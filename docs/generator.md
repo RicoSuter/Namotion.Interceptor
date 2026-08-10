@@ -342,21 +342,11 @@ public partial class Employee : PersonBase
 }
 ```
 
-The `DefaultProperties` of `Employee` includes properties from both classes, and properties declared
-on `PersonBase` are intercepted like any other: reads and writes go through the interceptor chain, so
-change tracking records them and connectors see them. The per instance plumbing is emitted once, in
-the class at the root of the hierarchy, and every subject below it inherits that plumbing.
+The `DefaultProperties` of `Employee` includes properties from both classes, and properties declared on `PersonBase` are intercepted like any other: reads and writes go through the interceptor chain, so change tracking records them and connectors see them. The per instance plumbing is emitted once, in the class at the root of the hierarchy, and every subject below it inherits that plumbing.
 
-Note that `PropertyChanged` firing is not evidence that a property is intercepted. A subject with no
-context still raises it, because the setter calls `RaisePropertyChanged` directly rather than through
-the chain. If you are testing whether interception reaches a property, assert on an interceptor.
+Note that `PropertyChanged` firing is not evidence that a property is intercepted. A subject with no context still raises it, because the setter calls `RaisePropertyChanged` directly rather than through the chain. If you are testing whether interception reaches a property, assert on an interceptor.
 
-The hierarchy does not have to be made only of subjects. A plain class with no attribute can sit
-between two subjects, a subject can be `sealed` at any level, and a base class written by hand can
-host generated subclasses as long as it provides the members the generated code calls. See
-[Hand-written base classes](subject-guidelines.md#hand-written-base-classes-and-subclasses) for that
-contract, and
-[Hierarchy Hazards](#hierarchy-hazards) for what a derived class must avoid declaring.
+The hierarchy does not have to be made only of subjects. A plain class with no attribute can sit between two subjects, a subject can be `sealed` at any level, and a base class written by hand can host generated subclasses as long as it provides the members the generated code calls. See [Hand-written base classes](subject-guidelines.md#hand-written-base-classes-and-subclasses) for that contract, and [Hierarchy Hazards](#hierarchy-hazards) for what a derived class must avoid declaring.
 
 ### Partial Class Spanning
 
@@ -433,88 +423,50 @@ The three remaining rules sit between those groups. NI0012 is a warning and gene
 
 ## Hierarchy Hazards
 
-Emitting the plumbing once per hierarchy means a derived subject inherits members it does not declare
-itself. Three consequences follow, and a fourth item is listed with them because the hierarchy case
-changed even though the rule itself is older. None of the first three applies to a subject with no
-subject base class, which is the large majority of them, and none of them needs any action for an
-ordinary hierarchy of `[InterceptorSubject]` classes.
+Emitting the plumbing once per hierarchy means a derived subject inherits members it does not declare itself. Three consequences follow, and a fourth item is listed with them because the hierarchy case changed even though the rule itself is older. None of the first three applies to a subject with no subject base class, which is the large majority of them, and none of them needs any action for an ordinary hierarchy of `[InterceptorSubject]` classes.
 
 ### A member in a derived class can take an interface slot
 
-C# only allows an explicit interface implementation in a class that lists the interface itself
-(CS0540), and each subject has to keep its own `IInterceptorSubject.Properties`, so every subject
-re-lists `IInterceptorSubject`. Re-listing recomputes the interface map for that class. A public
-member in a derived class, or in a plain class between two subjects, that matches `Context`, `Data`,
-`SyncRoot` or `AddProperties` therefore takes the slot away from the base class implementation. So
-does one in the base subject itself, or in any class above it, whenever a class further up already
-implements that member: the explicit implementation that would beat a public member only beats one in
-its own class, so it never protects a hijacker below it.
+C# only allows an explicit interface implementation in a class that lists the interface itself (CS0540), and each subject has to keep its own `IInterceptorSubject.Properties`, so every subject re-lists `IInterceptorSubject`. Re-listing recomputes the interface map for that class. A public member in a derived class, or in a plain class between two subjects, that matches `Context`, `Data`, `SyncRoot` or `AddProperties` therefore takes the slot away from the base class implementation. So does one in the base subject itself, or in any class above it, whenever a class further up already implements that member: the explicit implementation that would beat a public member only beats one in its own class, so it never protects a hijacker below it.
 
-The explicit form counts too, and the check does not treat it as safer. Because CS0540 forces the
-class to list `IInterceptorSubject` itself, and listing it is exactly what makes that class the
-subject's base subject, an explicit `IInterceptorSubject.Context` on a hand-written class in the chain
-is the normal way this goes wrong rather than an exception to it.
+The explicit form counts too, and the check does not treat it as safer. Because CS0540 forces the class to list `IInterceptorSubject` itself, and listing it is exactly what makes that class the subject's base subject, an explicit `IInterceptorSubject.Context` on a hand-written class in the chain is the normal way this goes wrong rather than an exception to it.
 
-Taking `Context` is the severe case: the inherited helpers keep reading the root's field, which
-nothing populates any more, so interception stops without an error and the property values still look
-correct. NI0014 turns the whole shape into a build error, so this is caught at compile time.
+Taking `Context` is the severe case: the inherited helpers keep reading the root's field, which nothing populates any more, so interception stops without an error and the property values still look correct. NI0014 turns the whole shape into a build error, so this is caught at compile time.
 
-This is a behaviour change. A derived subject declaring `public object SyncRoot { get; }` compiled
-cleanly before, because that class emitted its own explicit implementation which won over its own
-public member. It is now NI0014.
+This is a behaviour change. A derived subject declaring `public object SyncRoot { get; }` compiled cleanly before, because that class emitted its own explicit implementation which won over its own public member. It is now NI0014.
 
 ### A base class can hijack a slot later, without the consuming assembly being rebuilt
 
-NI0014 runs where the derived subject is compiled, so a member added to the base class afterwards is
-not seen. For that to matter, all four of the following have to hold:
+NI0014 runs where the derived subject is compiled, so a member added to the base class afterwards is not seen. For that to matter, all four of the following have to hold:
 
 1. the referenced assembly's subject hierarchy is more than one level deep;
-2. a non-static, non-`override` member is added to a class in that hierarchy, either as a public
-   member or as an explicit `IInterceptorSubject` implementation;
+2. a non-static, non-`override` member is added to a class in that hierarchy, either as a public member or as an explicit `IInterceptorSubject` implementation;
 3. that member matches an `IInterceptorSubject` member by name and signature exactly;
 4. the consuming assembly ships without being recompiled.
 
-Recompiling the consuming assembly against the new base turns it into an NI0014 build error, so the
-window is exactly "shipped, not rebuilt". This is accepted rather than fixed, for the reason under
-[Why not a virtual hook](#why-not-a-virtual-hook).
+Recompiling the consuming assembly against the new base turns it into an NI0014 build error, so the window is exactly "shipped, not rebuilt". This is accepted rather than fixed, for the reason under [Why not a virtual hook](#why-not-a-virtual-hook).
 
 ### Members added to IInterceptorSubject in future need the same review
 
-Because derived subjects keep re-listing `IInterceptorSubject`, any member added to that interface can
-be hijacked the same way and has to be added to NI0014's list at the same time. This is a note for
-whoever evolves the interface, not something a consumer can act on.
+Because derived subjects keep re-listing `IInterceptorSubject`, any member added to that interface can be hijacked the same way and has to be added to NI0014's list at the same time. This is a note for whoever evolves the interface, not something a consumer can act on.
 
 ### Writes before the context is published are not intercepted
 
-The context is published inside the generated `Subject(IInterceptorSubjectContext context)`
-constructor, which chains to the parameterless constructor first and adds the context afterwards.
-Anything that runs before that point writes straight to the backing field:
+The context is published inside the generated `Subject(IInterceptorSubjectContext context)` constructor, which chains to the parameterless constructor first and adds the context afterwards. Anything that runs before that point writes straight to the backing field:
 
-- the subject's own parameterless constructor body, which the generated context constructor runs
-  before it publishes anything;
+- the subject's own parameterless constructor body, which the generated context constructor runs before it publishes anything;
 - field initializers of a derived class, which the language runs before the base constructor;
 - statements in a constructor body that run before the base constructor publishes the context.
 
-The rule is not new, but one case changed. A write in a hand-written subclass constructor body after
-`: base(context)` has run is now intercepted, including a write to a property declared on the base
-class, where before it silently was not.
+The rule is not new, but one case changed. A write in a hand-written subclass constructor body after `: base(context)` has run is now intercepted, including a write to a property declared on the base class, where before it silently was not.
 
 ### Why not a virtual hook
 
-The first two hazards would both disappear if `IInterceptorSubject.Properties` were implemented once
-in the root behind a `protected virtual GetDefaultProperties()` hook, since derived subjects would
-then stop re-listing the interface and there would be no slot to take.
+The first two hazards would both disappear if `IInterceptorSubject.Properties` were implemented once in the root behind a `protected virtual GetDefaultProperties()` hook, since derived subjects would then stop re-listing the interface and there would be no slot to take.
 
-That alternative was measured rather than assumed. `IInterceptorSubject.Properties` is read on every
-intercepted write through `PropertyReference.Metadata`, which is deliberately uncached, so the hook
-adds a virtual call to a hot path. At a monomorphic call site the cost is flat, because the JIT
-devirtualizes it. At a polymorphic call site, which is the representative one since
-`PropertyReference.Metadata` is a single shared call site that every subject type passes through, the
-hook costs 0.133 ns per `Properties` read, or roughly 2 to 4 percent of an intercepted write.
+That alternative was measured rather than assumed. `IInterceptorSubject.Properties` is read on every intercepted write through `PropertyReference.Metadata`, which is deliberately uncached, so the hook adds a virtual call to a hot path. At a monomorphic call site the cost is flat, because the JIT devirtualizes it. At a polymorphic call site, which is the representative one since `PropertyReference.Metadata` is a single shared call site that every subject type passes through, the hook costs 0.133 ns per `Properties` read, or roughly 2 to 4 percent of an intercepted write.
 
-The current design was kept with those numbers in hand. The cost would be paid by every subject
-forever, including the large majority that have no base class at all, while the hazard it removes is
-caught at compile time by NI0014 for every consumer that recompiles.
+The current design was kept with those numbers in hand. The cost would be paid by every subject forever, including the large majority that have no base class at all, while the hazard it removes is caught at compile time by NI0014 for every consumer that recompiles.
 
 ## Requirements
 
