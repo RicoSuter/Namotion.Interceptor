@@ -103,23 +103,35 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
-    /// Gets the revision of the last write to this property that reached a write terminal, both counting
-    /// source-originated commits and excluding them, and whether a sink has already published its value.
-    /// Returns false when the property has never been written.
+    /// Gets the revision of the last write to this property that reached a write terminal, and whether any
+    /// sink has published its value. Returns false when the property has never been written.
     /// </summary>
-    /// <param name="includeSourceCommits">Whether commits applied from a source count. Only a sink that
-    /// can prove such a value already reached its destination may say true; for anything talking over a
-    /// wire the value was produced before the source saw our write, so it cannot rank against our
-    /// commits. Excluding them is load-bearing rather than an optimization.</param>
+    /// <param name="includeSourceCommitsInRevision">Whether <paramref name="commitRevision"/> also counts
+    /// commits applied from a source. It governs that value alone; <paramref name="publishedToAnySource"/>
+    /// is independent of it.
+    /// <para>
+    /// Pass true only where an applied value has provably already reached its destination by the time it
+    /// is applied, which holds for a server serving the store its clients write into. It does not hold for
+    /// anything reached over a wire, whose value was produced before it saw our write and therefore cannot
+    /// rank against our commits. Both mistakes are silent and permanent: true where it does not hold drops
+    /// local writes that nothing then redelivers, false where it does hold keeps serving a value the model
+    /// has moved past.
+    /// </para></param>
     /// <param name="commitRevision">The revision of the last qualifying commit, or 0 if there is none.</param>
-    /// <param name="published">Whether a sink has published this property's value.</param>
+    /// <param name="publishedToAnySource">Whether <em>some</em> sink has published this property's value.
+    /// Deliberately not per source, so a connector cannot read this as "I published it".</param>
     /// <remarks>
     /// A revision is only comparable against a change to the same property: revisions are per subject,
     /// and two properties of one subject draw from the same counter. The caller states which commits
     /// count rather than receiving both markers, so the wrong one cannot be selected by argument
     /// position, and only the slot that is needed is read.
+    /// <para>
+    /// The revision and the published flag are returned together despite being unrelated because the
+    /// delivery filter needs both per delivered change, and splitting them would hash the property key
+    /// twice on that path. Callers needing only one may ignore the other.
+    /// </para>
     /// </remarks>
-    public bool TryGetWriteState(bool includeSourceCommits, out long commitRevision, out bool published)
+    public bool TryGetWriteState(bool includeSourceCommitsInRevision, out long commitRevision, out bool publishedToAnySource)
     {
         if (TryGetWriteState(out var state))
         {
@@ -128,27 +140,34 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
             // Each commit advances exactly one of the two, so the last of any kind is their maximum, and
             // the source slot is read only when it can count. A stale read of either can only lower the
             // result, which delivers a redundant change rather than dropping a live one.
-            commitRevision = includeSourceCommits
+            commitRevision = includeSourceCommitsInRevision
                 ? Math.Max(nonSourceCommitRevision, Interlocked.Read(ref state.LastSourceCommitRevision))
                 : nonSourceCommitRevision;
 
-            published = state.Published;
+            publishedToAnySource = state.PublishedToAnySource;
             return true;
         }
 
         commitRevision = 0;
-        published = false;
+        publishedToAnySource = false;
         return false;
     }
 
     /// <summary>
-    /// Records that a sink has published this property's value. One-way: the flag is never cleared, so
-    /// calling this again on the same property has no effect. Read it back through the <c>published</c>
-    /// output of <see cref="TryGetWriteState(bool, out long, out bool)"/>.
+    /// Records that the calling sink has published this property's value to its source. One-way: the flag
+    /// is never cleared, so calling this again on the same property has no effect.
     /// </summary>
-    public void MarkPublished()
+    /// <remarks>
+    /// Takes no source, and the state it sets is not per source: it is read back as
+    /// <c>publishedToAnySource</c> from <see cref="TryGetWriteState(bool, out long, out bool)"/>, which
+    /// every sink sees. That is the whole design rather than a simplification. It decides only whether a
+    /// transaction confirmation is written back, and a confirmation carries the current value, so another
+    /// sink's mark costs one redundant write rather than a wrong value. Keeping it a bare flag is what
+    /// lets it hold no source reference to release when a subject detaches.
+    /// </remarks>
+    public void MarkAsPublishedToSource()
     {
-        GetOrAddWriteState().Published = true;
+        GetOrAddWriteState().PublishedToAnySource = true;
     }
 
     /// <summary>

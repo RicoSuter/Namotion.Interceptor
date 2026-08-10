@@ -20,10 +20,10 @@ internal static class ChangeDeliveryFilter
     public static bool TryAcceptForDelivery(in SubjectPropertyChange change, ChangeDeliveryRule rule)
     {
         var property = change.Property;
-        if (!property.TryGetWriteState(CountsSourceCommits(rule), out var commitRevision, out var published))
+        if (!property.TryGetWriteState(CountsSourceCommits(rule), out var commitRevision, out var publishedToAnySource))
         {
             // Nothing has ever been written to this property, so nothing can have superseded the change.
-            property.MarkPublished();
+            property.MarkAsPublishedToSource();
             return true;
         }
 
@@ -32,10 +32,10 @@ internal static class ChangeDeliveryFilter
             return false;
         }
 
-        if (!published)
+        if (!publishedToAnySource)
         {
-            // Sticky, so this is a once-per-property cost rather than a per-change one.
-            property.MarkPublished();
+            // One-way, so this is a once-per-property cost rather than a per-change one.
+            property.MarkAsPublishedToSource();
         }
 
         return true;
@@ -52,20 +52,20 @@ internal static class ChangeDeliveryFilter
     }
 
     /// <summary>
-    /// Records that a connector has written this property out. Deliberately not per source: it only
-    /// decides whether a transaction confirmation is written back, and a confirmation carries the current
-    /// value, so a foreign processor's mark costs one redundant write per confirmation on that property rather
-    /// than a wrong value. That is what lets it be a bare flag with no source reference to release.
+    /// Records that this connector has written the property out. The flag it sets is not per source; see
+    /// <see cref="PropertyReference.MarkAsPublishedToSource"/> for why that is the design rather than a
+    /// simplification.
     /// </summary>
-    public static void MarkPropertyAsPublished(in SubjectPropertyChange change)
+    public static void MarkPropertyAsPublishedToSource(in SubjectPropertyChange change)
     {
         var property = change.Property;
 
         // Read before write: the flag never clears, so after a property's first delivery every later
         // one avoids the dictionary write.
-        if (!property.TryGetWriteState(includeSourceCommits: false, out _, out var published) || !published)
+        if (!property.TryGetWriteState(includeSourceCommitsInRevision: false, out _, out var publishedToAnySource)
+            || !publishedToAnySource)
         {
-            property.MarkPublished();
+            property.MarkAsPublishedToSource();
         }
     }
 
@@ -79,15 +79,16 @@ internal static class ChangeDeliveryFilter
     /// </summary>
     public static bool NeedsWriteBack(in SubjectPropertyChange change)
     {
-        return change.Origin.Kind == ChangeOriginKind.Confirmed && IsPropertyPublished(change.Property);
+        return change.Origin.Kind == ChangeOriginKind.Confirmed && IsPublishedToAnySource(change.Property);
     }
 
     /// <summary>
-    /// Whether any connector has written this property out.
+    /// Whether any connector has written this property out, this one or another.
     /// </summary>
-    public static bool IsPropertyPublished(PropertyReference property)
+    public static bool IsPublishedToAnySource(PropertyReference property)
     {
-        return property.TryGetWriteState(includeSourceCommits: false, out _, out var published) && published;
+        return property.TryGetWriteState(includeSourceCommitsInRevision: false, out _, out var publishedToAnySource)
+               && publishedToAnySource;
     }
 
     // Explicit arms rather than a comparison, so the zero value cannot fall through to the client rule.

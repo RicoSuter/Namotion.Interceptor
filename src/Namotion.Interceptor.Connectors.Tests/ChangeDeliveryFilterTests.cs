@@ -186,10 +186,10 @@ public class ChangeDeliveryFilterTests
             .AddProperty("Dynamic", typeof(int), _ => stored, (_, value) => stored = value);
 
         property.SetValue(1);
-        Assert.True(property.Reference.TryGetWriteState(includeSourceCommits: false, out var earlierRevision, out _));
+        Assert.True(property.Reference.TryGetWriteState(includeSourceCommitsInRevision: false, out var earlierRevision, out _));
 
         property.SetValue(2);
-        Assert.True(property.Reference.TryGetWriteState(includeSourceCommits: false, out var settledRevision, out _));
+        Assert.True(property.Reference.TryGetWriteState(includeSourceCommitsInRevision: false, out var settledRevision, out _));
         Assert.True(settledRevision > earlierRevision);
 
         var earlier = CreateChange(property.Reference, 0, 1, earlierRevision);
@@ -207,10 +207,10 @@ public class ChangeDeliveryFilterTests
         var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create()) { First = 1 };
         var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
 
-        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var earlierRevision, out _));
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var earlierRevision, out _));
 
         subject.First = 2;
-        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var settledRevision, out _));
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var settledRevision, out _));
 
         var earlier = CreateChange(property, 0, 1, earlierRevision);
         var settled = CreateChange(property, 1, 2, settledRevision);
@@ -243,7 +243,7 @@ public class ChangeDeliveryFilterTests
         var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create());
         var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
 
-        Assert.False(property.TryGetWriteState(includeSourceCommits: false, out _, out _));
+        Assert.False(property.TryGetWriteState(includeSourceCommitsInRevision: false, out _, out _));
 
         var change = CreateChange(property, 0, 1, revision: 7);
 
@@ -276,15 +276,15 @@ public class ChangeDeliveryFilterTests
         var source = new object();
 
         subject.FirstName = "local";
-        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var localRevision, out _));
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var localRevision, out _));
 
         using (PendingOrigin.Set(property, ChangeOrigin.FromSource(source), "from source"))
         {
             subject.FirstName = "from source";
         }
 
-        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var nonSourceMarker, out _));
-        Assert.True(property.TryGetWriteState(includeSourceCommits: true, out var anyMarker, out _));
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var nonSourceMarker, out _));
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: true, out var anyMarker, out _));
         Assert.Equal(localRevision, nonSourceMarker);
         Assert.True(anyMarker > nonSourceMarker, "the applied commit must advance only the any-commit marker");
 
@@ -332,10 +332,10 @@ public class ChangeDeliveryFilterTests
         var property = new PropertyReference(subject, nameof(Person.FirstName));
 
         subject.FirstName = "first";
-        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var replacedRevision, out _));
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var replacedRevision, out _));
 
         subject.FirstName = "second";
-        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var settledRevision, out _));
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var settledRevision, out _));
         Assert.True(settledRevision > replacedRevision, "the second write must commit a later revision");
 
         var replaced = CreateChange(property, 0, 1, replacedRevision);

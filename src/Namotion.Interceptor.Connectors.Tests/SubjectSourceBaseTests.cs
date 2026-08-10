@@ -438,7 +438,7 @@ public class SubjectSourceBaseTests
         subject.FirstName = "Later";
 
         var property = new PropertyReference(subject, nameof(Person.FirstName));
-        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var marker, out _));
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var marker, out _));
         Assert.True(marker > 1,
             $"the later local write must commit past the parked revision, but the marker was {marker}");
 
@@ -532,7 +532,7 @@ public class SubjectSourceBaseTests
         var property = new PropertyReference(subject, nameof(Person.FirstName));
 
         subject.FirstName = "userwrite";
-        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var markerAfterLocalWrite, out _));
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var markerAfterLocalWrite, out _));
 
         // Act: an inbound apply the hook rewrites, so the origin demotes to Local.
         using (PendingOrigin.Set(property, ChangeOrigin.FromSource(source), "server-value"))
@@ -542,7 +542,7 @@ public class SubjectSourceBaseTests
 
         // Assert
         Assert.Equal("SERVER-VALUE", subject.FirstName);
-        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var markerAfterInboundApply, out _));
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var markerAfterInboundApply, out _));
         Assert.Equal(markerAfterLocalWrite, markerAfterInboundApply);
     }
 
@@ -567,7 +567,7 @@ public class SubjectSourceBaseTests
             {
                 // Inside the connect window, where the drain is what decides the change's fate.
                 var property = new PropertyReference(subject, nameof(Person.FirstName));
-                property.MarkPublished();
+                property.MarkAsPublishedToSource();
 
                 using (PendingOrigin.Set(property, ChangeOrigin.Confirmed(source), "confirmed"))
                 {
@@ -619,7 +619,7 @@ public class SubjectSourceBaseTests
         // the send branch and this test would pass with the production drop deleted.
         subject.FirstName = "SecondAttempt";
         Assert.True(new PropertyReference(subject, nameof(Person.FirstName))
-            .TryGetWriteState(includeSourceCommits: false, out var firstNameMarker, out _));
+            .TryGetWriteState(includeSourceCommitsInRevision: false, out var firstNameMarker, out _));
         EnqueueRetryChange(source, subject, nameof(Person.FirstName), "Original", "FirstAttempt",
             revision: firstNameMarker - 1);
 
@@ -1140,7 +1140,7 @@ public class SubjectSourceBaseTests
         // later local commit and must drop, LastName's is not and must be restored and sent.
         subject.FirstName = "NewerFirst";
         Assert.True(new PropertyReference(subject, nameof(Person.FirstName))
-            .TryGetWriteState(includeSourceCommits: false, out var firstNameMarker, out _));
+            .TryGetWriteState(includeSourceCommitsInRevision: false, out var firstNameMarker, out _));
         EnqueueRetryChange(source, subject, nameof(Person.FirstName), "OrigFirst", "ClientFirst",
             revision: firstNameMarker - 1);
 
@@ -1384,11 +1384,11 @@ public class SubjectSourceBaseTests
         IInterceptorSubject subject, string propertyName, TValue oldValue, TValue newValue)
     {
         var property = new PropertyReference(subject, propertyName);
-        property.TryGetWriteState(includeSourceCommits: false, out var revisionBefore, out _);
+        property.TryGetWriteState(includeSourceCommitsInRevision: false, out var revisionBefore, out _);
 
         property.Metadata.SetValue?.Invoke(subject, newValue);
 
-        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var revision, out _) && revision > revisionBefore,
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var revision, out _) && revision > revisionBefore,
             "the write did not reach a terminal, so the parked change would carry no revision");
 
         EnqueueRetryChange(source, subject, propertyName, oldValue, newValue, revision);

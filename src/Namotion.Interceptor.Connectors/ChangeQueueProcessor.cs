@@ -241,7 +241,7 @@ public class ChangeQueueProcessor : IDisposable
                     }
                     else
                     {
-                        ChangeDeliveryFilter.MarkPropertyAsPublished(in change);
+                        ChangeDeliveryFilter.MarkPropertyAsPublishedToSource(in change);
                     }
 
                     // Immediate path: send a single change without buffering (zero allocation)

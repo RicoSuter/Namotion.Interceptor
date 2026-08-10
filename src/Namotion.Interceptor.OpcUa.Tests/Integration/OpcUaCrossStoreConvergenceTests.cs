@@ -63,8 +63,8 @@ public class OpcUaCrossStoreConvergenceTests
             () => child.Value == "from-client",
             message: $"the client write must reach the subject; it holds '{child.Value}'");
 
-        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var lastNonSourceCommitRevision, out _));
-        Assert.True(property.TryGetWriteState(includeSourceCommits: true, out var lastCommitRevision, out _));
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var lastNonSourceCommitRevision, out _));
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: true, out var lastCommitRevision, out _));
         Assert.True(lastCommitRevision > lastNonSourceCommitRevision,
             "applying the client's write must have committed without moving the non-source marker");
 
@@ -83,7 +83,7 @@ public class OpcUaCrossStoreConvergenceTests
         // Positive control, so that a server which had stopped writing for any other reason (no node
         // mapped, no registered property, a converter throwing) could not pass the assertion above.
         child.Value = "later-local";
-        Assert.True(property.TryGetWriteState(includeSourceCommits: true, out var laterRevision, out _));
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: true, out var laterRevision, out _));
 
         var current = SubjectPropertyChange.Create(
             property, ChangeOrigin.Local, DateTimeOffset.UtcNow, null,

@@ -610,7 +610,7 @@ public class ChangeQueueProcessorTests
 
         subject.FirstName = "Settled";
         await AsyncTestHelpers.WaitUntilAsync(() => written.Contains("Settled"));
-        Assert.True(firstName.TryGetWriteState(includeSourceCommits: true, out var settledRevision, out _));
+        Assert.True(firstName.TryGetWriteState(includeSourceCommitsInRevision: true, out var settledRevision, out _));
 
         // Act: a commit that predates the settled one, arriving late.
         subscription.Enqueue(SubjectPropertyChange.Create(

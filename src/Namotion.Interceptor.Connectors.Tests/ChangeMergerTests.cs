@@ -166,7 +166,7 @@ public class ChangeMergerTests
 
         subject.FirstName = "First";
         subject.FirstName = "Settled";
-        Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var marker, out _));
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var marker, out _));
         Assert.True(marker > 1, "the marker needs room below it");
 
         using var merger = new ChangeMerger();
@@ -331,7 +331,7 @@ public class ChangeMergerTests
             var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create()) { First = index };
             var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
 
-            Assert.True(property.TryGetWriteState(includeSourceCommits: false, out var revision, out _),
+            Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var revision, out _),
                 "The write did not reach a terminal, so this measures the wrong path.");
             Assert.NotEqual(0, revision);
 
@@ -628,10 +628,10 @@ public class ChangeMergerTests
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
 
         subject.FirstName = "Stale";
-        Assert.True(firstName.TryGetWriteState(includeSourceCommits: false, out var stragglerRevision, out _));
+        Assert.True(firstName.TryGetWriteState(includeSourceCommitsInRevision: false, out var stragglerRevision, out _));
 
         subject.LastName = "Newer";
-        Assert.True(lastName.TryGetWriteState(includeSourceCommits: false, out var lastNameRevision, out _));
+        Assert.True(lastName.TryGetWriteState(includeSourceCommitsInRevision: false, out var lastNameRevision, out _));
 
         subject.FirstName = "Newest";
 
@@ -666,10 +666,10 @@ public class ChangeMergerTests
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
 
         subject.FirstName = "Stale";
-        Assert.True(firstName.TryGetWriteState(includeSourceCommits: false, out var stragglerRevision, out _));
+        Assert.True(firstName.TryGetWriteState(includeSourceCommitsInRevision: false, out var stragglerRevision, out _));
 
         subject.LastName = "Newer";
-        Assert.True(lastName.TryGetWriteState(includeSourceCommits: false, out var lastNameRevision, out _));
+        Assert.True(lastName.TryGetWriteState(includeSourceCommitsInRevision: false, out var lastNameRevision, out _));
 
         subject.FirstName = "Newest";
 

@@ -48,8 +48,15 @@ internal sealed class PropertyWriteState
     internal long LastSourceCommitRevision;
 
     /// <summary>
-    /// Whether a sink has published this property's value. Sticky. Volatile because a stale read of
-    /// false skips a transaction confirmation write-back, leaving the divergence it exists to repair.
+    /// Whether any sink has published this property's value. One-way: set once, never cleared. Volatile
+    /// because a stale read of false skips a transaction confirmation write-back, leaving the divergence
+    /// it exists to repair.
     /// </summary>
-    internal volatile bool Published;
+    /// <remarks>
+    /// Deliberately not per source. It decides only whether a confirmation is written back, and a
+    /// confirmation carries the current value, so a foreign sink's mark costs one redundant write rather
+    /// than a wrong value. That tolerance is what lets this be a bare flag holding no source reference to
+    /// release on detach. Making it per source trades that away for nothing.
+    /// </remarks>
+    internal volatile bool PublishedToAnySource;
 }
