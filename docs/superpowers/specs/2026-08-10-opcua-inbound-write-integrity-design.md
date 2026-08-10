@@ -137,7 +137,19 @@ Part of the change, not follow-up:
 1. **The invariant holds** for all five rows, and after recovery.
 2. **No new problems.** Every existing OPC UA test passes unchanged. Type checking, index range writes and client source timestamps all keep working. No client that receives `Good` today receives an error afterwards, except on an unregistered property.
 3. **No performance regression.** See below. The core library is untouched, so core benchmarks must be unmoved; a moved one means something was changed that should not have been.
-4. **Simplification.** The two thread-static fields, their seven touch points and the `StateChanged` hookup are gone, or the reason they had to stay is written down.
+4. **Simplification of coupling, not of volume.** The two thread-static fields, their seven touch points and the `StateChanged` hookup are gone, or the reason they had to stay is written down. Line count is expected to grow, see below.
+
+## Expected size
+
+Estimated from reading rather than from writing, so treat it as a range. Roughly 36 lines removed: the two `[ThreadStatic]` fields and their comments (`:42-55`), the flag arm/disarm and the `try`/`finally` that exists only for it (`:167-168`, `:198-202`), the `SelfWrittenNodeValue` assignment (`:192`), the guard block (`:411-416`), and the `StateChanged` closure (`CustomNodeManager.cs:408-416`). Roughly 62 to 77 added: the new node subclass and its override, the construction swap, the reshaped apply method, and the outbound status handling.
+
+**Net around plus 30 to 45 lines of production code.**
+
+The restructuring alone is close to break-even. All of the growth is the three guarantees added after the shape was settled: the commit-revision branch, the quality flag, and the outbound wrap. A minimal version without them would be flat or smaller, and knowably wrong in two corners.
+
+So the claim this design makes is about coupling, not volume. What leaves is a distributed invariant: thread-static state written in one file and read in another, seven touch points, eighteen lines of comment justifying a value comparison, and a defect in it as recently as `b8ecc22f`. What arrives is sequential logic in one method with no shared state.
+
+Test code will grow considerably more than production code, roughly fifteen tests, most needing the live server harness.
 
 ## Performance
 
