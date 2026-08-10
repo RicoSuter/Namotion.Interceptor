@@ -361,13 +361,18 @@ properties, so it adds noise to an already red build rather than hiding anything
 not in that list, because `WillBeGeneratedInThisCompilation` already excludes a non-partial declaration
 and a record declaration.
 
-## Four breaking changes
+## Five breaking changes
 
 Two of them, NI0013 and NI0014, are new errors of this generator, and both reject source that compiled
 before. The third is not a diagnostic of this generator at all: sharing the plumbing widened the
 inherited helper surface, so the compiler now reports hiding where it reported nothing. The fourth is
 NI0012 on the upgrade path: a leaf project that takes the new package while a referenced model library
 is still built by the old generator gets a base whose helpers are `private`, which fails the contract.
+The fifth is the wrapper guard: a `*WithoutInterceptor` method whose stripped name is one the generated
+half occupies is now rejected with NI0006 at any arity, so a wrapper that compiled and worked before,
+such as `InvokeMethodWithoutInterceptor(string, object[])`, now needs renaming. That is deliberate: three
+attempts at a signature precise rule each admitted a silent capture, and a rename request is loud and
+recoverable where a capture is neither.
 That one is a warning, so it breaks the build only where warnings are errors, and rebuilding the base
 assembly clears it. All four are listed here rather than presented as pure safety nets.
 
