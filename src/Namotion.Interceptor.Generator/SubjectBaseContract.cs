@@ -110,7 +110,7 @@ internal static class SubjectBaseContract
 
     /// <summary>
     /// The members a class must expose to host a generated subclass, tabulated in
-    /// docs/subject-guidelines.md. Generated root mode satisfies it by construction.
+    /// docs/generator.md. Generated root mode satisfies it by construction.
     /// </summary>
     /// <remarks>
     /// Only the <see cref="KnownTypes.IRaisePropertyChanged"/> clause is not required for the generated
@@ -155,7 +155,7 @@ internal static class SubjectBaseContract
     /// <summary>
     /// A static DefaultProperties, field or property, that is accessible and of a type the emitted
     /// .Concat(...) accepts. Compared against the constructed symbol rather than a display string,
-    /// because the wrong type produces CS1929 in a generated file. See docs/subject-guidelines.md.
+    /// because the wrong type produces CS1929 in a generated file. See docs/generator.md.
     /// </summary>
     private static bool HasUsableDefaultProperties(INamedTypeSymbol ancestor, INamedTypeSymbol subject, Compilation compilation)
     {

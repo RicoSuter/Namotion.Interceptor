@@ -1270,7 +1270,7 @@ public class SubjectBaseDiagnosticsTests
     public void WhenAWrapperWouldBeNamedContextOnABaseWithPublicMembers_ThenNI0006IsReportedAndNothingIsHidden()
     {
         // Arrange: the half of the exemption that was not merely unnecessary but unsound. This base
-        // satisfies the contract with public members, which is the shape subject-guidelines.md
+        // satisfies the contract with public members, which is the shape generator.md
         // documents, so a "Context" wrapper hides the inherited public property. CS0108 lands in a
         // generated file the consumer cannot edit and fails any build with TreatWarningsAsErrors.
         var source = PublicMemberBase + ContextWrapperDerived;

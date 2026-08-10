@@ -692,7 +692,7 @@ public class SubjectBaseShapeTests
     public void WhenTheDocumentedHandWrittenBaseHostsAGeneratedSubclass_ThenItsWritesReachTheInterceptor()
     {
         // Arrange: the other of the two directions goal 4 asks for, and the only test that runs it.
-        // The fixture is read out of docs/subject-guidelines.md instead of being copied here, so the
+        // The fixture is read out of docs/generator.md instead of being copied here, so the
         // contract the documentation asks a base class to satisfy and the contract this test proves
         // cannot drift apart.
         var source = ReadDocumentedConformingBaseFixture();
@@ -1160,7 +1160,7 @@ public class SubjectBaseShapeTests
     }
 
     /// <summary>
-    /// The single fenced code block in docs/subject-guidelines.md that holds the base class
+    /// The single fenced code block in docs/generator.md that holds the base class
     /// satisfying the whole contract, together with the generated subclass it hosts.
     /// </summary>
     private static string ReadDocumentedConformingBaseFixture()
@@ -1169,7 +1169,7 @@ public class SubjectBaseShapeTests
         var currentBlock = new List<string>();
         var insideBlock = false;
 
-        foreach (var line in File.ReadAllLines(FindRepositoryFile(Path.Combine("docs", "subject-guidelines.md"))))
+        foreach (var line in File.ReadAllLines(FindRepositoryFile(Path.Combine("docs", "generator.md"))))
         {
             if (line.StartsWith("```", StringComparison.Ordinal))
             {
@@ -1205,7 +1205,7 @@ public class SubjectBaseShapeTests
 
         throw new FileNotFoundException(
             $"Could not find '{relativePath}' in any directory above '{AppContext.BaseDirectory}'. This test " +
-            "reads its fixture from docs/subject-guidelines.md so the documented base cannot drift from the " +
+            "reads its fixture from docs/generator.md so the documented base cannot drift from the " +
             "tested one, which requires running inside the repository tree.");
     }
 
