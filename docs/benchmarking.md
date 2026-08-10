@@ -43,7 +43,9 @@ Picking one needs care, because `[GlobalSetup]` is per class, not per method, an
 
 **The Error column is not a significance test.** It is a confidence interval within one run, describing how precisely that run measured its own number, not whether the comparison would land in the same place tomorrow. A reference row can move many times its own error bar with its code provably unchanged. `-LaunchCount N` does not close this: it averages over process-level variation, but each arm keeps its own binary, so a difference caused by code placement reproduces on every launch instead of averaging out.
 
-**Repeat before believing a small delta.** Running the same two commits twice and comparing the two runs measures the noise directly, because the inputs were identical. Expect rows to flip sign.
+**Repeat before believing a small delta.** Running the same two commits twice and comparing the two runs measures the noise directly, because the inputs were identical. Expect rows to flip sign. Comparing a branch against itself works too, and is sobering: a `-Short` run of this suite against an identical tree produced a median of +2.2%, eight of thirteen rows above +2%, and single rows reading +32% and +45%.
+
+**`-Short` cannot decide anything.** It cuts iteration counts so far that error bars swallow any realistic delta; in the run just described every one of those deltas sat inside its own error band. Use it to check that a filter selects what you expect and that a run completes, never to judge a change.
 
 **Watch the timer floor.** A row whose per-operation cost approaches a nanosecond is at the edge of what the harness resolves, and its percentage swings wildly. That is a property of the measurement, not a rule about the code: benchmarks that deliberately measure such paths amortize them with `OperationsPerInvoke`, as `RegistryBenchmark.ReadParents` does over 256 calls, and those numbers are meaningful. Distrust a sub-nanosecond row that is not amortized.
 
@@ -80,6 +82,6 @@ Rough wall clock for both arms with the full job and `-LaunchCount 3`, from one 
 | `*RegistryBenchmark*` | about 30 minutes |
 | Whole suite | about 6 hours |
 
-`SubjectSourceBenchmark` measures in milliseconds per operation, and `SubjectHierarchyBenchmark.ConstructThreeLevel` is allocation heavy and multimodal, so BenchmarkDotNet keeps iterating toward its ceiling instead of converging. Between them they dominate a whole-suite run. Judge `ConstructThreeLevel` on its allocation column rather than its timing.
+`SubjectSourceBenchmark` measures in milliseconds per operation, and `SubjectHierarchyBenchmark.ConstructThreeLevel` is allocation heavy and gets a `MultimodalDistribution` warning out of BenchmarkDotNet, so it runs to its hundred iteration ceiling instead of settling at the default fifteen, every launch. Between them they dominate a whole-suite run. Judge `ConstructThreeLevel` on its allocation column; its timing carries a standard deviation around a quarter of its mean.
 
 A benchmark class that exists on only one branch runs on that arm and has nothing to compare against on the other, so exclude it from the filter unless you are deliberately measuring it. If you want a new benchmark compared properly, put it on the base branch first, which is what `-BaseBranch` is for.
