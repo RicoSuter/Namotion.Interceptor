@@ -27,7 +27,7 @@ internal static class ChangeDeliveryFilter
             return true;
         }
 
-        if (IsSuperseded(in change, commitRevision))
+        if (IsSupersededBy(in change, commitRevision))
         {
             return false;
         }
@@ -48,7 +48,7 @@ internal static class ChangeDeliveryFilter
     public static bool IsCurrent(in SubjectPropertyChange change, ChangeDeliveryRule rule)
     {
         return !change.Property.TryGetWriteState(CountsSourceCommits(rule), out var commitRevision, out _)
-               || !IsSuperseded(in change, commitRevision);
+               || !IsSupersededBy(in change, commitRevision);
     }
 
     /// <summary>
@@ -57,7 +57,7 @@ internal static class ChangeDeliveryFilter
     /// value, so a foreign processor's mark costs one redundant write per confirmation on that property rather
     /// than a wrong value. That is what lets it be a bare flag with no source reference to release.
     /// </summary>
-    public static void MarkWrittenOut(in SubjectPropertyChange change)
+    public static void MarkPropertyAsPublished(in SubjectPropertyChange change)
     {
         var property = change.Property;
 
@@ -79,13 +79,13 @@ internal static class ChangeDeliveryFilter
     /// </summary>
     public static bool NeedsWriteBack(in SubjectPropertyChange change)
     {
-        return change.Origin.Kind == ChangeOriginKind.Confirmed && WasWrittenOut(change.Property);
+        return change.Origin.Kind == ChangeOriginKind.Confirmed && IsPropertyPublished(change.Property);
     }
 
     /// <summary>
     /// Whether any connector has written this property out.
     /// </summary>
-    public static bool WasWrittenOut(PropertyReference property)
+    public static bool IsPropertyPublished(PropertyReference property)
     {
         return property.TryGetWriteState(includeSourceCommits: false, out _, out var published) && published;
     }
@@ -100,7 +100,7 @@ internal static class ChangeDeliveryFilter
             "A delivery rule must be chosen explicitly; see ChangeDeliveryRule for the condition that decides it.")
     };
 
-    private static bool IsSuperseded(in SubjectPropertyChange change, long marker)
+    private static bool IsSupersededBy(in SubjectPropertyChange change, long commitRevision)
     {
         // Revision 0 orders against nothing, so staleness is unprovable and the change is delivered: a
         // redundant write costs one message, a wrong drop is permanent. This is a guard rather than a
@@ -109,6 +109,6 @@ internal static class ChangeDeliveryFilter
         //
         // Inequality rather than equality, so that a path which stamps a change without advancing the
         // property delivers instead of dropping.
-        return change.Revision != 0 && change.Revision < marker;
+        return change.Revision != 0 && change.Revision < commitRevision;
     }
 }

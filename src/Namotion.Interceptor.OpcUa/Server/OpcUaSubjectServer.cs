@@ -18,11 +18,9 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
     internal string OpcUaVariableKey { get; } = "OpcUaVariable:" + Guid.NewGuid();
 
     // A client write reaches the node before UpdateProperty applies it, so an applied value is settled
-    // here by construction, which is what SourceValuesAreSettled requires. Named once because the write loop and the
-    // processor must agree: if only one of them ranked against the last commit, the other would still
-    // write an older one out. Do not inline either use.
-    // Internal so a test can pin the choice: picking the other rule is silent and only shows up
-    // later as a node serving a value the model has moved past.
+    // here by construction, which is what SourceValuesAreSettled requires. Named once because the write
+    // loop and the processor must agree: if only one of them ranked against the last commit, the other
+    // would still write an older one out.
     internal const ChangeDeliveryRule DeliveryRule = ChangeDeliveryRule.SourceValuesAreSettled;
 
     private readonly IInterceptorSubject _subject;

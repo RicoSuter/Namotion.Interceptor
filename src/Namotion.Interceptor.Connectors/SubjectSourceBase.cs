@@ -22,7 +22,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     private readonly TimeSpan _bufferTime;
 
     // A source we talk to over a wire: what it hands us was produced before it saw our write, so it
-    // cannot rank against our commits (issue #373). Named once because the processor and the reconcile
+    // cannot rank against our commits. Named once because the processor and the reconcile
     // must agree; if only one ranked against the last commit, the other would still deliver an older one.
     private const ChangeDeliveryRule DeliveryRule = ChangeDeliveryRule.SourceValuesMayBeStale;
     private readonly TimeSpan _retryTime;
@@ -468,7 +468,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                     // Marked here because this path flushes the retry queue directly rather than going
                     // through the processor, and without the mark a later transaction confirmation on
                     // this property is not written back, which is the divergence that repair exists for.
-                    ChangeDeliveryFilter.MarkWrittenOut(in change);
+                    ChangeDeliveryFilter.MarkPropertyAsPublished(in change);
                     (toSend ??= []).Add(change);
                     sent++;
                 }

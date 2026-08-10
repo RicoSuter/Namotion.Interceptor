@@ -110,7 +110,7 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// <param name="includeSourceCommits">Whether commits applied from a source count. Only a sink that
     /// can prove such a value already reached its destination may say true; for anything talking over a
     /// wire the value was produced before the source saw our write, so it cannot rank against our
-    /// commits. Excluding them is load-bearing rather than an optimization; see issue #373.</param>
+    /// commits. Excluding them is load-bearing rather than an optimization.</param>
     /// <param name="commitRevision">The revision of the last qualifying commit, or 0 if there is none.</param>
     /// <param name="published">Whether a sink has published this property's value.</param>
     /// <remarks>

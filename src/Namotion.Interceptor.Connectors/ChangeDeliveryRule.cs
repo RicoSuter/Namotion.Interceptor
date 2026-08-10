@@ -25,8 +25,7 @@ public enum ChangeDeliveryRule
     /// Any connector talking to something over a wire. Its notifications reflect a state the far end had
     /// at some earlier moment, and our write may still be in flight toward it, so a local commit has to be
     /// delivered even though it looks older. Choosing
-    /// <see cref="SourceValuesAreSettled"/> here drops that write and both ends settle on the stale value,
-    /// which is issue #373.
+    /// <see cref="SourceValuesAreSettled"/> here drops that write and both ends settle on the stale value.
     /// </remarks>
     SourceValuesMayBeStale,
 
