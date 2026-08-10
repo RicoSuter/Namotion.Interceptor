@@ -61,11 +61,14 @@ internal static class Diagnostics
     public static readonly DiagnosticDescriptor MemberSkipped = new(
         id: "NI0006",
         title: "Unsupported member skipped",
-        messageFormat: "'{0}' was skipped because {1}",
+        // The remedy is interpolated at {2} rather than fixed, because the four reasons that reach
+        // this rule do not share one: renaming answers a colliding wrapper name and says nothing
+        // about an inaccessible member.
+        messageFormat: "'{0}' was skipped because {1}, so it is not intercepted; {2}",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "The member is not part of the subject's properties.");
+        description: "No wrapper and no property metadata is emitted for the member, so a 'WithoutInterceptor' opt-in on it is ignored. When the skipped wrapper name is one the generated plumbing occupies, a call to the stripped name binds to the inherited plumbing instead.");
 
     public static readonly DiagnosticDescriptor ExplicitImplementationAttributesIgnored = new(
         id: "NI0007",
@@ -133,7 +136,10 @@ internal static class Diagnostics
     public static readonly DiagnosticDescriptor BasePlumbingCannotBeShared = new(
         id: "NI0012",
         title: "Base class plumbing cannot be shared",
-        messageFormat: "Base class '{0}' does not expose the shared subject plumbing, so '{1}' emits its own and base-declared properties stay unintercepted. Rebuild the base assembly against the current package version, or satisfy the subject base contract.",
+        // The missing members are interpolated at {2}: five different base defects reach this rule,
+        // and naming none of them made every one of them produce the same text. Two sentences, so
+        // RS1032 requires the trailing period, exactly as in NI0011.
+        messageFormat: "Base class '{0}' is missing {2}, so '{1}' emits its own plumbing and the base class's own properties stay unintercepted. Add the missing members to the base class, or rebuild the base assembly against the current package version if it predates the shared plumbing.",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,

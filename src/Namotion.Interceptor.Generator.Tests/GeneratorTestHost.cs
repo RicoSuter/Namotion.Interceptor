@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Reflection;
+using System.Runtime.Loader;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Namotion.Interceptor.Interceptors;
@@ -101,6 +103,21 @@ internal static class GeneratorTestHost
 {
     private static readonly IReadOnlyList<MetadataReference> References = CreateReferences();
 
+    /// <summary>
+    /// The library assemblies loaded from memory, by simple name. The default load context binds by
+    /// probing the file system, so an assembly loaded from a byte array is never found by name, and a
+    /// main assembly referencing one fails with FileNotFoundException on first type load.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, Assembly> LoadedLibraryAssemblies = new();
+
+    static GeneratorTestHost()
+    {
+        AssemblyLoadContext.Default.Resolving += (_, assemblyName) =>
+            assemblyName.Name is not null && LoadedLibraryAssemblies.TryGetValue(assemblyName.Name, out var assembly)
+                ? assembly
+                : null;
+    }
+
     public static GeneratorRunResult Run(string source)
     {
         // The name is fixed because one library fixture grants InternalsVisibleTo("TestAssembly").
@@ -128,9 +145,39 @@ internal static class GeneratorTestHost
         string librarySource,
         string mainSource,
         bool runGeneratorOverLibrary = false)
+        => RunWithLibraryReferenceCore(
+            librarySource, mainSource, runGeneratorOverLibrary, "TestLibrary", "TestAssembly", loadLibrary: false);
+
+    /// <summary>
+    /// Same as <see cref="RunWithLibraryReference"/>, but under names unique to this run and with the
+    /// library assembly loaded first, so that <see cref="GeneratorRunResult.LoadAssembly"/> can bind
+    /// its reference. Use this when a cross-assembly shape has to be exercised for real, which is the
+    /// only evidence there is for a shape that produces no compiler diagnostic. The generator always
+    /// runs over the library here: a base whose plumbing is not generated cannot host a derived-mode
+    /// subclass, so there would be nothing to run.
+    /// </summary>
+    public static GeneratorRunResult RunWithLibraryReferenceForExecution(string librarySource, string mainSource)
+    {
+        var runIdentity = Guid.NewGuid().ToString("N");
+        return RunWithLibraryReferenceCore(
+            librarySource,
+            mainSource,
+            runGeneratorOverLibrary: true,
+            "TestLibrary_" + runIdentity,
+            "TestAssembly_" + runIdentity,
+            loadLibrary: true);
+    }
+
+    private static GeneratorRunResult RunWithLibraryReferenceCore(
+        string librarySource,
+        string mainSource,
+        bool runGeneratorOverLibrary,
+        string libraryAssemblyName,
+        string mainAssemblyName,
+        bool loadLibrary)
     {
         var libraryCompilation = CSharpCompilation.Create(
-            assemblyName: "TestLibrary",
+            assemblyName: libraryAssemblyName,
             syntaxTrees: [CSharpSyntaxTree.ParseText(librarySource)],
             references: References,
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
@@ -152,10 +199,18 @@ internal static class GeneratorTestHost
             "Library compilation did not compile:" + Environment.NewLine +
             string.Join(Environment.NewLine, emitResult.Diagnostics.Select(d => d.ToString())));
 
-        libraryStream.Position = 0;
-        var libraryReference = MetadataReference.CreateFromStream(libraryStream);
+        var libraryBytes = libraryStream.ToArray();
+        var libraryReference = MetadataReference.CreateFromImage(libraryBytes);
 
-        return RunCore(mainSource, References.Append(libraryReference).ToList(), "TestAssembly");
+        // Loaded before the main assembly, so the reference the main assembly carries resolves by
+        // name to this one instead of failing to bind.
+        if (loadLibrary)
+        {
+            var libraryAssembly = Assembly.Load(libraryBytes);
+            LoadedLibraryAssemblies[libraryAssembly.GetName().Name!] = libraryAssembly;
+        }
+
+        return RunCore(mainSource, References.Append(libraryReference).ToList(), mainAssemblyName);
     }
 
     private static GeneratorRunResult RunCore(

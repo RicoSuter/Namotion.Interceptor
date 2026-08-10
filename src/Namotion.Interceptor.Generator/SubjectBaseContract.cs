@@ -81,7 +81,8 @@ internal static class SubjectBaseContract
                     Diagnostics.BasePlumbingCannotBeShared,
                     location,
                     subjectAncestor.ToDisplayString(),
-                    typeSymbol.ToDisplayString()));
+                    typeSymbol.ToDisplayString(),
+                    string.Join(", ", missingMembers)));
             }
             else
             {
@@ -291,6 +292,13 @@ internal static class SubjectBaseContract
         public const string GetInstanceProperties = "GetInstanceProperties";
         public const string PropertyChanged = "PropertyChanged";
         public const string RaisePropertyChanged = "RaisePropertyChanged";
+
+        /// <summary>
+        /// Emitted by both modes, not by root mode alone, which is why it is deliberately absent
+        /// from <see cref="RootModePlumbingMemberNames"/>: that array also answers which emitted
+        /// members need a 'new' modifier, and the emitter decides that one for itself.
+        /// </summary>
+        public const string DefaultProperties = "DefaultProperties";
     }
 
     /// <summary>
@@ -460,7 +468,7 @@ internal static class SubjectBaseContract
 
         foreach (var candidate in EnumerateChain(ancestor))
         {
-            foreach (var member in candidate.GetMembers("DefaultProperties"))
+            foreach (var member in candidate.GetMembers(MemberNames.DefaultProperties))
             {
                 var memberType = member switch
                 {
@@ -623,6 +631,13 @@ internal static class SubjectBaseContract
     /// annotations are deliberately not compared: the emitted code accepts both forms, and a base
     /// compiled without a nullable context would otherwise fail the contract for no reason.
     /// </summary>
+    /// <remarks>
+    /// The dictionary case accepts an implementing type as well as the declared interface, exactly
+    /// like <see cref="HasUsableDefaultProperties"/>, because the two feed the same emitted
+    /// expression, GetInstanceProperties() ?? DefaultProperties. Comparing by identity here rejects
+    /// a base returning FrozenDictionary&lt;string, SubjectPropertyMetadata&gt;?, which the emitted
+    /// expression consumes just as happily, and costs that base's own properties their interception.
+    /// </remarks>
     private static bool HasExpectedReturnType(
         IMethodSymbol method,
         PlumbingMethodShape plumbingMethod,
@@ -642,7 +657,8 @@ internal static class SubjectBaseContract
             default:
                 var expectedType = GetPropertyMetadataDictionaryType(compilation);
                 return expectedType is not null &&
-                       SymbolEqualityComparer.Default.Equals(method.ReturnType, expectedType);
+                       (SymbolEqualityComparer.Default.Equals(method.ReturnType, expectedType) ||
+                        method.ReturnType.AllInterfaces.Contains(expectedType, SymbolEqualityComparer.Default));
         }
     }
 
@@ -674,6 +690,66 @@ internal static class SubjectBaseContract
 
     private static readonly string[] HijackableInterfaceMembers =
         ["Context", "Data", "SyncRoot", "AddProperties"];
+
+    /// <summary>
+    /// Every name the generated half occupies, in either mode: the root-mode plumbing, the
+    /// IInterceptorSubject members the root implements, and the DefaultProperties both modes emit.
+    /// No other emitted member may take one of these names, which is the question
+    /// <see cref="CollidesWithGeneratedMember"/> answers for the "WithoutInterceptor" wrappers.
+    /// </summary>
+    /// <remarks>
+    /// Declared below the two arrays it reads, because a static field initializer runs in textual
+    /// order; see the remark on <see cref="GeneratedMemberNames"/>.
+    /// </remarks>
+    private static readonly string[] GeneratedHalfMemberNames = RootModePlumbingMemberNames
+        .Concat(HijackableInterfaceMembers)
+        .Concat([MemberNames.DefaultProperties])
+        .Distinct()
+        .ToArray();
+
+    /// <summary>
+    /// Whether a member the generator is about to emit under <paramref name="memberName"/> with
+    /// <paramref name="parameterCount"/> value parameters would collide with what the generated half
+    /// already occupies.
+    /// </summary>
+    /// <remarks>
+    /// The name is the trigger but not the answer, because the emitted member is always a method and
+    /// only some of these names are occupied in a way a method can take.
+    /// The four helpers are emitted as methods, and C# hides a method by signature, so one of the
+    /// same name and a different arity is an ordinary overload: it hides nothing, and the generated
+    /// call sites, which pass a lambda in a position such an overload does not have, still bind to
+    /// the plumbing. InvokeMethod(string, object[]) and GetPropertyValue(string) are both plausible
+    /// names on an RPC or OPC UA shaped model and both compiled and worked before this guard existed.
+    /// Context, Data and SyncRoot are implemented explicitly and are properties, so they occupy no
+    /// simple name in the class and no method can implement them; that is asked of the interface
+    /// rather than listed here, so a member added to it later is classified by what it is.
+    /// Everything left over is emitted under its own simple name, which a method of that name takes
+    /// whatever its arity: the PropertyChanged event, the DefaultProperties property, the
+    /// AddProperties the root implements as an interface method, and RaisePropertyChanged, kept
+    /// strict because an overload of it is not a shape the postfix has any reason to produce.
+    /// </remarks>
+    public static bool CollidesWithGeneratedMember(Compilation compilation, string memberName, int parameterCount)
+    {
+        if (!GeneratedHalfMemberNames.Contains(memberName))
+        {
+            return false;
+        }
+
+        foreach (var plumbingMethod in PlumbingMethods)
+        {
+            if (plumbingMethod.Name == memberName)
+            {
+                return parameterCount == plumbingMethod.ParameterCount;
+            }
+        }
+
+        var interfaceMember = compilation
+            .GetTypeByMetadataName(KnownTypes.IInterceptorSubject)?
+            .GetMembers(memberName)
+            .FirstOrDefault();
+
+        return interfaceMember is not IPropertySymbol;
+    }
 
     /// <summary>
     /// Members named like an inherited generated member. Deliberately name-only, any kind, no
@@ -722,6 +798,10 @@ internal static class SubjectBaseContract
     /// IInterceptorSubject.Properties in derived mode, and a hand-written explicit Context on the
     /// user's half is exactly the severe case: it compiles with no diagnostic and kills interception
     /// entirely, writes landing in the backing fields so the values still look right.
+    /// The contract provider is scanned as well, under the two extra conditions in
+    /// <see cref="TakesSlotFromAbove"/>: a provider that satisfies the contract by inheriting the
+    /// plumbing declares no explicit implementation of its own, so its public member wins the slot
+    /// for every generated subclass.
     /// </remarks>
     private static IEnumerable<(INamedTypeSymbol Declarer, string MemberName)> FindHijackingMembers(
         INamedTypeSymbol subject,
@@ -739,8 +819,10 @@ internal static class SubjectBaseContract
             .Where(entry => entry.Member is not null)
             .ToArray();
 
-        foreach (var type in EnumerateBetween(subject, contractProvider))
+        foreach (var type in EnumerateBetween(subject, contractProvider).Concat([contractProvider]))
         {
+            var isContractProvider = SymbolEqualityComparer.Default.Equals(type, contractProvider);
+
             foreach (var (name, interfaceMember) in hijackableMembers)
             {
                 foreach (var member in type.GetMembers())
@@ -756,14 +838,38 @@ internal static class SubjectBaseContract
 
                     var isExplicitMatch = IsExplicitInterceptorSubjectImplementation(member, name);
 
-                    if (isPublicMatch || isExplicitMatch)
+                    if (!isPublicMatch && !isExplicitMatch)
                     {
-                        yield return (type, name);
+                        continue;
+                    }
+
+                    if (isContractProvider && !TakesSlotFromAbove(contractProvider, interfaceMember!, isExplicitMatch))
+                    {
                         break;
                     }
+
+                    yield return (type, name);
+                    break;
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Whether a member declared in the contract provider itself really displaces an implementation
+    /// the provider inherits. Two things have to hold, and both keep the ordinary shapes quiet: an
+    /// explicit IInterceptorSubject implementation takes nothing, because interface mapping prefers
+    /// a class's own explicit implementation over its own public members, and a provider whose base
+    /// has no implementation to displace, the hand-written subject deriving from object, is the
+    /// shape the rule must never fire on.
+    /// </summary>
+    private static bool TakesSlotFromAbove(
+        INamedTypeSymbol contractProvider,
+        ISymbol interfaceMember,
+        bool isExplicitImplementation)
+    {
+        return !isExplicitImplementation &&
+               contractProvider.BaseType?.FindImplementationForInterfaceMember(interfaceMember) is not null;
     }
 
     /// <summary>
@@ -840,10 +946,12 @@ internal static class SubjectBaseContract
     }
 
     /// <summary>
-    /// The subject and every class between it and the class providing the contract member, which
-    /// is where a capturing or hijacking member can sit. Members in the provider itself are
-    /// excluded: interface mapping prefers a class's own explicit implementation over its own
-    /// public members.
+    /// The subject and every class between it and the class providing the contract member, which is
+    /// where a capturing member can sit. The provider itself is excluded, because the members it
+    /// declares are the very ones the contract check demanded of it: reporting them would fire on
+    /// every conforming base. <see cref="FindHijackingMembers"/> puts the provider back, under the
+    /// conditions in <see cref="TakesSlotFromAbove"/>, because a public member there can still take
+    /// an interface slot from something above it.
     /// </summary>
     private static IEnumerable<INamedTypeSymbol> EnumerateBetween(INamedTypeSymbol subject, INamedTypeSymbol provider)
     {

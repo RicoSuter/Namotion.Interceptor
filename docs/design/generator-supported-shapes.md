@@ -393,7 +393,8 @@ classes. `RaisePropertyChanged` is deliberately outside the rule: it was already
 the base provided the notify plumbing, so a `new` annotated override of it may well be deliberate and
 predates this change.
 
-**NI0014** fires in the same range for the four hijackable interface members. Two details differ from
+**NI0014** fires in the same range, plus the subject ancestor under the conditions below, for the four
+hijackable interface members. Two details differ from
 the first draft of the design and are worth knowing before the rule is narrowed again. The public
 member clause matches only a genuine implicit implementation, comparing the member type, parameter
 types and ref kinds, and requiring the accessors to be publicly callable, so an ordinary `string Data`
@@ -407,7 +408,13 @@ The break here is that a derived subject declaring `public object SyncRoot { get
 before, precisely because that class emitted its own explicit implementation which beat its own public
 member. It now takes the slot, and it is now an error.
 
-Both rules are scoped from the subject up to, but not including, the nearest subject ancestor. The
+Both rules are scoped from the subject up to the nearest subject ancestor. NI0013 excludes that
+ancestor, whose members are the ones the contract demanded of it. NI0014 includes it, but only for a
+member that is not an explicit `IInterceptorSubject` implementation and only when the ancestor's own
+base already implements that member: an ancestor that satisfies the contract by inheriting the
+plumbing declares no explicit implementation, so its public member wins the slot for every generated
+subclass, while the ordinary hand-written subject deriving from `object` has nothing above it to
+displace and stays quiet. The
 design first specified a per member contract provider located by re-running mode selection upward; the
 implementation uses the nearest subject ancestor for both rules, which is the same class in every shape
 where the contract is satisfied as a whole and is simpler to reason about.
@@ -446,8 +453,12 @@ they turn out to matter in practice.
   ProbeWithoutInterceptor()` on the same subject: the generator strips the suffix and emits a second
   `void Probe()` wrapper, which the compiler rejects as a duplicate. The generator does not currently
   check for this collision before emitting the wrapper. The one case it does check is a collision with
-  the plumbing member names, which is reported as NI0006 and the wrapper is not emitted, because there
-  the wrapper captured the generated call instead of colliding with it.
+  the names the generated half occupies, which is reported as NI0006 and the wrapper is not emitted,
+  because there the wrapper captured the generated call, or an interface slot, instead of colliding
+  with it. For the four helpers that check compares the parameter count as well, because a wrapper of
+  any other arity is an overload the generated call sites never bind to, and it leaves `Context`,
+  `Data` and `SyncRoot` alone, because those are explicit interface properties that a wrapper, always
+  a method, can neither hide nor implement.
 - **An interface property whose only accessible accessor is `init`, such as `{ protected get; init;
   }`, explicitly implemented by a class, yields a metadata entry with both accessor lambdas null.**
   This is not the "both accessors inaccessible" case, which is skipped entirely and never reaches the

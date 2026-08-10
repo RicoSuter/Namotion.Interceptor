@@ -296,7 +296,8 @@ internal static class SubjectMetadataExtractor
                             diagnostics.Add(Diagnostic.Create(
                                 Diagnostics.MemberSkipped, location,
                                 $"{typeSymbol.Name}.{implementedMember.ContainingType.Name}.{implementedMember.Name}",
-                                "the member is not accessible from generated code"));
+                                "the member is not accessible from generated code",
+                                "declare an accessor the subject's generated half can reach"));
                             continue;
                         }
 
@@ -472,7 +473,8 @@ internal static class SubjectMetadataExtractor
                     diagnostics.Add(Diagnostic.Create(
                         Diagnostics.MemberSkipped, location,
                         $"{typeSymbol.Name}.{fullMethodName}",
-                        $"the name has no prefix before '{InterceptedMethodPostfix}'"));
+                        $"the name has no prefix before '{InterceptedMethodPostfix}'",
+                        "rename it so a name remains once the postfix is stripped"));
                     continue;
                 }
 
@@ -492,7 +494,8 @@ internal static class SubjectMetadataExtractor
                     diagnostics.Add(Diagnostic.Create(
                         Diagnostics.MemberSkipped, location,
                         $"{typeSymbol.Name}.{fullMethodName}",
-                        "the method shape is not supported (static, generic, a by-reference parameter other than 'in' or 'ref readonly', a by-reference return type, or an explicit interface implementation)"));
+                        "the method shape is not supported (static, generic, a by-reference parameter other than 'in' or 'ref readonly', a by-reference return type, or an explicit interface implementation)",
+                        $"change the method shape, or drop the '{InterceptedMethodPostfix}' postfix if it should not be intercepted"));
                     continue;
                 }
 
@@ -502,14 +505,18 @@ internal static class SubjectMetadataExtractor
                 // named like a plumbing member captures the generated call sites instead of the
                 // plumbing. In derived mode the plumbing is inherited, so this is a silent capture:
                 // the only compiler signal is CS0108, which a consumer without TreatWarningsAsErrors
-                // never sees, and the subject then reports whatever the wrapper returns. NI0013
-                // cannot catch it, because it scans declared members rather than emitted ones.
-                if (SubjectBaseContract.RootModePlumbingMemberNames.Contains(methodName))
+                // never sees, and the subject then reports whatever the wrapper returns. An
+                // AddProperties wrapper is quieter still, taking the interface slot from the root's
+                // explicit implementation with no compiler diagnostic at all. NI0013 cannot catch
+                // either, because it scans declared members rather than emitted ones.
+                if (SubjectBaseContract.CollidesWithGeneratedMember(
+                        semanticModel.Compilation, methodName, method.ParameterList.Parameters.Count))
                 {
                     diagnostics.Add(Diagnostic.Create(
                         Diagnostics.MemberSkipped, location,
                         $"{typeSymbol.Name}.{fullMethodName}",
-                        $"the wrapper would be named '{methodName}', which is a generated subject plumbing member"));
+                        $"the wrapper would be named '{methodName}', which is a generated subject plumbing member",
+                        "rename it"));
                     continue;
                 }
 
