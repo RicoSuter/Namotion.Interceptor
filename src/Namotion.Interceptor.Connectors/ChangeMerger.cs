@@ -247,12 +247,14 @@ internal sealed class ChangeMerger : IDisposable
         var distinctPropertyCount = _propertyIndices.Count;
         _propertyIndices.Clear();
 
-        // Both high-water marks are judged together and released together, behind one hysteresis. They
-        // answer the same question, is the capacity far larger than this batch needed, and releasing one
-        // on the first narrow batch while making the other wait would just move the regrow cost around.
+        // Both marks are judged here and released together behind one hysteresis. They are not the same
+        // measurement: the buffer compares survivors against a capacity sized by batch length, the index
+        // compares distinct properties against its own, so they can disagree. Sharing the counter
+        // therefore means "the flush stream has been narrow for four batches" rather than "this mark has
+        // been". Nothing is starved by that: whatever is oversized when the threshold lands is released.
         // Read after the Clear: TrimExcess throws when the requested capacity is below Count, and the
         // guard does not bound Count by the floor, so trimming first would throw for exactly the wide
-        // batch this exists for. Dictionary.Clear leaves Capacity alone, so the test still sees the
+        // batch this exists for. Dictionary.Clear leaves Capacity alone, so the guard still sees the
         // pre-clear value.
         var indexIsOversized = _propertyIndices.Capacity >= PropertyIndexMaximumCapacity &&
                                distinctPropertyCount < _propertyIndices.Capacity / 4;

@@ -431,6 +431,40 @@ public class ChangeMergerTests
     }
 
     /// <summary>
+    /// The shape where the buffer is the only mark that can drive a release. Many changes over few
+    /// properties leaves the index at its floor, so its side of the guard is permanently false and the
+    /// counter advances on the buffer term alone. The other two buffer tests seed from a wide-distinct
+    /// batch, where the index drives the counter and that term is never exercised: without this, dropping
+    /// it from the guard leaves the whole suite green while the rental is retained forever on exactly the
+    /// workload that retains the most.
+    /// </summary>
+    [Fact]
+    public void WhenABurstCollapsesToFewProperties_ThenTheBufferAloneDrivesTheRelease()
+    {
+        // Arrange
+        using var merger = new ChangeMerger();
+
+        merger.Merge(CreateWideBatch(changeCount: 4096, distinctProperties: 8));
+        merger.Reset();
+
+        var burstLength = GetBufferLength(merger);
+        Assert.True(burstLength >= 4096, $"the burst should have grown the buffer, it is {burstLength}");
+        Assert.True(GetPropertyIndexCapacity(merger) < PropertyIndexMaximum,
+            "the index must stay at its floor, or it rather than the buffer is driving the counter");
+
+        // Act: three more, so four narrow resets counting the burst's own.
+        for (var round = 0; round < 3; round++)
+        {
+            merger.Merge(CreateWideBatch(changeCount: 2, distinctProperties: 2));
+            merger.Reset();
+        }
+
+        // Assert
+        Assert.True(GetBufferLength(merger) < burstLength,
+            $"buffer stayed at {GetBufferLength(merger)}, so the buffer term never advanced the counter");
+    }
+
+    /// <summary>
     /// The buffer shrink used to fire on the first qualifying reset while the index trim waited for the
     /// threshold, so one narrow batch after a burst returned the rental and the next burst re-rented and
     /// re-cleared the whole pool bucket. Both high-water marks now wait for the same evidence.
