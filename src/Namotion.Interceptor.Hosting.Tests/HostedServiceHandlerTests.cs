@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Hosting.Tests.Models;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Hosting.Tests;
 
@@ -533,12 +534,41 @@ public class HostedServiceHandlerTests
                 () => handler.WaitForStartAsync(subject, CancellationToken.None));
 
             Assert.Equal("start failed", exception.Message);
+
+            // The fault was raised on the transition thread, and a plain rethrow overwrites its stack
+            // with the rethrow point. This is the exception a failing subject aborts host startup
+            // with, so it is the one a user reads.
+            Assert.NotNull(exception.StackTrace);
+            Assert.Contains(nameof(ThrowingHostedSubject), exception.StackTrace);
         }
         finally
         {
             await host.StopAsync();
         }
     }
+
+    [Fact]
+    public async Task WhenAFailedStartIsRethrownToTheAttachingCaller_ThenTheOriginalStackSurvives()
+    {
+        // Arrange - the same claim on the attach path, where the fault crosses from the transition
+        // thread to the caller's. Two callers can also reach one fault instance concurrently, and a
+        // plain rethrow leaves at most one of them a usable trace.
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var person = new Person(context);
+
+            // Act & Assert
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                person.AttachHostedServiceAsync(FailingFactory, CancellationToken.None));
+
+            Assert.NotNull(exception.StackTrace);
+            Assert.Contains(nameof(FailingFactory), exception.StackTrace);
+        });
+    }
+
+    /// <summary>A named frame, so the stack trace of the exception it raises is recognizable.</summary>
+    private static TrackedBackgroundService FailingFactory()
+        => throw new InvalidOperationException("factory failed");
 
     [Fact]
     public async Task WhenTheAttachAwaitIsCancelled_ThenTheStartStillRunsToCompletion()
@@ -584,6 +614,70 @@ public class HostedServiceHandlerTests
         Assert.Null(target);
         Assert.Empty(attachments);
         Assert.Equal(entriesBefore, subject.Data.Count);
+    }
+
+    [Fact]
+    public void WhenASubjectWithoutHostedServicesIsDetached_ThenNothingIsAllocated()
+    {
+        // Arrange - one context detach reaches this for every subject in the detaching graph, under
+        // the lifecycle lock, and almost none of them host anything.
+        var handler = new HostedServiceHandler(() => null);
+        var subject = (IInterceptorSubject)new Person();
+        var change = new SubjectLifecycleChange
+        {
+            Subject = subject,
+            ReferenceCount = 0,
+            IsContextDetach = true
+        };
+
+        // Warm up so jit compilation does not land inside the measured window.
+        for (var i = 0; i < 100; i++)
+        {
+            handler.HandleLifecycleChange(change);
+        }
+
+        // Act
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1000; i++)
+        {
+            handler.HandleLifecycleChange(change);
+        }
+
+        // Assert
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal(0L, allocated);
+    }
+
+    [Fact]
+    public void WhenASubjectTargetAlreadyExists_ThenReadingItAllocatesNothing()
+    {
+        // Arrange - a re-attach of a hosted subject reaches this, and building the target and its
+        // chain lock before the lookup throws both away every time.
+        var subject = (IInterceptorSubject)new CountingHostedSubject();
+        var hostedService = (IHostedService)subject;
+        var first = subject.GetOrAddSubjectTarget(hostedService);
+
+        for (var i = 0; i < 100; i++)
+        {
+            subject.GetOrAddSubjectTarget(hostedService);
+        }
+
+        // Act
+        var same = 0;
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1000; i++)
+        {
+            if (ReferenceEquals(first, subject.GetOrAddSubjectTarget(hostedService)))
+            {
+                same++;
+            }
+        }
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        Assert.Equal(1000, same);
+        Assert.Equal(0L, allocated);
     }
 
     [Fact]

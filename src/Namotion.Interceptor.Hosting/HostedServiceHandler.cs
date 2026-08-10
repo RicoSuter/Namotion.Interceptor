@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
@@ -96,9 +97,16 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // because the attaching path takes target ownership itself and would pass its own check.
         _liveSubjects.TryRemove(subject, out _);
 
-        var subjectStopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var subjectTarget = subject.TryGetSubjectTarget();
         var attachments = subject.GetHostedServiceAttachments();
+        if (subjectTarget is null && attachments.IsEmpty)
+        {
+            // The overwhelmingly common case: this runs for every subject in a detaching graph, and
+            // almost none of them host anything. Read before anything is allocated, because a
+            // completion source per subject is 1.76 MB of garbage per detach of a 20,000 subject
+            // graph, all of it produced under the lifecycle lock.
+            return;
+        }
 
         // Ownership is read here and only here. A handler stops what it owns and nothing else:
         // otherwise this detach stops and disposes an instance another handler created and is
@@ -109,13 +117,16 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // Stops are appended NOW, not issued later from inside another transition. Deferring them
         // lets a re-attach's create land first on the attachment chain, after which the deferred stop
         // disposes the NEW instance and leaks the old one.
+        TaskCompletionSource? subjectStopped = null;
         if (subjectTarget is not null && ReferenceEquals(subjectTarget.Owner, this))
         {
+            // Allocated only when there is an attachment to order behind it: the signal exists to hold
+            // the attachment stops until the subject's own stop returned, and nothing else reads it.
+            subjectStopped = attachments.IsEmpty
+                ? null
+                : new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
             AppendStop(subject, subjectTarget, subjectStopped, waitFor: null, CancellationToken.None);
-        }
-        else
-        {
-            subjectStopped.TrySetResult();
         }
 
         foreach (var attachment in attachments)
@@ -123,7 +134,10 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             var target = ((IHostedServiceAttachmentTarget)attachment).Target;
             if (ReferenceEquals(target.Owner, this))
             {
-                AppendStop(subject, target, signal: null, waitFor: subjectStopped.Task, CancellationToken.None);
+                // A null wait is the "nothing to order behind" case, which is what the subject target
+                // being absent or owned by another handler means. It was an already completed task
+                // before, and awaiting one of those is the same no-op with an allocation in front.
+                AppendStop(subject, target, signal: null, waitFor: subjectStopped?.Task, CancellationToken.None);
             }
         }
 
@@ -489,7 +503,9 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         if (target.Fault is { } fault)
         {
-            throw fault;
+            // Captured rather than rethrown, for the reason on AttachHostedServiceAsync: this is the
+            // exception a failing subject aborts host startup with, so it is the one users read.
+            ExceptionDispatchInfo.Capture(fault).Throw();
         }
 
         // Read after the fault, and read at all because the guards above cannot cover a drain that

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Hosting;
 
 namespace Namotion.Interceptor.Hosting;
@@ -75,7 +76,12 @@ public static class InterceptorHostingExtensions
         if (attachment.Fault is { } fault)
         {
             RemoveAttachment(subject, attachment);
-            throw fault;
+
+            // Captured rather than rethrown: the fault was raised on the transition thread, and a
+            // plain throw overwrites its stack trace with this one, which is the stack a user reads
+            // when a failing subject aborts host startup. Two callers can also reach the same
+            // instance concurrently, and only one of them would keep a usable trace.
+            ExceptionDispatchInfo.Capture(fault).Throw();
         }
 
         return attachment;
@@ -175,8 +181,18 @@ public static class InterceptorHostingExtensions
 
     internal static HostedServiceTarget GetOrAddSubjectTarget(this IInterceptorSubject subject, IHostedService hostedService)
     {
+        // Read first: every re-attach of a hosted subject goes through here, and constructing the
+        // target and its chain lock ahead of the GetOrAdd throws both away again on all of them.
+        if (subject.Data.TryGetValue((null, SubjectTargetKey), out var existing) && existing is HostedServiceTarget found)
+        {
+            return found;
+        }
+
+        // The value overload, not the factory one: a factory closing over the target is a display
+        // class the compiler allocates at the top of this method, so the fast path above would still
+        // allocate on every call. The target is already built here, so there is nothing to defer.
         var target = new HostedServiceTarget(factory: null, subject: hostedService);
-        var stored = subject.Data.GetOrAdd((null, SubjectTargetKey), _ => target);
+        var stored = subject.Data.GetOrAdd((null, SubjectTargetKey), target);
         return stored as HostedServiceTarget ?? target;
     }
 
