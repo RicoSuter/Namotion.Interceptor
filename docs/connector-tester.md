@@ -6,7 +6,7 @@ The Connector Tester covers three aspects of connector quality:
 - **Load**: throughput and latency meet expectations at high change rates (load profiles).
 - **Memory**: no leaks over extended runs. `cycles.csv` records post-GC heap size per cycle for trend analysis.
 
-Run it after any connector change.
+Run it locally before merging connector work that could affect correctness or throughput. It does not run in CI, and the mode and duration depend on the change, so see [How long to run](#how-long-to-run).
 
 ## Quick Start
 
@@ -24,9 +24,19 @@ dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile m
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-load --configuration Release
 ```
 
-**Chaos profiles** inject kill/disconnect faults and verify all participants converge to identical state. **Load profiles** push high throughput (configurable via `ValueMutationRate`) and report latency percentiles, memory, and allocation rate. Both modes use the same verification cycle: mutate, pause, compare snapshots. Both should pass before merging connector changes.
+**Chaos profiles** inject kill/disconnect faults and verify all participants converge to identical state. **Load profiles** push high throughput (configurable via `ValueMutationRate`) and report latency percentiles, memory, and allocation rate. Both modes use the same verification cycle: mutate, pause, compare snapshots. Whichever mode the change warrants has to pass before merging, run for long enough to mean something.
 
 The tester runs indefinitely until a cycle fails (exit code 1) or you stop it with Ctrl-C (exit code 0).
+
+### How long to run
+
+Neither mode runs in CI, and neither has a cycle limit, so how long to leave it running is a judgement you make per change. The two modes need very different durations because they are answering different questions.
+
+**Chaos** needs cycles, not minutes. A cycle is a one minute mutate phase plus a convergence check, and the five chaos profiles rotate round robin, so a short run never exercises most of them and a pass means very little. Treat roughly a hundred cycles as the floor before a pass is evidence, which is a couple of hours. Bugs here surface as a single failed convergence after many good cycles, so stopping early is the main way to miss one.
+
+**Load** needs one cycle, but a long one. A load cycle is a single thirty minute mutate phase at 20,000 changes per second, so the first result arrives after about half an hour. Read the latency percentiles from that cycle, and read memory from the post-GC heap trend in `cycles.csv` across several cycles rather than from any single number, since one cycle cannot show a leak.
+
+Run the mode that matches the risk. A change to reconnection, session handling or write ordering wants chaos; a change to batching, queueing or allocation on the hot path wants load. A change that could plausibly do both wants both, which is most of a day, so plan it rather than discovering it.
 
 ## How It Works
 
