@@ -255,6 +255,15 @@ public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
 
 ## Monitoring & Subscriptions
 
+### Inbound Values
+
+Server values reach the model through four paths: subscription notifications, [polling](#polling-fallback-for-unsupported-nodes), the state load that runs on connect and after every reconnection, and [read-after-write](#read-after-write-fallback). All four handle a value the same way:
+
+- A value whose status is **Good** or **Uncertain** is applied. Uncertain means the server doubts the quality of the reading, not that there is none, and it is routine on industrial servers.
+- A value whose status is **Bad** is skipped and the property keeps the value it already has. A Bad status usually carries no value at all, so applying it would clear the property. The skip is logged, so a faulted node stays distinguishable from one that simply stopped changing.
+- Values are converted with the configured `ValueConverter` (see [Custom Value Converter](connectors-opcua.md#custom-value-converter)), so `decimal`, arrays and custom conversions behave the same whichever path delivered the value.
+- A value that fails to convert or to apply is logged and skipped on its own. The other values delivered in the same notification, poll, load or read-back are still applied.
+
 ### Sampling vs Exception-Based Monitoring
 
 OPC UA supports two monitoring modes for value changes:
@@ -420,7 +429,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 **Automatic behavior:**
 - Nodes automatically switch to polling when subscriptions fail
 - Batched reads for efficiency (reduces network overhead)
-- Same value change detection as subscriptions (only updates on actual changes)
+- Same value change detection as subscriptions (only updates on actual changes), and the same status and conversion rules (see [Inbound Values](#inbound-values))
 - No configuration required - works out of the box
 
 ### Auto-Healing of Failed Monitored Items

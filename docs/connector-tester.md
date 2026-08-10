@@ -281,7 +281,7 @@ Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfigur
 |----------|-----------------|-------------------|
 | Partial network failure (slow/lossy connections) | Keep-alive uses binary pass/fail detection | Low - TCP keepalive settings at OS level handle this |
 | Certificate expiry mid-session | No certificate rotation mechanism | Low for tests, relevant for >6 month production deployments |
-| Server returning persistent error status codes | Polling ignores some error codes | Low - circuit breaker limits impact |
+| Server returning persistent error status codes | Values with a Bad status are skipped rather than applied | Low - circuit breaker limits impact |
 | Out-of-order or duplicate notifications | No deduplication logic | Very low - OPC UA SDK handles within subscriptions |
 | Notification duplication after subscription transfer | Full state read overwrites stale values | Low - brief inconsistency only |
 | Server overload / adaptive backpressure | No response-time-based throttling | Low - not a connectivity failure |
