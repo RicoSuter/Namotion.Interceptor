@@ -185,7 +185,23 @@ public partial class Animal
 [InterceptorSubject]
 public partial class Dog : Animal
 {
-    // Override to change accessor visibility
+    // The override repeats the base modifiers
+    public override partial string Name { get; set; }
+}
+```
+
+C# does not allow an override to change accessor visibility, so a restricted setter has to be declared on the base and repeated on the override:
+
+```csharp
+[InterceptorSubject]
+public partial class Bird
+{
+    public virtual partial string Name { get; protected set; }
+}
+
+[InterceptorSubject]
+public partial class Parrot : Bird
+{
     public override partial string Name { get; protected set; }
 }
 ```
@@ -443,7 +459,7 @@ public partial class ShellyDevice
 
 2. **Interaction with AddSubject**: `AddSubject<T>` applies the context unconditionally after construction, so the subject is attached regardless of its constructor shape. A constructor taking an `IInterceptorSubjectContext` is still used when one exists, but it confers no advantage: a subject with only DI parameters is attached just the same. The `contextResolver` parameter allows overriding which context is provided, and returning null from it registers the subject without a context.
 
-   Where the `configure` callback runs relative to that attach depends on the constructor, and the difference is observable. When the type has no constructor taking a context, `AddSubject` performs the attach itself and runs `configure` before it, so the subject is fully configured before anything can start it and those assignments are not intercepted. When the type does take a context, the constructor has already attached the subject, so `configure` runs against an attached subject and its assignments are intercepted and tracked. See [Hosting](hosting.md#addsubjectt) for the full picture.
+   `configure` always runs before the attach `AddSubject` itself performs, but whether the subject is already attached by then depends on the constructor, and the difference is observable. A generated context constructor attaches during construction, so `configure` runs against an attached subject and its assignments are intercepted and tracked. Every shape that does not attach during construction, including one that declares an `IInterceptorSubjectContext` parameter and never attaches with it, is still unattached when `configure` runs, so the subject is fully configured before anything can start it and those assignments are not intercepted. See [Hosting](hosting.md#addsubjectt) for the full picture.
 
 ### Examples in the Codebase
 
@@ -457,7 +473,7 @@ public partial class ShellyDevice
 
 When creating a subject library that extends `BackgroundService`, provide a DI extension method using `AddSubject<T>` from `Namotion.Interceptor.Hosting`.
 
-`AddSubject<T>` registers the subject as a singleton, constructs it at host start and attaches it to the context. It does not start the subject itself: when the context has hosting enabled, the handler on that context starts the subject because it entered the graph, and host startup waits for that start. Do not register the same subject with `AddHostedService<T>` as well, because that is a second owner and a second start.
+`AddSubject<T>` registers the subject as a singleton, constructs it at host start and attaches it to the context. When that context has hosting enabled, the handler on it starts the subject because the subject entered the graph, and host startup waits for that start. When the resolved context has no hosting handler, `AddSubject<T>` starts an `IHostedService` subject itself and stops that same instance at host shutdown, so the subject runs either way. Do not register the same subject with `AddHostedService<T>` as well, because that is a second owner and a second start.
 
 ### DI Extension Method
 
@@ -522,8 +538,8 @@ public MySubject(IMyDriver driver, ILogger<MySubject> logger)
 }
 ```
 
-Declare an `IInterceptorSubjectContext` parameter only when the constructor genuinely needs the context, for example to build child subjects. It changes one thing that is worth knowing: `configure` then runs against an already attached subject, so its assignments are intercepted and race the start the attach queued, whereas without a context parameter `configure` runs before the attach and cannot race anything.
+Declare an `IInterceptorSubjectContext` parameter only when the constructor genuinely needs the context, for example to build child subjects. The one thing worth knowing turns on whether construction actually attaches the subject, which is what the generated context constructor does: `configure` then runs against an attached subject, so its assignments are intercepted and race the start the attach queued. A constructor that declares the parameter and never attaches with it behaves like one that never declared it.
 
 ### Restart Contract
 
-A subject implementing `IHostedService` is started when it enters the graph and stopped when it leaves, and the handler never disposes it. A subject that leaves and re-enters is therefore restarted in place on the same instance, so `ExecuteAsync` must tolerate being run more than once. A plain `BackgroundService` does. Anything that latches a "done" or "disposed" flag does not, so reset per run state at the top of `ExecuteAsync` rather than in the constructor.
+A subject implementing `IHostedService` is restarted in place, on the same instance, whenever it leaves the graph and re-enters it, so `ExecuteAsync` must tolerate being run more than once. See [Subject as Hosted Service](hosting.md#subject-as-hosted-service) for what that requires of the implementation.
