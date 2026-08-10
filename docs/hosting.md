@@ -102,6 +102,20 @@ Three sharp edges:
 - **Construction attaches the subject**, which is what the generated context constructor does. `configure` then runs against an attached subject. Its assignments are intercepted and tracked, and they race the queued start exactly as they do for a hand written `new MySubject(context) { Name = "x" }`.
 - **`T` declares a context parameter and never attaches with it**, which is the documented `MySubject(IInterceptorSubjectContext? context = null)` shape. Nothing attached during construction, so the attach `AddSubject` performs is again the only one and `configure` precedes it, and its assignments are not intercepted and not tracked either. This shape behaves exactly like the first case despite declaring the parameter.
 
+#### What it costs at host startup
+
+`AddSubject<T>()` registers one hosted activation per type, and when `T` implements `IHostedService` that activation waits for the subject to start before host startup moves on. The generic host starts hosted services one after another by default, so those waits do not overlap and the cost is linear in the number of such registrations. The handler's queued start also carries a fixed short delay, so each registration costs roughly 50 ms even when the service itself starts instantly: 16 registered hosted subject types measured 836 ms of host startup. A registered type that is a plain subject waits for no start and adds nothing.
+
+Let the host start its services concurrently to get the waits overlapping again. The same 16 registrations then measured 53 ms:
+
+```csharp
+builder.Services.Configure<HostOptions>(options => options.ServicesStartConcurrently = true);
+```
+
+`AddSubject<T>()` deliberately does not set this for you. The option is host wide, so it changes the startup of every hosted service in the application, including ones registered by libraries that know nothing about this package, and that decision belongs to whoever owns the host.
+
+Subjects that reach the graph as part of an object tree do not pay this cost. Their starts are queued on independent chains and run concurrently, so 50 subjects attached together cost about as much as one.
+
 ### A service bound to a subject
 
 When a service is not the subject itself but should run for as long as a subject is in the graph, attach a factory to that subject. See [Factory Attachment](#factory-attachment) below.
@@ -280,7 +294,7 @@ Holds are counted, so nested attaches compose: a service that attaches children 
 
 `SourceMonitor` is the one implementation in this repository. It is what makes an attached source count towards source registration from the moment it is attached rather than from the moment it finally starts, so a synchronization wait cannot complete against a tree whose sources have not registered yet. See [Applications That Create Sources at Runtime](connectors-monitoring.md#applications-that-create-sources-at-runtime).
 
-A deferrer runs inside the lifecycle lock, so `DeferCompletion` must not block: see [A deferrer that takes a lock of its own](design/hosting-service-ownership.md#4-a-deferrer-that-takes-a-lock-of-its-own).
+A deferrer runs inside the lifecycle lock, so neither `DeferCompletion` nor the hold's `Dispose` may block on anything that can be waiting for that lock, or take a lock that a thread already inside it can be waiting for. The constraint is written on `IStartupCompletionDeferrer`, and an implementation that follows it cannot take part in the deadlock: see [A deferrer that takes a lock of its own](design/hosting-service-ownership.md#4-a-deferrer-that-takes-a-lock-of-its-own).
 
 ## Migrating from the Previous API
 

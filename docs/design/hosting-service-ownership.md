@@ -74,10 +74,22 @@ DrainGate        Func<Task>?             test seam, null in production
 
 The three concurrent dictionaries are the state the rest of this document is about. `_running` maps a
 target to its subject rather than being a set, because the drain has to group the targets it stops per
-subject to reproduce the ordering a context detach gives. The logger is resolved through a callback
-rather than injected because `WithHostedServices` constructs the handler while the context is being
-configured, which is before any service provider exists; the registration it adds to the
-`IServiceCollection` assigns the logger when the provider builds it.
+subject to reproduce the ordering a context detach gives.
+
+`_liveSubjects` holds an entry for **every** subject that attaches, not only the subjects that host
+something, and that is what it has to be. An attachment can be added to a subject at any time after it
+entered the graph, and this entry is the only thing that lets that later attach tell a live subject from
+a detached one, so recording only the subjects hosting something at attach time would refuse every
+attachment onto every other subject. The entry is removed on context detach and the whole set is cleared
+by the drain, so it tracks the graph rather than growing with the process, but the cost is paid by
+graphs that host nothing at all: a 20,000 subject graph with no hosted services anywhere retains about
+1.4 MB in this dictionary and pays roughly 2.9 times the attach churn of the previous implementation,
+which recorded nothing per subject. Bounded by the graph and paid for correctness on the attach path,
+which is why it stays.
+
+The logger is resolved through a callback rather than injected because `WithHostedServices` constructs
+the handler while the context is being configured, which is before any service provider exists; the
+registration it adds to the `IServiceCollection` assigns the logger when the provider builds it.
 
 `DrainGate` is awaited in `StopAsync` after the gate begins draining and after the queued stops are
 snapshotted, but before liveness is cleared and before the running set is snapshotted. That placement
@@ -452,7 +464,8 @@ worse than never having taken the hold.
 
 A deferrer that throws while taking or releasing is logged and ignored, because the take runs under the
 lifecycle lock inside a property write and an exception would surface at an unrelated assignment. A
-deferrer that blocks is a different matter: see
+deferrer that blocks is a different matter, and it is a constraint on the implementation rather than an
+exposure every consumer carries: see
 [residual hazard 4](#4-a-deferrer-that-takes-a-lock-of-its-own).
 
 ## Faults and Failed Starts
@@ -603,12 +616,33 @@ deserialization, and `AddSubject`'s `configure` on the generated context constru
 after the attach has fired and after the start has been appended.
 
 The delay is a mitigation, not a synchronization, and removing it is a separate problem: it needs a
-"subject fully constructed" signal, which touches the generator. It lives inside each target's
-transition rather than in a shared loop, so it no longer serializes across targets and N subjects cost
-50 ms rather than N times 50 ms. The old loop's staggering across services was a side effect of
-serialization rather than a guarantee, so nothing is lost by the move: what protects against the hazard
-is the gap between a target's own attach event and its own start, and that is 50 ms either way. Both
-delays pass `CancellationToken.None`, so shutdown waits each one out per target.
+"subject fully constructed" signal, which touches the generator. The old loop's staggering across
+services was a side effect of serialization rather than a guarantee, so nothing is lost by moving the
+delay into each target's own transition: what protects against the hazard is the gap between a target's
+own attach event and its own start, and that is 50 ms either way. Both delays pass
+`CancellationToken.None`, so shutdown waits each one out per target.
+
+### What the move actually bought, and where it did not
+
+The delay no longer serializes across targets, but that only removes the linear cost on the path where
+nothing waits for the starts one at a time. The two paths differ, and the difference is measured:
+
+- **Subjects entering the graph.** Each start is appended to its own target's chain and nothing awaits
+  them in turn, so the delays overlap. 50 subjects attached together cost 57 ms, against 2,533 ms under
+  the shared loop.
+- **`AddSubject<T>`.** Still linear. `AddSubject<T>` registers one `SubjectActivation<T>` per type
+  through `AddHostedService`, the activation awaits `WaitForStartAsync` when `T` is an `IHostedService`,
+  and the generic host starts hosted services one after another by default, so each activation's 50 ms
+  is over before the next one begins. 16 registered types cost 836 ms of host startup, linear in the
+  number of registered types that implement `IHostedService`. A registered type that is a plain subject
+  awaits no start and adds nothing.
+
+`AddSubject` does not fix its own path, and that is deliberate. The switch that fixes it is
+`HostOptions.ServicesStartConcurrently`, which is host wide: it would change the startup behaviour of
+every hosted service in the application, including services this package knows nothing about, which is
+too broad a side effect for a registration helper to impose. It belongs to the application author, and
+it works. The same 16 types measured 53 ms with it set. This is stated for consumers in
+[`AddSubject<T>()`](../hosting.md#addsubjectt).
 
 ## Residual Hazards
 
@@ -662,22 +696,44 @@ Nothing resolves it, and unlike the three chain wedges above the blast radius is
 rather than one chain: `B` is holding `_attachedSubjects`, so every structural property write anywhere
 in the graph queues behind it.
 
-This is accepted rather than fixed. The hold must exist before the append completes, or the window it
-closes reopens: a subsystem that treats "the graph has finished starting" as a completion point would
-pass that point with a queued start still on its way in. On the lifecycle driven path the event that
-appends arrives already inside `_attachedSubjects`, so there is no earlier point at which to take it.
-Every alternative that keeps the guarantee either calls `DeferCompletion` from the same place, or needs
-a new cross-package protocol between Hosting and Connectors, which is a design change rather than a
-defect fix. Deferring only the release off the lock was considered and rejected: it costs an allocation
-and a thread hop on a rare path and leaves the take, which is the main exposure, exactly where it was.
+**The call site is accepted rather than fixed, and it is not by itself the deadlock.** The hold
+must exist before the append completes, or the window it closes reopens: a subsystem that treats "the
+graph has finished starting" as a completion point would pass that point with a queued start still on
+its way in. On the lifecycle driven path the event that appends arrives already inside
+`_attachedSubjects`, so there is no earlier point at which to take it. Every alternative that keeps the
+guarantee either calls `DeferCompletion` from the same place, or needs a new cross-package protocol
+between Hosting and Connectors, which is a design change rather than a defect fix. Deferring only the
+release off the lock was considered and rejected: it costs an allocation and a thread hop on a rare path
+and leaves the take, which is the main exposure, exactly where it was.
 
-The constraint on deferrer implementers that follows is: do not block on anything that can be waiting
-for a transition, and do not take a lock that a thread inside `_attachedSubjects` can be waiting for.
-`SourceMonitor`, the only implementation in this repository, satisfies it by construction:
-`DeferCompletion` is an `Interlocked.Increment` and takes no lock. Releasing its last hold does take
-its lock, to re-evaluate pending waits, and on the refused append path that release runs under
-`_attachedSubjects` as well. It is safe because nothing under that lock ever waits for a transition,
-and it is the reason the constraint is written down rather than assumed.
+What the call site does is put a constraint on the implementer, and an implementation that follows it
+cannot supply the step the cycle needs. The constraint is on
+[`IStartupCompletionDeferrer`](../../src/Namotion.Interceptor.Tracking/IStartupCompletionDeferrer.cs),
+where an implementer meets it, and it is: do not block, in `DeferCompletion` or in the returned hold's
+`Dispose`, on anything that can be waiting for a transition, and do not take a lock that a thread inside
+`_attachedSubjects` can be waiting for. Step 3 of the cycle is the only step a deferrer supplies, so a
+deferrer that never blocks there leaves nothing for `A` and `T` to close a cycle against. The exposure
+is therefore per implementation, not per consumer: an application whose deferrers all follow the rule is
+not exposed to this hazard at all.
+
+`SourceMonitor`, the only implementation in this repository, follows it, and the two halves follow it
+for different reasons:
+
+- **The take acquires nothing.** `DeferCompletion` delegates to `DeferWaitCompletion`, which is an
+  `Interlocked.Increment` and a handle allocation. It cannot be the take side of any cycle, whatever the
+  rest of the process is doing.
+- **The release does acquire a lock, and the order it acquires it in is already fixed.** Disposing the
+  last hold reaches `OnWaitConditionChanged`, which takes the monitor's `_lock` to re-evaluate pending
+  waits, and on the refused append path that release runs under `_attachedSubjects`. That is safe
+  because `SourceMonitor` establishes the same order for itself independently: `IsBranchSynchronized`
+  walks the parent graph under `_lock`, and it is reached from `SourceMonitor`'s own lifecycle handler,
+  which runs inside `_attachedSubjects`. The order is always `_attachedSubjects` then `_lock` and never
+  the reverse, because nothing held under `_lock` waits on anything that needs `_attachedSubjects`: the
+  walk reads parent sets, and completing a wait uses `RunContinuationsAsynchronously` so no continuation
+  runs on that thread.
+
+A lock on the release path is safe under exactly that condition, and it is the reason the constraint is
+written on the interface rather than assumed.
 
 ### Disposal from a handler transition
 
