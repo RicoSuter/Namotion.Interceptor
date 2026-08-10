@@ -137,7 +137,7 @@ internal static class GeneratorTestHost
     /// library assembly loaded first, so that <see cref="GeneratorRunResult.LoadAssembly"/> can bind
     /// its reference. Use this when a cross-assembly shape has to be exercised for real, which is the
     /// only evidence there is for a shape that produces no compiler diagnostic. The generator always
-    /// runs over the library here: a base whose plumbing is not generated cannot host a derived-mode
+    /// runs over the library here: a base whose interception members are not generated cannot host a derived-mode
     /// subclass, so there would be nothing to run.
     /// </summary>
     public static GeneratorRunResult RunWithLibraryReferenceForExecution(string librarySource, string mainSource)

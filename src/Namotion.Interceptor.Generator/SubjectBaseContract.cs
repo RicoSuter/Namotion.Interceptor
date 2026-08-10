@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Generator;
 
 /// <summary>
 /// Everything the generator needs to know about the class a subject inherits from: which ancestor
-/// owns the shared plumbing, and whether that ancestor exposes enough of it to be inherited from.
+/// owns the shared interception members, and whether that ancestor exposes enough of it to be inherited from.
 /// </summary>
 internal static class SubjectBaseContract
 {
@@ -16,7 +16,7 @@ internal static class SubjectBaseContract
     /// Resolves everything the emitter needs to know about the base class, and reports NI0011 to
     /// NI0014. A null result means generation is suppressed and the caller must emit nothing.
     /// </summary>
-    public static BaseClassInfo? Resolve(
+    public static SubjectBaseClass? Resolve(
         INamedTypeSymbol typeSymbol,
         Compilation compilation,
         Location location,
@@ -36,13 +36,13 @@ internal static class SubjectBaseContract
 
         // Root mode emits the whole IInterceptorSubject block; derived mode emits only its own
         // Properties line. Asked of the NEAREST subject ancestor, never of "some ancestor".
-        var emitsPlumbingHere = true;
-        IReadOnlyList<string> hiddenPlumbingMembers = [];
+        var emitsInterceptionMembers = true;
+        IReadOnlyList<string> hiddenMembers = [];
 
         if (subjectAncestor is not null)
         {
             // An ancestor generated in this very compilation cannot be contract-checked: its
-            // plumbing lives in source the generator has not emitted yet, so the symbol shows none
+            // interception members live in source the generator has not emitted yet, so the symbol shows none
             // of it.
             var ancestorIsGeneratedHere =
                 baseClassHasInterceptorSubject &&
@@ -51,7 +51,7 @@ internal static class SubjectBaseContract
             if (ancestorIsGeneratedHere ||
                 SatisfiesContract(subjectAncestor, typeSymbol, compilation, out var missingMembers))
             {
-                emitsPlumbingHere = false;
+                emitsInterceptionMembers = false;
 
                 foreach (var (declarer, memberName) in SubjectMemberConflicts.FindHidingMembers(typeSymbol, subjectAncestor, compilation))
                 {
@@ -67,10 +67,10 @@ internal static class SubjectBaseContract
             }
             else if (HasUsableDefaultProperties(subjectAncestor, typeSymbol, compilation))
             {
-                // Only emitsPlumbingHere flips. The ancestor stays the base-class fact source, so
+                // Only emitsInterceptionMembers flips. The ancestor stays the base-class fact source, so
                 // DefaultProperties still concatenates with it and the INPC decision is unchanged.
                 diagnostics.Add(Diagnostic.Create(
-                    Diagnostics.BasePlumbingCannotBeShared,
+                    Diagnostics.BaseInterceptionMembersCannotBeShared,
                     location,
                     subjectAncestor.ToDisplayString(),
                     typeSymbol.ToDisplayString(),
@@ -92,20 +92,20 @@ internal static class SubjectBaseContract
         // carrying PropertyChanged and RaisePropertyChanged collides just as well. The walk starts at
         // the immediate base because hiding is decided against the nearest declaration of the name
         // anywhere above; a generated ancestor has no symbol yet, hence the table lookup.
-        if (emitsPlumbingHere)
+        if (emitsInterceptionMembers)
         {
-            hiddenPlumbingMembers = SubjectAncestry.HasGeneratedSubjectAncestor(typeSymbol, cancellationToken)
-                ? GeneratedMemberTable.RootModePlumbingMemberNames
-                : SubjectMemberConflicts.FindHiddenPlumbingMembers(typeSymbol.BaseType, typeSymbol, compilation, !baseClassHasInpc);
+            hiddenMembers = SubjectAncestry.HasGeneratedSubjectAncestor(typeSymbol, cancellationToken)
+                ? GeneratedMemberTable.RootModeMemberNames
+                : SubjectMemberConflicts.FindHiddenInterceptionMembers(typeSymbol.BaseType, typeSymbol, compilation, !baseClassHasInpc);
         }
 
-        return new BaseClassInfo(
+        return new SubjectBaseClass(
             baseClassTypeName,
             baseClassHasInterceptorSubject,
             baseClassHasInpc,
             hasCallableRaisePropertyChanged,
-            emitsPlumbingHere,
-            hiddenPlumbingMembers);
+            emitsInterceptionMembers,
+            hiddenMembers);
     }
 
     /// <summary>
@@ -135,11 +135,11 @@ internal static class SubjectBaseContract
             missing.Add(KnownTypes.IRaisePropertyChanged);
         }
 
-        foreach (var plumbingMethod in GeneratedMemberTable.PlumbingMethods)
+        foreach (var accessorHelper in GeneratedMemberTable.AccessorHelpers)
         {
-            if (!HasAccessibleMethod(ancestor, subject, compilation, plumbingMethod))
+            if (!HasAccessibleMethod(ancestor, subject, compilation, accessorHelper))
             {
-                missing.Add(plumbingMethod.Declaration);
+                missing.Add(accessorHelper.Declaration);
             }
         }
 
@@ -216,17 +216,17 @@ internal static class SubjectBaseContract
         INamedTypeSymbol ancestor,
         INamedTypeSymbol subject,
         Compilation compilation,
-        PlumbingMethodShape plumbingMethod)
-        => SymbolExtensions.AccessibleMembers(ancestor, subject, compilation, plumbingMethod.Name)
+        AccessorHelperShape accessorHelper)
+        => SymbolExtensions.AccessibleMembers(ancestor, subject, compilation, accessorHelper.Name)
             .OfType<IMethodSymbol>()
             .Any(method =>
-                method.TypeParameters.Length == plumbingMethod.TypeParameterCount &&
-                method.Parameters.Length == plumbingMethod.ParameterCount &&
-                (!plumbingMethod.RequiresParameterArray ||
+                method.TypeParameters.Length == accessorHelper.TypeParameterCount &&
+                method.Parameters.Length == accessorHelper.ParameterCount &&
+                (!accessorHelper.RequiresParameterArray ||
                  method.Parameters[method.Parameters.Length - 1].IsParams) &&
-                (!plumbingMethod.RequiresLeadingString ||
+                (!accessorHelper.RequiresLeadingString ||
                  method.Parameters[0].Type.SpecialType == SpecialType.System_String) &&
-                HasExpectedReturnType(method, plumbingMethod, compilation));
+                HasExpectedReturnType(method, accessorHelper, compilation));
 
     /// <summary>
     /// Whether the base helper returns what the generated call sites consume. Nullability annotations
@@ -240,18 +240,18 @@ internal static class SubjectBaseContract
     /// </remarks>
     private static bool HasExpectedReturnType(
         IMethodSymbol method,
-        PlumbingMethodShape plumbingMethod,
+        AccessorHelperShape accessorHelper,
         Compilation compilation)
     {
-        switch (plumbingMethod.ReturnKind)
+        switch (accessorHelper.ReturnKind)
         {
-            case PlumbingReturnKind.OwnTypeParameter:
+            case AccessorHelperReturnKind.OwnTypeParameter:
                 return SymbolEqualityComparer.Default.Equals(method.ReturnType, method.TypeParameters[0]);
 
-            case PlumbingReturnKind.Boolean:
+            case AccessorHelperReturnKind.Boolean:
                 return method.ReturnType.SpecialType == SpecialType.System_Boolean;
 
-            case PlumbingReturnKind.Object:
+            case AccessorHelperReturnKind.Object:
                 return method.ReturnType.SpecialType == SpecialType.System_Object;
 
             default:

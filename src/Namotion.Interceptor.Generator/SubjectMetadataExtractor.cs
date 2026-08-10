@@ -509,8 +509,8 @@ internal static class SubjectMetadataExtractor
                     diagnostics.Add(Diagnostic.Create(
                         Diagnostics.MemberSkipped, location,
                         $"{typeSymbol.Name}.{fullMethodName}",
-                        $"the wrapper would be named '{methodName}', which is a generated subject plumbing member",
-                        "rename the method so that stripping the postfix leaves a name the generated plumbing does not use"));
+                        $"the wrapper would be named '{methodName}', which is a generated subject interception member",
+                        "rename the method so that stripping the postfix leaves a name the generated interception members do not use"));
                     continue;
                 }
 

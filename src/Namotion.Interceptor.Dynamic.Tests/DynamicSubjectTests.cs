@@ -119,7 +119,7 @@ public class DynamicSubjectTests
     }
 
     [Fact]
-    public void WhenProxyingAGeneratedSubject_ThenNoGeneratedPlumbingMemberBecomesAProperty()
+    public void WhenProxyingAGeneratedSubject_ThenNoGeneratedInterceptionMemberBecomesAProperty()
     {
         // Arrange & Act: Motor is [InterceptorSubject], so the proxy's base is generated code.
         var motor = DynamicSubjectFactory.CreateSubject<Motor>(typeof(IMotor), typeof(ISensor));

@@ -170,7 +170,7 @@ public class BaseClassInterceptionBehaviorTests
     }
 
     [Fact]
-    public void WhenHierarchyIsThreeLevelsDeep_ThenPlumbingIsAllocatedOnce()
+    public void WhenHierarchyIsThreeLevelsDeep_ThenInterceptionMembersAreAllocatedOnce()
     {
         // Arrange & Act
         var leaf = new HierarchyLeaf();

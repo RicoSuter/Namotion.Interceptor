@@ -19,18 +19,18 @@ internal static class MemberNames
 
     /// <summary>
     /// Emitted by both modes, not by root mode alone, which is why it is deliberately absent from
-    /// <see cref="GeneratedMemberTable.RootModePlumbingMemberNames"/>: that array also answers which
+    /// <see cref="GeneratedMemberTable.RootModeMemberNames"/>: that array also answers which
     /// emitted members need a 'new' modifier, and the emitter decides that one for itself.
     /// </summary>
     public const string DefaultProperties = "DefaultProperties";
 }
 
 /// <summary>
-/// The return type the contract check demands of one plumbing helper. An enum rather than a symbol,
+/// The return type the contract check demands of one accessor helper. An enum rather than a symbol,
 /// because two of the four are answered from the method itself and one has to be constructed from
 /// the compilation.
 /// </summary>
-internal enum PlumbingReturnKind
+internal enum AccessorHelperReturnKind
 {
     OwnTypeParameter,
     Boolean,
@@ -56,12 +56,12 @@ internal enum PlumbingReturnKind
 /// </param>
 /// <param name="RequiresLeadingString">Whether the first parameter must be a string.</param>
 /// <param name="Declaration">How the member is named in the NI0011 message.</param>
-internal sealed record PlumbingMethodShape(
+internal sealed record AccessorHelperShape(
     string Name,
     int TypeParameterCount,
     int ParameterCount,
     bool RequiresParameterArray,
-    PlumbingReturnKind ReturnKind,
+    AccessorHelperReturnKind ReturnKind,
     bool RequiresLeadingString,
     string Declaration);
 
@@ -71,23 +71,23 @@ internal sealed record PlumbingMethodShape(
 /// </summary>
 internal static class GeneratedMemberTable
 {
-    public static readonly PlumbingMethodShape[] PlumbingMethods =
+    public static readonly AccessorHelperShape[] AccessorHelpers =
     [
-        new PlumbingMethodShape(
+        new AccessorHelperShape(
             MemberNames.GetPropertyValue, TypeParameterCount: 1, ParameterCount: 2, RequiresParameterArray: false,
-            PlumbingReturnKind.OwnTypeParameter, RequiresLeadingString: true,
+            AccessorHelperReturnKind.OwnTypeParameter, RequiresLeadingString: true,
             "protected TProperty GetPropertyValue<TProperty>(string, Func<IInterceptorSubject, TProperty>)"),
-        new PlumbingMethodShape(
+        new AccessorHelperShape(
             MemberNames.SetPropertyValue, TypeParameterCount: 1, ParameterCount: 4, RequiresParameterArray: false,
-            PlumbingReturnKind.Boolean, RequiresLeadingString: true,
+            AccessorHelperReturnKind.Boolean, RequiresLeadingString: true,
             "protected bool SetPropertyValue<TProperty>(string, TProperty, TProperty, Action<IInterceptorSubject, TProperty>)"),
-        new PlumbingMethodShape(
+        new AccessorHelperShape(
             MemberNames.InvokeMethod, TypeParameterCount: 0, ParameterCount: 3, RequiresParameterArray: true,
-            PlumbingReturnKind.Object, RequiresLeadingString: true,
+            AccessorHelperReturnKind.Object, RequiresLeadingString: true,
             "protected object? InvokeMethod(string, Func<IInterceptorSubject, object?[], object?>, params object?[])"),
-        new PlumbingMethodShape(
+        new AccessorHelperShape(
             MemberNames.GetInstanceProperties, TypeParameterCount: 0, ParameterCount: 0, RequiresParameterArray: false,
-            PlumbingReturnKind.PropertyMetadataDictionary, RequiresLeadingString: false,
+            AccessorHelperReturnKind.PropertyMetadataDictionary, RequiresLeadingString: false,
             "protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties()")
     ];
 
@@ -107,11 +107,11 @@ internal static class GeneratedMemberTable
         ["Context", "Data", "SyncRoot", "AddProperties"];
 
     /// <summary>
-    /// Derived from <see cref="PlumbingMethods"/> rather than repeated, so a fifth helper added there
+    /// Derived from <see cref="AccessorHelpers"/> rather than repeated, so a fifth helper added there
     /// cannot be contract-checked and silently escape the hiding rule.
     /// </summary>
     public static readonly string[] GeneratedMemberNames =
-        PlumbingMethods.Select(shape => shape.Name).ToArray();
+        AccessorHelpers.Select(shape => shape.Name).ToArray();
 
     /// <summary>
     /// Every member root mode emits that a generated copy further up the chain would hide, the two
@@ -119,14 +119,14 @@ internal static class GeneratedMemberTable
     /// exactly like the helpers do. This is the answer for a generated ancestor, whose members have no
     /// symbol yet.
     /// </summary>
-    public static readonly string[] RootModePlumbingMemberNames =
+    public static readonly string[] RootModeMemberNames =
         GeneratedMemberNames.Concat([MemberNames.PropertyChanged, MemberNames.RaisePropertyChanged]).ToArray();
 
     /// <summary>
     /// Every name the generated half occupies, in either mode. No other emitted member may take one of
     /// these names, whatever its signature.
     /// </summary>
-    private static readonly string[] GeneratedHalfMemberNames = RootModePlumbingMemberNames
+    private static readonly string[] GeneratedHalfMemberNames = RootModeMemberNames
         .Concat(HijackableInterfaceMembers)
         .Concat([MemberNames.DefaultProperties])
         .Distinct()

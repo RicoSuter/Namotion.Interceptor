@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Generator;
 
 /// <summary>
 /// Which class above a subject is itself a subject, whether it will really receive generated
-/// plumbing, and whether the chain already carries the INotifyPropertyChanged half of it.
+/// interception members, and whether the chain already carries the INotifyPropertyChanged half of it.
 /// </summary>
 internal static class SubjectAncestry
 {
@@ -54,7 +54,7 @@ internal static class SubjectAncestry
 
     /// <summary>
     /// Whether any ancestor, not only the nearest subject one, is an in-source subject that will
-    /// actually receive generated plumbing. Asked of the whole chain because a hand-written class in
+    /// actually receive generated interception members. Asked of the whole chain because a hand-written class in
     /// between is exactly what pushes this subject back into root mode, and the generated ancestor
     /// above it still owns the members this one is about to re-emit.
     /// </summary>
@@ -65,7 +65,7 @@ internal static class SubjectAncestry
 
     /// <summary>
     /// Whether an attributed ancestor declared in this compilation will actually receive generated
-    /// plumbing. Carrying the attribute is not enough: NI0001 suppresses generation for a subject that
+    /// interception members. Carrying the attribute is not enough: NI0001 suppresses generation for a subject that
     /// is not partial.
     /// </summary>
     public static bool WillBeGeneratedInThisCompilation(INamedTypeSymbol ancestor, CancellationToken cancellationToken)
@@ -88,13 +88,13 @@ internal static class SubjectAncestry
     }
 
     /// <summary>
-    /// Whether the class chain above the type already provides the INotifyPropertyChanged plumbing, so
+    /// Whether the class chain above the type already provides the INotifyPropertyChanged members, so
     /// the subject must not declare its own.
     /// </summary>
     /// <remarks>
     /// The interface clause is deliberately asked of the TYPE, not of its subject ancestor: a base
     /// implementing IRaisePropertyChanged by hand is not a subject ancestor at all, and dropping this
-    /// makes its subclass re-declare the plumbing (ManualInpcPersonBase in
+    /// makes its subclass re-declare those members (ManualInpcPersonBase in
     /// Namotion.Interceptor.Tracking.Tests, live test). The attribute alone is a promise, not evidence.
     /// </remarks>
     public static bool InheritsNotifyPropertyChanged(
@@ -127,7 +127,7 @@ internal static class SubjectAncestry
     /// </summary>
     /// <remarks>
     /// The whole chain is walked, not just the nearest subject ancestor: a generated ancestor emits no
-    /// raise of its own when its own base already provided the plumbing, so the member that answers the
+    /// raise of its own when its own base already provided those members, so the member that answers the
     /// call can sit several classes further up. An explicit interface implementation is not found here
     /// and must not be: its name is qualified and it is private, so no simple-name call can reach it.
     /// </remarks>
@@ -145,7 +145,7 @@ internal static class SubjectAncestry
         }
 
         // An ancestor generated in this compilation has no member symbol yet. It emits one exactly
-        // when nothing above it provides the plumbing, which is the same question asked here.
+        // when nothing above it provides them, which is the same question asked here.
         return SymbolExtensions.EnumerateChain(typeSymbol.BaseType).Any(ancestor =>
             HasInterceptorSubjectAttribute(ancestor) &&
             WillBeGeneratedInThisCompilation(ancestor, cancellationToken) &&

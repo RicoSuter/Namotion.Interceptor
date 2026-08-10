@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Generator;
 
 /// <summary>
 /// Members on a subject's own chain that collide with the generated half: ones the emitted root-mode
-/// plumbing hides, ones that capture a call meant for inherited plumbing, and ones that take an
+/// members hide, ones that capture a call meant for inherited members, and ones that take an
 /// IInterceptorSubject slot from the root.
 /// </summary>
 internal static class SubjectMemberConflicts
@@ -19,7 +19,7 @@ internal static class SubjectMemberConflicts
     /// 'new' produces CS0109 when nothing is hidden. Both are build errors under
     /// TreatWarningsAsErrors, so the modifier has to be decided per member.
     /// </summary>
-    public static IReadOnlyList<string> FindHiddenPlumbingMembers(
+    public static IReadOnlyList<string> FindHiddenInterceptionMembers(
         INamedTypeSymbol? baseType,
         INamedTypeSymbol subject,
         Compilation compilation,
@@ -32,14 +32,14 @@ internal static class SubjectMemberConflicts
 
         var hidden = new List<string>();
 
-        foreach (var plumbingMethod in GeneratedMemberTable.PlumbingMethods)
+        foreach (var accessorHelper in GeneratedMemberTable.AccessorHelpers)
         {
-            var isHidden = SymbolExtensions.HidableMembers(baseType, subject, compilation, plumbingMethod.Name)
-                .Any(member => IsHiddenByEmittedMember(member, plumbingMethod));
+            var isHidden = SymbolExtensions.HidableMembers(baseType, subject, compilation, accessorHelper.Name)
+                .Any(member => IsHiddenByEmittedMember(member, accessorHelper));
 
             if (isHidden)
             {
-                hidden.Add(plumbingMethod.Name);
+                hidden.Add(accessorHelper.Name);
             }
         }
 
@@ -61,7 +61,7 @@ internal static class SubjectMemberConflicts
         // The emitted raise is a method, so only a member C#'s hiding rule really hides counts. A
         // RaisePropertyChanged(PropertyChangedEventArgs) overload hides nothing, and a 'new' for it
         // would be CS0109, which is a build error under TreatWarningsAsErrors just like the CS0108 it
-        // is meant to prevent. Parameter types are compared here, unlike in PlumbingMethods, because
+        // is meant to prevent. Parameter types are compared here, unlike in AccessorHelpers, because
         // that overload is an ordinary shape on an MVVM base rather than a contrivance.
         var raiseIsHidden = SymbolExtensions.HidableMembers(baseType, subject, compilation, MemberNames.RaisePropertyChanged)
             .Any(member => member is not IMethodSymbol method || GeneratedMemberTable.HasRaisePropertyChangedParameters(method));
@@ -76,18 +76,18 @@ internal static class SubjectMemberConflicts
 
     /// <summary>
     /// A method is hidden only when its signature matches the emitted one, so an unrelated overload of
-    /// a plumbing name hides nothing and must not attract a 'new'. Everything else hides by name
+    /// an interception member name hides nothing and must not attract a 'new'. Everything else hides by name
     /// alone: a base property or field named GetPropertyValue is hidden by the emitted method.
     /// </summary>
-    private static bool IsHiddenByEmittedMember(ISymbol member, PlumbingMethodShape plumbingMethod)
+    private static bool IsHiddenByEmittedMember(ISymbol member, AccessorHelperShape accessorHelper)
     {
         if (member is not IMethodSymbol method)
         {
             return true;
         }
 
-        return method.TypeParameters.Length == plumbingMethod.TypeParameterCount &&
-               method.Parameters.Length == plumbingMethod.ParameterCount;
+        return method.TypeParameters.Length == accessorHelper.TypeParameterCount &&
+               method.Parameters.Length == accessorHelper.ParameterCount;
     }
 
     /// <summary>

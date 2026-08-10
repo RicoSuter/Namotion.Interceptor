@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Generator.Tests;
 public class SubjectBaseShapeTests
 {
     [Fact]
-    public void WhenBaseImplementsRaisePropertyChangedWithoutBeingASubject_ThenNoNotifyPlumbingIsRedeclared()
+    public void WhenBaseImplementsRaisePropertyChangedWithoutBeingASubject_ThenNoNotifyMembersAreRedeclared()
     {
         // Arrange: the base is INPC + IRaisePropertyChanged but NOT IInterceptorSubject and has no
         // attribute, so it is not a subject ancestor. BaseClassHasInpc must still be true, because
@@ -50,7 +50,7 @@ public class SubjectBaseShapeTests
     public void WhenAttributedAncestorRaisesThroughAnExplicitImplementation_ThenTheSetterCallsItThroughTheInterface()
     {
         // Arrange: Middle carries the attribute but emits no RaisePropertyChanged of its own,
-        // because ManualInpcBase already provides the INPC plumbing, and that base implements the
+        // because ManualInpcBase already provides the INPC members, and that base implements the
         // raise explicitly. Leaf's attributed ancestor therefore exposes no member of that name and
         // a simple-name call from Leaf is CS0103.
         const string source = """
@@ -232,11 +232,11 @@ public class SubjectBaseShapeTests
     }
 
     [Fact]
-    public void WhenReferencedAttributedBaseHasNoNotifyPlumbing_ThenTheSubjectDeclaresItsOwn()
+    public void WhenReferencedAttributedBaseHasNoNotifyMembers_ThenTheSubjectDeclaresItsOwn()
     {
-        // Arrange: the attribute alone is not evidence that the base owns the INPC plumbing. This
+        // Arrange: the attribute alone is not evidence that the base owns the INPC members. This
         // base owns none of it, so a simple-name call is CS0103 and an interface cast throws at
-        // runtime; the subject has to declare the plumbing itself.
+        // runtime; the subject has to declare those members itself.
         const string librarySource = """
             using System.Collections.Generic;
             using System.Collections.Frozen;
@@ -273,7 +273,7 @@ public class SubjectBaseShapeTests
         var generated = result.SingleSource();
 
         // Assert: the base only provides DefaultProperties, so it takes the NI0012 root-mode
-        // fallback and declares the notify plumbing it then calls by simple name.
+        // fallback and declares the notify members it then calls by simple name.
         Assert.Contains(result.GeneratorDiagnostics, d => d.Id == "NI0012");
         Assert.Empty(result.CompilationErrors);
         Assert.Empty(result.CompilationWarnings);
@@ -725,7 +725,7 @@ public class SubjectBaseShapeTests
     }
 
     [Fact]
-    public void WhenBaseSubjectIsInAReferencedAssembly_ThenTheDerivedSubjectSharesItsPlumbing()
+    public void WhenBaseSubjectIsInAReferencedAssembly_ThenTheDerivedSubjectSharesItsInterceptionMembers()
     {
         // Arrange: mode selection branch 2. The library is compiled WITH the generator, so its
         // protected helpers exist as metadata symbols the contract check can see.
@@ -761,7 +761,7 @@ public class SubjectBaseShapeTests
         var result = GeneratorTestHost.RunWithLibraryReference(librarySource, mainSource, runGeneratorOverLibrary: true);
         var generated = result.SingleSource();
 
-        // Assert: derived mode, so no plumbing of its own. Both members below are emitted by root
+        // Assert: derived mode, so no interception members of its own. Both members below are emitted by root
         // mode only, unlike the Properties line, which both modes emit identically.
         Assert.Empty(result.CompilationErrors);
         Assert.Empty(result.CompilationWarnings);
@@ -773,7 +773,7 @@ public class SubjectBaseShapeTests
     public void WhenBaseSubjectIsInAReferencedAssembly_ThenABaseDeclaredWriteReachesTheInterceptor()
     {
         // Arrange: the same shape as above, executed. The emitted text cannot show this: the base
-        // property's setter was compiled into the library against the library's own plumbing, and
+        // property's setter was compiled into the library against the library's own interception members, and
         // only running it shows that it reaches the executor the leaf's context published rather
         // than a second one the leaf kept for itself. This is what a consumer deriving from a
         // subject shipped in a package hits, and the contract check reads the base from metadata
@@ -1006,7 +1006,7 @@ public class SubjectBaseShapeTests
         // Act
         var result = GeneratorTestHost.RunExpectingNoWarnings(source);
 
-        // Assert: derived mode, so no plumbing of its own, and no contract diagnostic.
+        // Assert: derived mode, so no interception members of its own, and no contract diagnostic.
         Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id == "NI0011" || d.Id == "NI0012");
         Assert.DoesNotContain("private IInterceptorExecutor? _context;", result.SingleSource());
     }
@@ -1054,7 +1054,7 @@ public class SubjectBaseShapeTests
     {
         // Arrange: an ordinary MVVM base. It is not a subject ancestor, so root mode re-emits the
         // whole notify block, and both members it emits already exist above it. The base also
-        // carries a plumbing name to cover the helper half of the same lookup.
+        // carries an interception member name to cover the helper half of the same lookup.
         const string source = """
             using System.ComponentModel;
             using Namotion.Interceptor;
@@ -1093,8 +1093,7 @@ public class SubjectBaseShapeTests
     [Fact]
     public void WhenTheCollidingBaseMemberIsStatic_ThenTheRedeclaredMemberStillCarriesNew()
     {
-        // Arrange: C# hiding is not staticness-sensitive, so a static base member of a plumbing
-        // name is hidden by the emitted instance member exactly like an instance one.
+        // Arrange: C# hiding is not staticness-sensitive, so a static base member of an interception member name is hidden by the emitted instance member exactly like an instance one.
         const string source = """
             using Namotion.Interceptor;
             using Namotion.Interceptor.Attributes;
@@ -1212,7 +1211,7 @@ public class SubjectBaseShapeTests
 
     /// <summary>
     /// Counts the executor fields over the whole hierarchy. A hand-written base that really hosts
-    /// its generated subclass carries the only one; a subclass that emits its own plumbing instead
+    /// its generated subclass carries the only one; a subclass that emits its own interception members instead
     /// adds a second that nothing above it ever populates.
     /// </summary>
     private static int CountExecutorFields(Type type)

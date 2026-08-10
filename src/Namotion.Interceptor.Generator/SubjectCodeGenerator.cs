@@ -44,7 +44,7 @@ internal static class SubjectCodeGenerator
     /// <see cref="MemberNames"/>, never from a literal here.
     /// </summary>
     private static string HidingModifier(SubjectMetadata metadata, string memberName)
-        => metadata.BaseClass.HiddenPlumbingMemberNames.Contains(memberName) ? "new " : "";
+        => metadata.BaseClass.HiddenMemberNames.Contains(memberName) ? "new " : "";
 
     /// <summary>
     /// Generates the filename for the generated code.
@@ -165,7 +165,7 @@ internal static class SubjectCodeGenerator
         // to the root: DefaultProperties is a static hidden by 'new' at each level, so this
         // expression binds at compile time to the class it was emitted into. Emitted only in the
         // root, every derived subject would report the root's property set.
-        if (!metadata.BaseClass.EmitsPlumbingHere)
+        if (!metadata.BaseClass.EmitsInterceptionMembers)
         {
             builder.AppendLine("        [JsonIgnore]");
             builder.AppendLine("        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;");
@@ -426,7 +426,7 @@ internal static class SubjectCodeGenerator
 
     private static void EmitHelperMethods(StringBuilder builder, SubjectMetadata metadata)
     {
-        if (!metadata.BaseClass.EmitsPlumbingHere)
+        if (!metadata.BaseClass.EmitsInterceptionMembers)
         {
             return;
         }

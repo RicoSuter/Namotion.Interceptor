@@ -105,7 +105,7 @@ public class SubjectBaseDiagnosticsTests
 
     /// <summary>
     /// Same as <see cref="DefaultPropertiesOnlyBase"/> plus an unrelated overload of one of the four
-    /// plumbing names. C# hides a method by signature, so this overload hides nothing the generator
+    /// interception member names. C# hides a method by signature, so this overload hides nothing the generator
     /// emits and a 'new' modifier on the emitted member would be CS0109.
     /// </summary>
     private const string DifferentSignatureOverloadBase = """
@@ -619,7 +619,7 @@ public class SubjectBaseDiagnosticsTests
     }
 
     [Fact]
-    public void WhenBaseDeclaresADifferentSignatureOverloadOfAPlumbingName_ThenNoStrayNewModifierIsEmitted()
+    public void WhenBaseDeclaresADifferentSignatureOverloadOfAnInterceptionMemberName_ThenNoStrayNewModifierIsEmitted()
     {
         // Arrange: the base takes the NI0012 root-mode fallback and declares GetInstanceProperties(int),
         // which hides nothing because C# hides methods by signature.
@@ -636,7 +636,7 @@ public class SubjectBaseDiagnosticsTests
     }
 
     [Fact]
-    public void WhenBaseDeclaresAMatchingSignatureOfAPlumbingName_ThenTheNewModifierIsStillEmitted()
+    public void WhenBaseDeclaresAMatchingSignatureOfAnInterceptionMemberName_ThenTheNewModifierIsStillEmitted()
     {
         // Arrange: the counterpart of the overload case. Narrowing the hiding check to a signature
         // match must not stop the modifier being emitted where C# does require it (CS0108).
@@ -684,10 +684,10 @@ public class SubjectBaseDiagnosticsTests
     }
 
     [Fact]
-    public void WhenAttributedAncestorIsNotPartial_ThenTheDerivedSubjectDoesNotAssumeGeneratedPlumbing()
+    public void WhenAttributedAncestorIsNotPartial_ThenTheDerivedSubjectDoesNotAssumeGeneratedInterceptionMembers()
     {
         // Arrange: the ancestor carries the attribute but NI0001 suppresses its generation, so none
-        // of the plumbing the derived class would inherit ever exists.
+        // of the members the derived class would inherit ever exists.
         const string source = """
             using Namotion.Interceptor;
             using Namotion.Interceptor.Attributes;
@@ -1106,7 +1106,7 @@ public class SubjectBaseDiagnosticsTests
     }
 
     [Fact]
-    public void WhenAWrapperWouldBeNamedLikeAnInheritedPlumbingMember_ThenNI0006IsReportedAndThePropertiesSurvive()
+    public void WhenAWrapperWouldBeNamedLikeAnInheritedInterceptionMember_ThenNI0006IsReportedAndThePropertiesSurvive()
     {
         // Arrange: stripping the postfix yields "GetInstanceProperties", the inherited helper the
         // generated IInterceptorSubject.Properties calls. Emitting the wrapper captures that call,
@@ -1128,9 +1128,9 @@ public class SubjectBaseDiagnosticsTests
     }
 
     [Fact]
-    public void WhenBaseDeclaresAPlumbingHelperWithTheWrongReturnType_ThenTheContractRejectsIt()
+    public void WhenBaseDeclaresAnAccessorHelperWithTheWrongReturnType_ThenTheContractRejectsIt()
     {
-        // Arrange: every plumbing member is present and only SetPropertyValue returns void. The
+        // Arrange: every accessor helper is present and only SetPropertyValue returns void. The
         // generated setter tests that return value in "!cancel && SetPropertyValue(...)", so
         // accepting this base means CS0019 inside a generated file, which is exactly the outcome
         // the contract check exists to replace.
@@ -1139,7 +1139,7 @@ public class SubjectBaseDiagnosticsTests
         // Act
         var result = GeneratorTestHost.Run(source);
 
-        // Assert: rejected by the contract, so the subject falls back to its own plumbing (NI0012)
+        // Assert: rejected by the contract, so the subject falls back to its own interception members (NI0012)
         // instead of calling the base helper that does not fit. The message names the one member
         // that failed, which is what tells this base apart from the four other defects that reach
         // the same rule.
@@ -1177,9 +1177,9 @@ public class SubjectBaseDiagnosticsTests
     [Fact]
     public void WhenAWrapperWouldBeNamedInvokeMethodAtAnotherArity_ThenNI0006IsReportedAndTheRealBodyRuns()
     {
-        // Arrange: the plumbing's InvokeMethod ends in "params object?[]", so the generated call site
+        // Arrange: the accessor helper InvokeMethod ends in "params object?[]", so the generated call site
         // for a parameterless method, InvokeMethod("Echo", lambda), passes two arguments. A
-        // two-parameter overload is applicable in normal form and therefore beats the plumbing, which
+        // two-parameter overload is applicable in normal form and therefore beats the helper, which
         // is only applicable in expanded form, so the wrapper swallows the call. Nothing in the
         // compiler says a word about it and Echo() returns the wrapper's answer instead of "echo".
         var source = LeafDeclaring("""
@@ -1205,13 +1205,13 @@ public class SubjectBaseDiagnosticsTests
     }
 
     [Fact]
-    public void WhenAWrapperSharesAPlumbingNameButNotItsArity_ThenNI0006IsReportedAndNoWrapperIsEmitted()
+    public void WhenAWrapperSharesAnInterceptionMemberNameButNotItsArity_ThenNI0006IsReportedAndNoWrapperIsEmitted()
     {
         // Arrange: the deliberate inversion of a rule that used to compare the arity and let these
         // two through. Since InvokeMethod takes a parameter array, no arity is safe, and the guard no
         // longer reasons about signatures at all. Both wrappers are the accepted false positive: the
         // author is told to rename, which is loud and recoverable, unlike the capture above. Echo is
-        // here to show that the plumbing still binds once they are gone.
+        // here to show that the helper still binds once they are gone.
         var source = LeafDeclaring("""
                 public object InvokeMethodWithoutInterceptor(string name, object[] arguments) => name;
 
@@ -1324,7 +1324,7 @@ public class SubjectBaseDiagnosticsTests
 
         // Assert: derived mode. Comparing the return type by identity sent this base to the NI0012
         // root-mode fallback, which costs the base's own properties their interception, the very
-        // failure the shared plumbing exists to fix.
+        // failure the shared interception members exist to fix.
         Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id is "NI0011" or "NI0012");
         Assert.DoesNotContain("private IInterceptorExecutor? _context;", result.AllSources());
         Assert.Empty(result.CompilationErrors);
@@ -1335,7 +1335,7 @@ public class SubjectBaseDiagnosticsTests
     public void WhenAReferencedSubjectIsSubclassedByHandWithAPublicContext_ThenNI0014IsReportedAndWritesAreNotIntercepted()
     {
         // Arrange: the hand-written class satisfies the contract by inheriting the referenced
-        // subject's plumbing, so it declares no explicit implementation of its own and its public
+        // subject's interception members, so it declares no explicit implementation of its own and its public
         // Context wins the slot for every generated subclass. That is the silent interception loss
         // in the shape the rule exists to prevent, and it produces no compiler diagnostic at all.
         const string librarySource = """

@@ -86,8 +86,7 @@ internal static class SymbolExtensions
     /// <summary>
     /// The members of a given name on the base chain that a member emitted into
     /// <paramref name="accessingType"/> can hide. Same as <see cref="AccessibleMembers"/> except that
-    /// statics are kept: C# hiding is not staticness-sensitive, so a static base member of a plumbing
-    /// name is hidden by the emitted instance member and produces the same CS0108 an instance one
+    /// statics are kept: C# hiding is not staticness-sensitive, so a static base member of one of those names is hidden by the emitted instance member and produces the same CS0108 an instance one
     /// would. Accessibility still applies, because an inaccessible member is neither hidden nor found
     /// by member lookup.
     /// </summary>

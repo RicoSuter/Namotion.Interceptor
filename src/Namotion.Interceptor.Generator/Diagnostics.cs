@@ -34,7 +34,7 @@ internal static class Diagnostics
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Records and record structs are excluded because the generated plumbing breaks value equality and with-expressions.");
+        description: "Records and record structs are excluded because the generated interception members break value equality and with-expressions.");
 
     public static readonly DiagnosticDescriptor GeneratorFailed = new(
         id: "NI0004",
@@ -68,7 +68,7 @@ internal static class Diagnostics
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "No wrapper and no property metadata is emitted for the member, so a 'WithoutInterceptor' opt-in on it is ignored. When the skipped wrapper name is one the generated plumbing occupies, a call to the stripped name binds to the inherited plumbing instead.");
+        description: "No wrapper and no property metadata is emitted for the member, so a 'WithoutInterceptor' opt-in on it is ignored. When the skipped wrapper name is one the generated interception members occupy, a call to the stripped name binds to the inherited member instead.");
 
     public static readonly DiagnosticDescriptor ExplicitImplementationAttributesIgnored = new(
         id: "NI0007",
@@ -133,17 +133,17 @@ internal static class Diagnostics
         isEnabledByDefault: true,
         description: "The generated subclass calls members the base class must provide. This checks their shape, not their behaviour.");
 
-    public static readonly DiagnosticDescriptor BasePlumbingCannotBeShared = new(
+    public static readonly DiagnosticDescriptor BaseInterceptionMembersCannotBeShared = new(
         id: "NI0012",
-        title: "Base class plumbing cannot be shared",
+        title: "Base class interception members cannot be shared",
         // The missing members are interpolated at {2}: five different base defects reach this rule,
         // and naming none of them made every one of them produce the same text. Two sentences, so
         // RS1032 requires the trailing period, exactly as in NI0011.
-        messageFormat: "Base class '{0}' is missing {2}, so '{1}' emits its own plumbing and the base class's own properties stay unintercepted. Add the missing members to the base class, or rebuild the base assembly against the current package version if it predates the shared plumbing.",
+        messageFormat: "Base class '{0}' is missing {2}, so '{1}' emits its own interception members and the base class's own properties stay unintercepted. Add the missing members to the base class, or rebuild the base assembly against the current package version if it predates the shared interception members.",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "The subject still generates and behaves as it did before the plumbing was shared, but a project that treats warnings as errors fails on this rule.");
+        description: "The subject still generates and behaves as it did before those members became shared, but a project that treats warnings as errors fails on this rule.");
 
     public static readonly DiagnosticDescriptor HidesGeneratedMember = new(
         id: "NI0013",

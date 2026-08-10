@@ -305,7 +305,7 @@ public partial class Sensor
 
 ## Base Classes and Subclasses
 
-A subject can derive from another subject, and properties declared anywhere in the hierarchy are intercepted. The plumbing that interception needs (the context, the property table, the sync root and the helper methods the generated accessors call) is emitted once, in the class at the root of the hierarchy, and every subject below it inherits it.
+A subject can derive from another subject, and properties declared anywhere in the hierarchy are intercepted. The set of members that interception needs (the context, the property table, the sync root and the helper methods the generated accessors call) is emitted once, in the class at the root of the hierarchy, and every subject below it inherits it.
 
 ```csharp
 [InterceptorSubject]
@@ -491,12 +491,12 @@ A class can host generated subclasses when it exposes all of the following. A ge
 Details that are easy to get wrong:
 
 - Members may be more accessible than listed, and a member the base class itself inherits from further up counts. A generic base class is checked with its type arguments substituted.
-- `InvokeMethod`'s last parameter must really be `params`. The generated call site passes arguments in expanded form, and the check tests for `params` explicitly, so the same parameter types without it fail the contract. The subject then falls back to emitting its own plumbing and NI0012 is reported, which `TreatWarningsAsErrors` turns into a build error.
+- `InvokeMethod`'s last parameter must really be `params`. The generated call site passes arguments in expanded form, and the check tests for `params` explicitly, so the same parameter types without it fail the contract. The subject then falls back to emitting its own interception members and NI0012 is reported, which `TreatWarningsAsErrors` turns into a build error.
 - `DefaultProperties` may be a static property or a static field, but its type has to be `IReadOnlyDictionary<string, SubjectPropertyMetadata>` or something that implements it. A static of that name with any other type is reported rather than accepted.
 - `GetInstanceProperties` may likewise return something that implements the dictionary interface, such as `FrozenDictionary<string, SubjectPropertyMetadata>?`, but it has to be a reference type. The generated code combines the two as `GetInstanceProperties() ?? DefaultProperties`, and `??` rejects a value type on its left, so a struct implementing the interface fails the contract even though the same struct is accepted for `DefaultProperties`, which is only concatenated.
-- The `IRaisePropertyChanged` row is the only one that is not needed for the generated code to compile. A base class that satisfies everything else but not that one still produces code that compiles, with the subject declaring its own change notification plumbing, but it fails the contract all the same: the subject re-emits the whole plumbing block and NI0012 is reported, which `TreatWarningsAsErrors` turns into a build error.
+- The `IRaisePropertyChanged` row is the only one that is not needed for the generated code to compile. A base class that satisfies everything else but not that one still produces code that compiles, with the subject declaring its own change notification members, but it fails the contract all the same: the subject re-emits the whole block and NI0012 is reported, which `TreatWarningsAsErrors` turns into a build error.
 
-What happens when a base class does not satisfy the contract depends on `DefaultProperties`. If it is present and usable, the subject falls back to emitting its own plumbing and the generator reports NI0012: the code compiles and behaves as it did before the plumbing became shared, which means properties declared on that base class are not intercepted. If `DefaultProperties` is missing or unusable as well, the generator reports NI0011 and generates nothing for the subject.
+What happens when a base class does not satisfy the contract depends on `DefaultProperties`. If it is present and usable, the subject falls back to emitting its own interception members and the generator reports NI0012: the code compiles and behaves as it did before they became shared, which means properties declared on that base class are not intercepted. If `DefaultProperties` is missing or unusable as well, the generator reports NI0011 and generates nothing for the subject.
 
 Here is a base class that satisfies the whole contract:
 
@@ -573,7 +573,7 @@ public partial class Machine : TrackedEntityBase
 The list above is checked by looking at member signatures, which cannot see what the members do. Three requirements are behavioural, and a base class that gets one of them wrong passes every check and then misbehaves at runtime.
 
 1. **`AddProperties` must merge starting from `((IInterceptorSubject)this).Properties`**, not from its own `DefaultProperties` and not from its own backing field, and it must store the result in the field that `GetInstanceProperties()` returns. Merging from its own field drops the subclass's `DefaultProperties` on the first call, so the subject loses its own generated properties.
-2. **The three helpers must route through the same executor that `IInterceptorSubject.Context` publishes for that instance.** A base class that keeps a second executor for the helpers still compiles, and reproduces the exact bug that per hierarchy plumbing was introduced to fix: writes look fine and no interceptor ever sees them.
+2. **The three helpers must route through the same executor that `IInterceptorSubject.Context` publishes for that instance.** A base class that keeps a second executor for the helpers still compiles, and reproduces the exact bug that per hierarchy interception members were introduced to fix: writes look fine and no interceptor ever sees them.
 3. **`IInterceptorSubject.Context` must return an `IInterceptorExecutor` built for that instance.** `InterceptorExecutor` binds to its subject when it is constructed, and other parts of the library cast `Context` to `IInterceptorExecutor` without checking, so a borrowed or shared context misroutes every property reference.
 
 ### Writing a subclass by hand
