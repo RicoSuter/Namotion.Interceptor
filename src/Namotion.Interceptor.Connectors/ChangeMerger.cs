@@ -27,11 +27,11 @@ internal sealed class ChangeMerger : IDisposable
     private const int PropertyIndexMinimumCapacity = 256;
     private const int PropertyIndexMaximumCapacity = 1024;
 
-    // A trim releases a burst's high-water mark, but the index cannot tell a burst from a working set by
-    // looking at one batch. Flush widths vary constantly under load, so trimming on the first narrow batch
-    // makes a wide one regrow it immediately: measured at +17% allocation on the connector delivery
-    // benchmark. Requiring the narrow condition to persist distinguishes "the load went quiet" from
-    // "this flush happened to be small".
+    // Releasing either high-water mark is cheap once and expensive repeatedly, and neither the index nor
+    // the buffer can tell a burst from a working set by looking at one batch. Flush widths vary constantly
+    // under load, so releasing on the first narrow batch makes a wide one regrow it immediately: measured
+    // at +17% allocation on the connector delivery benchmark. Requiring the narrow condition to persist
+    // distinguishes "the load went quiet" from "this flush happened to be small".
     private const int NarrowBatchesBeforeTrim = 4;
 
     // Per property: the slot of its surviving change, the arrival index that seeded that slot, and the
@@ -247,34 +247,44 @@ internal sealed class ChangeMerger : IDisposable
         var distinctPropertyCount = _propertyIndices.Count;
         _propertyIndices.Clear();
 
-        // Same hysteresis as the buffer below. Must run after the Clear: TrimExcess throws when the
-        // requested capacity is below Count, and the guard does not bound Count by the floor, so trimming
-        // first would throw for exactly the wide batch this exists for.
-        if (_propertyIndices.Capacity >= PropertyIndexMaximumCapacity &&
-            distinctPropertyCount < _propertyIndices.Capacity / 4)
+        // Both high-water marks are judged together and released together, behind one hysteresis. They
+        // answer the same question, is the capacity far larger than this batch needed, and releasing one
+        // on the first narrow batch while making the other wait would just move the regrow cost around.
+        // Read after the Clear: TrimExcess throws when the requested capacity is below Count, and the
+        // guard does not bound Count by the floor, so trimming first would throw for exactly the wide
+        // batch this exists for. Dictionary.Clear leaves Capacity alone, so the test still sees the
+        // pre-clear value.
+        var indexIsOversized = _propertyIndices.Capacity >= PropertyIndexMaximumCapacity &&
+                               distinctPropertyCount < _propertyIndices.Capacity / 4;
+        var bufferIsOversized = _buffer.Length >= BufferMaximumSize && _count < _buffer.Length / 4;
+
+        // Only the prefix Merge filled can hold object references (subjects, boxed values): every
+        // buffer is cleared once when it is rented and every batch is released here, so the rest of the
+        // array is already clear. Clearing the whole rental instead would make a small batch pay for the
+        // 256 slot minimum. Before any return to the pool, so no references leave with it.
+        Array.Clear(_buffer, 0, _count);
+
+        if (indexIsOversized || bufferIsOversized)
         {
             if (++_consecutiveNarrowBatches >= NarrowBatchesBeforeTrim)
             {
-                _propertyIndices.TrimExcess(PropertyIndexMinimumCapacity);
+                if (indexIsOversized)
+                {
+                    _propertyIndices.TrimExcess(PropertyIndexMinimumCapacity);
+                }
+
+                if (bufferIsOversized)
+                {
+                    ArrayPool<SubjectPropertyChange>.Shared.Return(_buffer);
+                    _buffer = RentClearedBuffer(BufferMinimumSize);
+                }
+
                 _consecutiveNarrowBatches = 0;
             }
         }
         else
         {
             _consecutiveNarrowBatches = 0;
-        }
-
-        // Only the prefix Merge filled can hold object references (subjects, boxed values): every
-        // buffer is cleared once when it is rented and every batch is released here, so the rest of the
-        // array is already clear. Clearing the whole rental instead would make a small batch pay for the
-        // 256 slot minimum.
-        Array.Clear(_buffer, 0, _count);
-
-        if (_buffer.Length >= BufferMaximumSize && _count < _buffer.Length / 4)
-        {
-            // Shrink buffer if it grew too large (return to pool and rent smaller)
-            ArrayPool<SubjectPropertyChange>.Shared.Return(_buffer);
-            _buffer = RentClearedBuffer(BufferMinimumSize);
         }
 
         // No batch is held any more, and a shrink can leave a buffer shorter than the old count.

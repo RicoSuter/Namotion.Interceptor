@@ -394,9 +394,11 @@ public class ChangeMergerTests
             merger.Reset();
         }
 
-        // Assert
+        // Assert: both high-water marks are released, and by the same evidence.
         Assert.True(GetPropertyIndexCapacity(merger) <= 293,
             $"index capacity stayed at {GetPropertyIndexCapacity(merger)} after sustained narrow batches");
+        Assert.True(GetBufferLength(merger) < 4096,
+            $"buffer length stayed at {GetBufferLength(merger)} after sustained narrow batches");
     }
 
     [Fact]
@@ -426,6 +428,33 @@ public class ChangeMergerTests
         }
 
         Assert.Equal(settledCapacity, GetPropertyIndexCapacity(merger));
+    }
+
+    /// <summary>
+    /// The buffer shrink used to fire on the first qualifying reset while the index trim waited for the
+    /// threshold, so one narrow batch after a burst returned the rental and the next burst re-rented and
+    /// re-cleared the whole pool bucket. Both high-water marks now wait for the same evidence.
+    /// </summary>
+    [Fact]
+    public void WhenNarrowBatchesStopOneShortOfTheThreshold_ThenTheBufferIsKept()
+    {
+        // Arrange
+        using var merger = new ChangeMerger();
+
+        merger.Merge(CreateWideBatch(changeCount: 4096, distinctProperties: 4096));
+        merger.Reset();
+        var settledLength = GetBufferLength(merger);
+        Assert.True(settledLength >= 4096, $"the wide batch should have grown the buffer, it is {settledLength}");
+
+        // Act
+        for (var round = 0; round < 3; round++)
+        {
+            merger.Merge(CreateWideBatch(changeCount: 2, distinctProperties: 2));
+            merger.Reset();
+        }
+
+        // Assert
+        Assert.Equal(settledLength, GetBufferLength(merger));
     }
 
     [Fact]
@@ -549,6 +578,15 @@ public class ChangeMergerTests
         }
 
         return changes;
+    }
+
+    private static int GetBufferLength(ChangeMerger merger)
+    {
+        var field = typeof(ChangeMerger)
+            .GetField("_buffer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        Assert.True(field is not null, "_buffer was renamed, this test needs updating.");
+        return ((SubjectPropertyChange[])field!.GetValue(merger)!).Length;
     }
 
     private static int GetPropertyIndexCapacity(ChangeMerger merger)
