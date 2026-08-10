@@ -13,6 +13,10 @@ namespace Namotion.Interceptor.Hosting;
 [RunsAfter(typeof(ContextInheritanceHandler))]
 internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 {
+    // A workaround, not a design choice: the generated context constructor attaches the subject
+    // before the caller has assigned anything, so "new Car(context) { Name = "x" }" would otherwise
+    // start a service that reads a half built subject. Removing it needs a signal that a subject is
+    // fully constructed, which touches the generator. See docs/design/hosting-service-ownership.md.
     private const int StartDelayMilliseconds = 50;
 
     private readonly Func<ILogger?> _loggerResolver;
