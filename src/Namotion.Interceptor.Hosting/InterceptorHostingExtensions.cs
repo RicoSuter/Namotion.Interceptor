@@ -93,6 +93,12 @@ public static class InterceptorHostingExtensions
         }
 
         var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+
+        // Marked before the stop is appended, and that order is the whole guard: an attach that has
+        // published this attachment but not yet appended its start either reads the mark and appends
+        // nothing, or appends ahead of the stop below, which then stops and disposes what it created.
+        target.MarkDetached();
+
         var handler = subject.Context.TryGetService<HostedServiceHandler>();
         handler?.AppendStop(subject, target, signal: null, waitFor: null, CancellationToken.None);
         return true;
@@ -110,6 +116,10 @@ public static class InterceptorHostingExtensions
         }
 
         var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+
+        // Marked before the stop is appended, for the reason on the synchronous overload.
+        target.MarkDetached();
+
         var handler = subject.Context.TryGetService<HostedServiceHandler>();
         if (handler is null)
         {

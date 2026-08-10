@@ -15,6 +15,8 @@ internal sealed class HostedServiceTarget
     private IHostedService? _current;
     private Exception? _fault;
     private HostedServiceHandler? _owner;
+    private IHostedService? _lastFactoryInstance;
+    private bool _detached;
 
     public HostedServiceTarget(Func<IHostedService>? factory, IHostedService? subject)
     {
@@ -46,6 +48,37 @@ internal sealed class HostedServiceTarget
     public void SetCurrent(IHostedService? instance) => Volatile.Write(ref _current, instance);
 
     public void SetFault(Exception? fault) => Volatile.Write(ref _fault, fault);
+
+    /// <summary>
+    /// Marks the attachment this target belongs to as detached, which permanently refuses further
+    /// starts. Taken under the chain lock, so it pairs with the read in
+    /// <see cref="TryTakeOwnershipAndAppendAsync"/>: a detach that marks here before appending its
+    /// stop leaves an appended start either refused outright or ordered ahead of that stop.
+    /// </summary>
+    public void MarkDetached()
+    {
+        lock (_sync)
+        {
+            _detached = true;
+        }
+    }
+
+    /// <summary>
+    /// Records the instance the factory just produced and reports whether it differs from the one the
+    /// previous invocation produced. The handler disposes every instance it creates, so a factory that
+    /// hands back the same instance hands back a disposed one. Only start bodies call this, and the
+    /// chain serializes them, so the field needs no synchronization of its own.
+    /// </summary>
+    public bool TryRecordFactoryInstance(IHostedService instance)
+    {
+        if (ReferenceEquals(_lastFactoryInstance, instance))
+        {
+            return false;
+        }
+
+        _lastFactoryInstance = instance;
+        return true;
+    }
 
     /// <summary>
     /// Takes ownership for the given handler. Finding this handler already installed counts as
@@ -91,6 +124,12 @@ internal sealed class HostedServiceTarget
     /// this call reads the cleared liveness and appends nothing. Splitting them lets a start land behind
     /// an attachment stop that is waiting for the subject's own stop, which is waiting for the caller
     /// that is awaiting this start, and that cycle never resolves.
+    /// <para>
+    /// The detached read is the same argument for an explicit detach, which clears no liveness: a
+    /// detach that removed the attachment between it being published and this call would otherwise
+    /// leave the start to run, and the instance it creates is reachable from nothing, because no
+    /// enumerable attachment remains for a later context detach to stop.
+    /// </para>
     /// </remarks>
     public Task? TryTakeOwnershipAndAppendAsync(
         HostedServiceHandler handler,
@@ -103,7 +142,7 @@ internal sealed class HostedServiceTarget
 
         lock (_sync)
         {
-            if (!handler.IsLive(subject))
+            if (_detached || !handler.IsLive(subject))
             {
                 return null;
             }

@@ -60,6 +60,121 @@ public class HostedServiceHandlerRaceTests
     }
 
     [Fact]
+    public async Task WhenAnAttachmentIsDetachedBeforeItsStartIsAppended_ThenNothingIsStarted()
+    {
+        // Arrange - the window between publishing the attachment and appending its start. A detach
+        // that lands inside it removes the attachment from the subject, so the start it leaves
+        // running is reachable from nothing: a later context detach enumerates no attachment for it
+        // and never stops it. Taking a startup hold is the only user code the attach path runs inside
+        // that window, so the deferrer drives the interleaving rather than a delay.
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var detacher = new CallbackStartupDeferrer();
+        context.AddService<IStartupCompletionDeferrer>(detacher);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            parent.Child = child;
+
+            var created = 0;
+            detacher.OnDefer = () =>
+            {
+                foreach (var published in child.GetHostedServiceAttachments())
+                {
+                    child.DetachHostedService(published);
+                }
+            };
+
+            // Act
+            var attachment = child.AttachHostedService(() =>
+            {
+                Interlocked.Increment(ref created);
+                return new TrackedBackgroundService();
+            });
+
+            // Assert - an empty transition on the target's chain drains whatever the attach appended,
+            // so the count is read after any start would have run rather than after a delay.
+            var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+            Assert.Equal(1, detacher.Taken);
+            Assert.Empty(child.GetHostedServiceAttachments());
+            Assert.Equal(0, Volatile.Read(ref created));
+            Assert.Null(attachment.Current);
+            Assert.Null(target.Owner);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAnAwaitedAttachmentIsDetachedBeforeItsStartIsAppended_ThenNothingIsStarted()
+    {
+        // Arrange - the same window on the awaiting overload, which appends through the same call.
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var detacher = new CallbackStartupDeferrer();
+        context.AddService<IStartupCompletionDeferrer>(detacher);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            parent.Child = child;
+
+            var created = 0;
+            detacher.OnDefer = () =>
+            {
+                foreach (var published in child.GetHostedServiceAttachments())
+                {
+                    child.DetachHostedService(published);
+                }
+            };
+
+            // Act
+            var attachment = await child.AttachHostedServiceAsync(() =>
+            {
+                Interlocked.Increment(ref created);
+                return new TrackedBackgroundService();
+            }, CancellationToken.None);
+
+            // Assert
+            var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+            Assert.Equal(1, detacher.Taken);
+            Assert.Empty(child.GetHostedServiceAttachments());
+            Assert.Equal(0, Volatile.Read(ref created));
+            Assert.Null(attachment.Current);
+            Assert.Null(target.Owner);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task WhenAnExplicitDetachRacesTheHostDrain_ThenTheInstanceIsDisposedOnce()
     {
         // Arrange - two stops reach the same instance, so stop and dispose have to be idempotent per

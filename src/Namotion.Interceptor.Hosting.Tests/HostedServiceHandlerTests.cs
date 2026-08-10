@@ -151,6 +151,37 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
+    public async Task WhenAnAttachmentIsDetachedSynchronously_ThenItIsStoppedDisposedAndForgotten()
+    {
+        // Arrange - the synchronous overload is what the OPC UA wrappers call, and the removal is the
+        // half of it that decides whether a later context attach starts the factory again.
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            var instance = new TrackedBackgroundService();
+            var attachment = child.AttachHostedService(() => instance);
+
+            parent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(() => instance.IsStarted);
+
+            // Act
+            var detached = child.DetachHostedService(attachment);
+
+            // Assert
+            Assert.True(detached);
+            Assert.Empty(child.GetHostedServiceAttachments());
+
+            await AsyncTestHelpers.WaitUntilAsync(() => instance.IsDisposed);
+            Assert.True(instance.IsStopped);
+            Assert.Null(attachment.Current);
+
+            // A second detach removes nothing, which is what tells a caller its handle is spent.
+            Assert.False(child.DetachHostedService(attachment));
+        });
+    }
+
+    [Fact]
     public async Task WhenTheFactoryThrows_ThenTheFaultIsRecordedAndCurrentStaysNull()
     {
         // Arrange
