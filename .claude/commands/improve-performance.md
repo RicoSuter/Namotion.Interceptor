@@ -22,7 +22,7 @@ Ask the user one question at a time:
 
 1. **Topic slug.** Used as the branch prefix and doc filename. Example: `attach-detach`. Reject anything containing slashes, spaces, or uppercase.
 2. **Candidate source.** Offer: (a) brainstorm fresh now, (b) load from an existing doc path, (c) load from a GitHub issue number, (d) user pastes a list. For (a), drive a focused brainstorm in this conversation (no need to spawn a subagent).
-3. **Benchmark mapping.** Read the benchmark project sources. For each candidate, propose a BenchmarkDotNet filter pattern. Show the table with a `Coverage` column. For candidates with no clear coverage, ask per candidate: (a) write a new benchmark on the parent branch, (b) skip the candidate, (c) run with the closest existing filter and accept noisy results.
+3. **Benchmark mapping.** For each candidate, propose a filter pattern covering the benchmarks that can reach it, following the process in [Benchmarking](../../docs/benchmarking.md). Always add `*ServiceOrderResolver*` so every run carries its own noise control. Show the table with a `Coverage` column. For candidates with no clear coverage, ask per candidate: (a) write a new benchmark on the parent branch, (b) skip the candidate, (c) run with the closest existing filter and accept noisy results.
 4. **Run config.** `LaunchCount` (default 3) and `Short` toggle (default off).
 
 Test verification is fixed: every candidate runs `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"` (matches the project default in `AGENTS.md`). Results are recorded only in the local design doc on the parent branch, not posted to any GitHub issue.
@@ -65,7 +65,7 @@ When the loop finishes, print a summary table:
 N | Candidate slug | Status | Mean Δ | Alloc Δ | Branch
 ```
 
-Pull the deltas from each candidate's results section in the doc (parse the comparison report). Mark regressions with a flag.
+Pull the deltas from each candidate's results section in the doc (parse the comparison report). Judge them against the spread of the control rows in that same run rather than against zero: a delta inside the control spread is noise, not a win and not a regression. Flag only what falls outside it.
 
 Ask the user: "Which to keep? (comma-separated indices, `all`, or `none`)."
 
@@ -87,7 +87,7 @@ Print the parent branch name and a suggested next step (`gh pr create -B master 
 ## Constraints
 
 - Never push branches. Never open PRs.
-- Candidate branches (`performance/<slug>/<candidate-slug>`) are deleted automatically only at the end of Phase 3, after the combined benchmark is committed. The parent branch (`performance/<slug>`) and `master` are never deleted automatically.
+- Candidate branches (`performance/<slug>-<candidate-slug>`) are deleted automatically only at the end of Phase 3, after the combined benchmark is committed. The parent branch (`performance/<slug>`) and `master` are never deleted automatically.
 - Never modify `master` outside this skill. The parent branch holds all in-progress changes.
 - Branch names: `performance/<slug>` for the parent, `performance/<slug>-<candidate-slug>` for each candidate (flat, hyphenated; nesting under the parent breaks because git refs cannot have both a file and a directory at the same path). Slugs are lowercase, kebab-case, no slashes.
 - Doc path: `performance-<slug>.md` at the repo root (treated as a transient working doc tied to the parent branch). If the file already exists, ask the user whether to append a new dated section or use a different slug.
@@ -97,5 +97,6 @@ Print the parent branch name and a suggested next step (`gh pr create -B master 
 ## Notes
 
 - The benchmark script (`scripts/benchmark.ps1`) accepts `-BaseBranch` so the comparison runs against the parent perf branch, not master. This matters for candidates that depend on a benchmark added on the parent: comparing against master would show "new benchmark + candidate" with no baseline.
-- Sequential by design. Concurrent BenchmarkDotNet runs on the same machine pollute each other's numbers, defeating the purpose.
+- Sequential by design. Concurrent BenchmarkDotNet runs on the same machine pollute each other's numbers, defeating the purpose. The same applies to anything else running on the box, including builds and test runs.
+- [Benchmarking](../../docs/benchmarking.md) covers pinning the CPU before a run and how to read a delta. Both matter here: this skill produces a table of small deltas, which is exactly the shape that gets over-read.
 - The user owns the working directory while this runs (~30-90 min typical for 5-7 candidates at `LaunchCount 3`, dominated by full non-integration test suite per candidate). Warn during setup confirmation.
