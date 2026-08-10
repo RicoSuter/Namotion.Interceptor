@@ -337,7 +337,7 @@ See [Subject Updates](connectors-subject-updates.md) for details on the update f
 
 ### Write Retry Queue
 
-Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors — Write Retry Queue](connectors.md#write-retry-queue). Configure via the client configuration:
+Write retry queue behavior (ring buffer, reconcile by commit order on reconnection) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via the client configuration:
 
 ```csharp
 configuration.WriteRetryQueueSize = 1000;  // Buffer up to 1000 writes (default, 0 to disable)
@@ -353,7 +353,7 @@ configuration.ReconnectDelay = TimeSpan.FromSeconds(5);      // Initial delay
 configuration.MaxReconnectDelay = TimeSpan.FromSeconds(60);  // Maximum delay
 ```
 
-On reconnection, the client performs the Hello/Welcome handshake to obtain a state snapshot from the server. The base class then handles loading initial state, replaying buffered updates, and optimistic retry re-apply (see [Connectors — Initialization Sequence](connectors.md#initialization)).
+On reconnection, the client performs the Hello/Welcome handshake to obtain a state snapshot from the server. The base class then handles loading initial state, replaying buffered updates, and reconcile of queued writes by commit order (see [Connectors: Initialization Sequence](connectors.md#initialization)).
 
 The circuit breaker pauses reconnection attempts after repeated failures:
 

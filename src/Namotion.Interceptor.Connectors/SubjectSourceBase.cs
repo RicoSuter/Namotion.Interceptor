@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Monitoring;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
@@ -19,8 +20,15 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
+
+    // A source we talk to over a wire: what it hands us was produced before it saw our write, so it
+    // cannot rank against our commits. Named once because the processor and the reconcile
+    // must agree; if only one ranked against the last commit, the other would still deliver an older one.
+    private const ChangeDeliveryRule DeliveryRule = ChangeDeliveryRule.SourceValuesMayBeStale;
     private readonly TimeSpan _retryTime;
     private readonly SubjectPropertyWriter _propertyWriter;
+
+    private static readonly TimeSpan ConnectWindowDrainInterval = TimeSpan.FromSeconds(1);
 
     private readonly Lock _stateLock = new();
     private int _state = (int)SourceState.Synchronizing;
@@ -48,6 +56,8 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
 
+        // The retry queue also carries writes captured while (re)connecting. With size 0 it is
+        // disabled, and those connect/reconnect-window writes are dropped rather than reconciled.
         if (writeRetryQueueSize > 0)
         {
             WriteRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger);
@@ -152,30 +162,83 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Inside the try, so the finally below still publishes Stopped when startup fails. Outside it, a
+        // configuration error leaves the source registered as Synchronizing for the process lifetime:
+        // the DI path tears the host down, but on the graph-attach path the faulted task is swallowed and
+        // every WaitForSynchronizationAsync on that branch blocks until its caller's token fires. A silent
+        // hang in place of the loud failure the guard exists to give.
         try
         {
+            // A missing PropertyChangeInterceptor means the source can capture no writes: a configuration
+            // error, so fail fast with an actionable message instead of running silently inert. Detect it
+            // precisely (null-check, not catch-all) so unrelated failures surface with their own diagnosis.
+            if (_context.TryGetService<PropertyChangeInterceptor>() is null)
+            {
+                throw new InvalidOperationException(
+                    "Cannot start source: no PropertyChangeInterceptor is registered in the interceptor context. " +
+                    "Add WithPropertyChangeSubscriptions() or WithFullPropertyTracking() to the context configuration.");
+            }
+
+            // Source-lifetime capture: one subscription for the whole source, so writes are captured
+            // continuously (including during the retry delay) and never fall into a no-subscription gap.
+            using var subscription = _context.CreatePropertyChangeQueueSubscription();
+
+            var firstAttempt = true;
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
+                    if (!firstAttempt)
+                    {
+                        await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
+                    }
+                    firstAttempt = false;
+
+                    // Park writes captured since the previous attempt (retry delay + any failed attempt).
+                    // This also caps memory across repeated failed attempts.
+                    DrainOwnedWritesToRetryQueue(subscription);
+
                     _propertyWriter.StartBuffering();
                     await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
 
-                    await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
+                    // Caps the window's memory at the retry queue's size; the subscription itself is
+                    // unbounded. Starts only after StartListeningAsync, because ownership is established in
+                    // there and the drain discards what it cannot attribute, which leaves the longer leg
+                    // unguarded rather than the shorter one: for OPC UA the browse runs inside that call and
+                    // takes minutes, while the load this wraps is a batched read. Covering it needs an
+                    // ownership-neutral accumulator and an eviction contract to go with it.
+                    using (var windowDrain = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
+                    {
+                        var windowDrainTask = DrainConnectWindowPeriodicallyAsync(subscription, windowDrain.Token);
+                        try
+                        {
+                            await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            // Awaited before the drain below runs, so the subscription keeps a single consumer.
+                            await windowDrain.CancelAsync().ConfigureAwait(false);
+                            await windowDrainTask.ConfigureAwait(false);
+                        }
+                    }
 
+                    // Park connect-window writes captured during listen/load.
+                    DrainOwnedWritesToRetryQueue(subscription);
+
+                    // Single reconcile point: send (model already holds it), restore (the load moved the
+                    // model off it), drop (a later local write supersedes it).
+                    await ReconcileRetryQueueAsync(stoppingToken).ConfigureAwait(false);
+
+                    // Connected phase reuses the source-lifetime subscription and does not own it.
                     using var processor = new ChangeQueueProcessor(
                         this,
-                        _context,
+                        subscription,
                         propertyReference => propertyReference.TryGetSource(out var source) && source == this,
                         WriteChangesViaRetryQueueAsync,
+                        DeliveryRule,
                         _bufferTime,
                         maxQueueDepth: null,
                         logger: _logger);
-
-                    // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
-                    // re-apply queued changes locally if the source hasn't changed the property.
-                    // ChangeQueueProcessor picks up re-applied changes and sends them to the source as fresh writes.
-                    ReapplyRetryQueue();
 
                     await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
                 }
@@ -185,16 +248,10 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                 }
                 catch (Exception ex)
                 {
+                    // Whatever it reported before the failure, the source is no longer serving the model.
                     TransitionStateTo(SourceState.Synchronizing);
                     _logger.LogError(ex, "Failed to listen for changes in source.");
-                    try
-                    {
-                        await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        return;
-                    }
+                    // The next iteration delays before reconnecting, with the subscription still capturing.
                 }
             }
         }
@@ -260,7 +317,119 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         }
     }
 
-    private void ReapplyRetryQueue()
+    /// <summary>
+    /// Parks owned writes into the retry queue at intervals while the initial state loads, so a slow
+    /// load cannot grow the subscription without bound. Collapsed per property like every other drain,
+    /// so a property written repeatedly costs one slot rather than one per write.
+    /// </summary>
+    private async Task DrainConnectWindowPeriodicallyAsync(
+        PropertyChangeQueueSubscription subscription, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(ConnectWindowDrainInterval);
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                DrainOwnedWritesToRetryQueue(subscription);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected: the load finished, or the source is stopping.
+        }
+    }
+
+    private void DrainOwnedWritesToRetryQueue(PropertyChangeQueueSubscription subscription)
+    {
+        // No retry queue: still drain the subscription to empty it, but there is nothing to reconcile.
+        if (WriteRetryQueue is null)
+        {
+            while (subscription.TryDequeueImmediate(out _))
+            {
+            }
+            return;
+        }
+
+        List<SubjectPropertyChange>? owned = null;
+        while (subscription.TryDequeueImmediate(out var change))
+        {
+            if (ReferenceEquals(change.Origin.Source, this) && !ChangeDeliveryFilter.NeedsWriteBack(in change))
+            {
+                // This source's own applies (inbound / source-tagged). The exception is a transaction
+                // confirmation on a property a connector has written out, which has to reach the source
+                // to repair it; skipping it here would discard the repair for the whole connect window.
+                continue;
+            }
+
+            if (!(change.Property.TryGetSource(out var source) && source == this))
+            {
+                continue; // not owned by this source
+            }
+
+            (owned ??= []).Add(change);
+        }
+
+        if (owned is not null)
+        {
+            // Collapsed before parking, not only at reconcile time. The queue is a bounded ring buffer
+            // that drops its oldest entries, so parking raw changes lets a burst on one property evict
+            // other properties' window writes before the reconcile ever sees them. Collapsing first
+            // makes the space this costs proportional to the number of properties written rather than
+            // to the number of writes.
+            WriteRetryQueue.Enqueue(CollapsePerProperty(owned.ToArray()).ToArray());
+        }
+    }
+
+    /// <summary>
+    /// Collapses parked changes to one per property, keeping the oldest old value and the new value
+    /// of the highest-revision commit.
+    /// </summary>
+    /// <remarks>
+    /// Reconciliation classifies each change against the live value and mutates that value when it
+    /// restores, so two writes to one property have to be judged as one. Left separate, an older
+    /// write can match the live value, get restored, and thereby make the newer write look diverged,
+    /// which drops it: the older write would win over the newer one.
+    /// <para>
+    /// Which one is newer is decided by <see cref="SubjectPropertyChange.Revision"/>, not by capture
+    /// order. Changes are enqueued after their commit and outside the subject lock, so under
+    /// concurrent writers arrival order is a race order. Both changes are writes to the same
+    /// property and therefore to the same subject, so their revisions are comparable. A change
+    /// carrying revision 0 was built outside a terminal write and orders against nothing, so
+    /// capture order decides between those and the survivor carries no revision either, matching
+    /// the flush-path collapse in <c>ChangeMerger</c> on unordered changes. The two still differ on which
+    /// old value survives when every revision is ordered, which the delivery contract calls best effort.
+    /// </para>
+    /// </remarks>
+    private static List<SubjectPropertyChange> CollapsePerProperty(SubjectPropertyChange[] changes)
+    {
+        var collapsed = new List<SubjectPropertyChange>(changes.Length);
+        var indices = new Dictionary<PropertyReference, int>(changes.Length, PropertyReference.Comparer);
+
+        foreach (var change in changes)
+        {
+            if (!indices.TryGetValue(change.Property, out var index))
+            {
+                indices[change.Property] = collapsed.Count;
+                collapsed.Add(change);
+                continue;
+            }
+
+            var kept = collapsed[index];
+            collapsed[index] = change.Revision == 0 || kept.Revision == 0
+                // One of them orders against nothing, so capture order decides and the survivor carries
+                // no revision either. Same rule as the flush-path collapse: keeping a revision here would
+                // let the survivor be ranked against the property marker and dropped, on a comparison
+                // against a value it was not ordered by.
+                ? kept.MergeWithNewer(change).WithoutRevision()
+                : change.Revision < kept.Revision
+                    ? change.MergeWithNewer(kept)
+                    : kept.MergeWithNewer(change);
+        }
+
+        return collapsed;
+    }
+
+    private async Task ReconcileRetryQueueAsync(CancellationToken cancellationToken)
     {
         var retryChanges = WriteRetryQueue?.DrainForLocalReapply();
         if (retryChanges is null || retryChanges.Length == 0)
@@ -268,49 +437,84 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
             return;
         }
 
-        var applied = 0;
+        var restored = 0;
+        var sent = 0;
         var dropped = 0;
         var failed = 0;
-        foreach (var change in retryChanges)
+        List<SubjectPropertyChange>? toSend = null;
+
+        foreach (var change in CollapsePerProperty(retryChanges))
         {
             try
             {
                 var property = change.Property;
-                var currentValue = change.GetCurrentValue<object>();
-                var oldValue = change.GetOldValue<object>();
 
-                if (Equals(currentValue, oldValue))
+                if (!ChangeDeliveryFilter.IsCurrent(in change, DeliveryRule))
                 {
-                    // Server hasn't changed this property - re-apply client's change locally.
-                    // The interceptor chain fires, ChangeQueueProcessor captures the change, and sends it to the source.
-                    property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object>());
-                    applied++;
+                    // A later local commit supersedes it, and that commit's change is delivered in its
+                    // place.
+                    dropped++;
+                    continue;
+                }
+
+                // Still the latest local intent, so it has to reach the source. Decided by commit order
+                // rather than by comparing values: the load writes the source's value into the model
+                // without advancing the marker, and a value comparison cannot tell that apart from a
+                // newer local write, so it discarded live writes.
+                var currentValue = property.Metadata.GetValue?.Invoke(property.Subject);
+                if (Equals(currentValue, change.GetNewValue<object?>()))
+                {
+                    // Already the current model value: the source has not received it, so send it.
+                    // Marked here because this path flushes the retry queue directly rather than going
+                    // through the processor, and without the mark a later transaction confirmation on
+                    // this property is not written back, which is the divergence that repair exists for.
+                    ChangeDeliveryFilter.MarkPropertyAsPublishedToSource(in change);
+                    (toSend ??= []).Add(change);
+                    sent++;
+                }
+                else if (property.Metadata.SetValue is { } setValue)
+                {
+                    // The load moved the model off it: restore locally so the connected phase captures
+                    // and sends the re-applied write.
+                    setValue(property.Subject, change.GetNewValue<object?>());
+                    restored++;
                 }
                 else
                 {
+                    // No setter, so there is nothing to restore and the change has already left the
+                    // queue. Derived properties reach this: their recomputation commits as Local and is
+                    // parked like any other write. Counted as dropped rather than reported as restored.
                     dropped++;
+                    _logger.LogWarning(
+                        "Cannot restore the queued write for property '{PropertyName}': it has no setter, so the change is dropped.",
+                        property.Name);
                 }
             }
             catch (Exception exception)
             {
                 _logger.LogWarning(exception,
-                    "Failed to re-apply retry queue change for property '{PropertyName}', dropping.",
+                    "Failed to reconcile retry queue change for property '{PropertyName}', dropping.",
                     change.Property.Name);
                 failed++;
             }
         }
 
+        if (toSend is not null)
+        {
+            WriteRetryQueue!.Enqueue(toSend.ToArray());
+            await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
+        }
+
         if (dropped > 0 || failed > 0)
         {
             _logger.LogWarning(
-                "Retry queue optimistic re-apply: {Applied} re-applied, {Dropped} dropped (source wins), {Failed} failed.",
-                applied, dropped, failed);
+                "Retry queue reconcile: {Restored} restored over the loaded source value, {Sent} sent, {Dropped} superseded by a later local write, {Failed} failed.",
+                restored, sent, dropped, failed);
         }
-        else if (applied > 0)
+        else if (restored > 0 || sent > 0)
         {
             _logger.LogInformation(
-                "Retry queue optimistic re-apply: {Applied} changes re-applied.",
-                applied);
+                "Retry queue reconcile: {Restored} restored, {Sent} sent.", restored, sent);
         }
     }
 

@@ -251,6 +251,36 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     }
 
     /// <summary>
+    /// Copies this change carrying no revision, without re-boxing the values. A batch collapse uses this
+    /// when it falls back to arrival position: the survivor is then chosen by arrival rather than by
+    /// revision, so ranking a later commit against the revision it happens to carry could drop the very
+    /// value the fallback selected, with nothing left in the batch still holding it.
+    /// </summary>
+    /// <remarks>
+    /// For anyone collapsing a batch themselves rather than through the built-in processor. Use it
+    /// whenever arrival order, not commit order, decided which change survived.
+    /// <para>
+    /// Scope it to changes on their way out to a sink. There a change carrying no revision is never
+    /// dropped as superseded, so using it where it was not needed costs a redundant delivery rather than
+    /// a value. Do <b>not</b> use it on a change that will be parked and later re-applied locally, for
+    /// example into a retry queue: the same supersession check is what stops an older parked write from
+    /// being restored over a newer local one, and a missing revision makes that check pass
+    /// unconditionally, which loses the newer write instead.
+    /// </para>
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public SubjectPropertyChange WithoutRevision() =>
+        new(Property,
+            Origin,
+            ChangedTimestamp,
+            ReceivedTimestamp,
+            _oldValueStorage,
+            _newValueStorage,
+            _oldBoxedHolder,
+            _newBoxedHolder,
+            revision: 0);
+
+    /// <summary>
     /// Copies this change with a different origin, without re-boxing the values. A transaction writer
     /// uses this to mark an accepted change with the origin that confirmed it.
     /// </summary>
