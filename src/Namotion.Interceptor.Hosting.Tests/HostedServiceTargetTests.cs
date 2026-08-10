@@ -114,17 +114,28 @@ public class HostedServiceTargetTests
     public async Task WhenATransitionIsAppended_ThenItDoesNotRunOnTheAppendingThread()
     {
         // Arrange - appends happen while LifecycleInterceptor holds its lock, so an inline
-        // continuation would run user code under that lock.
+        // continuation would run a transition body under that lock. The append runs on a dedicated
+        // thread rather than the test's own: xunit runs tests on pool threads, and a body queued to
+        // the pool can be picked up by the very thread that appended once that thread parks on the
+        // await below, which reads as inline execution without being it.
         var target = new HostedServiceTarget(factory: null, subject: null);
-        var appendingThread = Environment.CurrentManagedThreadId;
         var ranInline = false;
+        Task? transition = null;
+
+        var appendingThread = new Thread(() =>
+        {
+            var appendingThreadId = Environment.CurrentManagedThreadId;
+            transition = target.AppendAsync(_ =>
+            {
+                ranInline = Environment.CurrentManagedThreadId == appendingThreadId;
+                return Task.CompletedTask;
+            }, CancellationToken.None);
+        });
 
         // Act
-        await target.AppendAsync(_ =>
-        {
-            ranInline = Environment.CurrentManagedThreadId == appendingThread;
-            return Task.CompletedTask;
-        }, CancellationToken.None);
+        appendingThread.Start();
+        appendingThread.Join();
+        await transition!;
 
         // Assert
         Assert.False(ranInline);
