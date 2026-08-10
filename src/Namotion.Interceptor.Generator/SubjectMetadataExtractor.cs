@@ -509,14 +509,13 @@ internal static class SubjectMetadataExtractor
                 // AddProperties wrapper is quieter still, taking the interface slot from the root's
                 // explicit implementation with no compiler diagnostic at all. NI0013 cannot catch
                 // either, because it scans declared members rather than emitted ones.
-                if (SubjectBaseContract.CollidesWithGeneratedMember(
-                        semanticModel.Compilation, methodName, method.ParameterList.Parameters.Count))
+                if (SubjectBaseContract.CollidesWithGeneratedMember(methodName))
                 {
                     diagnostics.Add(Diagnostic.Create(
                         Diagnostics.MemberSkipped, location,
                         $"{typeSymbol.Name}.{fullMethodName}",
                         $"the wrapper would be named '{methodName}', which is a generated subject plumbing member",
-                        "rename it"));
+                        "rename the method so that stripping the postfix leaves a name the generated plumbing does not use"));
                     continue;
                 }
 

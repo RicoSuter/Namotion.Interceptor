@@ -637,6 +637,9 @@ internal static class SubjectBaseContract
     /// expression, GetInstanceProperties() ?? DefaultProperties. Comparing by identity here rejects
     /// a base returning FrozenDictionary&lt;string, SubjectPropertyMetadata&gt;?, which the emitted
     /// expression consumes just as happily, and costs that base's own properties their interception.
+    /// The reference type clause is the asymmetry with <see cref="HasUsableDefaultProperties"/>, and
+    /// it is real rather than an oversight: this side is the left operand of '??', which rejects a
+    /// value type with CS0019, while the other side feeds .Concat, where a struct is fine.
     /// </remarks>
     private static bool HasExpectedReturnType(
         IMethodSymbol method,
@@ -657,6 +660,7 @@ internal static class SubjectBaseContract
             default:
                 var expectedType = GetPropertyMetadataDictionaryType(compilation);
                 return expectedType is not null &&
+                       method.ReturnType.IsReferenceType &&
                        (SymbolEqualityComparer.Default.Equals(method.ReturnType, expectedType) ||
                         method.ReturnType.AllInterfaces.Contains(expectedType, SymbolEqualityComparer.Default));
         }
@@ -694,8 +698,9 @@ internal static class SubjectBaseContract
     /// <summary>
     /// Every name the generated half occupies, in either mode: the root-mode plumbing, the
     /// IInterceptorSubject members the root implements, and the DefaultProperties both modes emit.
-    /// No other emitted member may take one of these names, which is the question
-    /// <see cref="CollidesWithGeneratedMember"/> answers for the "WithoutInterceptor" wrappers.
+    /// No other emitted member may take one of these names, whatever its signature, which is the
+    /// whole of what <see cref="CollidesWithGeneratedMember"/> answers for the "WithoutInterceptor"
+    /// wrappers.
     /// </summary>
     /// <remarks>
     /// Declared below the two arrays it reads, because a static field initializer runs in textual
@@ -708,48 +713,26 @@ internal static class SubjectBaseContract
         .ToArray();
 
     /// <summary>
-    /// Whether a member the generator is about to emit under <paramref name="memberName"/> with
-    /// <paramref name="parameterCount"/> value parameters would collide with what the generated half
-    /// already occupies.
+    /// Whether a member the generator is about to emit under <paramref name="memberName"/> would take
+    /// a name the generated half already occupies.
     /// </summary>
     /// <remarks>
-    /// The name is the trigger but not the answer, because the emitted member is always a method and
-    /// only some of these names are occupied in a way a method can take.
-    /// The four helpers are emitted as methods, and C# hides a method by signature, so one of the
-    /// same name and a different arity is an ordinary overload: it hides nothing, and the generated
-    /// call sites, which pass a lambda in a position such an overload does not have, still bind to
-    /// the plumbing. InvokeMethod(string, object[]) and GetPropertyValue(string) are both plausible
-    /// names on an RPC or OPC UA shaped model and both compiled and worked before this guard existed.
-    /// Context, Data and SyncRoot are implemented explicitly and are properties, so they occupy no
-    /// simple name in the class and no method can implement them; that is asked of the interface
-    /// rather than listed here, so a member added to it later is classified by what it is.
-    /// Everything left over is emitted under its own simple name, which a method of that name takes
-    /// whatever its arity: the PropertyChanged event, the DefaultProperties property, the
-    /// AddProperties the root implements as an interface method, and RaisePropertyChanged, kept
-    /// strict because an overload of it is not a shape the postfix has any reason to produce.
+    /// Deliberately name-only: any arity, no signature reasoning and no per-name exemption. Every
+    /// attempt to narrow this has let a silent capture through, and a false positive here costs a
+    /// rename while a capture costs the interception nobody notices is gone.
+    /// The arity test was wrong because InvokeMethod ends in "params object?[]", so the emitted call
+    /// sites span every arity from two upward, and an overload applicable in normal form beats the
+    /// plumbing, which needs the expanded form: a two-parameter InvokeMethod wrapper swallows every
+    /// generated method call and the real body never runs.
+    /// The Context, Data and SyncRoot exemption was wrong because those are explicit interface
+    /// properties only in a generated root. A hand-written base that satisfies the contract with
+    /// public members, the shape docs/subject-guidelines.md documents, is hidden by a wrapper of that
+    /// name, which is a CS0108 in a file the consumer cannot edit.
+    /// The cost is a legitimate wrapper such as GetPropertyValueWithoutInterceptor(string, string),
+    /// which is now reported as NI0006 and fixed by renaming.
     /// </remarks>
-    public static bool CollidesWithGeneratedMember(Compilation compilation, string memberName, int parameterCount)
-    {
-        if (!GeneratedHalfMemberNames.Contains(memberName))
-        {
-            return false;
-        }
-
-        foreach (var plumbingMethod in PlumbingMethods)
-        {
-            if (plumbingMethod.Name == memberName)
-            {
-                return parameterCount == plumbingMethod.ParameterCount;
-            }
-        }
-
-        var interfaceMember = compilation
-            .GetTypeByMetadataName(KnownTypes.IInterceptorSubject)?
-            .GetMembers(memberName)
-            .FirstOrDefault();
-
-        return interfaceMember is not IPropertySymbol;
-    }
+    public static bool CollidesWithGeneratedMember(string memberName)
+        => GeneratedHalfMemberNames.Contains(memberName);
 
     /// <summary>
     /// Members named like an inherited generated member. Deliberately name-only, any kind, no
@@ -798,10 +781,16 @@ internal static class SubjectBaseContract
     /// IInterceptorSubject.Properties in derived mode, and a hand-written explicit Context on the
     /// user's half is exactly the severe case: it compiles with no diagnostic and kills interception
     /// entirely, writes landing in the backing fields so the values still look right.
-    /// The contract provider is scanned as well, under the two extra conditions in
-    /// <see cref="TakesSlotFromAbove"/>: a provider that satisfies the contract by inheriting the
-    /// plumbing declares no explicit implementation of its own, so its public member wins the slot
-    /// for every generated subclass.
+    /// The walk runs the whole chain up to object rather than stopping at the contract provider,
+    /// because the provider is exactly where a hand-written hijacker sits and a second one further up
+    /// was never examined. From the provider upward the report is conditional on
+    /// <see cref="TakesSlotFromAbove"/>, which asks whether a class above the declarer already
+    /// implements the member; below the provider that question always answers yes, and asking it
+    /// there would go wrong for a provider generated in this very compilation, whose symbol does not
+    /// implement the interface yet.
+    /// An override is skipped along with a static: it occupies the slot it already had, so it
+    /// displaces nothing, and virtual dispatch means it is the implementation rather than a
+    /// replacement for one.
     /// </remarks>
     private static IEnumerable<(INamedTypeSymbol Declarer, string MemberName)> FindHijackingMembers(
         INamedTypeSymbol subject,
@@ -819,15 +808,17 @@ internal static class SubjectBaseContract
             .Where(entry => entry.Member is not null)
             .ToArray();
 
-        foreach (var type in EnumerateBetween(subject, contractProvider).Concat([contractProvider]))
+        var isAtOrAboveContractProvider = false;
+
+        foreach (var type in EnumerateChain(subject))
         {
-            var isContractProvider = SymbolEqualityComparer.Default.Equals(type, contractProvider);
+            isAtOrAboveContractProvider |= SymbolEqualityComparer.Default.Equals(type, contractProvider);
 
             foreach (var (name, interfaceMember) in hijackableMembers)
             {
                 foreach (var member in type.GetMembers())
                 {
-                    if (member.IsStatic)
+                    if (member.IsStatic || member.IsOverride)
                     {
                         continue;
                     }
@@ -836,14 +827,12 @@ internal static class SubjectBaseContract
                                         member.DeclaredAccessibility == Accessibility.Public &&
                                         IsImplicitImplementationOf(member, interfaceMember!);
 
-                    var isExplicitMatch = IsExplicitInterceptorSubjectImplementation(member, name);
-
-                    if (!isPublicMatch && !isExplicitMatch)
+                    if (!isPublicMatch && !IsExplicitInterceptorSubjectImplementation(member, name))
                     {
                         continue;
                     }
 
-                    if (isContractProvider && !TakesSlotFromAbove(contractProvider, interfaceMember!, isExplicitMatch))
+                    if (isAtOrAboveContractProvider && !TakesSlotFromAbove(type, interfaceMember!))
                     {
                         break;
                     }
@@ -856,21 +845,20 @@ internal static class SubjectBaseContract
     }
 
     /// <summary>
-    /// Whether a member declared in the contract provider itself really displaces an implementation
-    /// the provider inherits. Two things have to hold, and both keep the ordinary shapes quiet: an
-    /// explicit IInterceptorSubject implementation takes nothing, because interface mapping prefers
-    /// a class's own explicit implementation over its own public members, and a provider whose base
-    /// has no implementation to displace, the hand-written subject deriving from object, is the
-    /// shape the rule must never fire on.
+    /// Whether a member declared at or above the contract provider really displaces an implementation
+    /// its own base already provides. This is what keeps the ordinary shape quiet: the hand-written
+    /// subject root derives from object, so there is nothing above it whose slot its members could
+    /// take.
     /// </summary>
-    private static bool TakesSlotFromAbove(
-        INamedTypeSymbol contractProvider,
-        ISymbol interfaceMember,
-        bool isExplicitImplementation)
-    {
-        return !isExplicitImplementation &&
-               contractProvider.BaseType?.FindImplementationForInterfaceMember(interfaceMember) is not null;
-    }
+    /// <remarks>
+    /// An explicit implementation is deliberately not exempt. C# only allows one in a class that
+    /// lists the interface itself (CS0540), and listing it makes that class the nearest subject
+    /// ancestor and therefore the contract provider, so an exemption keyed on the explicit form never
+    /// fired at all: it made the only form a hand-written ancestor can express invisible, which is
+    /// issue #437 with nothing reported.
+    /// </remarks>
+    private static bool TakesSlotFromAbove(INamedTypeSymbol declarer, ISymbol interfaceMember)
+        => declarer.BaseType?.FindImplementationForInterfaceMember(interfaceMember) is not null;
 
     /// <summary>
     /// Whether a public member really is an implicit implementation of the interface member, which
@@ -949,9 +937,8 @@ internal static class SubjectBaseContract
     /// The subject and every class between it and the class providing the contract member, which is
     /// where a capturing member can sit. The provider itself is excluded, because the members it
     /// declares are the very ones the contract check demanded of it: reporting them would fire on
-    /// every conforming base. <see cref="FindHijackingMembers"/> puts the provider back, under the
-    /// conditions in <see cref="TakesSlotFromAbove"/>, because a public member there can still take
-    /// an interface slot from something above it.
+    /// every conforming base. <see cref="FindHijackingMembers"/> is not bounded this way, because a
+    /// member at or above the provider can still take an interface slot from something above it.
     /// </summary>
     private static IEnumerable<INamedTypeSymbol> EnumerateBetween(INamedTypeSymbol subject, INamedTypeSymbol provider)
     {

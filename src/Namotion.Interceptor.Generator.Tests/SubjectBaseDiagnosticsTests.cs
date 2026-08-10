@@ -390,6 +390,90 @@ public class SubjectBaseDiagnosticsTests
         """;
 
     /// <summary>
+    /// A base that satisfies every clause of the contract except that GetInstanceProperties returns a
+    /// struct implementing the dictionary interface. The emitted
+    /// "GetInstanceProperties() ?? DefaultProperties" rejects a value type as its left operand with
+    /// CS0019, so accepting this base puts a raw compiler error into a generated file.
+    /// </summary>
+    private const string ValueTypeInstancePropertiesBase = """
+        using System;
+        using System.Collections;
+        using System.Collections.Concurrent;
+        using System.Collections.Generic;
+        using System.Collections.Frozen;
+        using System.ComponentModel;
+        using System.Linq;
+        using Namotion.Interceptor;
+        using Namotion.Interceptor.Interceptors;
+
+        namespace Repro
+        {
+            public readonly struct PropertyMap : IReadOnlyDictionary<string, SubjectPropertyMetadata>
+            {
+                public SubjectPropertyMetadata this[string key] => throw new KeyNotFoundException();
+                public IEnumerable<string> Keys => Array.Empty<string>();
+                public IEnumerable<SubjectPropertyMetadata> Values => Array.Empty<SubjectPropertyMetadata>();
+                public int Count => 0;
+                public bool ContainsKey(string key) => false;
+
+                public bool TryGetValue(string key, out SubjectPropertyMetadata value)
+                {
+                    value = default;
+                    return false;
+                }
+
+                public IEnumerator<KeyValuePair<string, SubjectPropertyMetadata>> GetEnumerator()
+                    => Enumerable.Empty<KeyValuePair<string, SubjectPropertyMetadata>>().GetEnumerator();
+
+                IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+            }
+
+            public class HandBase : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+            {
+                private IInterceptorExecutor? _context;
+                private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
+
+                public event PropertyChangedEventHandler? PropertyChanged;
+
+                void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
+                    => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+                IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
+                object IInterceptorSubject.SyncRoot { get; } = new object();
+                IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
+
+                void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+                    => _properties = ((IInterceptorSubject)this).Properties
+                        .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                        .ToFrozenDictionary();
+
+                public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; }
+                    = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
+
+                protected PropertyMap GetInstanceProperties() => default;
+
+                protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
+                    => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+
+                protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                {
+                    if (_context is null)
+                    {
+                        setValue(this, newValue);
+                        return true;
+                    }
+
+                    return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                }
+
+                protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
+                    => _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
+            }
+        }
+        """;
+
+    /// <summary>
     /// The ordinary hand-written subject: it satisfies the contract with plain public members and
     /// derives from object, so it has nothing above it whose interface slot it could take. This is
     /// the shape NI0014 must stay silent on, and it has to keep intercepting.
@@ -451,12 +535,51 @@ public class SubjectBaseDiagnosticsTests
         }
         """;
 
+    /// <summary>
+    /// <see cref="PublicMemberBase"/> with a virtual Context, which is what an intermediate class
+    /// needs in order to override it rather than hide it.
+    /// </summary>
+    private static readonly string VirtualContextBase = PublicMemberBase.Replace(
+        "public IInterceptorSubjectContext Context",
+        "public virtual IInterceptorSubjectContext Context");
+
     private const string GeneratedDerived = """
 
         namespace Repro
         {
             [Namotion.Interceptor.Attributes.InterceptorSubject]
             public partial class GenDerived : HandBase
+            {
+                public partial string Name { get; set; }
+            }
+        }
+        """;
+
+    private const string ContextWrapperDerived = """
+
+        namespace Repro
+        {
+            [Namotion.Interceptor.Attributes.InterceptorSubject]
+            public partial class GenDerived : HandBase
+            {
+                public partial string Name { get; set; }
+
+                public string ContextWithoutInterceptor(string tag) => tag;
+            }
+        }
+        """;
+
+    private const string OverridingIntermediateDerived = """
+
+        namespace Repro
+        {
+            public class Middle : HandBase
+            {
+                public override IInterceptorSubjectContext Context => base.Context;
+            }
+
+            [Namotion.Interceptor.Attributes.InterceptorSubject]
+            public partial class GenDerived : Middle
             {
                 public partial string Name { get; set; }
             }
@@ -1052,14 +1175,43 @@ public class SubjectBaseDiagnosticsTests
     }
 
     [Fact]
-    public void WhenAWrapperSharesAPlumbingNameButNotItsArity_ThenItIsGeneratedAndThePlumbingStillBinds()
+    public void WhenAWrapperWouldBeNamedInvokeMethodAtAnotherArity_ThenNI0006IsReportedAndTheRealBodyRuns()
     {
-        // Arrange: InvokeMethod(string, object[]) and GetPropertyValue(string) are distinct overloads
-        // of the plumbing's InvokeMethod(string, Func<...>, params object?[]) and generic
-        // GetPropertyValue<TProperty>(string, Func<...>). Rejecting them by name alone drops both
-        // wrappers and leaves only the protected plumbing, so every consumer call site fails with
-        // CS0122. Echo is here to exercise the generated call site, which passes a lambda in the
-        // position the InvokeMethod wrapper does not have.
+        // Arrange: the plumbing's InvokeMethod ends in "params object?[]", so the generated call site
+        // for a parameterless method, InvokeMethod("Echo", lambda), passes two arguments. A
+        // two-parameter overload is applicable in normal form and therefore beats the plumbing, which
+        // is only applicable in expanded form, so the wrapper swallows the call. Nothing in the
+        // compiler says a word about it and Echo() returns the wrapper's answer instead of "echo".
+        var source = LeafDeclaring("""
+                public string EchoWithoutInterceptor() => "echo";
+
+                public object InvokeMethodWithoutInterceptor(string name, Action<IInterceptorSubject, object[]> callback)
+                    => "HIJACKED:" + name;
+            """);
+
+        // Act
+        var result = GeneratorTestHost.RunForExecution(source);
+        var leafType = result.LoadAssembly().GetType("Repro.LeafSubject");
+        Assert.NotNull(leafType);
+        var instance = Activator.CreateInstance(leafType)!;
+
+        // Assert: the real body runs, which is the only evidence there is. The value is what the
+        // capture changes, and no diagnostic accompanies it.
+        Assert.Equal("echo", leafType.GetMethod("Echo", Type.EmptyTypes)!.Invoke(instance, []));
+        Assert.Null(leafType.GetMethod("InvokeMethod", [typeof(string), typeof(Action<IInterceptorSubject, object[]>)]));
+        Assert.Contains(result.GeneratorDiagnostics, d => d.Id == "NI0006");
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+    }
+
+    [Fact]
+    public void WhenAWrapperSharesAPlumbingNameButNotItsArity_ThenNI0006IsReportedAndNoWrapperIsEmitted()
+    {
+        // Arrange: the deliberate inversion of a rule that used to compare the arity and let these
+        // two through. Since InvokeMethod takes a parameter array, no arity is safe, and the guard no
+        // longer reasons about signatures at all. Both wrappers are the accepted false positive: the
+        // author is told to rename, which is loud and recoverable, unlike the capture above. Echo is
+        // here to show that the plumbing still binds once they are gone.
         var source = LeafDeclaring("""
                 public object InvokeMethodWithoutInterceptor(string name, object[] arguments) => name;
 
@@ -1074,37 +1226,88 @@ public class SubjectBaseDiagnosticsTests
         Assert.NotNull(leafType);
         var instance = Activator.CreateInstance(leafType)!;
 
-        // Assert: both wrappers exist as public members, so a consumer can still call them, and the
-        // generated Echo wrapper reached the plumbing rather than the InvokeMethod wrapper.
-        var invokeMethodWrapper = leafType.GetMethod("InvokeMethod", [typeof(string), typeof(object[])]);
-        var getPropertyValueWrapper = leafType.GetMethod("GetPropertyValue", [typeof(string)]);
-        Assert.NotNull(invokeMethodWrapper);
-        Assert.NotNull(getPropertyValueWrapper);
-        Assert.Equal("m", invokeMethodWrapper.Invoke(instance, ["m", Array.Empty<object>()]));
-        Assert.Equal("k", getPropertyValueWrapper.Invoke(instance, ["k"]));
+        // Assert
+        Assert.Null(leafType.GetMethod("InvokeMethod", [typeof(string), typeof(object[])]));
+        Assert.Null(leafType.GetMethod("GetPropertyValue", [typeof(string)]));
         Assert.Equal("v", leafType.GetMethod("Echo", [typeof(string)])!.Invoke(instance, ["v"]));
-        Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id == "NI0006");
+
+        var skipped = result.GeneratorDiagnostics
+            .Where(d => d.Id == "NI0006")
+            .Select(d => d.GetMessage())
+            .ToList();
+
+        Assert.Equal(2, skipped.Count);
+        Assert.Contains(skipped, message => message.Contains("InvokeMethodWithoutInterceptor") && message.Contains("rename"));
+        Assert.Contains(skipped, message => message.Contains("GetPropertyValueWithoutInterceptor") && message.Contains("rename"));
         Assert.Empty(result.CompilationErrors);
         Assert.Empty(result.CompilationWarnings);
     }
 
     [Fact]
-    public void WhenAWrapperIsNamedLikeAnExplicitlyImplementedInterfaceProperty_ThenItIsGenerated()
+    public void WhenAWrapperIsNamedLikeAnExplicitlyImplementedInterfaceProperty_ThenNI0006IsReported()
     {
-        // Arrange: the root implements Data as an explicit interface property, so it occupies no
-        // simple name in the class, and a wrapper is always a method, which can neither hide that
-        // property nor implement it. Dropping the wrapper here would break every consumer call site
-        // for no gain.
+        // Arrange: the deliberate inversion of an exemption for Context, Data and SyncRoot. Those are
+        // explicit interface properties in a generated root, where a method of the same name really
+        // does collide with nothing, but the exemption was keyed on the name rather than on the base,
+        // so it applied just as much to a hand-written base that exposes them publicly, where the
+        // wrapper is a CS0108. The name is now enough on its own.
         var source = LeafDeclaring("public string DataWithoutInterceptor(string tag) => tag;");
 
         // Act
         var result = GeneratorTestHost.RunForExecution(source);
         var leaf = result.CreateInstance("Repro.LeafSubject");
 
-        // Assert: the wrapper runs, and the interface slot is still the root's dictionary.
-        Assert.Equal("t", leaf.GetType().GetMethod("Data", [typeof(string)])!.Invoke(leaf, ["t"]));
+        // Assert: no wrapper, and the interface slot is still the root's dictionary.
+        Assert.Null(leaf.GetType().GetMethod("Data", [typeof(string)]));
         Assert.NotNull(((IInterceptorSubject)leaf).Data);
-        Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id is "NI0006" or "NI0014");
+        Assert.Contains(result.GeneratorDiagnostics, d => d.Id == "NI0006");
+        Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id == "NI0014");
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+    }
+
+    [Fact]
+    public void WhenAWrapperWouldBeNamedContextOnABaseWithPublicMembers_ThenNI0006IsReportedAndNothingIsHidden()
+    {
+        // Arrange: the half of the exemption that was not merely unnecessary but unsound. This base
+        // satisfies the contract with public members, which is the shape subject-guidelines.md
+        // documents, so a "Context" wrapper hides the inherited public property. CS0108 lands in a
+        // generated file the consumer cannot edit and fails any build with TreatWarningsAsErrors.
+        var source = PublicMemberBase + ContextWrapperDerived;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        Assert.Contains(result.GeneratorDiagnostics, d => d.Id == "NI0006");
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+    }
+
+    [Fact]
+    public void WhenAnIntermediateOverridesAPublicContext_ThenNoDiagnosticIsReportedAndWritesAreIntercepted()
+    {
+        // Arrange: an override occupies the slot the overridden member already had, so it displaces
+        // nothing, and virtual dispatch makes it the implementation rather than a replacement for
+        // one. Reporting it was an NI0014, an error, on a hierarchy that builds and intercepts.
+        var source = VirtualContextBase + OverridingIntermediateDerived;
+
+        var writeInterceptor = new RecordingWriteInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => writeInterceptor);
+
+        // Act
+        var result = GeneratorTestHost.RunForExecution(source);
+        var derivedType = result.LoadAssembly().GetType("Repro.GenDerived");
+        Assert.NotNull(derivedType);
+        var derived = Activator.CreateInstance(derivedType, context)!;
+        derivedType.GetProperty("Name")!.SetValue(derived, "n");
+
+        // Assert
+        Assert.Contains(writeInterceptor.Writes, w => w.PropertyName == "Name" && Equals(w.Value, "n"));
+        Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id == "NI0014");
         Assert.Empty(result.CompilationErrors);
         Assert.Empty(result.CompilationWarnings);
     }
@@ -1216,5 +1419,156 @@ public class SubjectBaseDiagnosticsTests
         Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id is "NI0011" or "NI0012" or "NI0013" or "NI0014");
         Assert.Empty(result.CompilationErrors);
         Assert.Empty(result.CompilationWarnings);
+    }
+
+    [Fact]
+    public void WhenAReferencedSubjectIsSubclassedByHandWithAnExplicitContext_ThenNI0014IsReportedAndWritesAreNotIntercepted()
+    {
+        // Arrange: the explicit form of the hijack, and the only one a hand-written ancestor can
+        // express, because C# requires the class to list the interface itself (CS0540) and listing it
+        // is what makes the class the contract provider. Exempting the explicit form therefore
+        // exempted every base class there is, which left this shape reported by nothing at all.
+        const string librarySource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Lib
+            {
+                [InterceptorSubject]
+                public partial class LibRoot
+                {
+                    public partial string A { get; set; }
+                }
+            }
+            """;
+
+        const string mainSource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                public class Hand : Lib.LibRoot, IInterceptorSubject
+                {
+                    private readonly IInterceptorSubjectContext _own = InterceptorSubjectContext.Create();
+
+                    IInterceptorSubjectContext IInterceptorSubject.Context => _own;
+                }
+
+                [InterceptorSubject]
+                public partial class HandLeaf : Hand
+                {
+                    public partial string B { get; set; }
+                }
+            }
+            """;
+
+        var writeInterceptor = new RecordingWriteInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => writeInterceptor);
+
+        // Act
+        var result = GeneratorTestHost.RunWithLibraryReferenceForExecution(librarySource, mainSource);
+        var leafType = result.LoadAssembly().GetType("Repro.HandLeaf");
+        Assert.NotNull(leafType);
+        var leaf = Activator.CreateInstance(leafType, context)!;
+        leafType.GetProperty("B")!.SetValue(leaf, "b");
+
+        // Assert: the inherited helpers keep reading the root's field, which nothing populates, so
+        // the write lands in the backing field and the value still looks right.
+        Assert.Equal("b", leafType.GetProperty("B")!.GetValue(leaf));
+        Assert.Empty(writeInterceptor.Writes);
+        Assert.Contains(result.GeneratorDiagnostics, d => d.Id == "NI0014");
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+    }
+
+    [Fact]
+    public void WhenAHijackerSitsAboveTheContractProvider_ThenNI0014IsReportedAndWritesAreNotIntercepted()
+    {
+        // Arrange: Hand satisfies the contract by inheritance and declares nothing, so it is the
+        // contract provider and the scan used to stop there. The public Context that really takes the
+        // slot sits one class further up, where nothing ever looked.
+        const string librarySource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Lib
+            {
+                [InterceptorSubject]
+                public partial class LibRoot
+                {
+                    public partial string A { get; set; }
+                }
+            }
+            """;
+
+        const string mainSource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                public class Middle : Lib.LibRoot, IInterceptorSubject
+                {
+                    private readonly IInterceptorSubjectContext _own = InterceptorSubjectContext.Create();
+
+                    public IInterceptorSubjectContext Context => _own;
+                }
+
+                public class Hand : Middle, IInterceptorSubject
+                {
+                }
+
+                [InterceptorSubject]
+                public partial class HandLeaf : Hand
+                {
+                    public partial string B { get; set; }
+                }
+            }
+            """;
+
+        var writeInterceptor = new RecordingWriteInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => writeInterceptor);
+
+        // Act
+        var result = GeneratorTestHost.RunWithLibraryReferenceForExecution(librarySource, mainSource);
+        var leafType = result.LoadAssembly().GetType("Repro.HandLeaf");
+        Assert.NotNull(leafType);
+        var leaf = Activator.CreateInstance(leafType, context)!;
+        leafType.GetProperty("B")!.SetValue(leaf, "b");
+
+        // Assert: the declarer named in the message is Middle, not the provider below it.
+        Assert.Equal("b", leafType.GetProperty("B")!.GetValue(leaf));
+        Assert.Empty(writeInterceptor.Writes);
+        var diagnostic = Assert.Single(result.GeneratorDiagnostics, d => d.Id == "NI0014");
+        Assert.Contains("Repro.Middle", diagnostic.GetMessage());
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+    }
+
+    [Fact]
+    public void WhenBaseGetInstancePropertiesReturnsAValueType_ThenTheContractRejectsIt()
+    {
+        // Arrange: the counterpart of the FrozenDictionary case. Widening the return type to any
+        // implementer of the dictionary interface also admitted a struct, and the emitted
+        // "GetInstanceProperties() ?? DefaultProperties" then fails with CS0019 in a file the
+        // consumer cannot edit, where the narrower rule gave a clean NI0012 fallback.
+        var source = ValueTypeInstancePropertiesBase + GeneratedDerived;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert: the compilation is checked first, because CS0019 in generated code is the damage
+        // and the diagnostic is only the replacement for it.
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+        var diagnostic = Assert.Single(result.GeneratorDiagnostics, d => d.Id == "NI0012");
+        Assert.Contains("GetInstanceProperties", diagnostic.GetMessage());
     }
 }

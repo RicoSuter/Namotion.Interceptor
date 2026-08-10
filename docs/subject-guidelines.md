@@ -357,6 +357,11 @@ Details that are easy to get wrong:
 - `DefaultProperties` may be a static property or a static field, but its type has to be
   `IReadOnlyDictionary<string, SubjectPropertyMetadata>` or something that implements it. A static of
   that name with any other type is reported rather than accepted.
+- `GetInstanceProperties` may likewise return something that implements the dictionary interface, such
+  as `FrozenDictionary<string, SubjectPropertyMetadata>?`, but it has to be a reference type. The
+  generated code combines the two as `GetInstanceProperties() ?? DefaultProperties`, and `??` rejects a
+  value type on its left, so a struct implementing the interface fails the contract even though the
+  same struct is accepted for `DefaultProperties`, which is only concatenated.
 - The `IRaisePropertyChanged` row is the only one that is not needed for the generated code to
   compile. A base class that satisfies everything else but not that one still produces code that
   compiles, with the subject declaring its own change notification plumbing, but it fails the

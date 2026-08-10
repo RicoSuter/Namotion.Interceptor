@@ -411,16 +411,24 @@ The break here is that a derived subject declaring `public object SyncRoot { get
 before, precisely because that class emitted its own explicit implementation which beat its own public
 member. It now takes the slot, and it is now an error.
 
-Both rules are scoped from the subject up to the nearest subject ancestor. NI0013 excludes that
-ancestor, whose members are the ones the contract demanded of it. NI0014 includes it, but only for a
-member that is not an explicit `IInterceptorSubject` implementation and only when the ancestor's own
-base already implements that member: an ancestor that satisfies the contract by inheriting the
-plumbing declares no explicit implementation, so its public member wins the slot for every generated
-subclass, while the ordinary hand-written subject deriving from `object` has nothing above it to
-displace and stays quiet. The
-design first specified a per member contract provider located by re-running mode selection upward; the
-implementation uses the nearest subject ancestor for both rules, which is the same class in every shape
-where the contract is satisfied as a whole and is simpler to reason about.
+NI0013 is scoped from the subject up to the nearest subject ancestor and excludes that ancestor, whose
+members are the ones the contract demanded of it. NI0014 is not bounded: it walks the whole chain up to
+`object`, because the nearest subject ancestor is exactly where a hand-written hijacker sits, and a
+second one further up used to be invisible. Below that ancestor the report is unconditional. At it and
+above it, the member is reported only when the declarer's own base already implements the same member,
+which keeps the ordinary hand-written subject deriving from `object` quiet and cannot be asked below
+the ancestor, where an ancestor generated in the same compilation does not implement the interface as a
+symbol yet.
+
+Two refinements that once sat on that condition are gone. Exempting an explicit implementation was
+dead: CS0540 forces the declaring class to list `IInterceptorSubject`, listing it makes that class the
+nearest subject ancestor and therefore always the contract provider, so the exemption fired on every
+base class there is and hid the only form a hand-written ancestor can express. An `override` is
+skipped instead, since it occupies the slot it already had and displaces nothing.
+
+The design first specified a per member contract provider located by re-running mode selection upward;
+the implementation uses the nearest subject ancestor for both rules, which is the same class in every
+shape where the contract is satisfied as a whole and is simpler to reason about.
 
 **The inherited helper surface is wider.** `GetPropertyValue`, `SetPropertyValue`, `InvokeMethod` and
 `GetInstanceProperties` are emitted `protected` instead of `private`, because that is what lets a
@@ -458,10 +466,15 @@ they turn out to matter in practice.
   check for this collision before emitting the wrapper. The one case it does check is a collision with
   the names the generated half occupies, which is reported as NI0006 and the wrapper is not emitted,
   because there the wrapper captured the generated call, or an interface slot, instead of colliding
-  with it. For the four helpers that check compares the parameter count as well, because a wrapper of
-  any other arity is an overload the generated call sites never bind to, and it leaves `Context`,
-  `Data` and `SyncRoot` alone, because those are explicit interface properties that a wrapper, always
-  a method, can neither hide nor implement.
+  with it. That check is name only, at any arity, with no exemptions. Two attempts to narrow it each
+  let a capture through: comparing the parameter count ignored that `InvokeMethod` ends in `params
+  object?[]`, so the emitted call sites span every arity from two upward and an overload applicable in
+  normal form beats the plumbing, which needs the expanded form; and exempting `Context`, `Data` and
+  `SyncRoot` treated "explicit interface property" as a property of the name rather than of the base,
+  which is false for a hand-written base that satisfies the contract with public members, where the
+  wrapper is a CS0108 in the generated file. The price is a false positive on a legitimate wrapper
+  such as `GetPropertyValueWithoutInterceptor(string, string)`, which is loud, actionable and fixed by
+  renaming.
 - **An interface property whose only accessible accessor is `init`, such as `{ protected get; init;
   }`, explicitly implemented by a class, yields a metadata entry with both accessor lambdas null.**
   This is not the "both accessors inaccessible" case, which is skipped entirely and never reaches the
