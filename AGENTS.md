@@ -34,7 +34,7 @@ Only run integration tests when changing connector implementations (OPC UA, MQTT
 - `pwsh scripts/benchmark.ps1 -Filter "*RegistryBenchmark*" -LaunchCount 3` - Compare against a base branch (`-Filter` takes several patterns)
 - `pwsh scripts/benchmark.ps1 -Filter "*RegistryBenchmark*" -LocalOnly` - Absolute numbers for the current tree
 
-Filter to the benchmarks the change can reach. A whole-suite run takes hours, so propose it and get agreement first rather than launching one. Read [Benchmarking](docs/benchmarking.md) before interpreting a delta; noise here is the same size as the deltas people care about.
+Always read [Benchmarking](docs/benchmarking.md) before running or interpreting a benchmark.
 
 ## Architecture
 
