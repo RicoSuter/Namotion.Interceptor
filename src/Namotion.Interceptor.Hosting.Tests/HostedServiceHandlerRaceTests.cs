@@ -175,6 +175,70 @@ public class HostedServiceHandlerRaceTests
     }
 
     [Fact]
+    public async Task WhenAnAttachmentIsDetachedByTheAwaitingOverloadBeforeItsStartIsAppended_ThenNothingIsStarted()
+    {
+        // Arrange - the same window, reached through the awaiting detach overload. Both overloads mark
+        // the target before appending their stop, and each mark has to be pinned separately: the two
+        // tests above drive the window through the synchronous overload only, so deleting the mark from
+        // DetachHostedServiceAsync alone leaves them green.
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var detacher = new CallbackStartupDeferrer();
+        context.AddService<IStartupCompletionDeferrer>(detacher);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            parent.Child = child;
+
+            var created = 0;
+            var detaches = new ConcurrentQueue<Task<bool>>();
+            detacher.OnDefer = () =>
+            {
+                foreach (var published in child.GetHostedServiceAttachments())
+                {
+                    // Not awaited here: the detach runs synchronously up to and past its append, which
+                    // is the whole window, and awaiting it from inside the hold would park the attach
+                    // that is taking the hold. The tasks are awaited below instead.
+                    detaches.Enqueue(child.DetachHostedServiceAsync(published, CancellationToken.None));
+                }
+            };
+
+            // Act
+            var attachment = child.AttachHostedService(() =>
+            {
+                Interlocked.Increment(ref created);
+                return new TrackedBackgroundService();
+            });
+
+            // Assert - an empty transition on the target's chain drains whatever the attach appended,
+            // so the count is read after any start would have run rather than after a delay.
+            var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+            Assert.All(await Task.WhenAll(detaches), Assert.True);
+            Assert.Equal(1, detacher.Taken);
+            Assert.Empty(child.GetHostedServiceAttachments());
+            Assert.Equal(0, Volatile.Read(ref created));
+            Assert.Null(attachment.Current);
+            Assert.Null(target.Owner);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task WhenAnExplicitDetachRacesTheHostDrain_ThenTheInstanceIsDisposedOnce()
     {
         // Arrange - two stops reach the same instance, so stop and dispose have to be idempotent per
@@ -540,6 +604,67 @@ public class HostedServiceHandlerRaceTests
     }
 
     [Fact]
+    public async Task WhenASubjectLeavesTheGraph_ThenItStopsBeforeItsAttachmentIsDisposed()
+    {
+        // Arrange - the context detach half of the ordering. A hosted subject's stop is slow, because
+        // BackgroundService.StopAsync awaits its execute task, and the attachments it uses must not be
+        // disposed underneath it while it unwinds. The shutdown path builds the same shape from its own
+        // code, so it pins nothing here: dropping the wait DetachSubject passes leaves the drain test
+        // below green. The hold makes the window the subject is inside observable rather than timed.
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            var parent = new HostedParent(context);
+            var child = new CountingHostedSubject();
+            var instance = new TrackedBackgroundService();
+            var attachment = child.AttachHostedService(() => instance);
+
+            parent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(() => child.StartCount == 1 && instance.IsStarted);
+
+            var subjectStopEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            child.StopHold = () =>
+            {
+                subjectStopEntered.TrySetResult();
+                return release.Task;
+            };
+
+            // Act
+            parent.Child = null;
+            await subjectStopEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+            // Assert - an unordered detach clears Current at the top of the attachment's stop body,
+            // which runs the moment that stop is appended, a whole transition delay before the
+            // subject's own StopAsync is entered.
+            Assert.NotNull(attachment.Current);
+            Assert.False(instance.IsStopped);
+            Assert.False(instance.IsDisposed);
+
+            release.SetResult();
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => instance.IsStopped && instance.IsDisposed,
+                message: "The attachment was never stopped and disposed after the subject's stop returned.");
+
+            Assert.Equal(1, child.StopCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task WhenTheHostDrains_ThenASubjectStopsBeforeItsAttachmentIsDisposed()
     {
         // Arrange - shutdown shares the ordering hazard of a context detach: a hosted subject's stop
@@ -824,9 +949,14 @@ public class HostedServiceHandlerRaceTests
             await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
 
             Assert.Equal(1, subject.StartCount);
-            Assert.True(
-                deferrer.Taken > takenByTheFirstAttach,
-                "The second attach appended no start, so the guard under test was never reached.");
+
+            // Exact, because "more than before" is also satisfied by the non owning handler alone: it
+            // takes a hold, loses the compare and exchange, and releases the hold again without ever
+            // reaching the guard under test. The second attach raises one context attach per handler,
+            // so two more holds is the owning handler's queued start plus that refused append.
+            Assert.Equal(
+                takenByTheFirstAttach + 2,
+                deferrer.Taken);
 
             Assert.Equal(0, deferrer.Outstanding);
         }
