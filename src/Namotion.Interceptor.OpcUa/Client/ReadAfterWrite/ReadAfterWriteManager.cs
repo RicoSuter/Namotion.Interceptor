@@ -28,11 +28,11 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     // NodeId -> (RevisedInterval, Property) for properties that need read-after-writes
     private readonly Dictionary<NodeId, (TimeSpan RevisedInterval, RegisteredSubjectProperty Property)> _trackedProperties = new();
 
-    // NodeId -> (ReadAt, Property) for pending scheduled reads
-    private readonly Dictionary<NodeId, (DateTime ReadAt, RegisteredSubjectProperty Property)> _pendingReads = new();
+    // NodeId -> (ReadAt, Property, SentRevision) for pending scheduled reads
+    private readonly Dictionary<NodeId, (DateTime ReadAt, RegisteredSubjectProperty Property, long SentRevision)> _pendingReads = new();
 
     // Reusable list for due reads (avoids allocation per timer tick)
-    private readonly List<(NodeId NodeId, RegisteredSubjectProperty Property)> _dueReadsList = new();
+    private readonly List<(NodeId NodeId, RegisteredSubjectProperty Property, long SentRevision)> _dueReadsList = new();
 
     private DateTime _earliestReadTime = DateTime.MaxValue;
     private ISession? _lastKnownSession;
@@ -133,7 +133,11 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     /// Notifies that a property was successfully written. Schedules a read-after-write if needed.
     /// </summary>
     /// <param name="nodeId">The OPC UA node ID that was written.</param>
-    public void OnPropertyWritten(NodeId nodeId)
+    /// <param name="sentRevision">The commit revision of the change that was written, as it was when the
+    /// request was built. It must not be re-read from the property here: a local write that committed
+    /// while the request was in flight would then be counted as already sent, and the read-back would
+    /// revert it. 0 means the change carried no revision, which leaves nothing to rank locally.</param>
+    public void OnPropertyWritten(NodeId nodeId, long sentRevision)
     {
         if (Volatile.Read(ref _disposed) == 1)
         {
@@ -167,16 +171,20 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
             var readAt = DateTime.UtcNow + tracked.RevisedInterval + _configuration.ReadAfterWriteBuffer;
 
-            if (_pendingReads.ContainsKey(nodeId))
+            if (_pendingReads.TryGetValue(nodeId, out var pending))
             {
                 _metrics.RecordCoalesced();
+
+                // Two flushes can complete out of order, so the highest revision is the last write we
+                // sent, and that is what the surviving read-back has to be ranked against.
+                sentRevision = Math.Max(sentRevision, pending.SentRevision);
             }
             else
             {
                 _metrics.RecordScheduled();
             }
 
-            _pendingReads[nodeId] = (readAt, tracked.Property);
+            _pendingReads[nodeId] = (readAt, tracked.Property, sentRevision);
             UpdatePendingReadCountLocked();
 
             // Only reschedule timer if this is earlier than current earliest
@@ -273,11 +281,11 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             {
                 if (kvp.Value.ReadAt <= utcNow)
                 {
-                    _dueReadsList.Add((kvp.Key, kvp.Value.Property));
+                    _dueReadsList.Add((kvp.Key, kvp.Value.Property, kvp.Value.SentRevision));
                 }
             }
 
-            foreach (var (nodeId, _) in _dueReadsList)
+            foreach (var (nodeId, _, _) in _dueReadsList)
             {
                 _pendingReads.Remove(nodeId);
             }
@@ -348,12 +356,27 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                         continue;
                     }
 
-                    var (_, property) = _dueReadsList[i];
-                    var sourceTimestamp = (DateTimeOffset)result.SourceTimestamp;
+                    var (_, property, sentRevision) = _dueReadsList[i];
+                    var reference = property.Reference;
 
-                    // Skip if property already has a newer value from subscription notification
-                    var currentWriteTimestamp = property.Reference.TryGetWriteTimestamp();
-                    if (currentWriteTimestamp.HasValue && currentWriteTimestamp.Value >= sourceTimestamp)
+                    // Ranked in two domains, because the two candidates are not always produced by the same
+                    // clock. A local write that committed after the one this read-back verifies is newer
+                    // than anything the server can have seen, and revisions order it without a clock at all.
+                    reference.TryGetWriteState(false, out var localRevision, out _);
+                    if (sentRevision != 0 && localRevision > sentRevision)
+                    {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    // Otherwise the last commit may have come from a source, and only then is the stored
+                    // write timestamp the server's own SourceTimestamp, which is what makes comparing it
+                    // against the read-back's a comparison of one clock with itself.
+                    var sourceTimestamp = (DateTimeOffset)result.SourceTimestamp;
+                    if (reference.TryGetWriteState(true, out var lastCommitRevision, out _) &&
+                        lastCommitRevision > localRevision &&
+                        reference.TryGetWriteTimestamp() is { } writeTimestamp &&
+                        writeTimestamp >= sourceTimestamp)
                     {
                         skippedCount++;
                         continue;
@@ -387,6 +410,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             // A response can carry fewer results than requested; the unanswered remainder failed.
             failedCount = dueCount - successCount - skippedCount;
             _metrics.RecordExecuted(successCount);
+            _metrics.RecordSkipped(skippedCount);
             _metrics.RecordFailed(failedCount);
             _circuitBreaker.RecordSuccess();
 

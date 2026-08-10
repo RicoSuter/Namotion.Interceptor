@@ -353,6 +353,7 @@ var config = new OpcUaClientConfiguration
 
 **Behavior:**
 - Only triggers for properties where `SamplingInterval = 0` was revised to > 0
+- A read-back is discarded when the property has already moved on, either through a local write that committed after the one being verified or through a newer value from the server
 - Multiple rapid writes are coalesced into a single read
 - Reads are batched for efficiency
 - Circuit breaker prevents repeated failures from overwhelming the server

@@ -185,7 +185,10 @@ internal sealed class OutboundWriter
             if (span[i].Property.TryGetPropertyData(_opcUaNodeIdKey, out var nodeIdObj) &&
                 nodeIdObj is NodeId nodeId)
             {
-                manager.OnPropertyWritten(nodeId);
+                // The change's own revision, not the property's current one: this runs after the write
+                // returned, so a fresh read would fold in a local write that committed while it was in
+                // flight, and the read-back would then be free to revert it.
+                manager.OnPropertyWritten(nodeId, span[i].Revision);
             }
         }
     }
