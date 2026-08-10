@@ -397,37 +397,4 @@ public class GeneratorShapeBehaviorTests
         Assert.Equal(["Label"], firedEvents);
     }
 
-    private sealed class RecordingReadInterceptor : IReadInterceptor
-    {
-        public List<(string PropertyName, object? Value)> Reads { get; } = [];
-
-        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
-        {
-            var value = next(ref context);
-            Reads.Add((context.Property.Name, value));
-            return value;
-        }
-    }
-
-    private sealed class RecordingWriteInterceptor : IWriteInterceptor
-    {
-        public List<(string PropertyName, object? Value)> Writes { get; } = [];
-
-        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
-        {
-            Writes.Add((context.Property.Name, context.NewValue));
-            next(ref context);
-        }
-    }
-
-    private sealed class RecordingMethodInterceptor : IMethodInterceptor
-    {
-        public List<(string MethodName, object?[] Parameters)> Invocations { get; } = [];
-
-        public object? InvokeMethod(MethodInvocationContext context, InvokeMethodInterceptionDelegate next)
-        {
-            Invocations.Add((context.MethodName, context.Parameters));
-            return next(ref context);
-        }
-    }
 }

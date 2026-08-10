@@ -9,22 +9,6 @@ using Xunit;
 namespace Namotion.Interceptor.Generator.Tests;
 
 /// <summary>
-/// Records every intercepted write, which is what separates "the value looks right" from "the
-/// executor really saw it". Shared, because a generated shape is only proven by running it and more
-/// than one test class needs the same evidence.
-/// </summary>
-internal sealed class RecordingWriteInterceptor : IWriteInterceptor
-{
-    public List<(string PropertyName, object? Value)> Writes { get; } = [];
-
-    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
-    {
-        Writes.Add((context.Property.Name, context.NewValue));
-        next(ref context);
-    }
-}
-
-/// <summary>
 /// The outcome of running the generator over a single source snippet.
 /// </summary>
 internal sealed record GeneratorRunResult(

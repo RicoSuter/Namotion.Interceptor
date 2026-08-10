@@ -295,26 +295,4 @@ public class BaseClassInterceptionBehaviorTests
         return count;
     }
 
-    private sealed class RecordingReadInterceptor : IReadInterceptor
-    {
-        public List<(string PropertyName, object? Value)> Reads { get; } = [];
-
-        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
-        {
-            var value = next(ref context);
-            Reads.Add((context.Property.Name, value));
-            return value;
-        }
-    }
-
-    private sealed class RecordingMethodInterceptor : IMethodInterceptor
-    {
-        public List<(string MethodName, object?[] Parameters)> Invocations { get; } = [];
-
-        public object? InvokeMethod(MethodInvocationContext context, InvokeMethodInterceptionDelegate next)
-        {
-            Invocations.Add((context.MethodName, context.Parameters));
-            return next(ref context);
-        }
-    }
 }
