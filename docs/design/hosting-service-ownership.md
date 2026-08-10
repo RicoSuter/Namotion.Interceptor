@@ -659,17 +659,13 @@ nothing waits for the starts one at a time. The two paths differ in shape:
   them in turn, so the delays overlap: a set of subjects entering the graph together pays one delay
   rather than one each, and the cost is constant in how many of them there are. Under the shared loop
   it was linear, because every start waited out the delay of the start ahead of it.
-  `HostedServiceStartupBenchmark.AttachHostedSubjectsAndWaitForTheirStarts` is where that shape is
-  re-derived: its two subject counts should stay within noise of each other. The absolute figures are
-  the delay constant plus whatever the machine adds and mean nothing on their own, which is why only
-  the comparison between the rows is stated here.
+  `HostedServiceStartupShapeTests.WhenManySubjectsEnterTheGraphTogether_ThenTheirStartsDoNotSerialize` pins it as a ratio rather than an absolute: it starts one subject, then thirty two, and fails when the second takes more than four times the first. Serialized starts separate the two by roughly the subject count, measured at a ratio of 32 with the starts forced into series, so the margin against a loaded machine is wide. The assertion is a ratio because an absolute would be flaky and would pin the delay constant, which is a workaround rather than a guarantee.
 - **`AddSubject<T>`.** Still linear. `AddSubject<T>` registers one `SubjectActivation<T>` per type
   through `AddHostedService`, the activation awaits `WaitForStartAsync` when `T` is an `IHostedService`,
   and the generic host starts hosted services one after another by default, so each activation's 50 ms
   is over before the next one begins. The cost is linear in the number of registered types that
   implement `IHostedService`, at one delay each. A registered type that is a plain subject awaits no
-  start and adds nothing. There is no benchmark for this path, because what it measures is the generic
-  host's own sequential start rather than anything this package decides.
+  start and adds nothing. Nothing pins this path, because what it measures is the generic host's own sequential start rather than anything this package decides.
 
 `AddSubject` does not fix its own path, and that is deliberate. The switch that fixes it is
 `HostOptions.ServicesStartConcurrently`, which is host wide: it would change the startup behaviour of
