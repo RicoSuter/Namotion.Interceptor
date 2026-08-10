@@ -67,6 +67,26 @@ Placing the status rule on `OpcUaStatusCodeClassifier` extends a type that alrea
 
 Transient failures keep blocking, deliberately. That blocking is what preserves write ordering, and removing it would let newer changes overtake queued ones.
 
+### Read-after-write ranks by revision, not by clock
+
+Separate commit, and separable: it can be dropped without affecting the rest.
+
+`ReadAfterWriteManager.cs:332-334` decides whether to apply a read-back by comparing the **remote server's** `SourceTimestamp` against our own last write timestamp:
+
+```csharp
+var currentWriteTimestamp = property.Reference.TryGetWriteTimestamp();
+if (currentWriteTimestamp.HasValue && currentWriteTimestamp.Value >= sourceTimestamp)
+    continue;
+```
+
+Two clocks, one decision. A remote clock running ahead defeats the guard and lets a stale read overwrite a newer local value. A remote clock running behind trips it and discards a fresh one.
+
+Read-after-write is *solicited*, so there is a local before-point: we issued the write. Capture the property's commit revision when the read is scheduled (`:177`), carry it on the pending record (`:30`, `:33`), and at `:333` skip the apply if the revision has advanced. Purely local, monotonic, no clock involved, and it catches the subscription-beat-me case it was written for more reliably than the timestamp did.
+
+**This does not close [#373](https://github.com/RicoSuter/Namotion.Interceptor/issues/373).** That issue covers every inbound path, and subscriptions and polling have no ordering guard at all. Their case does not generalise from this one: an unsolicited notification carries no local before-point, and its only ordering information is a clock we have just decided not to trust. #373 is updated with what is now closed and why the remainder is hard, rather than closed.
+
+This is the only cross-clock decision in the connector surface. The other `TryGetWriteTimestamp` uses are data rather than decisions (`CustomNodeManager.cs:397`, `SubjectUpdateFactory.cs:139`), and `WriteRetryQueue.cs:157` uses `Environment.TickCount64`, which is local and monotonic.
+
 ### Public API
 
 `WriteResult` is a public readonly struct and appears on `ISubjectSource.WriteChangesAsync`, so this reaches every custom source. The change is **additive**: a new factory overload plus a property that defaults to "none permanent", which is exactly today's behaviour. Existing implementations compile unchanged and behave unchanged; only the OPC UA client opts in. The public API snapshot moves and is re-accepted.
@@ -115,6 +135,14 @@ Written red first. One testability note shapes the approach: our own server does
 | `WhenAWriteFailsPermanently_ThenSubsequentWritesAreStillDelivered` | the head-of-line test, and the reason this PR exists |
 | `WhenAWriteFailsTransiently_ThenItIsRequeuedAndOrderingIsPreserved` | the deliberate blocking still blocks |
 | `WhenASourceReportsNoPermanentFailures_ThenBehaviourIsUnchanged` | pins the additive API default |
+
+**Read-after-write ordering, its own commit:**
+
+| Test | Passes when |
+|---|---|
+| `WhenALocalWriteLandsBeforeTheReadBack_ThenTheReadBackIsNotApplied` | the newer local value survives. Fails today only if the clocks happen to disagree, so the test drives the revision directly rather than manipulating time |
+| `WhenNothingChangedSinceTheWrite_ThenTheReadBackIsApplied` | the guard does not over-trigger |
+| `WhenTheRemoteTimestampIsAheadOfOurs_ThenTheReadBackStillRespectsLocalOrdering` | pins the actual fix: a skewed remote clock no longer decides |
 
 Conventions: `When<Condition>_Then<ExpectedBehavior>` naming, explicit `// Arrange`, `// Act`, `// Assert`, `AsyncTestHelpers.WaitUntilAsync` rather than delays.
 
