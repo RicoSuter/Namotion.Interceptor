@@ -42,8 +42,10 @@ public enum ChangeDeliveryRule
     /// What the condition really asks is that the destination already holds the value the subject will
     /// settle on, so where a server converts on the way in, as the OPC UA server does, it also needs that
     /// conversion to round-trip. A converter that clamps, scales or narrows leaves the node holding
-    /// something the subject will not settle on, and the older commit that would have corrected it is
-    /// dropped under this rule.
+    /// something the subject will not settle on. The shipped OPC UA converter is such a case: it maps a
+    /// decimal property onto a double node and back, keeping 15 significant digits. This rule does not
+    /// cause that divergence and dropping the older commit does not worsen it, since that commit carries
+    /// an even staler value, but do not read the round-trip requirement as hypothetical.
     /// Choosing <see cref="SourceValuesMayBeStale"/> here delivers a commit the clients have already moved
     /// past, leaving them behind the model with nothing to correct them.
     /// </remarks>

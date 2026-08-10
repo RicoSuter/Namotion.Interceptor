@@ -301,6 +301,10 @@ public class ChangeQueueProcessor : IDisposable
             return;
         }
 
+        // Whether the merger was handed a batch, which decides whether it has one to release below. Set
+        // before the call rather than after, so a throw part-way through a merge still releases it.
+        var merged = false;
+
         try
         {
             // Drain the concurrent queue into the scratch buffer under exclusive flush
@@ -315,6 +319,7 @@ public class ChangeQueueProcessor : IDisposable
                 return;
             }
 
+            merged = true;
             var mergedChanges = _changeMerger.Merge(CollectionsMarshal.AsSpan(_flushChanges), _deliveryRule);
 
             if (mergedChanges.Length > 0)
@@ -345,8 +350,12 @@ public class ChangeQueueProcessor : IDisposable
                     // Disposed while flushing - return buffer to pool now
                     _changeMerger.Dispose();
                 }
-                else
+                else if (merged)
                 {
+                    // Only when there was a batch. An idle tick has nothing to release, and resetting
+                    // anyway would feed the merger a zero-width batch: at the default buffer time that is
+                    // roughly 125 of them a second, which drives its trim and shrink policies off how long
+                    // the source has been quiet rather than off how wide its flushes actually are.
                     _changeMerger.Reset();
                 }
             }

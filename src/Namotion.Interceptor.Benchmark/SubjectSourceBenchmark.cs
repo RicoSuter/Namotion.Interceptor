@@ -55,9 +55,8 @@ public class SubjectSourceBenchmark
         foreach (var name in _propertyNames)
         {
             // Closure-backed so the getter returns what the setter stored, the way the OPC UA loader
-            // registers dynamic properties. A constant getter makes every change look superseded to the
-            // connector's current-value check, so nothing is ever written and this benchmark measures
-            // an empty write path.
+            // registers dynamic properties. A constant getter with a no-op setter measures a write path
+            // where nothing is ever stored, which is not the path production takes.
             object? value = null;
             var property = registeredSubject.AddProperty(name, typeof(string), _ => value, (_, newValue) => value = newValue);
             property.Reference.SetSource(_source);
