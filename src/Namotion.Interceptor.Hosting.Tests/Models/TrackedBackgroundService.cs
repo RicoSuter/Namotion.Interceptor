@@ -5,10 +5,14 @@ namespace Namotion.Interceptor.Hosting.Tests.Models;
 public sealed class TrackedBackgroundService : IHostedService, IAsyncDisposable
 {
     private int _disposeCount;
+    private int _startCount;
 
     public bool ThrowOnStart { get; init; }
 
     public bool IsStarted { get; private set; }
+
+    /// <summary>Calls into <see cref="StartAsync"/>, so a start on a disposed instance is measurable.</summary>
+    public int StartCount => Volatile.Read(ref _startCount);
 
     public bool IsStopped { get; private set; }
 
@@ -18,6 +22,8 @@ public sealed class TrackedBackgroundService : IHostedService, IAsyncDisposable
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
+        Interlocked.Increment(ref _startCount);
+
         if (ThrowOnStart)
         {
             throw new InvalidOperationException("start failed");

@@ -95,6 +95,40 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
+    public async Task WhenTheFactoryReturnsTheInstanceItAlreadyProduced_ThenTheStartFaultsInsteadOfUsingItAfterDispose()
+    {
+        // Arrange - the shape a caller migrating from the old instance based API is steered into:
+        // "AttachHostedService(myService)" no longer compiles and "AttachHostedService(() => myService)"
+        // does. The handler disposed that instance when the subject left the graph, so a re-entry that
+        // started it again would be a use after dispose with nothing reported anywhere.
+        await RunWithAppLifecycleAsync(async context =>
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            var instance = new TrackedBackgroundService();
+            var attachment = child.AttachHostedService(() => instance);
+
+            parent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(() => instance.IsStarted);
+
+            parent.Child = null;
+            await AsyncTestHelpers.WaitUntilAsync(() => instance.IsDisposed);
+
+            // Act
+            parent.Child = child;
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => attachment.Fault is not null,
+                message: "The re-entry started the instance the handler had already disposed.");
+
+            Assert.Equal(1, instance.StartCount);
+            Assert.Equal(1, instance.DisposeCount);
+            Assert.Null(attachment.Current);
+        });
+    }
+
+    [Fact]
     public async Task WhenSubjectIsDetached_ThenTheInstanceIsDisposedExactlyOnce()
     {
         // Arrange
