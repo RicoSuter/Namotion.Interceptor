@@ -86,6 +86,23 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
         configuration.Validate();
     }
 
+    /// <summary>
+    /// Builds the outbound processor. Extracted so the delivery rule it selects can be pinned by a test:
+    /// choosing the wrong one is silent, so "it compiles" is not evidence that it chose correctly.
+    /// </summary>
+    internal ChangeQueueProcessor CreateChangeQueueProcessor() =>
+        new(source: this,
+            _context,
+            propertyFilter: IsPropertyIncluded,
+            writeHandler: WriteChangesAsync,
+            // Safe only because inbound client messages are applied under _mqttClientSource rather than
+            // this, so none of them is skipped here as our own echo and every superseding value is
+            // relayed on. Applying them under this would break it.
+            ChangeDeliveryRule.SourceValuesAreSettled,
+            _configuration.BufferTime,
+            maxQueueDepth: null,
+            logger: _logger);
+
     private bool IsPropertyIncluded(PropertyReference propertyReference) =>
         propertyReference.TryGetRegisteredProperty() is { } property &&
         _configuration.Mapper.TryGetMapping(property, _subject, out _);
@@ -168,18 +185,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
 
                 try
                 {
-                    using var changeQueueProcessor = new ChangeQueueProcessor(
-                        source: this,
-                        _context,
-                        propertyFilter: IsPropertyIncluded,
-                        writeHandler: WriteChangesAsync,
-                        // Safe only because inbound client messages are applied under _mqttClientSource
-                        // rather than this, so none of them is skipped here as our own echo and every
-                        // superseding value is relayed on. Applying them under this would break it.
-                        ChangeDeliveryRule.SourceValuesAreSettled,
-                        _configuration.BufferTime,
-                        maxQueueDepth: null,
-                        logger: _logger);
+                    using var changeQueueProcessor = CreateChangeQueueProcessor();
 
                     await changeQueueProcessor.ProcessAsync(linkedToken).ConfigureAwait(false);
                 }

@@ -146,7 +146,7 @@ public class ChangeDeliveryFilterTests
             bufferTime: TimeSpan.FromMilliseconds(8),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         // Both commit before processing starts, so the loop meets the local write with the model
         // already holding source B's value.
@@ -302,7 +302,7 @@ public class ChangeDeliveryFilterTests
     /// to close.
     /// </summary>
     [Fact]
-    public void WhenTheSupersessionRuleIsUnspecified_ThenTheDeliveryDecisionIsRejected()
+    public void WhenTheDeliveryRuleIsUnspecified_ThenTheDeliveryDecisionIsRejected()
     {
         // Arrange
         var subject = new DerivedCollectionDevice(InterceptorSubjectContext.Create()) { First = 1 };
@@ -334,7 +334,7 @@ public class ChangeDeliveryFilterTests
             bufferTime: TimeSpan.FromMilliseconds(8),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
     }
 
     private static async Task StopAsync(CancellationTokenSource cancellation, Task processing)

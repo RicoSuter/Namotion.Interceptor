@@ -21,7 +21,9 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
     // here by construction, which is what SourceValuesAreSettled requires. Named once because the write loop and the
     // processor must agree: if only one of them ranked against the last commit, the other would still
     // write an older one out. Do not inline either use.
-    private const ChangeDeliveryRule SupersessionRule = ChangeDeliveryRule.SourceValuesAreSettled;
+    // Internal so a test can pin the choice: picking the other rule is silent and only shows up
+    // later as a node serving a value the model has moved past.
+    internal const ChangeDeliveryRule DeliveryRule = ChangeDeliveryRule.SourceValuesAreSettled;
 
     private readonly IInterceptorSubject _subject;
     private readonly IInterceptorSubjectContext _context;
@@ -163,7 +165,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                     // Decided again here rather than only when the batch was assembled: a client write
                     // takes this same lock, so one can land between the two and leave the node holding
                     // its value while we are about to overwrite it with an older commit.
-                    if (ChangeDelivery.IsSuperseded(in change, SupersessionRule))
+                    if (ChangeDelivery.IsSuperseded(in change, DeliveryRule))
                     {
                         continue;
                     }
@@ -251,7 +253,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                     using var changeQueueProcessor = new ChangeQueueProcessor(
                         source: this, _context,
                         propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
-                        SupersessionRule,
+                        DeliveryRule,
                         _configuration.BufferTime, maxQueueDepth: null, logger: _logger);
 
                     await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);

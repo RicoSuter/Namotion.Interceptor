@@ -33,7 +33,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         // Act - enqueue multiple changes to the same property and trigger flush
         var property = new PropertyReference(subject, nameof(Person.FirstName));
@@ -77,7 +77,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         // Act - enqueue changes to different properties
         var firstNameProperty = new PropertyReference(subject, nameof(Person.FirstName));
@@ -121,7 +121,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         // Act - enqueue in order: A, B, A (last occurrence of A is after B)
         var firstNameProperty = new PropertyReference(subject, nameof(Person.FirstName));
@@ -169,7 +169,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         // Act - trigger flush without enqueuing anything
         await TriggerFlushAsync(processor);
@@ -196,7 +196,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         // Act & Assert - should not throw
         processor.Dispose();
@@ -229,7 +229,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         // Act - enqueue and start first flush
         var property = new PropertyReference(subject, nameof(Person.FirstName));
@@ -276,7 +276,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMinutes(10),
             maxQueueDepth: 2,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
@@ -325,7 +325,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMilliseconds(20),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
@@ -373,7 +373,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         // Act
         var property = new PropertyReference(subject, nameof(Person.FirstName));
@@ -440,7 +440,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMilliseconds(5),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var processing = processor.ProcessAsync(cancellation.Token);
@@ -524,7 +524,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMilliseconds(5),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesAreSettled);
+            deliveryRule: ChangeDeliveryRule.SourceValuesAreSettled);
 
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var processing = processor.ProcessAsync(cancellation.Token);
@@ -600,7 +600,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.Zero,
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesAreSettled);
+            deliveryRule: ChangeDeliveryRule.SourceValuesAreSettled);
 
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var processing = processor.ProcessAsync(cancellation.Token);
@@ -697,7 +697,7 @@ public class ChangeQueueProcessorTests
     /// data with no diagnostic, so the zero value is rejected rather than treated as a rule.
     /// </summary>
     [Fact]
-    public void WhenTheSupersessionRuleIsUnspecified_ThenTheProcessorIsRejected()
+    public void WhenTheDeliveryRuleIsUnspecified_ThenTheProcessorIsRejected()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -714,7 +714,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMilliseconds(8),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: default));
+            deliveryRule: default));
     }
 
     private static (IInterceptorSubjectContext Context, Person Subject, ConcurrentQueue<string?> Written, object Source, ChangeQueueProcessor Processor)
@@ -745,7 +745,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.Zero,
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         return (context, subject, written, source, processor);
     }
@@ -813,7 +813,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.Zero,
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         // Act: both writes are queued before processing starts; the second supersedes the first.
         subject.FirstName = "superseded";
@@ -853,7 +853,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMilliseconds(50),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         // Act
         processor.Dispose();
@@ -921,7 +921,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.Zero,
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);

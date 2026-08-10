@@ -335,7 +335,7 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
             bufferTime: TimeSpan.FromMilliseconds(8),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            supersessionRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         using var processorCts = new CancellationTokenSource();
         var processTask = processor.ProcessAsync(processorCts.Token);

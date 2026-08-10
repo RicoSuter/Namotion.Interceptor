@@ -72,12 +72,12 @@ internal sealed class ChangeMerger : IDisposable
     /// <returns>The merged changes. The memory points into the pooled buffer and stays valid until
     /// the next <see cref="Merge"/>, <see cref="Reset"/> or <see cref="Dispose"/> call, so the caller
     /// can await a write handler on it before resetting. Empty once <see cref="Dispose"/> has run.</returns>
-    /// <param name="supersessionRule">When set, drops survivors the model has already moved past under
+    /// <param name="deliveryRule">When set, drops survivors the model has already moved past under
     /// that rule, which is what makes delivery converge across flushes rather than only within one. Null
     /// by default so the batch collapse can be exercised on its own.</param>
     public ReadOnlyMemory<SubjectPropertyChange> Merge(
         ReadOnlySpan<SubjectPropertyChange> changes,
-        ChangeDeliveryRule? supersessionRule = null)
+        ChangeDeliveryRule? deliveryRule = null)
     {
         if (_buffer is null)
         {
@@ -188,7 +188,7 @@ internal sealed class ChangeMerger : IDisposable
             Array.Reverse(_buffer, 0, _count);
         }
 
-        if (supersessionRule is { } rule && _count > 0)
+        if (deliveryRule is { } rule && _count > 0)
         {
             SuppressSupersededChanges(rule);
         }
