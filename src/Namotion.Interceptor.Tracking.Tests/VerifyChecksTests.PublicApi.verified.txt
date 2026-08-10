@@ -39,8 +39,10 @@ namespace Namotion.Interceptor.Tracking.Change
     }
     public sealed class PropertyChangeQueueSubscription : System.IDisposable
     {
+        public int Count { get; }
         public void Dispose() { }
         public bool TryDequeue(out Namotion.Interceptor.Tracking.Change.SubjectPropertyChange item, System.Threading.CancellationToken cancellationToken) { }
+        public bool TryDequeueImmediate(out Namotion.Interceptor.Tracking.Change.SubjectPropertyChange item) { }
     }
     public static class PropertyChangeSubscriptionExtensions
     {
@@ -80,6 +82,7 @@ namespace Namotion.Interceptor.Tracking.Change
         public bool TryGetNewValue<TValue>(out TValue value) { }
         public bool TryGetOldValue<TValue>(out TValue value) { }
         public Namotion.Interceptor.Tracking.Change.SubjectPropertyChange WithOrigin(Namotion.Interceptor.ChangeOrigin origin) { }
+        public Namotion.Interceptor.Tracking.Change.SubjectPropertyChange WithoutRevision() { }
         public static Namotion.Interceptor.Tracking.Change.SubjectPropertyChange Create<TValue>(Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.ChangeOrigin origin, System.DateTimeOffset changedTimestamp, System.DateTimeOffset? receivedTimestamp, TValue oldValue, TValue newValue, long revision = 0) { }
         public static bool operator !=(Namotion.Interceptor.Tracking.Change.SubjectPropertyChange left, Namotion.Interceptor.Tracking.Change.SubjectPropertyChange right) { }
         public static bool operator ==(Namotion.Interceptor.Tracking.Change.SubjectPropertyChange left, Namotion.Interceptor.Tracking.Change.SubjectPropertyChange right) { }
