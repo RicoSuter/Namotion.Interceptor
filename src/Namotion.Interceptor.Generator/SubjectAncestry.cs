@@ -139,7 +139,7 @@ internal static class SubjectAncestry
         if (typeSymbol.BaseType is not null &&
             SymbolExtensions.AccessibleMembers(typeSymbol.BaseType, typeSymbol, compilation, MemberNames.RaisePropertyChanged)
                 .OfType<IMethodSymbol>()
-                .Any(GeneratedMemberTable.IsRaisePropertyChangedSignature))
+                .Any(GeneratedMemberTable.HasRaisePropertyChangedParameters))
         {
             return true;
         }

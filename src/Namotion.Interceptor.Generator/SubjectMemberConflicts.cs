@@ -64,7 +64,7 @@ internal static class SubjectMemberConflicts
         // is meant to prevent. Parameter types are compared here, unlike in PlumbingMethods, because
         // that overload is an ordinary shape on an MVVM base rather than a contrivance.
         var raiseIsHidden = SymbolExtensions.HidableMembers(baseType, subject, compilation, MemberNames.RaisePropertyChanged)
-            .Any(member => member is not IMethodSymbol method || GeneratedMemberTable.IsRaisePropertyChangedSignature(method));
+            .Any(member => member is not IMethodSymbol method || GeneratedMemberTable.HasRaisePropertyChangedParameters(method));
 
         if (raiseIsHidden)
         {

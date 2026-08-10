@@ -95,6 +95,14 @@ internal static class GeneratedMemberTable
     // textual order, so reordering them leaves one null and takes the generator down with a
     // TypeInitializationException on every compilation.
 
+    /// <summary>
+    /// Four of IInterceptorSubject's five members, not all of them, and not enumerated from the
+    /// compilation for that reason. Properties is deliberately left out: every subject emits its own
+    /// explicit implementation of it, which always wins, so treating it as hijackable would report
+    /// every legitimate generated hierarchy. The names cannot be nameof here, because the generator
+    /// ships as an analyzer and does not reference Namotion.Interceptor; GeneratedMemberTableTests
+    /// pins them against the interface instead.
+    /// </summary>
     private static readonly string[] HijackableInterfaceMembers =
         ["Context", "Data", "SyncRoot", "AddProperties"];
 
@@ -145,11 +153,13 @@ internal static class GeneratedMemberTable
     }
 
     /// <summary>
-    /// Whether a method matches the RaisePropertyChanged(string) the root emits. Read by the notify
-    /// lookup, which asks whether a base already answers that call, and by the hiding check, which
-    /// asks whether the emitted one needs a 'new'.
+    /// Whether a method takes what the RaisePropertyChanged(string) the root emits takes. The name is
+    /// deliberately not tested: both callers reach this through a lookup keyed on
+    /// <see cref="MemberNames.RaisePropertyChanged"/>, so every method reaching it already carries that
+    /// name. Read by the notify lookup, which asks whether a base already answers that call, and by the
+    /// hiding check, which asks whether the emitted one needs a 'new'.
     /// </summary>
-    public static bool IsRaisePropertyChangedSignature(IMethodSymbol method)
+    public static bool HasRaisePropertyChangedParameters(IMethodSymbol method)
         => method.TypeParameters.Length == 0 &&
            method.Parameters.Length == 1 &&
            method.Parameters[0].RefKind == RefKind.None &&
