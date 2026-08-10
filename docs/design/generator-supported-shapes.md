@@ -727,6 +727,12 @@ Use `--no-incremental` on both builds. Without it the Razor generator does not r
 files show as present in one tree and absent in the other. That is distinguishable from a real
 difference, since `diff -r` reports absence separately, but it makes the comparison useless.
 
+Diff the `Namotion.Interceptor.Generator` subdirectory, not the whole output. One
+`CompilerGeneratedFilesOutputPath` is shared by every project in the solution, and Razor writes
+`_Imports_razor.g.cs` from each of them to the same path, so whichever project finishes last wins.
+That produces a large diff between two builds of identical source. The subjects this generator emits
+are named after their full type name and do not collide.
+
 **Compare resolved `DefaultProperties` blocks, not key lists.** `.Concat(Base.DefaultProperties)` puts
 the base last and `ToFrozenDictionary` is last wins, so a changed entry does not show up as a key
 difference.

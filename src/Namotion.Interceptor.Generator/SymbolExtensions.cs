@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using Microsoft.CodeAnalysis;
@@ -55,4 +56,49 @@ internal static class SymbolExtensions
         }
         return false;
     }
+
+    /// <summary>
+    /// The type and every class above it, stopping before object.
+    /// </summary>
+    public static IEnumerable<INamedTypeSymbol> EnumerateChain(INamedTypeSymbol? type)
+    {
+        for (var current = type; current is { SpecialType: not SpecialType.System_Object }; current = current.BaseType)
+        {
+            yield return current;
+        }
+    }
+
+    /// <summary>
+    /// The members of a given name that member lookup from <paramref name="accessingType"/> would find
+    /// on the chain starting at <paramref name="baseType"/>. Statics are dropped because none of the
+    /// call sites the generator emits can reach one, and inaccessible members because they neither
+    /// hide nor bind. Callers add the part that actually differs between them: the base class contract
+    /// tests the signature, and the notify lookup tests the emitted call's one argument. Contrast
+    /// <see cref="HidableMembers"/>, which must see statics.
+    /// </summary>
+    public static IEnumerable<ISymbol> AccessibleMembers(
+        INamedTypeSymbol baseType,
+        INamedTypeSymbol accessingType,
+        Compilation compilation,
+        string name)
+        => EnumerateChain(baseType)
+            .SelectMany(type => type.GetMembers(name))
+            .Where(member => !member.IsStatic && compilation.IsSymbolAccessibleWithin(member, accessingType));
+
+    /// <summary>
+    /// The members of a given name on the base chain that a member emitted into
+    /// <paramref name="accessingType"/> can hide. Same as <see cref="AccessibleMembers"/> except that
+    /// statics are kept: C# hiding is not staticness-sensitive, so a static base member of a plumbing
+    /// name is hidden by the emitted instance member and produces the same CS0108 an instance one
+    /// would. Accessibility still applies, because an inaccessible member is neither hidden nor found
+    /// by member lookup.
+    /// </summary>
+    public static IEnumerable<ISymbol> HidableMembers(
+        INamedTypeSymbol baseType,
+        INamedTypeSymbol accessingType,
+        Compilation compilation,
+        string name)
+        => EnumerateChain(baseType)
+            .SelectMany(type => type.GetMembers(name))
+            .Where(member => compilation.IsSymbolAccessibleWithin(member, accessingType));
 }

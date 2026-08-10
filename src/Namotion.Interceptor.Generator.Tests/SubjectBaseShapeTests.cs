@@ -354,7 +354,7 @@ public class SubjectBaseShapeTests
     public void WhenAPlainClassSitsBetweenTwoSubjectsAcrossAssemblies_ThenTheWalkSkipsItAndNamesTheAttributedAncestor()
     {
         // Arrange: same A/B/C shape as above, but A and B live in a referenced assembly whose
-        // generated code is already in metadata. That is what separates SubjectBaseContract's
+        // generated code is already in metadata. That is what separates SubjectAncestry's
         // Interfaces from AllInterfaces: B inherits IInterceptorSubject from A, so AllInterfaces
         // reports it on B and the walk would stop at the plain intermediate. The result still
         // compiles, so only the emitted shape asserted below catches the regression.

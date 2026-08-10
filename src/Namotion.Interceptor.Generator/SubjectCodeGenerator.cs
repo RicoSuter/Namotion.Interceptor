@@ -1,7 +1,6 @@
 using System.Linq;
 using System.Text;
 using Namotion.Interceptor.Generator.Models;
-using MemberNames = Namotion.Interceptor.Generator.SubjectBaseContract.MemberNames;
 
 namespace Namotion.Interceptor.Generator;
 
