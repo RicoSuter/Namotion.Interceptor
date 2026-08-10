@@ -116,10 +116,14 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
     public PropertyReference DoubleProperty =>
         new(ServerRoot.Child!, nameof(InboundStatusChild.DoubleValue));
 
+    // waitForInitialValue: false only waits for the client's subscriptions, not for the initial value.
+    // A test whose interceptor rejects that very value would otherwise fail here in its Arrange phase
+    // rather than on its own assertion.
     public static async Task<InboundStatusFixture> StartAsync(
         ITestOutputHelper output,
         OpcUaValueConverter? valueConverter = null,
-        IWriteInterceptor? clientInterceptor = null)
+        IWriteInterceptor? clientInterceptor = null,
+        bool waitForInitialValue = true)
     {
         var logger = new TestLogger(output);
         var port = await OpcUaTestPortPool.AcquireAsync();
@@ -156,7 +160,7 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
 
                     return new InboundStatusRoot(context);
                 },
-                isConnected: root => root.Child?.Value == InitialValue,
+                isConnected: root => !waitForInitialValue || root.Child?.Value == InitialValue,
                 serverUrl: port.ServerUrl,
                 certificateStoreBasePath: port.CertificateStoreBasePath);
 

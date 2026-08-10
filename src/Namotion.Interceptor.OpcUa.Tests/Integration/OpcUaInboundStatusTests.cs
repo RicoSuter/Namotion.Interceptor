@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Testing;
 using Opc.Ua;
@@ -85,5 +86,28 @@ public class OpcUaInboundStatusTests
         await AsyncTestHelpers.WaitUntilAsync(
             () => fixture.ClientRoot.Child?.DecimalValue == 12.5m,
             message: "the polled value should be converted to the property's type");
+    }
+
+    [Fact]
+    public async Task WhenOnePropertysApplyThrowsDuringInitialLoad_ThenTheSourceStillReachesSynchronized()
+    {
+        // Arrange: the interceptor rejects the value both string nodes hold on the server, so applying
+        // the loaded snapshot throws. The connected-wait is relaxed because that value can never land,
+        // and the fixture would otherwise time out before this test's own assertion runs.
+        await using var fixture = await InboundStatusFixture.StartAsync(
+            _output,
+            clientInterceptor: new ThrowOnValueInterceptor("initial"),
+            waitForInitialValue: false);
+
+        // Act & Assert: a rejected value must not abort the load, which would retry the connect forever.
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => fixture.ClientSource.State == SourceState.Synchronized);
+        }
+        catch (TimeoutException)
+        {
+            // Read here rather than passed to WaitUntilAsync, whose message is built before the wait.
+            Assert.Fail($"The source should reach Synchronized, but it is {fixture.ClientSource.State}.");
+        }
     }
 }

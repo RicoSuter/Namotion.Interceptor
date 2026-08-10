@@ -297,7 +297,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             var resultCount = Math.Min(readResponse.Results.Count, readValues.Count);
             for (var i = 0; i < resultCount; i++)
             {
-                if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
+                if (StatusCode.IsNotBad(readResponse.Results[i].StatusCode))
                 {
                     var dataValue = readResponse.Results[i];
                     result[ownedProperties[offset + i].Property] = dataValue;
@@ -305,16 +305,27 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             }
         }
 
-        _logger.LogInformation("Successfully read {Count} OPC UA nodes from server.", itemCount);
+        _logger.LogInformation("Read {Count} of {Requested} OPC UA nodes from server.", result.Count, itemCount);
         return () =>
         {
+            var applied = 0;
             foreach (var (property, dataValue) in result)
             {
-                var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
-                property.SetValueFromSource(this, dataValue.SourceTimestamp, null, value);
+                try
+                {
+                    var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
+                    property.SetValueFromSource(this, dataValue.SourceTimestamp, null, value);
+                    applied++;
+                }
+                catch (Exception e)
+                {
+                    // Per property, not per load: one rejected value must not stop the source reaching
+                    // Synchronized, because the connect would then retry forever.
+                    _logger.LogError(e, "Failed to apply the loaded value for {PropertyName}.", property.Name);
+                }
             }
 
-            _logger.LogInformation("Updated {Count} properties with OPC UA node values.", itemCount);
+            _logger.LogInformation("Applied {Count} of {Loaded} OPC UA node values.", applied, result.Count);
         };
     }
 
