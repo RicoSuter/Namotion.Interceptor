@@ -256,8 +256,14 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     /// revision, so ranking a later commit against the revision it happens to carry could drop the very
     /// value the fallback selected, with nothing left in the batch still holding it.
     /// </summary>
+    /// <remarks>
+    /// For anyone collapsing a batch themselves rather than through the built-in processor. A change
+    /// carrying no revision is never dropped as superseded, so the cost of using this where it was not
+    /// needed is a redundant delivery rather than a lost value. Use it whenever arrival order, not commit
+    /// order, decided which change survived.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal SubjectPropertyChange WithoutRevision() =>
+    public SubjectPropertyChange WithoutRevision() =>
         new(Property,
             Origin,
             ChangedTimestamp,
