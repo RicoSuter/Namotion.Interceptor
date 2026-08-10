@@ -1336,8 +1336,8 @@ public class SubjectBaseDiagnosticsTests
     {
         // Arrange: the hand-written class satisfies the contract by inheriting the referenced
         // subject's plumbing, so it declares no explicit implementation of its own and its public
-        // Context wins the slot for every generated subclass. This is issue #437 in the shape the
-        // rule exists to prevent, and it produces no compiler diagnostic at all.
+        // Context wins the slot for every generated subclass. That is the silent interception loss
+        // in the shape the rule exists to prevent, and it produces no compiler diagnostic at all.
         const string librarySource = """
             using Namotion.Interceptor;
             using Namotion.Interceptor.Attributes;

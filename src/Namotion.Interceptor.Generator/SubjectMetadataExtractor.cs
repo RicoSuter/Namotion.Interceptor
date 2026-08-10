@@ -501,14 +501,9 @@ internal static class SubjectMetadataExtractor
 
                 var methodName = fullMethodName.Substring(0, fullMethodName.Length - InterceptedMethodPostfix.Length);
 
-                // The wrapper is emitted into the same generated half as the plumbing, so a wrapper
-                // named like a plumbing member captures the generated call sites instead of the
-                // plumbing. In derived mode the plumbing is inherited, so this is a silent capture:
-                // the only compiler signal is CS0108, which a consumer without TreatWarningsAsErrors
-                // never sees, and the subject then reports whatever the wrapper returns. An
-                // AddProperties wrapper is quieter still, taking the interface slot from the root's
-                // explicit implementation with no compiler diagnostic at all. NI0013 cannot catch
-                // either, because it scans declared members rather than emitted ones.
+                // The capture is silent: in derived mode the only compiler signal is a CS0108 that a
+                // consumer without TreatWarningsAsErrors never sees, and an AddProperties wrapper
+                // produces none at all. NI0013 scans declared members rather than emitted ones.
                 if (GeneratedMemberTable.CollidesWithGeneratedMember(methodName))
                 {
                     diagnostics.Add(Diagnostic.Create(

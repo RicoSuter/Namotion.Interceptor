@@ -70,7 +70,7 @@ public class VirtualPropertyIntegrationTests
     public void WhenWritingThroughAThreeLevelHierarchy_ThenBaseAndDerivedWritesAreIntercepted()
     {
         // Arrange: the value alone proves nothing here, because a base-declared property kept its
-        // value even while base-declared writes bypassed the interceptor chain (issue #437).
+        // value even while base-declared writes bypassed the interceptor chain.
         var writeInterceptor = new RecordingWriteInterceptor();
         var context = InterceptorSubjectContext
             .Create()

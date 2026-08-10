@@ -200,8 +200,8 @@ internal static class SubjectMemberConflicts
     /// An explicit implementation is deliberately not exempt. C# only allows one in a class that lists
     /// the interface itself (CS0540), and listing it makes that class the nearest subject ancestor and
     /// therefore the contract provider, so an exemption keyed on the explicit form never fired at all:
-    /// it made the only form a hand-written ancestor can express invisible, which is issue #437 with
-    /// nothing reported.
+    /// it made the only form a hand-written ancestor can express invisible, which is the silent
+    /// interception loss with nothing reported.
     /// </remarks>
     private static bool TakesSlotFromAbove(INamedTypeSymbol declarer, ISymbol interfaceMember)
         => declarer.BaseType?.FindImplementationForInterfaceMember(interfaceMember) is not null;
