@@ -47,11 +47,12 @@ Nodes are constructed at one site (`OpcUaNodeFactory.cs:227`), so they are ours 
 if (property does not resolve to a registered property)
     return BadNoCommunication                                // node untouched
 
+previous = this.Value                                        // last value we could represent
 if (indexRange is not Empty && Value is Array original)     // copy before the merge
     masks = ChangeMasks; Value = CopyForMerge(original)
 
 result = base.WriteValueAttribute(...)                       // type check, merge, assignment
-if (result is bad) { restore Value and ChangeMasks if copied; return result }
+if (result is bad) { if copied { Value = original; ChangeMasks = masks } return result }
 
 requested = null; applied = false
 try {
@@ -67,7 +68,7 @@ try {
     Timestamp   = model write timestamp
     StatusCode  = Good
 }
-catch (e) { StatusCode = UncertainLastUsableValue; log }
+catch (e) { Value = previous; StatusCode = UncertainLastUsableValue; log }
 
 IncomingThroughput.Add(1)
 ClearChangeMasks(context, includeChildren: false)
@@ -77,7 +78,7 @@ return applied && ValuesMatch(modelValue, requested) ? Good : BadOutOfRange
 
 ### Copy before the merge, not at every crossing
 
-The merge is the only in-place mutator, and `WriteValueAttribute` is the only route to it. Copying the node's array immediately before `base` hands the merge a private instance, so the model's array is never touched however the node came to hold it.
+The merge is the only in-place mutator of a node value, and `WriteValueAttribute` is the only route that reaches one. (`AuditEvents.cs:217` also calls `UpdateRange`, on the client's own fragment as both source and destination, which touches no node.) Copying the node's array immediately before `base` hands the merge a private instance, so the model's array is never touched however the node came to hold it.
 
 This establishes the precondition locally at the one site that needs it, rather than maintaining a "never share" invariant across every crossing that would have to be re-proved whenever someone adds a fourth. It also costs **one `Array.Clone` per index range write** and nothing on the outbound path, at node creation, on ordinary writes, or for scalars.
 
@@ -109,7 +110,9 @@ return false;
 
 ### Uncertain, and how it clears
 
-If `ConvertToNodeValue` throws on the model's own value, no node value is correct. The node keeps what it has and reports `UncertainLastUsableValue`, which is the field OPC UA provides for exactly this. Leaving it unwrapped instead would let the throw escape as `BadUnexpectedError` with the node still holding the client's value, which is the divergence this PR exists to remove.
+If `ConvertToNodeValue` throws on the model's own value, no node value is correct. The node is restored to `previous`, the last value this server could represent, and reports `UncertainLastUsableValue`, which is exactly what that status code means.
+
+The restore is the point. Without it the node keeps what `base` assigned at `BaseVariableState.cs:2046`, which is the **client's** value, so a refused write to a property whose own value is unrepresentable would leave the client's value on the node forever with only a status flag to distinguish it. That is the divergence this PR exists to remove, and an earlier revision shipped it while claiming the opposite. The test asserts the value, not only the status.
 
 It clears the next time a representable value arrives. The outbound loop must set `node.StatusCode = StatusCodes.Good` alongside `Value` and `Timestamp` (`OpcUaSubjectServer.cs:190-191`), because the `Value` setter resets the status only while `!m_valueTouched` (`BaseVariableState.cs:536-539`) and that flag is already true from node creation.
 
@@ -119,7 +122,7 @@ Clients act on it: the client PR teaches all four inbound paths that Uncertain i
 
 **The registration check is a per-write resolve**, not a field. A readonly field would never be null and row 1 would stay unfixed. `UpdateProperty` pays the same lookup today (`:421`), so this is not a regression.
 
-**The timestamp comes from the model**, not from `sourceTimestamp` and not from what `base` assigned. `base` sets `m_timestamp = sourceTimestamp` at `:2048` and the `Value` setter does not touch it, so a refused write would otherwise serve `conv(A)` stamped now. The other two writers of these nodes already stamp from the model (`CustomNodeManager.cs:397-401`, `OpcUaSubjectServer.cs:191`), so this keeps one convention.
+**The timestamp comes from the model when it has one.** `TryGetWriteTimestamp()` returns null whenever the current value never went through a terminal write, which includes constructor-initialized state and a write the equality check short-circuited, and `NodeState.Timestamp` is a non-nullable `DateTime` that the SDK reads as unset at `MinValue` (`BaseVariableState.cs:1965`). So leave `Timestamp` untouched when the model has none, matching what node creation already does (`CustomNodeManager.cs:397-401`). Otherwise it comes from the model, not from `sourceTimestamp` and not from what `base` assigned. `base` sets `m_timestamp = sourceTimestamp` at `:2048` and the `Value` setter does not touch it, so a refused write would otherwise serve `conv(A)` stamped now. The other two writers of these nodes already stamp from the model (`CustomNodeManager.cs:397-401`, `OpcUaSubjectServer.cs:191`), so this keeps one convention.
 
 **Apply `this.Value`, not the `value` parameter.** For an index range write the parameter is only the client's fragment.
 
@@ -141,7 +144,7 @@ A plain `try` block allocates nothing. It must not be a lambda or local function
 - the `StateChanged` subscription (`CustomNodeManager.cs:408-416`), its only subscriber
 - `SelfEchoReproTests.cs` entirely: both tests hand-construct a flush/guard race that cannot exist once no node write reaches the subject
 
-Verified: one reader of the fields, one caller of `UpdateProperty`, one subscriber. Node values are written at creation, in the outbound loop through the property setter, and by the SDK write service (`NodeState.cs:3775`, reached from `CustomNodeManager.cs:2008`, `:2229`, and `NodeState.WriteChildAttribute:4513`, all virtual). Monitored items use the SDK's own `OnStateChanged` field. `NodeState.Clone()` throws by default (`:73-76`), so a subclass field cannot be silently lost.
+Verified: one reader of the fields, one caller of `UpdateProperty`, one subscriber. Node values are written at creation, in the outbound loop through the property setter, and by the SDK write service (`NodeState.cs:3775`, reached from `CustomNodeManager.cs:2008`, `:2229`, and `NodeState.WriteChildAttribute:4513`, all virtual). Monitored items use the SDK's own `OnStateChanged` field. Nothing in `Libraries/Opc.Ua.Server` clones these nodes, which is what makes a subclass field safe. Not, as an earlier revision claimed, that `NodeState.Clone()` throws: `BaseVariableState` overrides it with `MemberwiseClone` (`:501-516`), which is `Activator.CreateInstance(GetType(), Parent)`, so a clone would either throw for want of that constructor or silently produce one with a null server. The safety is an audit result, not a language guarantee, and a future SDK that clones would break it quietly.
 
 ### Comments and docs this PR must carry
 
@@ -168,7 +171,7 @@ Deletions about 38. Additions: the subclass and override 55-70, the copy helper 
 
 ## Performance
 
-**Inbound, per client write:** one model read (boxing a value type), one outward conversion, and one `Array.Clone` only when an index range is present. The registration resolve is two dictionary lookups, the same as today.
+**Inbound, per client write:** one model read (boxing a value type), one outward conversion, and one `Array.Clone` only when an index range is present, plus one per inner array for a jagged ByteString. The registration resolve is two dictionary lookups, the same as today.
 
 **Outbound, per change:** the thread-static store, the `StateChanged` dispatch and the `Equals` guard all leave the 20k/s path. Added: one `StatusCode` compare-and-store and a `try` block, neither of which allocates. Net improvement.
 
