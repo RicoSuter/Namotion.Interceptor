@@ -12,6 +12,13 @@ namespace Namotion.Interceptor;
 /// </remarks>
 internal sealed class PropertyWriteState
 {
+    /// <summary>
+    /// The last write's timestamp as raw UTC ticks: a primitive rather than a DateTimeOffset so the write
+    /// path stores one value instead of building a struct, and UTC by convention because no offset is
+    /// kept. Zero means never written, which a genuine 0001-01-01 cannot be told apart from. Moves
+    /// independently of the revision slots below, since every commit advances it whatever its origin and
+    /// a derived recomputation advances it without committing a revision at all.
+    /// </summary>
     internal long TimestampTicks;
 
     /// <summary>
@@ -48,15 +55,16 @@ internal sealed class PropertyWriteState
     internal long LastSourceCommitRevision;
 
     /// <summary>
-    /// Whether any sink has published this property's value. One-way: set once, never cleared. Volatile
-    /// because a stale read of false skips a transaction confirmation write-back, leaving the divergence
-    /// it exists to repair.
+    /// Whether any sink has published this property's value. One-way, which is what makes a plain store
+    /// safe: racing writers write the same constant, so no update can be lost and no interlocked
+    /// read-modify-write is needed. Volatile supplies the other half, visibility, since it is written on
+    /// the flush task and read on the dequeue loop, and a stale false skips a transaction confirmation
+    /// write-back, leaving the divergence that write-back exists to repair.
     /// </summary>
     /// <remarks>
-    /// Deliberately not per source. It decides only whether a confirmation is written back, and a
+    /// Not per source, deliberately: it decides only whether a confirmation is written back, and a
     /// confirmation carries the current value, so a foreign sink's mark costs one redundant write rather
-    /// than a wrong value. That tolerance is what lets this be a bare flag holding no source reference to
-    /// release on detach. Making it per source trades that away for nothing.
+    /// than a wrong value. That tolerance is what lets it hold no source reference to release on detach.
     /// </remarks>
     internal volatile bool PublishedToAnySource;
 }

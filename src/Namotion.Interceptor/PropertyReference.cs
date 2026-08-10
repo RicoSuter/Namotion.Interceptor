@@ -171,8 +171,8 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
-    /// Records what the terminal just committed: the write timestamp as raw UTC ticks, avoiding a
-    /// DateTimeOffset conversion on the hot path, and the commit revision. The revision goes to whichever
+    /// Records what the terminal just committed: the write timestamp and the commit revision, the first
+    /// as raw UTC ticks; see <see cref="PropertyWriteState.TimestampTicks"/>. The revision goes to whichever
     /// of the two slots the origin selects, never both, so a commit costs one revision store on top of the
     /// timestamp store rather than two; see <see cref="PropertyWriteState.LastSourceCommitRevision"/>. The
     /// timestamp is recorded either way, preserving what <see cref="TryGetWriteTimestamp"/> reports.
