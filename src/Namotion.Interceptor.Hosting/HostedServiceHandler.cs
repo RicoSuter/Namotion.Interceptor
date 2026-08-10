@@ -41,8 +41,17 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        // Invoked from inside LifecycleInterceptor's lock (_attachedSubjects). Everything here must
-        // only append; appending never blocks and never runs user code.
+        // Invoked from inside LifecycleInterceptor's lock (_attachedSubjects). Everything here only
+        // appends, and appending never blocks and never runs a transition body.
+        //
+        // Third party code does run under that lock, though, and calling it a hazard is more honest
+        // than calling it impossible: an attach takes a startup completion hold from every
+        // IStartupCompletionDeferrer on the context, and a refused append disposes those holds again,
+        // both synchronously (see TakeStartupHolds). A deferrer that takes a lock of its own therefore
+        // joins the lock order of this lock, and a thread holding that lock while waiting for a
+        // transition that needs this one wedges all three. The hold has to exist before the append
+        // completes, and the event that appends arrives already inside the lock, so there is nowhere
+        // else to take it without reopening the window the hold exists to close.
         if (change.IsContextAttach)
         {
             AttachSubject(change.Subject);
@@ -284,7 +293,12 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// <remarks>
     /// Empty for an application that configures no deferring subsystem (no source monitoring, for
     /// example), which is the common case and costs one empty check per attach.
-    /// </remarks>
+    /// <para>
+    /// <c>DeferCompletion</c> is third party code and, on the lifecycle driven path, it runs under
+    /// LifecycleInterceptor's lock. A deferrer must therefore not block on anything that can be waiting
+    /// for a transition, and must not take a lock that a thread inside that lock can be waiting for.
+    /// See the note on <see cref="HandleLifecycleChange"/>.
+    /// </para></remarks>
     private IDisposable[] TakeStartupHolds(IInterceptorSubjectContext context)
     {
         var deferrers = context.GetServices<IStartupCompletionDeferrer>();

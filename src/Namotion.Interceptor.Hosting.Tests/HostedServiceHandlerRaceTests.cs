@@ -647,6 +647,213 @@ public class HostedServiceHandlerRaceTests
         Assert.Equal(1, detaching.StopCount);
     }
 
+    [Fact]
+    public async Task WhenASubjectEntersTheGraph_ThenItsStartupHoldIsTakenBeforeTheGraphWriteReturns()
+    {
+        // Arrange - the hold closes the window in which "the graph has finished starting" can be
+        // reached while a start is still queued, so it has to exist by the time the graph write
+        // returns. That is the constraint on where the hold may be taken, and it is why the take is
+        // still inside the lifecycle lock: the event that appends the start arrives already inside
+        // that lock, so taking the hold anywhere later reopens the window.
+        var (host, context, deferrer) = await StartHostWithDeferrerAsync();
+
+        try
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            var attachment = child.AttachHostedService(() => new TrackedBackgroundService());
+
+            var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            target.TransitionGate = () => release.Task;
+
+            // Act - the start is appended while the graph write runs, and its body is held at the
+            // seam, so the hold is read while the start it belongs to is provably still pending.
+            parent.Child = child;
+
+            // Assert
+            Assert.Equal(1, deferrer.Taken);
+            Assert.Equal(1, deferrer.Outstanding);
+
+            release.SetResult();
+            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+            Assert.Equal(0, deferrer.Outstanding);
+            Assert.NotNull(attachment.Current);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAQueuedStartIsSkippedByTheDrain_ThenItsStartupHoldIsReleased()
+    {
+        // Arrange - a hold that outlives the start it belongs to hangs every synchronization wait on
+        // that tree forever, which is worse than never having taken it, so every way out of the start
+        // body has to release. This is the drain's way out: the start is appended while the gate is
+        // Running and its body runs once draining has begun. Two seams, so both halves are pinned
+        // rather than timed.
+        var (host, context, deferrer) = await StartHostWithDeferrerAsync();
+
+        var parent = new Parent(context);
+        var child = new Person();
+        var created = 0;
+
+        var attachment = child.AttachHostedService(() =>
+        {
+            Interlocked.Increment(ref created);
+            return new TrackedBackgroundService();
+        });
+
+        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        target.TransitionGate = () => release.Task;
+
+        parent.Child = child;
+        Assert.Equal(1, deferrer.Outstanding);
+
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+        var drainEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDrain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.DrainGate = () =>
+        {
+            drainEntered.TrySetResult();
+            return releaseDrain.Task;
+        };
+
+        // Act
+        var stopping = host.StopAsync();
+        await drainEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        release.SetResult();
+        releaseDrain.SetResult();
+
+        // Assert - the drain appends its own stop behind that start and awaits it, so the start body
+        // has provably run by the time the shutdown returns.
+        await stopping;
+
+        Assert.Equal(0, Volatile.Read(ref created));
+        Assert.Equal(0, deferrer.Outstanding);
+    }
+
+    [Fact]
+    public async Task WhenAQueuedStartFindsItsSubjectDetached_ThenItsStartupHoldIsReleased()
+    {
+        // Arrange - the same leak through the liveness guard, which is the way out a graph move takes.
+        var (host, context, deferrer) = await StartHostWithDeferrerAsync();
+
+        try
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            var created = 0;
+
+            var attachment = child.AttachHostedService(() =>
+            {
+                Interlocked.Increment(ref created);
+                return new TrackedBackgroundService();
+            });
+
+            var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            target.TransitionGate = () => release.Task;
+
+            parent.Child = child;
+            Assert.Equal(1, deferrer.Outstanding);
+
+            // Act - the detach clears liveness while the start is held at the seam.
+            parent.Child = null;
+            release.SetResult();
+
+            // Assert
+            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+            Assert.Equal(0, Volatile.Read(ref created));
+            Assert.Equal(0, deferrer.Outstanding);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAQueuedStartIsSkippedByTheOneInstanceGuard_ThenItsStartupHoldIsReleased()
+    {
+        // Arrange - the third way out, and the one no other test reaches: a subject visible from two
+        // hosting contexts raises one context attach per context and the OWNING handler sees both, so
+        // it appends a second start for a target that is already running. That start skips its work
+        // in the body, where the chain serializes the two, and owes the release from there.
+        var builder = Host.CreateApplicationBuilder();
+
+        var firstContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var secondContext = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        // Registered on one context only: the subject's own context reaches it through the fallback,
+        // so both handlers resolve the same single deferrer.
+        var deferrer = new CallbackStartupDeferrer();
+        firstContext.AddService<IStartupCompletionDeferrer>(deferrer);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            var subject = new CountingHostedSubject();
+            ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
+
+            var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
+            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+            Assert.Equal(1, subject.StartCount);
+            var takenByTheFirstAttach = deferrer.Taken;
+
+            // Act
+            ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext);
+
+            // Assert - an empty transition drains whatever the second attach appended.
+            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+            Assert.Equal(1, subject.StartCount);
+            Assert.True(
+                deferrer.Taken > takenByTheFirstAttach,
+                "The second attach appended no start, so the guard under test was never reached.");
+
+            Assert.Equal(0, deferrer.Outstanding);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    private static async Task<(IHost Host, IInterceptorSubjectContext Context, CallbackStartupDeferrer Deferrer)>
+        StartHostWithDeferrerAsync()
+    {
+        var builder = Host.CreateApplicationBuilder();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance()
+            .WithHostedServices(builder.Services);
+
+        var deferrer = new CallbackStartupDeferrer();
+        context.AddService<IStartupCompletionDeferrer>(deferrer);
+
+        var host = builder.Build();
+        await host.StartAsync();
+        return (host, context, deferrer);
+    }
+
     /// <summary>
     /// Starts a host over a hosted subject that carries a factory attachment, then detaches the
     /// subject from inside the drain window with its own stop held on the transition seam. The
