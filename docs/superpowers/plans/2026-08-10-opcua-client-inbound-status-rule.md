@@ -39,14 +39,191 @@ dotnet test src/Namotion.Interceptor.OpcUa.Tests --filter "FullyQualifiedName~Op
 
 ---
 
-## Task 1: A test driver that makes the server emit a chosen status
+## Task 1: Test scaffolding
 
-The server never emits a non-Good status on its own, so every test below needs a way to produce one. The pattern is the one `Integration/OpcUaCrossStoreConvergenceTests.cs:44-60` already uses for values: reach the node through `TryGetVariableNode`, mutate it under `NodeManagerLock`, and flush.
+Everything below needs three things that do not exist yet: a model with the property shapes the tests exercise, a way to make the server emit a non-Good status, and a fixture that stands up a server and a connected client. Build them first, in one commit, so the later tasks are pure red-green.
+
+`SelfWriteTestChild` in `OpcUaServerSelfWriteTests.cs:108-112` has only a `string? Value` and is not reusable here, so this commit gets its own model.
 
 **Files:**
 - Create: `src/Namotion.Interceptor.OpcUa.Tests/Integration/Testing/OpcUaNodeStatusDriver.cs`
+- Create: `src/Namotion.Interceptor.OpcUa.Tests/Integration/Testing/InboundStatusFixture.cs`
 
-- [ ] **Step 1: Write the helper**
+- [ ] **Step 1: Write the model and the test doubles**
+
+Put these in `InboundStatusFixture.cs`, above the fixture:
+
+```csharp
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.OpcUa;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Sources.Paths.Attributes;
+
+namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
+
+[InterceptorSubject]
+public partial class InboundStatusRoot
+{
+    public partial InboundStatusChild? Child { get; set; }
+}
+
+[InterceptorSubject]
+public partial class InboundStatusChild
+{
+    [Path("opc", "Value")]
+    public partial string? Value { get; set; }
+
+    /// <summary>A sibling, so a test can prove one property's failure does not take another down.</summary>
+    [Path("opc", "Other")]
+    public partial string? Other { get; set; }
+
+    /// <summary>Decimal maps to Double on the wire, so this only round-trips if the path converts.</summary>
+    [Path("opc", "DecimalValue")]
+    public partial decimal DecimalValue { get; set; }
+}
+
+/// <summary>Throws from the inbound conversion when the incoming value equals a sentinel.</summary>
+internal sealed class ThrowOnSentinelConverter(object sentinel) : OpcUaValueConverter
+{
+    public override object? ConvertToPropertyValue(object? nodeValue, RegisteredSubjectProperty property)
+    {
+        if (Equals(nodeValue, sentinel))
+        {
+            throw new InvalidOperationException($"Refusing to convert '{nodeValue}'.");
+        }
+
+        return base.ConvertToPropertyValue(nodeValue, property);
+    }
+}
+
+/// <summary>Rejects a specific value on write, standing in for a validation interceptor.</summary>
+internal sealed class ThrowOnValueInterceptor(object rejected) : IWriteInterceptor
+{
+    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    {
+        if (Equals(context.NewValue, rejected))
+        {
+            throw new InvalidOperationException($"Refusing to accept '{context.NewValue}'.");
+        }
+
+        next(ref context);
+    }
+}
+```
+
+Check `IWriteInterceptor`'s exact signature in `src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs` before writing this one; match it rather than the sketch above if they differ.
+
+- [ ] **Step 2: Write the fixture**
+
+```csharp
+internal sealed class InboundStatusFixture : IAsyncDisposable
+{
+    private readonly OpcUaTestPortPool.Lease _port;
+    private readonly OpcUaTestServer<InboundStatusRoot> _server;
+    private readonly OpcUaTestClient<InboundStatusRoot> _client;
+
+    private InboundStatusFixture(
+        OpcUaTestPortPool.Lease port,
+        OpcUaTestServer<InboundStatusRoot> server,
+        OpcUaTestClient<InboundStatusRoot> client)
+    {
+        _port = port;
+        _server = server;
+        _client = client;
+    }
+
+    public InboundStatusRoot ServerRoot => _server.Root!;
+    public InboundStatusRoot ClientRoot => _client.Root!;
+    public IOpcUaSubjectServer ServerService => _server.Server!;
+
+    public PropertyReference ServerProperty =>
+        new(ServerRoot.Child!, nameof(InboundStatusChild.Value));
+
+    public PropertyReference OtherProperty =>
+        new(ServerRoot.Child!, nameof(InboundStatusChild.Other));
+
+    public PropertyReference DecimalProperty =>
+        new(ServerRoot.Child!, nameof(InboundStatusChild.DecimalValue));
+
+    public static async Task<InboundStatusFixture> StartAsync(
+        ITestOutputHelper output,
+        OpcUaValueConverter? valueConverter = null,
+        IWriteInterceptor? clientInterceptor = null,
+        bool pollingOnly = false)
+    {
+        var logger = new TestLogger(output);
+        var port = await OpcUaTestPortPool.AcquireAsync();
+
+        var server = new OpcUaTestServer<InboundStatusRoot>(logger);
+        await server.StartAsync(
+            createRoot: context => new InboundStatusRoot(context),
+            initializeDefaults: (context, root) =>
+                root.Child = new InboundStatusChild(context) { Value = "initial", Other = "initial" },
+            baseAddress: port.BaseAddress,
+            certificateStoreBasePath: port.CertificateStoreBasePath);
+
+        var client = new OpcUaTestClient<InboundStatusRoot>(logger, configureClient: configuration =>
+        {
+            if (valueConverter is not null)
+            {
+                configuration.ValueConverter = valueConverter;
+            }
+
+            // Sampling interval 0 puts every property on the polling path instead of subscriptions.
+            if (pollingOnly)
+            {
+                configuration.DefaultSamplingInterval = TimeSpan.Zero;
+            }
+        });
+
+        await client.StartAsync(
+            createRoot: context =>
+            {
+                if (clientInterceptor is not null)
+                {
+                    context.WithService(() => clientInterceptor);
+                }
+
+                return new InboundStatusRoot(context);
+            },
+            serverUrl: port.ServerUrl);
+
+        // Wait for the node tree, so a test can drive it immediately.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => server.Server!.TryGetVariableNode(
+                new PropertyReference(server.Root!.Child!, nameof(InboundStatusChild.Value)), out _),
+            message: "the child's variable node should exist");
+
+        return new InboundStatusFixture(port, server, client);
+    }
+
+    public Task WaitForClientValueAsync(string expected) =>
+        AsyncTestHelpers.WaitUntilAsync(
+            () => ClientRoot.Child?.Value == expected,
+            message: $"the client should hold '{expected}'");
+
+    /// <summary>Drives two properties in one lock hold, so they arrive in a single notification.</summary>
+    public void PublishPair(string first, string second)
+    {
+        OpcUaNodeStatusDriver.PublishMany(ServerService, systemContextOwner: ServerService, publish: node =>
+        {
+            node(ServerProperty, first, StatusCodes.Good);
+            node(OtherProperty, second, StatusCodes.Good);
+        });
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _client.DisposeAsync();
+        await _server.DisposeAsync();
+        _port.Dispose();
+    }
+}
+```
+
+The exact signatures of `OpcUaTestClient.StartAsync`, `OpcUaTestPortPool.Lease` and `configureClient` must be read from `src/Namotion.Interceptor.OpcUa.Tests/Integration/Testing/` and matched. The shape above follows `OpcUaCrossStoreConvergenceTests.cs:30-45`; if a member differs, follow the harness, not this sketch.
+
+- [ ] **Step 3: Write the status driver**
 
 ```csharp
 using Namotion.Interceptor.OpcUa.Server;
@@ -90,16 +267,56 @@ internal static class OpcUaNodeStatusDriver
 }
 ```
 
-- [ ] **Step 2: Build to confirm the accessors are reachable**
+Add a second entry point for the paired case, so two properties land in one notification:
+
+```csharp
+    /// <summary>
+    /// Publishes several properties inside one lock hold and one flush, so a subscription delivers
+    /// them in a single notification.
+    /// </summary>
+    public static void PublishMany(
+        IOpcUaSubjectServer server,
+        Action<Action<PropertyReference, object?, StatusCode>> publish)
+    {
+        var standardServer = (OpcUaStandardServer)((OpcUaSubjectServer)server).CurrentServer!;
+        var systemContext = standardServer.CurrentInstance.DefaultSystemContext;
+        var pending = new List<BaseDataVariableState>();
+
+        lock (standardServer.NodeManagerLock!)
+        {
+            publish((property, value, statusCode) =>
+            {
+                if (!server.TryGetVariableNode(property, out var node))
+                {
+                    throw new InvalidOperationException($"No variable node for '{property.Name}'.");
+                }
+
+                node.Value = value;
+                node.StatusCode = statusCode;
+                node.Timestamp = DateTime.UtcNow;
+                pending.Add(node);
+            });
+
+            foreach (var node in pending)
+            {
+                node.ClearChangeMasks(systemContext, false);
+            }
+        }
+    }
+```
+
+Simplify `InboundStatusFixture.PublishPair` to call this directly rather than through the nested-delegate shape sketched above, whichever reads better once both are in front of you.
+
+- [ ] **Step 4: Build to confirm the accessors are reachable**
 
 Run: `dotnet build src/Namotion.Interceptor.OpcUa.Tests`
 Expected: success. If `CurrentServer` or `NodeManagerLock` is inaccessible from the test assembly, add the test project to `InternalsVisibleTo` in `src/Namotion.Interceptor.OpcUa/Namotion.Interceptor.OpcUa.csproj` rather than widening either member's visibility.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/Namotion.Interceptor.OpcUa.Tests/Integration/Testing/OpcUaNodeStatusDriver.cs
-git commit -m "test: driver to emit a chosen node status from a running server"
+git add src/Namotion.Interceptor.OpcUa.Tests/Integration/Testing/
+git commit -m "test: scaffolding for the inbound status rule"
 ```
 
 ---
@@ -363,7 +580,13 @@ if (!ValuesAreEqual(newValue, oldValue))
 
     var key = pollingItem.NodeId.ToString();
     var updatedItem = pollingItem with { LastValue = newValue };   // cache stays raw
-    ...
+
+    if (!_pollingItems.TryUpdate(key, updatedItem, pollingItem))
+    {
+        _logger.LogTrace("Skipping update for concurrently modified/removed item {NodeId}", pollingItem.NodeId);
+        return;
+    }
+
     var update = new PropertyUpdate
     {
         Property = pollingItem.Property,
@@ -374,7 +597,17 @@ if (!ValuesAreEqual(newValue, oldValue))
 
 `LastValue` keeps the **raw** value so change detection continues to compare like with like.
 
-`pollingItem.Property` is a `PropertyReference`; `ConvertToPropertyValue` takes a `RegisteredSubjectProperty`. Resolve it with `TryGetRegisteredProperty()` and skip with a log if it does not resolve, matching what the other three paths do.
+`pollingItem.Property` is a `PropertyReference` and `ConvertToPropertyValue` takes a `RegisteredSubjectProperty`, so resolve it first, immediately above the conversion:
+
+```csharp
+    if (pollingItem.Property.TryGetRegisteredProperty() is not { } registeredProperty)
+    {
+        _logger.LogTrace("Skipping polled value for unregistered property {NodeId}", pollingItem.NodeId);
+        return;
+    }
+```
+
+and pass `registeredProperty` to `ConvertToPropertyValue`.
 
 - [ ] **Step 5: Run both and watch them pass**
 
