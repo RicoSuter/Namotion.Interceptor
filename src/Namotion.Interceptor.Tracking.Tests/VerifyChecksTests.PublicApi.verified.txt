@@ -40,8 +40,10 @@ namespace Namotion.Interceptor.Tracking.Change
     }
     public sealed class PropertyChangeQueueSubscription : System.IDisposable
     {
+        public int Count { get; }
         public void Dispose() { }
         public bool TryDequeue(out Namotion.Interceptor.Tracking.Change.SubjectPropertyChange item, System.Threading.CancellationToken cancellationToken) { }
+        public bool TryDequeueImmediate(out Namotion.Interceptor.Tracking.Change.SubjectPropertyChange item) { }
     }
     public static class PropertyChangeSubscriptionExtensions
     {

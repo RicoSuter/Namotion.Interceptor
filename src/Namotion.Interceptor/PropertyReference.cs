@@ -83,9 +83,7 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
             .Remove(new KeyValuePair<(string?, string), object?>((Name, key), expectedValue));
     }
 
-    // Short by convention, and load-bearing here: the write state is read on every delivered change,
-    // string hash codes are not cached, so key length is per-call work. Matches the "ni.*" keys the
-    // tracking and connector layers use.
+    // Short deliberately: hashed on every delivered change, and string hash codes are not cached.
     private const string WriteStateKey = "ni.wstate";
 
     /// <summary>

@@ -29,14 +29,21 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
     /// Number of changes currently queued. Exact only from the consumer thread while no
     /// producers are racing; concurrent enqueues may or may not be included in the snapshot.
     /// </summary>
-    internal int Count => _queue.Count;
+    public int Count => _queue.Count;
 
     /// <summary>
     /// Dequeues one currently-available change without waiting; returns false when the queue is
-    /// momentarily empty. Single-consumer only, like <see cref="TryDequeue"/>. Does not touch the
-    /// wake-up signal, so it must not run concurrently with <see cref="TryDequeue"/>.
+    /// momentarily empty.
     /// </summary>
-    internal bool TryDequeueImmediate(out SubjectPropertyChange item) => _queue.TryDequeue(out item);
+    /// <remarks>
+    /// Single consumer, and stricter than <see cref="TryDequeue"/>: this does not touch the wake-up
+    /// signal, so it must never run concurrently with <see cref="TryDequeue"/> on the same subscription.
+    /// Breaking that is silent rather than fatal. Nothing throws; changes are simply consumed by the
+    /// wrong loop or a waiter misses its wake-up, and the symptom appears later as a source that has
+    /// quietly stopped delivering. Use it to drain a subscription you own exclusively at that moment,
+    /// for example while connecting, and <see cref="TryDequeue"/> everywhere else.
+    /// </remarks>
+    public bool TryDequeueImmediate(out SubjectPropertyChange item) => _queue.TryDequeue(out item);
 
     /// <summary>
     /// Enqueues a property change. Thread-safe and can be called concurrently from multiple threads.
