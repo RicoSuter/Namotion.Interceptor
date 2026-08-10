@@ -14,6 +14,8 @@ Everything else on this page follows from that one sentence:
 
 Nothing else may start these services. In particular, do not also register a subject the handler manages with `AddHostedService<T>()`, because that is a second owner and a second start.
 
+> **Internal design:** For the concurrency model behind this, the ordering guarantees and the deadlock shapes that are accepted rather than guarded, see [Hosted Service Ownership](design/hosting-service-ownership.md).
+
 ## Setup
 
 Configure hosting support on the context and register it with the host:
@@ -32,7 +34,12 @@ await host.StartAsync();
 
 `WithHostedServices()` creates the `HostedServiceHandler` for this context and registers it with the host, so the handler opens for business when the host starts and drains when the host stops. It also enables `WithLifecycle()`, which raises the context attach and detach events the handler listens to. Each context gets its own handler, so two contexts sharing one `IServiceCollection` both work, and a subject reachable from two hosting enabled contexts is still started once.
 
-Child subjects reach the handler through their own `Context`, so hosting for anything below the root needs context inheritance. `WithFullPropertyTracking()` includes `WithContextInheritance()`. If you compose the context by hand, add `WithContextInheritance()` yourself, or only root subjects will ever start anything.
+Hosting below the root needs context inheritance. `WithFullPropertyTracking()` includes `WithContextInheritance()`. If you compose the context by hand, add `WithContextInheritance()` yourself.
+
+Without it, a subject one level below the root still starts, because the graph write that attaches it invokes the handler through the parent's context. Two things break instead, and both are silent:
+
+- **The descent stops at level one.** Inheritance is what gives a child the parent's context, and it is that assignment which walks the child's own children into the graph. Without it nothing below the first level is ever attached, so nothing below the first level is ever started.
+- **Attaching to a subject already in the graph resolves no handler.** `AttachHostedService` looks the handler up on `subject.Context`. A child that never inherited the parent's context resolves nothing there, so the factory is stored and no instance is created.
 
 Starts and stops queued before the host starts run once it does. Each managed service has its own queue, so its own starts and stops never overlap, while unrelated services run concurrently. The one ordering guarantee across services is the one that matters for cleanup: when a subject leaves the graph, its own stop runs before the stops of the services attached to it.
 
@@ -79,19 +86,21 @@ builder.Services.AddSubject<WeatherStation>(station =>
 });
 ```
 
-It registers `T` as a singleton, forces its construction at host start, and attaches it to the context resolved from the container (or from the optional `contextResolver`). Constructor shape decides nothing: the context is applied after construction whether or not `T` declares a constructor taking an `IInterceptorSubjectContext`.
+It registers `T` as a singleton, forces its construction at host start, and attaches it to the context resolved from the container (or from the optional `contextResolver`). The context is applied after construction whether or not `T` declares a constructor taking an `IInterceptorSubjectContext`, so a subject with only injected dependencies is attached just the same.
 
 If `T` also implements `IHostedService`, the handler starts it as usual, and host startup waits for that start and fails if it throws, the way `AddHostedService<T>` does. `AddSubject<T>()` also serves plain subjects that only need to exist and be attached at startup.
 
-Two sharp edges:
+Three sharp edges:
 
 - Registration is idempotent. A second `AddSubject<T>()` for the same `T` silently drops its `configure` and `contextResolver`.
 - If you already registered `T` yourself, `AddSubject<T>()` applies neither the context nor `configure`.
+- When the resolved context has no hosting handler, because `WithHostedServices()` was never called on it or because `contextResolver` returned null, there is nothing to hand the subject to. `AddSubject<T>()` then starts an `IHostedService` subject itself at host start and stops that same instance at host shutdown. It never disposes it.
 
-Where `configure` runs relative to the attach depends on the constructor, and the difference is observable:
+`configure` always runs before the attach `AddSubject` itself performs. Whether the subject is already attached at that point depends on the constructor, and the difference is observable:
 
-- **`T` has no constructor taking a context.** `AddSubject` performs the attach itself and runs `configure` before it, so the subject is fully configured before anything can start it. Those assignments are not intercepted and not tracked, because the subject has no context yet. This is the deliberate trade: running `configure` after the attach would race the start the attach appends.
-- **`T` takes a context.** The generated constructor has already attached the subject by the time the factory sees it, so `configure` necessarily runs against an attached subject. Its assignments are intercepted and tracked, and they race the queued start exactly as they do for a hand written `new MySubject(context) { Name = "x" }`.
+- **`T` has no constructor taking a context.** The attach `AddSubject` performs is the only one, so `configure` runs against an unattached subject and it is fully configured before anything can start it. Those assignments are not intercepted and not tracked, because the subject has no context yet. This is the deliberate trade: running `configure` after the attach would race the start the attach appends.
+- **Construction attaches the subject**, which is what the generated context constructor does. `configure` then runs against an attached subject. Its assignments are intercepted and tracked, and they race the queued start exactly as they do for a hand written `new MySubject(context) { Name = "x" }`.
+- **`T` declares a context parameter and never attaches with it.** Nothing attached during construction, so the attach `AddSubject` performs is again the only one and `configure` precedes it. This shape behaves like the first case despite declaring the parameter.
 
 ### A service bound to a subject
 
@@ -133,16 +142,20 @@ var attachment = person.AttachHostedService(() => new PersonBackgroundService(pe
 
 ### The factory must construct
 
-`() => existingInstance` is the one shape that defeats the design. The handler disposes the instance when the subject leaves the graph and invokes the factory again when it comes back, so a factory that hands out a captured instance restarts something that has already been stopped and disposed.
+`() => existingInstance` is the one shape that defeats the design. The handler disposes the instance when the subject leaves the graph and invokes the factory again when it comes back, so a factory that hands out a captured instance would restart something that has already been stopped and disposed.
 
 ```csharp
 // Correct: a fresh instance every time the handler needs one.
 subject.AttachHostedService(() => new DataSyncService(subject));
 
-// Wrong: the handler disposes this instance on detach, then starts the same one again on re-attach.
+// Wrong: refused. The handler disposed this instance on detach, so it will not start it again.
 var service = new DataSyncService(subject);
 subject.AttachHostedService(() => service);
 ```
+
+The second shape is caught rather than left to fail obscurely. The handler compares each instance the factory produces against the previous one and, on a repeat, refuses the start before calling `StartAsync`: `Current` stays null and an `InvalidOperationException` explaining the rule lands on `attachment.Fault`.
+
+The check is one reference comparison against the last instance, which catches the immediate repeat and nothing more. A pooling factory that alternates between two instances still hands back a disposed one, and that is not detected.
 
 The factory runs inside the handler's transition, outside every lock, so it can read live state rather than a snapshot taken at attach time. It is deliberately narrow: `Func<T>`, no cancellation token, no service provider, not async.
 
@@ -158,19 +171,19 @@ Detaching from an operation, from a configuration change, or from any path not r
 
 ### Keep the dispose path out of the lifecycle lock
 
-Because the handler now disposes what the factory built, disposal runs from a handler transition that can run while a detach cascade still holds the lifecycle lock. Previously the wrapper disposed and the two never interleaved. A connector that is disposed this way must therefore obey two rules:
+The handler disposes what the factory built, from a transition that can run while a detach cascade still holds the lifecycle lock. A service disposed this way must therefore obey two rules:
 
 - its dispose path must not enter the lifecycle lock, directly or transitively
 - it must not block on a lock that its own `SubjectDetaching` handler acquires
 
-Writing a scalar property from a dispose path is safe. Writing a property whose type can contain subjects takes the lifecycle lock and is not safe, and attaching or detaching a subject enters the same lock without being a property write at all. Nothing enforces this and no test covers it, which is exactly why it is written down here.
+Writing a scalar property from a dispose path is safe. Writing a property whose type can contain subjects takes the lifecycle lock and is not safe, and attaching or detaching a subject enters the same lock without being a property write at all. Nothing enforces this and no test covers it, which is exactly why it is written down here. The lock order that makes it a deadlock rather than a slow path is in [Disposal from a handler transition](design/hosting-service-ownership.md#disposal-from-a-handler-transition).
 
 ### Reading the outcome
 
 The handle carries the state of the attachment:
 
 - `Current` is the running instance, or null when nothing is running: before the first start, after a stop, and after a start that failed.
-- `Fault` is the exception from the last failed transition, or null. The next successful transition clears it.
+- `Fault` is the exception from the last failed transition, or null. Only a start clears it, and only once it has got past its own guards, so that a start skipped by a shutdown does not drop a fault nobody has read yet. A stop never clears it. A start that failed followed by a clean stop therefore leaves `Fault` set with `Current` null, which is the shape of "this should be running and is not".
 
 ```csharp
 if (attachment.Fault is { } fault)
@@ -264,6 +277,38 @@ A subsystem says so by implementing `IStartupCompletionDeferrer` and registering
 Holds are counted, so nested attaches compose: a service that attaches children during its own `StartAsync` takes their holds before its own is released.
 
 `SourceMonitor` is the one implementation in this repository. It is what makes an attached source count towards source registration from the moment it is attached rather than from the moment it finally starts, so a synchronization wait cannot complete against a tree whose sources have not registered yet. See [Applications That Create Sources at Runtime](connectors-monitoring.md#applications-that-create-sources-at-runtime).
+
+A deferrer runs inside the lifecycle lock, so `DeferCompletion` must not block: see [A deferrer that takes a lock of its own](design/hosting-service-ownership.md#4-a-deferrer-that-takes-a-lock-of-its-own).
+
+## Migrating from the Previous API
+
+Two groups of members were removed. Both were replaced rather than renamed, so the compiler points at every call site.
+
+### `AddHostedSubject<T>()` becomes `AddSubject<T>()`
+
+| Removed | Replacement |
+|---|---|
+| `HostedSubjectServiceCollectionExtensions.AddHostedSubject<T>(configure, contextResolver)` | `SubjectServiceCollectionExtensions.AddSubject<T>(configure, contextResolver)` |
+
+The parameters are unchanged, so the call site only needs the new name and the `Namotion.Interceptor.Hosting` using it already had. Three things changed underneath it:
+
+- `AddHostedSubject<T>` registered `T` with `AddHostedService<T>` as well, so a subject that the context also started ran two starts on one instance. `AddSubject<T>` leaves the start to the handler.
+- `AddHostedSubject<T>` passed the context only when `T` had a constructor accepting one, and never applied it afterwards, so a subject with injected constructor dependencies silently got no context at all. `AddSubject<T>` applies it unconditionally after construction.
+- The constraint widened from `IHostedService` to `IInterceptorSubject`, so it now also serves plain subjects that just need to exist and be attached at host start.
+
+### Instance based attachment becomes factory based
+
+| Removed | Replacement |
+|---|---|
+| `AttachHostedService(IHostedService)` returning `bool` | `AttachHostedService<T>(Func<T>)` returning `IHostedServiceAttachment<T>` |
+| `AttachHostedServiceAsync(IHostedService, CancellationToken)` returning `Task<bool>` | `AttachHostedServiceAsync<T>(Func<T>, CancellationToken)` returning `Task<IHostedServiceAttachment<T>>` |
+| `DetachHostedService(IHostedService)` | `DetachHostedService(IHostedServiceAttachment)` |
+| `DetachHostedServiceAsync(IHostedService, CancellationToken)` | `DetachHostedServiceAsync(IHostedServiceAttachment, CancellationToken)` |
+| `GetAttachedHostedServices()` returning `ImmutableArray<IHostedService>` | `GetHostedServiceAttachments()` returning `ImmutableArray<IHostedServiceAttachment>` |
+
+The handle the attach returns is what you now pass to detach, in place of the instance. `GetAttachedHostedServices()` returned the instances; `GetHostedServiceAttachments()` returns the handles, and `attachment.Current` is the instance for each.
+
+Do not translate `AttachHostedService(service)` into `AttachHostedService(() => service)`. That compiles, and it is the one shape the handler refuses, because the handler now disposes what it creates. Construct inside the lambda instead. See [The factory must construct](#the-factory-must-construct).
 
 ## For Library Authors
 
