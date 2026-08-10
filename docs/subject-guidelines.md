@@ -303,6 +303,28 @@ public partial class Sensor
 }
 ```
 
+## Base Classes and Subclasses
+
+A subject can derive from another subject, and properties declared anywhere in the hierarchy are intercepted. The set of members that interception needs (the context, the property table, the sync root and the helper methods the generated accessors call) is emitted once, in the class at the root of the hierarchy, and every subject below it inherits it.
+
+```csharp
+[InterceptorSubject]
+public partial class PersonBase
+{
+    public partial string Name { get; set; }
+}
+
+[InterceptorSubject]
+public partial class Employee : PersonBase
+{
+    public partial string Department { get; set; }
+}
+```
+
+Writing `Name` on an `Employee` goes through the interceptor chain exactly like writing `Department`. A plain class with no attribute may sit between two subjects, and a subject may be `sealed` at any level. Nothing below is needed for this case.
+
+Writing either side of that relationship by hand is possible but demanding. It needs a contract this page does not cover; see [Hand-written base classes and subclasses](generator.md#hand-written-base-classes-and-subclasses) in the generator reference.
+
 ## Property Change Hooks
 
 The source generator creates optional partial method hooks for each partial property, allowing you to execute custom logic before or after property changes.
