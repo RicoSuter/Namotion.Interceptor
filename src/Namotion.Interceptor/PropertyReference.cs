@@ -102,7 +102,9 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
 
     /// <summary>
     /// Gets the revision of the last write to this property that reached a write terminal, and whether any
-    /// sink has published its value. Returns false when the property has never been written.
+    /// sink has published its value. Returns false when no write state has been recorded at all, which is
+    /// not the same as never written: marking a property published records state for it too, so a
+    /// never-written property can return true with a commit revision of 0.
     /// </summary>
     /// <param name="includeSourceCommitsInRevision">Whether <paramref name="commitRevision"/> also counts
     /// commits applied from a source. It governs that value alone; <paramref name="publishedToAnySource"/>

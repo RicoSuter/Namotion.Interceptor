@@ -132,8 +132,9 @@ public class ChangeQueueProcessor : IDisposable
     }
 
     // Rejects every unnamed value, not just zero: the delivery decision throws on an unknown rule from
-    // inside the flush, outside the try that wraps the write handler, so it would escape the periodic
-    // loop's catch and end delivery for this processor's lifetime while the queue kept filling.
+    // inside the flush, outside the try that wraps the write handler. The periodic loop's catch does
+    // catch it, but that catch sits outside the loop, so the loop never resumes and delivery ends for
+    // this processor's lifetime while the queue keeps filling.
     private static ChangeDeliveryRule ValidateRule(ChangeDeliveryRule rule)
     {
         if (rule is not (ChangeDeliveryRule.SourceValuesMayBeStale or ChangeDeliveryRule.SourceValuesAreSettled))

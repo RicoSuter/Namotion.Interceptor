@@ -87,7 +87,7 @@ A change carrying revision 0 orders against nothing, so staleness is unprovable 
 
 The survivor of such a batch is emitted carrying no revision too. It was chosen by arrival rather than by revision, so ranking it against the property marker could drop it while the higher-revision change whose value it carries has already been merged away in the same batch, leaving nothing to re-deliver.
 
-This is a guard rather than a path the pipeline takes. Every published change comes from a write terminal and carries a revision, including derived recomputations, so revision 0 only reaches here for changes built through the public factory.
+No committed change arrives carrying revision 0: every published change comes from a write terminal and carries a revision, including derived recomputations. The batch collapses manufacture it deliberately, though, through `WithoutRevision`, which is the case the paragraph above describes, so this is a live path rather than a guard against something that cannot happen.
 
 ## Why the written-out mark is sticky and not per source
 

@@ -29,9 +29,10 @@ internal sealed class ChangeMerger : IDisposable
 
     // Releasing either high-water mark is cheap once and expensive repeatedly, and neither the index nor
     // the buffer can tell a burst from a working set by looking at one batch. Flush widths vary constantly
-    // under load, so releasing on the first narrow batch makes a wide one regrow it immediately: measured
-    // at +17% allocation on the connector delivery benchmark. Requiring the narrow condition to persist
-    // distinguishes "the load went quiet" from "this flush happened to be small".
+    // under load, so releasing on the first narrow batch makes a wide one regrow it immediately.
+    // Requiring the narrow condition to persist distinguishes "the load went quiet" from "this flush
+    // happened to be small". The +17% allocation regression that produced this constant was measured for
+    // the index trim only; the buffer shrink was ungated then, so its share was never measured.
     private const int NarrowBatchesBeforeTrim = 4;
 
     // Per property: the slot of its surviving change, the arrival index that seeded that slot, and the

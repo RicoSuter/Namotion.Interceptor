@@ -554,7 +554,7 @@ All built-in servers (OPC UA, MQTT, WebSocket) follow the same structure:
 
 1. Extend `BackgroundService` for hosting lifecycle
 2. Implement `ISubjectConnector` for type consistency and connector enumeration
-3. Create a `ChangeQueueProcessor` in `ExecuteAsync` to subscribe to property changes before the protocol server starts accepting clients
+3. Create a `ChangeQueueProcessor` in `ExecuteAsync` to subscribe to property changes. Only the OPC UA server does this before its protocol server starts accepting clients; MQTT and WebSocket create it once theirs is already listening, so changes made during their startup are not captured
 4. Accept incoming client connections and route write requests to the local model via `SetValueFromSource()`
 5. Use a retry/restart loop in `ExecuteAsync` to recover from protocol failures
 
