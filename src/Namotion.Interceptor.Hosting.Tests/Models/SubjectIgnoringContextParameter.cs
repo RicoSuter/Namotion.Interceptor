@@ -20,8 +20,15 @@ public partial class SubjectIgnoringContextParameter : IHostedService
 
     public int StartCount => Volatile.Read(ref _startCount);
 
+    /// <summary>
+    /// The value the start observed, which is how a configure callback that lost the race with the
+    /// start is measurable rather than inferred.
+    /// </summary>
+    public string? NameAtStart { get; private set; }
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
+        NameAtStart = Name;
         Interlocked.Increment(ref _startCount);
         return Task.CompletedTask;
     }

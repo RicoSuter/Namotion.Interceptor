@@ -31,11 +31,13 @@ public static class SubjectServiceCollectionExtensions
     /// context yet.
     /// </para>
     /// <para>
-    /// When <typeparamref name="T"/> does take a context, the attach can already have happened inside
-    /// the constructor and cannot be reordered from here, so <paramref name="configure"/> necessarily
-    /// runs against an attached subject. Its assignments are intercepted and tracked, and they race
-    /// the start the attach appended exactly as they do for a hand written
-    /// <c>new MySubject(context) { Name = "x" }</c>.
+    /// When <typeparamref name="T"/> does take a context, <paramref name="configure"/> still runs
+    /// before the attach this method performs, but a generated context constructor has already
+    /// attached the subject and that attach cannot be reordered from here. For that shape the
+    /// assignments are intercepted and tracked, and they race the start the attach appended exactly as
+    /// they do for a hand written <c>new MySubject(context) { Name = "x" }</c>. A constructor that
+    /// takes the context and ignores it attaches nothing, so there the attach below is the first one
+    /// and <paramref name="configure"/> precedes it.
     /// </para>
     /// </remarks>
     /// <typeparam name="T">The subject type.</typeparam>
@@ -66,14 +68,17 @@ public static class SubjectServiceCollectionExtensions
             {
                 var attachedInstance = ActivatorUtilities.CreateInstance<T>(serviceProvider, context);
 
+                // Ordered ahead of the attach below, which is the only ordering this factory controls.
+                // For the generated constructor the subject is already attached and this changes
+                // nothing, but for the documented "MySubject(IInterceptorSubjectContext? context = null)"
+                // shape, which takes the context and never uses it, the attach below is the first one
+                // and running configure after it would start the subject half configured.
+                configure?.Invoke(attachedInstance);
+
                 // Unconditional and idempotent. Applying it only when there is no context constructor
-                // would leave the documented "MySubject(IInterceptorSubjectContext? context = null)"
-                // shape unattached, because that constructor takes the context and never uses it.
+                // would leave that same shape unattached.
                 attachedInstance.Context.AddFallbackContext(context);
 
-                // The generated constructor attached the subject before this factory ever saw it, so
-                // the start that attach appended cannot be ordered behind configure from here.
-                configure?.Invoke(attachedInstance);
                 return attachedInstance;
             }
 

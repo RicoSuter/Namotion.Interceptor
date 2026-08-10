@@ -231,6 +231,57 @@ public class AddSubjectTests
     }
 
     [Fact]
+    public async Task WhenTheConstructorIgnoresTheContext_ThenConfigureCompletesBeforeTheSubjectCanStart()
+    {
+        // Arrange - this shape gets no generated context constructor, so the attach this method
+        // performs is the first one and is what makes the handler append a start. The sibling test
+        // for the no-context shape asserts the same ordering; without it a configure held open past
+        // the handler's start delay is observed by StartAsync as an unconfigured subject.
+        var builder = Host.CreateApplicationBuilder();
+        var context = CreateContext(builder);
+        builder.Services.AddSingleton(context);
+
+        using var configureEntered = new ManualResetEventSlim();
+        using var releaseConfigure = new ManualResetEventSlim();
+        SubjectIgnoringContextParameter? configuredSubject = null;
+
+        builder.Services.AddSubject<SubjectIgnoringContextParameter>(subject =>
+        {
+            configuredSubject = subject;
+            configureEntered.Set();
+            releaseConfigure.Wait(WaitTimeout);
+            subject.Name = "configured";
+        });
+
+        var host = builder.Build();
+
+        // Act - the factory runs on the host's own start path, so configure has to be released from
+        // another thread.
+        var startup = Task.Run(() => host.StartAsync());
+        Assert.True(configureEntered.Wait(WaitTimeout), "The configure callback was never invoked.");
+
+        var subject = configuredSubject!;
+        var attachedDuringConfigure = ((IInterceptorSubject)subject).TryGetSubjectTarget() is not null;
+        var startCountDuringConfigure = subject.StartCount;
+        releaseConfigure.Set();
+        await startup.WaitAsync(WaitTimeout);
+
+        try
+        {
+            // Assert - a subject target exists only once a handler has seen the attach, so its
+            // absence is what proves no start could have been appended while configure still ran.
+            Assert.False(attachedDuringConfigure, "The subject was attached to the context before configure ran.");
+            Assert.Equal(0, startCountDuringConfigure);
+            Assert.Equal("configured", subject.NameAtStart);
+            Assert.Equal(1, subject.StartCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task WhenTheSubjectIsNotAHostedService_ThenItIsStillConstructedAndAttachedAtHostStart()
     {
         // Arrange - nothing resolves the singleton, so the activation is the only thing that can
