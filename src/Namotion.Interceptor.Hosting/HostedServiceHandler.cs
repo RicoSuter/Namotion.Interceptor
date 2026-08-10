@@ -258,15 +258,20 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 var instance = target.Subject ?? target.Factory!();
                 if (target.IsHandlerOwnedInstance && !target.TryRecordFactoryInstance(instance))
                 {
-                    // The handler disposes every instance it creates, so a factory that hands back
-                    // what it handed back last time hands back a disposed instance. Enforced rather
-                    // than documented, because it is the one shape a caller migrating from the old
-                    // instance based API is steered into: "AttachHostedService(myService)" no longer
-                    // compiles and "AttachHostedService(() => myService)" does. Recorded as a fault,
-                    // which is the channel that caller already reads.
+                    // Refused for every factory attachment, which is wider than the damage: an
+                    // instance the handler created is stopped in every case but disposed only when it
+                    // is IDisposable or IAsyncDisposable, so one that is neither would in fact still
+                    // start. The check does not look, because the rule is the attachment's rather than
+                    // the type's, and reusability that depends on which interfaces a service happens
+                    // to implement is not a rule anyone can hold in their head. Enforced rather than
+                    // documented, because it is the one shape a caller migrating from the old instance
+                    // based API is steered into: "AttachHostedService(myService)" no longer compiles
+                    // and "AttachHostedService(() => myService)" does. Recorded as a fault, which is
+                    // the channel that caller already reads.
                     throw new InvalidOperationException(
-                        "The hosted service factory returned the instance it returned last time. The handler " +
-                        "disposes every instance it creates, so the factory must construct a new one on every call.");
+                        "The hosted service factory returned the instance it returned last time. The handler owns " +
+                        "every instance it creates and stops it when the subject leaves the graph, disposing it as " +
+                        "well when it is disposable, so the factory must construct a new one on every call.");
                 }
 
                 try

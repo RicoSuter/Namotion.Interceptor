@@ -31,7 +31,7 @@ Subject               IHostedService?          the subject for a subject target,
 _current              IHostedService?          the running instance, or null
 _fault                Exception?               the exception from the last failed transition
 _owner                HostedServiceHandler?    the handler that claimed this target
-_lastFactoryInstance  IHostedService?          the instance the previous factory call returned
+_lastFactoryInstance  IHostedService?          the instance the previous factory call returned, kept for the life of the attachment
 _detached             bool                     set by an explicit detach, refuses every later start
 _tail                 Task                     the transition chain
 _sync                 object                   guards _tail and _detached
@@ -48,7 +48,11 @@ The fields are synchronized differently, and each difference is deliberate:
   carries the fence itself. A plain write would lose the compare and swap that decides which of two
   racing handlers claims the target.
 - `_lastFactoryInstance` is neither volatile nor locked. Only start bodies touch it, and the chain
-  serializes start bodies against each other, so the chain already provides the ordering.
+  serializes start bodies against each other, so the chain already provides the ordering. It is never
+  cleared, so an attachment that has run once roots one stopped, usually disposed, instance for as long
+  as the attachment itself lives. That is deliberate: the comparison has to outlive the stop that
+  disposed the instance, or the repeat it exists to catch is exactly the case it cannot see. The cost is
+  bounded by the number of attachments the application created, at one dead reference each.
 - `_detached` is written and read under `_sync`, which is what pairs it with the append (see
   [Refusing a start for an attachment a detach already removed](#refusing-a-start-for-an-attachment-a-detach-already-removed)).
 
@@ -227,8 +231,11 @@ attachment chain**. That proviso is [residual hazard 3](#3-a-subject-that-detach
 
 Pinned by `HostedServiceHandlerRaceTests.WhenAReAttachLandsWhileTheSubjectStopIsHeld_ThenAFreshInstanceRunsAndTheOldOneIsDisposed`,
 which holds the subject's stop on a seam so the re-attach provably lands mid stop, and by
-`HostedServiceHandlerRaceTests.WhenTheHostDrains_ThenASubjectStopsBeforeItsAttachmentIsDisposed` for
-the ordering itself.
+`HostedServiceHandlerRaceTests.WhenASubjectLeavesTheGraph_ThenItStopsBeforeItsAttachmentIsDisposed`
+for the ordering itself. Shutdown builds the same shape from its own code in `StopAsync` rather than
+calling this path, so it needs its own test and has one,
+`HostedServiceHandlerRaceTests.WhenTheHostDrains_ThenASubjectStopsBeforeItsAttachmentIsDisposed`.
+Dropping the wait from one path fails that path's test and leaves the other green.
 
 ### What `subjectStopped` actually means
 
@@ -347,9 +354,15 @@ lock acquisition that reads liveness. That leaves two orders and no third:
 
 Without the mark, an attach that had published its attachment but not yet appended its start would run
 that start after the detach had already removed the attachment, and the instance it creates is reachable
-from nothing: no enumerable attachment remains for a later context detach to stop. Pinned by
+from nothing: no enumerable attachment remains for a later context detach to stop.
+
+The two marks are independent, so each needs a test that drives its own overload: deleting the mark
+from one of them leaves every test that reaches the window through the other green. Pinned by
 `HostedServiceHandlerRaceTests.WhenAnAttachmentIsDetachedBeforeItsStartIsAppended_ThenNothingIsStarted`
-and `HostedServiceHandlerRaceTests.WhenAnAwaitedAttachmentIsDetachedBeforeItsStartIsAppended_ThenNothingIsStarted`.
+and `HostedServiceHandlerRaceTests.WhenAnAwaitedAttachmentIsDetachedBeforeItsStartIsAppended_ThenNothingIsStarted`,
+which both detach through the synchronous overload, the second against the awaiting attach; and by
+`HostedServiceHandlerRaceTests.WhenAnAttachmentIsDetachedByTheAwaitingOverloadBeforeItsStartIsAppended_ThenNothingIsStarted`
+for the awaiting detach.
 
 ## The Gate
 
@@ -464,7 +477,16 @@ dispose releases.
 
 A start whose factory returns the instance it returned last time is refused before `StartAsync` and
 before `SetCurrent`, with an `InvalidOperationException` recorded on `Fault` and `Current` left null.
-The handler disposes every instance it creates, so the repeat is an instance it has already disposed.
+
+The guard gates on `IsHandlerOwnedInstance`, which is wider than the harm it names: `DisposeInstanceAsync`
+acts on `IDisposable` and `IAsyncDisposable` only, so a hosted service implementing neither is stopped
+and never disposed, and handing it back would in fact start it cleanly. Measured both ways: with the
+guard such a service starts once and the fault is set, and with the guard disabled it starts twice and
+works. The rule stated is therefore "a factory attachment constructs on every call", not "the handler
+would otherwise hand back a disposed instance". Failing closed is the choice: reusability that depends
+on which interfaces a service happens to implement is not a rule a caller can hold in their head, and
+the only thing it buys is keeping one allocation the caller asked for by writing the factory that way.
+
 It is enforced rather than documented because it is the shape a caller migrating from the removed
 instance based API is steered into: `AttachHostedService(myService)` no longer compiles and
 `AttachHostedService(() => myService)` does. The check is one reference comparison against

@@ -27,10 +27,10 @@ public static class InterceptorHostingExtensions
 
     /// <summary>
     /// Attaches a hosted service factory to the subject. The handler invokes the factory when the
-    /// subject enters the graph and disposes the instance when it leaves, so a re-attach yields a
-    /// fresh instance. The factory must construct: a factory that returns the instance it returned
-    /// last time returns one the handler has already disposed, and that start is refused and recorded
-    /// as a fault on the attachment rather than run.
+    /// subject enters the graph, stops the instance when it leaves, and disposes it as well when it is
+    /// disposable, so a re-attach yields a fresh instance. The factory must construct: a factory that
+    /// returns the instance it returned last time has that start refused and recorded as a fault on the
+    /// attachment rather than run, whether or not that instance was disposable.
     /// </summary>
     public static IHostedServiceAttachment<T> AttachHostedService<T>(
         this IInterceptorSubject subject, Func<T> factory)

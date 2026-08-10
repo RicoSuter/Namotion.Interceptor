@@ -30,7 +30,7 @@ internal sealed class HostedServiceTarget
     /// <summary>The subject when this target is a subject, or null when it is an attachment.</summary>
     public IHostedService? Subject { get; }
 
-    /// <summary>True when the handler created the current instance and must therefore dispose it.</summary>
+    /// <summary>True when the handler created the current instance, so it owns its disposal.</summary>
     public bool IsHandlerOwnedInstance => Factory is not null;
 
     /// <summary>
@@ -65,9 +65,11 @@ internal sealed class HostedServiceTarget
 
     /// <summary>
     /// Records the instance the factory just produced and reports whether it differs from the one the
-    /// previous invocation produced. The handler disposes every instance it creates, so a factory that
-    /// hands back the same instance hands back a disposed one. Only start bodies call this, and the
-    /// chain serializes them, so the field needs no synchronization of its own.
+    /// previous invocation produced. A repeat is refused whatever the instance is: the handler owns
+    /// every instance it creates and has already stopped this one, and disposed it as well when it was
+    /// disposable. The recorded reference is held for the life of the attachment, which keeps one
+    /// stopped instance reachable per attachment. Only start bodies call this, and the chain serializes
+    /// them, so the field needs no synchronization of its own.
     /// </summary>
     public bool TryRecordFactoryInstance(IHostedService instance)
     {

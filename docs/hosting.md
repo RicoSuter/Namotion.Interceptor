@@ -100,7 +100,7 @@ Three sharp edges:
 
 - **`T` has no constructor taking a context.** The attach `AddSubject` performs is the only one, so `configure` runs against an unattached subject and it is fully configured before anything can start it. Those assignments are not intercepted and not tracked, because the subject has no context yet. This is the deliberate trade: running `configure` after the attach would race the start the attach appends.
 - **Construction attaches the subject**, which is what the generated context constructor does. `configure` then runs against an attached subject. Its assignments are intercepted and tracked, and they race the queued start exactly as they do for a hand written `new MySubject(context) { Name = "x" }`.
-- **`T` declares a context parameter and never attaches with it.** Nothing attached during construction, so the attach `AddSubject` performs is again the only one and `configure` precedes it. This shape behaves like the first case despite declaring the parameter.
+- **`T` declares a context parameter and never attaches with it**, which is the documented `MySubject(IInterceptorSubjectContext? context = null)` shape. Nothing attached during construction, so the attach `AddSubject` performs is again the only one and `configure` precedes it, and its assignments are not intercepted and not tracked either. This shape behaves exactly like the first case despite declaring the parameter.
 
 ### A service bound to a subject
 
@@ -142,20 +142,22 @@ var attachment = person.AttachHostedService(() => new PersonBackgroundService(pe
 
 ### The factory must construct
 
-`() => existingInstance` is the one shape that defeats the design. The handler disposes the instance when the subject leaves the graph and invokes the factory again when it comes back, so a factory that hands out a captured instance would restart something that has already been stopped and disposed.
+`() => existingInstance` is the one shape that defeats the design. The handler stops the instance when the subject leaves the graph, disposes it as well when it implements `IDisposable` or `IAsyncDisposable`, and invokes the factory again when the subject comes back, so a factory that hands out a captured instance would restart something it has already stopped.
 
 ```csharp
 // Correct: a fresh instance every time the handler needs one.
 subject.AttachHostedService(() => new DataSyncService(subject));
 
-// Wrong: refused. The handler disposed this instance on detach, so it will not start it again.
+// Wrong: refused on the second start. The handler stopped this instance on detach.
 var service = new DataSyncService(subject);
 subject.AttachHostedService(() => service);
 ```
 
 The second shape is caught rather than left to fail obscurely. The handler compares each instance the factory produces against the previous one and, on a repeat, refuses the start before calling `StartAsync`: `Current` stays null and an `InvalidOperationException` explaining the rule lands on `attachment.Fault`.
 
-The check is one reference comparison against the last instance, which catches the immediate repeat and nothing more. A pooling factory that alternates between two instances still hands back a disposed one, and that is not detected.
+The refusal is wider than the damage, and deliberately so. A repeat is refused whatever the instance is, including a hosted service that implements neither disposable interface and was therefore never disposed and would in fact restart cleanly. Constructing on every call is a rule about the attachment; a rule that held for some service types and not others would be worse than one that fails closed.
+
+Only the repeat is refused, so the first start of `() => service` succeeds and a subject that never leaves and re-enters the graph is never told anything is wrong. The check is also one reference comparison against the last instance, which catches the immediate repeat and nothing more. A pooling factory that alternates between two instances still hands back a stopped one, and that is not detected.
 
 The factory runs inside the handler's transition, outside every lock, so it can read live state rather than a snapshot taken at attach time. It is deliberately narrow: `Func<T>`, no cancellation token, no service provider, not async.
 
@@ -308,7 +310,7 @@ The parameters are unchanged, so the call site only needs the new name and the `
 
 The handle the attach returns is what you now pass to detach, in place of the instance. `GetAttachedHostedServices()` returned the instances; `GetHostedServiceAttachments()` returns the handles, and `attachment.Current` is the instance for each.
 
-Do not translate `AttachHostedService(service)` into `AttachHostedService(() => service)`. That compiles, and it is the one shape the handler refuses, because the handler now disposes what it creates. Construct inside the lambda instead. See [The factory must construct](#the-factory-must-construct).
+Do not translate `AttachHostedService(service)` into `AttachHostedService(() => service)`. That compiles, and the handler refuses only the repeat: the first start uses the captured instance and succeeds, so the shape reports nothing at all until the subject leaves the graph and comes back. Construct inside the lambda instead. See [The factory must construct](#the-factory-must-construct).
 
 ## For Library Authors
 

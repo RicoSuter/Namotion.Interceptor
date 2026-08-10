@@ -36,8 +36,11 @@ public static class SubjectServiceCollectionExtensions
     /// attached the subject and that attach cannot be reordered from here. For that shape the
     /// assignments are intercepted and tracked, and they race the start the attach appended exactly as
     /// they do for a hand written <c>new MySubject(context) { Name = "x" }</c>. A constructor that
-    /// takes the context and ignores it attaches nothing, so there the attach below is the first one
-    /// and <paramref name="configure"/> precedes it.
+    /// takes the context and ignores it, which is the documented
+    /// <c>MySubject(IInterceptorSubjectContext? context = null)</c> shape, attaches nothing, so there
+    /// the attach below is the first one and <paramref name="configure"/> precedes it. Its assignments
+    /// are then not intercepted and not tracked either, so that shape behaves exactly like the one with
+    /// no context parameter at all.
     /// </para>
     /// </remarks>
     /// <typeparam name="T">The subject type.</typeparam>
