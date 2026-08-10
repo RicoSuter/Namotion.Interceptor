@@ -5,7 +5,7 @@ The benchmark suite lives in `src/Namotion.Interceptor.Benchmark` and runs on Be
 ## The usual process
 
 1. Work out which benchmarks can reach the code you changed. `dotnet run --project src/Namotion.Interceptor.Benchmark -c Release -- --filter "*" --list flat` prints every row.
-2. Run those, plus `ServiceOrderResolverBenchmark` as a control, in one filtered comparison.
+2. Run those in one filtered comparison, and check the filter also catches at least one row the change cannot reach, to read the noise off. Often it already does. If it does not, add `*ServiceOrderResolver*`.
 3. Only reach for the whole suite when the change is broad enough that step 1 cannot bound it. That costs hours, so propose it and get agreement before starting it rather than launching it and reporting back much later.
 
 ```
@@ -26,7 +26,11 @@ Allocation columns are unaffected by any of this. They are deterministic counts,
 
 ## Reading the results
 
-**Get the noise floor from the control.** `ServiceOrderResolverBenchmark` is the only class in the suite that never touches an `[InterceptorSubject]`. Every other class constructs subjects, including `SourcePathProviderBenchmark` and `SubjectUpdateBenchmark`, which are easy to mistake for controls. For a change that cannot affect service ordering, its rows measure nothing but the harness, so their spread in that run is that run's floor. Read it from your own run: it moves between runs and machines, so a remembered number is worse than none. Its rows are on the slow side of the suite and shorter benchmarks are more sensitive to code placement, so treat its spread as a lower bound for the faster rows.
+**BenchmarkDotNet's statistics do not span the two arms.** Its comparison machinery, the `Ratio` column against a `[Baseline]` and the Mann-Whitney test behind `--statisticalTest`, all works within one run, where BenchmarkDotNet builds and measures both things itself. A branch comparison is two independent runs on two separately built binaries, stapled together by the script afterwards, so none of it applies. Every figure in the report is computed inside its own arm, which is why the two arms can disagree while both look precise.
+
+**So read the noise off a row the change cannot reach.** Most filtered runs already contain one: `RegistryBenchmark.GenerateSubjectId`, for instance, is a static method that never touches a subject. Whatever such rows do in that run is what the harness does to an unchanged code path, and that is the bar a real delta has to clear. Read it from your own run, since it moves between runs and machines, and note that shorter benchmarks are more sensitive to code placement, so a slow control understates the floor for fast rows.
+
+`ServiceOrderResolverBenchmark` is the fallback when the filter has nothing unreachable in it. It is the only class in the suite that never touches an `[InterceptorSubject]` at all. Every other class constructs subjects, including `SourcePathProviderBenchmark` and `SubjectUpdateBenchmark`, which are easy to mistake for controls.
 
 **The Error column is not a significance test.** It is a confidence interval within one run, describing how precisely that run measured its own number, not whether the comparison would land in the same place tomorrow. A control row can move many times its own error bar with its code provably unchanged. `-LaunchCount N` does not close this: it averages over process-level variation, but each arm keeps its own binary, so a difference caused by code placement reproduces on every launch instead of averaging out.
 

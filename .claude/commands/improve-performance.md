@@ -22,7 +22,7 @@ Ask the user one question at a time:
 
 1. **Topic slug.** Used as the branch prefix and doc filename. Example: `attach-detach`. Reject anything containing slashes, spaces, or uppercase.
 2. **Candidate source.** Offer: (a) brainstorm fresh now, (b) load from an existing doc path, (c) load from a GitHub issue number, (d) user pastes a list. For (a), drive a focused brainstorm in this conversation (no need to spawn a subagent).
-3. **Benchmark mapping.** For each candidate, propose a filter pattern covering the benchmarks that can reach it, following the process in [Benchmarking](../../docs/benchmarking.md). Always add `*ServiceOrderResolver*` so every run carries its own noise control. Show the table with a `Coverage` column. For candidates with no clear coverage, ask per candidate: (a) write a new benchmark on the parent branch, (b) skip the candidate, (c) run with the closest existing filter and accept noisy results.
+3. **Benchmark mapping.** For each candidate, propose a filter pattern covering the benchmarks that can reach it, following the process in [Benchmarking](../../docs/benchmarking.md). Check the filter also catches a row the candidate cannot reach, so each run carries its own noise reference; add `*ServiceOrderResolver*` if it does not. Show the table with a `Coverage` column. For candidates with no clear coverage, ask per candidate: (a) write a new benchmark on the parent branch, (b) skip the candidate, (c) run with the closest existing filter and accept noisy results.
 4. **Run config.** `LaunchCount` (default 3) and `Short` toggle (default off).
 
 Test verification is fixed: every candidate runs `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"` (matches the project default in `AGENTS.md`). Results are recorded only in the local design doc on the parent branch, not posted to any GitHub issue.
@@ -65,7 +65,7 @@ When the loop finishes, print a summary table:
 N | Candidate slug | Status | Mean Δ | Alloc Δ | Branch
 ```
 
-Pull the deltas from each candidate's results section in the doc (parse the comparison report). Judge them against the spread of the control rows in that same run rather than against zero: a delta inside the control spread is noise, not a win and not a regression. Flag only what falls outside it.
+Pull the deltas from each candidate's results section in the doc (parse the comparison report). Judge them against what the unreachable rows did in that same run rather than against zero: a delta inside that spread is noise, not a win and not a regression. Flag only what falls outside it.
 
 Ask the user: "Which to keep? (comma-separated indices, `all`, or `none`)."
 
