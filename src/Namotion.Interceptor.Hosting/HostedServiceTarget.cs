@@ -51,7 +51,7 @@ internal sealed class HostedServiceTarget
 
     /// <summary>
     /// Marks the attachment this target belongs to as detached, which permanently refuses further
-    /// starts. Taken under the chain lock, so it pairs with the read in
+    /// starts. Set under the chain lock, so it pairs with the read in
     /// <see cref="TryTakeOwnershipAndAppendAsync"/>: a detach that marks here before appending its
     /// stop leaves an appended start either refused outright or ordered ahead of that stop.
     /// </summary>
