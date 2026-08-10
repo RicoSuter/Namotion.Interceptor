@@ -41,7 +41,7 @@ Properties without a setter are already read-only nodes (`CustomNodeManager.cs:3
 
 Four rows predate #420. The round-trip row does not: master's outbound loop used to push every mapped change into the node, including the subject's own apply of a client write, and that redundant write kept overwriting the node with the model's value. #420 added the supersession check at `OpcUaSubjectServer.cs:177`, correctly skipping it, and the accidental repair went with it.
 
-Recorded as findings 2, 3 and 9 in epic [#442](https://github.com/RicoSuter/Namotion.Interceptor/issues/442). One issue is filed for the cluster before implementation starts.
+Recorded as findings 2, 3 and 9 in epic [#442](https://github.com/RicoSuter/Namotion.Interceptor/issues/442), which the PR references directly. No separate issue is filed: the epic is open, so nothing is at risk of being lost, and a second tracker entry for work already in flight is noise. The finished findings are struck from #442 after merge, along with the outbound conversion wrap folded in here.
 
 ## Design
 
