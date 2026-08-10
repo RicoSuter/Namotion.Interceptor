@@ -104,9 +104,9 @@ Three sharp edges:
 
 #### What it costs at host startup
 
-`AddSubject<T>()` registers one hosted activation per type, and when `T` implements `IHostedService` that activation waits for the subject to start before host startup moves on. The generic host starts hosted services one after another by default, so those waits do not overlap and the cost is linear in the number of such registrations. The handler's queued start also carries a fixed short delay, so each registration costs roughly 50 ms even when the service itself starts instantly: 16 registered hosted subject types measured 836 ms of host startup. A registered type that is a plain subject waits for no start and adds nothing.
+`AddSubject<T>()` registers one hosted activation per type, and when `T` implements `IHostedService` that activation waits for the subject to start before host startup moves on. The generic host starts hosted services one after another by default, so those waits do not overlap and the cost is linear in the number of such registrations. The handler's queued start also carries a fixed short delay, so each registration costs roughly 50 ms of host startup even when the service itself starts instantly, and sixteen such registrations cost sixteen of those. A registered type that is a plain subject waits for no start and adds nothing.
 
-Let the host start its services concurrently to get the waits overlapping again. The same 16 registrations then measured 53 ms:
+Let the host start its services concurrently to get the waits overlapping again. The same registrations then pay one delay between them rather than one each:
 
 ```csharp
 builder.Services.Configure<HostOptions>(options => options.ServicesStartConcurrently = true);
@@ -220,7 +220,7 @@ var attachment = await person.AttachHostedServiceAsync(
 // The instance is running, or this call threw.
 
 await person.DetachHostedServiceAsync(attachment, cancellationToken);
-// The instance has stopped and has been disposed.
+// The instance has stopped, and has been disposed when it is disposable.
 ```
 
 `AttachHostedServiceAsync` is transactional for its own transition: when that start faults, the attachment is removed before the exception propagates, so a `catch` block is never left owning an invisible attachment. When a context attach had already queued a create for the same attachment, the caller awaits the second transition rather than the first. A graph driven start that faults keeps the attachment with `Current` null and `Fault` set, so the next context attach retries it.
@@ -294,7 +294,7 @@ Holds are counted, so nested attaches compose: a service that attaches children 
 
 `SourceMonitor` is the one implementation in this repository. It is what makes an attached source count towards source registration from the moment it is attached rather than from the moment it finally starts, so a synchronization wait cannot complete against a tree whose sources have not registered yet. See [Applications That Create Sources at Runtime](connectors-monitoring.md#applications-that-create-sources-at-runtime).
 
-A deferrer runs inside the lifecycle lock, so neither `DeferCompletion` nor the hold's `Dispose` may block on anything that can be waiting for that lock, or take a lock that a thread already inside it can be waiting for. The constraint is written on `IStartupCompletionDeferrer`, and an implementation that follows it cannot take part in the deadlock: see [A deferrer that takes a lock of its own](design/hosting-service-ownership.md#4-a-deferrer-that-takes-a-lock-of-its-own).
+A deferrer runs inside the lifecycle lock, so neither `DeferCompletion` nor the hold's `Dispose` may block on anything that can be waiting for that lock. A lock of the deferrer's own is allowed, but only where the acquisition order is already fixed: it is safe when nothing held under that lock ever waits on anything that needs the lifecycle lock, so the two are always taken in the same order, and unsafe as soon as they can be taken in either. The constraint is written on `IStartupCompletionDeferrer`, and an implementation that follows it cannot take part in the deadlock: see [A deferrer that takes a lock of its own](design/hosting-service-ownership.md#4-a-deferrer-that-takes-a-lock-of-its-own).
 
 ## Migrating from the Previous API
 

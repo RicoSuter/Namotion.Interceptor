@@ -326,7 +326,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// <para>
     /// <c>DeferCompletion</c> is third party code and, on the lifecycle driven path, it runs under
     /// LifecycleInterceptor's lock. A deferrer must therefore not block on anything that can be waiting
-    /// for a transition, and must not take a lock that a thread inside that lock can be waiting for.
+    /// for a transition, and may take a lock of its own only where the order against that lock is
+    /// already fixed, which means nothing held under it ever waits on anything that needs that lock.
     /// See the note on <see cref="HandleLifecycleChange"/>.
     /// </para></remarks>
     private IDisposable[] TakeStartupHolds(IInterceptorSubjectContext context)

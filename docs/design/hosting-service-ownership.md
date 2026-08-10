@@ -36,6 +36,7 @@ _detached             bool                     set by an explicit detach, refuse
 _tail                 Task                     the transition chain
 _sync                 object                   guards _tail and _detached
 TransitionGate        Func<Task>?              test seam awaited at the top of every body, null in production
+ChainLockGate         Action?                  test seam invoked inside _sync between the take and the append, null in production
 ```
 
 The fields are synchronized differently, and each difference is deliberate:
@@ -70,6 +71,7 @@ _running         ConcurrentDictionary    target -> subject, for targets this han
 _liveSubjects    ConcurrentDictionary    subject -> unused, for subjects in the graph for this handler
 _inFlightStops   ConcurrentDictionary    stop task -> unused, for stops appended but not yet finished
 DrainGate        Func<Task>?             test seam, null in production
+OwnershipTakenGate Action?               test seam invoked between the take and the gate re-read, null in production
 ```
 
 The three concurrent dictionaries are the state the rest of this document is about. `_running` maps a
@@ -82,10 +84,11 @@ entered the graph, and this entry is the only thing that lets that later attach 
 a detached one, so recording only the subjects hosting something at attach time would refuse every
 attachment onto every other subject. The entry is removed on context detach and the whole set is cleared
 by the drain, so it tracks the graph rather than growing with the process, but the cost is paid by
-graphs that host nothing at all: a 20,000 subject graph with no hosted services anywhere retains about
-1.4 MB in this dictionary and pays roughly 2.9 times the attach churn of the previous implementation,
-which recorded nothing per subject. Bounded by the graph and paid for correctness on the attach path,
-which is why it stays.
+graphs that host nothing at all. The shape of that cost is one concurrent dictionary entry per subject
+in the graph, tens of bytes each, plus one dictionary write on every attach and one removal on every
+detach: retained memory linear in the size of the graph rather than in the number of hosted services,
+and a graph with no hosted services anywhere pays all of it. Bounded by the graph and paid for
+correctness on the attach path, which is why it stays.
 
 The logger is resolved through a callback rather than injected because `WithHostedServices` constructs
 the handler while the context is being configured, which is before any service provider exists; the
@@ -316,9 +319,11 @@ own lock only and is unordered against them, so a start needs a second check. Ta
 be that check, and the failure was measured: the attaching path takes ownership itself, so an attach
 racing a detach passes its own check and leaves the attachment running on a detached subject.
 
-The flag is read on both of the paths a start passes through. The suite does not distinguish the two
-reads: deleting either one alone leaves every test green, and deleting both fails two. The argument for
-keeping both is below, and it is an argument rather than a measurement.
+The flag is read on both of the paths a start passes through, and each read is discriminated
+separately. Deleting the read inside the chain lock fails
+`HostedServiceHandlerRaceTests.WhenASubjectLeavesTheGraphBeforeItsAttachTakesTheTarget_ThenTheNextHandlerStillClaimsIt`
+and nothing else. Inside the start body the flag is still masked by the ownership read beside it:
+deleting the flag read alone leaves every test green, and deleting the whole body guard fails three.
 
 ### The read inside the chain lock
 
@@ -328,10 +333,20 @@ appends each stop under that same lock, which leaves only two orders: this call 
 stop lands behind a start that then finds the subject dead and no-ops; or the detach's stop first, so
 this call reads cleared liveness and appends nothing.
 
-Splitting the three steps lets a start land behind an attachment stop that is waiting for the subject's
-own stop, which is waiting for the caller awaiting this start, and that cycle never resolves. No test
-in the suite reproduces that interleaving: splitting the critical section leaves all of them green, so
-this is an argued property rather than a pinned one.
+Splitting the three steps opens a gap for a detach to append its stop into, and the start then runs
+behind that stop. The worst thing that reaches is a cycle: a start queued behind an attachment stop
+that is waiting for the subject's own stop, which is waiting for the caller awaiting this start. The
+same append order under an explicit detach is the damage a test can read, because there the stop runs
+first, finds nothing to stop, and leaves the start behind it to create an instance the detach has
+already made unreachable.
+
+That order is what
+`HostedServiceHandlerRaceTests.WhenADetachRacesTheAppendInsideTheChainLock_ThenTheStartIsOrderedAheadOfTheStop`
+reads. It holds the section open on `ChainLockGate` while a real `DetachHostedService` runs on its own
+thread, and releases the seam only once that thread has provably blocked on the chain lock or run to
+completion, so both builds decide the same way every time rather than by whichever thread wakes first.
+Splitting the section fails that test and no other; deleting the liveness read or the detached read
+inside it leaves it green.
 
 ### The read inside the start body
 
@@ -566,7 +581,7 @@ service provider the moment `StopAsync` returns. Each entry removes itself throu
 the set does not grow with the process. Pinned by
 `HostedServiceHandlerRaceTests.WhenAStopIsInFlightWhenTheHostDrains_ThenTheDrainWaitsForIt`.
 
-### The second gate read in `TryTakeOwnershipAndStart`
+### The two gate reads in `TryTakeOwnershipAndStart`
 
 `TryTakeOwnershipAndStart` reads the gate twice, once on entry and once after writing both `_running`
 and the owner. The second read is what turns the first from a narrowing into a guard: reading `Running`
@@ -577,10 +592,23 @@ is undone. `AttachSubject` re-reads the gate after writing `_liveSubjects` for t
 
 `HostedServiceHandlerRaceTests.WhenAnAttachmentIsAddedDuringTheDrain_ThenTheDrainingHandlerTakesNoOwnership`
 pins that a draining handler ends up owning nothing, and it fails only when **both** reads are deleted:
-its attach arrives after `BeginDraining`, so the read on entry already refuses it. The suite does not
-discriminate the second read from the first. The interleaving that would, an attach that passes the
-entry read just before `BeginDraining` and lands its two writes just after, has no test, because there
-is no seam between the entry read and the writes to hold it on.
+its attach arrives after `BeginDraining`, so the read on entry already refuses it. Each read also has a
+test the other does not satisfy, and deleting either one alone fails exactly that one:
+
+- The re-read:
+  `HostedServiceHandlerRaceTests.WhenAnAttachLandsItsTakeAfterTheDrainBegan_ThenTheTakeIsUndone`. Its
+  attach passes the read on entry while the gate is still `Running` and lands both writes after
+  `BeginDraining`. The seam between the two is `TakeStartupHolds`, which is third party code on that
+  path: the deferrer starts the drain and waits for it to reach `DrainGate` before the attach goes on.
+  The ownership is read while the drain is still held, because letting it go releases every target the
+  drain's snapshot covered and hides the difference.
+- The read on entry:
+  `HostedServiceHandlerRaceTests.WhenADrainingHandlerSeesAnAttach_ThenItInstallsNoOwnerForALiveHandlerToLoseTo`.
+  It holds the take open on `OwnershipTakenGate` and has a second handler try the compare and exchange
+  from there. The re-read undoes a take, but only after installing it, and a live handler that reaches
+  the target inside that window loses the exchange for good, because nothing retries it. The seam is
+  reached only when the read on entry is gone, so on an intact build the attach simply returns and the
+  second handler wins.
 
 ## Activation and Waiting for a Start
 
@@ -625,23 +653,30 @@ own attach event and its own start, and that is 50 ms either way. Both delays pa
 ### What the move actually bought, and where it did not
 
 The delay no longer serializes across targets, but that only removes the linear cost on the path where
-nothing waits for the starts one at a time. The two paths differ, and the difference is measured:
+nothing waits for the starts one at a time. The two paths differ in shape:
 
 - **Subjects entering the graph.** Each start is appended to its own target's chain and nothing awaits
-  them in turn, so the delays overlap. 50 subjects attached together cost 57 ms, against 2,533 ms under
-  the shared loop.
+  them in turn, so the delays overlap: a set of subjects entering the graph together pays one delay
+  rather than one each, and the cost is constant in how many of them there are. Under the shared loop
+  it was linear, because every start waited out the delay of the start ahead of it.
+  `HostedServiceStartupBenchmark.AttachHostedSubjectsAndWaitForTheirStarts` is where that shape is
+  re-derived: its two subject counts should stay within noise of each other. The absolute figures are
+  the delay constant plus whatever the machine adds and mean nothing on their own, which is why only
+  the comparison between the rows is stated here.
 - **`AddSubject<T>`.** Still linear. `AddSubject<T>` registers one `SubjectActivation<T>` per type
   through `AddHostedService`, the activation awaits `WaitForStartAsync` when `T` is an `IHostedService`,
   and the generic host starts hosted services one after another by default, so each activation's 50 ms
-  is over before the next one begins. 16 registered types cost 836 ms of host startup, linear in the
-  number of registered types that implement `IHostedService`. A registered type that is a plain subject
-  awaits no start and adds nothing.
+  is over before the next one begins. The cost is linear in the number of registered types that
+  implement `IHostedService`, at one delay each. A registered type that is a plain subject awaits no
+  start and adds nothing. There is no benchmark for this path, because what it measures is the generic
+  host's own sequential start rather than anything this package decides.
 
 `AddSubject` does not fix its own path, and that is deliberate. The switch that fixes it is
 `HostOptions.ServicesStartConcurrently`, which is host wide: it would change the startup behaviour of
 every hosted service in the application, including services this package knows nothing about, which is
 too broad a side effect for a registration helper to impose. It belongs to the application author, and
-it works. The same 16 types measured 53 ms with it set. This is stated for consumers in
+it works: the activations' waits overlap again, so the same registrations pay one delay between them
+rather than one each. This is stated for consumers in
 [`AddSubject<T>()`](../hosting.md#addsubjectt).
 
 ## Residual Hazards
@@ -710,11 +745,14 @@ What the call site does is put a constraint on the implementer, and an implement
 cannot supply the step the cycle needs. The constraint is on
 [`IStartupCompletionDeferrer`](../../src/Namotion.Interceptor.Tracking/IStartupCompletionDeferrer.cs),
 where an implementer meets it, and it is: do not block, in `DeferCompletion` or in the returned hold's
-`Dispose`, on anything that can be waiting for a transition, and do not take a lock that a thread inside
-`_attachedSubjects` can be waiting for. Step 3 of the cycle is the only step a deferrer supplies, so a
-deferrer that never blocks there leaves nothing for `A` and `T` to close a cycle against. The exposure
-is therefore per implementation, not per consumer: an application whose deferrers all follow the rule is
-not exposed to this hazard at all.
+`Dispose`, on anything that can be waiting for a transition, and take a lock of your own only where the
+order against `_attachedSubjects` is already fixed, which means nothing held under that lock ever waits
+on anything that needs `_attachedSubjects`. A lock a thread inside `_attachedSubjects` can wait for is
+allowed under exactly that condition and forbidden without it, because without it the two locks can be
+acquired in either order. Step 3 of the cycle is the only step a deferrer supplies, so a deferrer that
+never blocks there leaves nothing for `A` and `T` to close a cycle against. The exposure is therefore
+per implementation, not per consumer: an application whose deferrers all follow the rule is not exposed
+to this hazard at all.
 
 `SourceMonitor`, the only implementation in this repository, follows it, and the two halves follow it
 for different reasons:
