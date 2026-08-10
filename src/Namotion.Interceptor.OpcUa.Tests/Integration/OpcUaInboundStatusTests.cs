@@ -23,15 +23,15 @@ public class OpcUaInboundStatusTests
         // Arrange
         await using var fixture = await InboundStatusFixture.StartAsync(_output);
 
-        // Act: both properties travel in one notification, so the sentinel arriving on the sibling proves
-        // the notification was processed and the assertion below is not racing it.
+        // Act
         fixture.PublishPair("from-faulted-sensor", StatusCodes.BadDeviceFailure, "sentinel", StatusCodes.Good);
 
+        // Assert: the sibling is published second, and sequential publishing makes the queue order the
+        // processing order, so its arrival proves the Bad value was already processed and skipped.
         await AsyncTestHelpers.WaitUntilAsync(
             () => fixture.ClientRoot.Child?.Other == "sentinel",
             message: "the notification carrying both properties should reach the client");
 
-        // Assert
         Assert.Equal("initial", fixture.ClientRoot.Child!.Value);
     }
 
@@ -42,11 +42,12 @@ public class OpcUaInboundStatusTests
         await using var fixture = await InboundStatusFixture.StartAsync(
             _output, valueConverter: new ThrowOnSentinelConverter("poison"));
 
-        // Act: both properties travel in one notification, so the failing conversion of the first can
-        // only be contained if it does not abort the processing of the notification as a whole.
+        // Act
         fixture.PublishPair("poison", StatusCodes.Good, "survivor", StatusCodes.Good);
 
-        // Assert
+        // Assert: the pair is published in one lock hold and so normally arrives in one notification,
+        // which is what makes the sibling evidence that a failing conversion did not abort the rest of
+        // it. A split would make this pass trivially rather than fail, so it can only weaken the test.
         await AsyncTestHelpers.WaitUntilAsync(
             () => fixture.ClientRoot.Child?.Other == "survivor",
             message: "the sibling in the same notification should still be applied");

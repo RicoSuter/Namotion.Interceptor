@@ -214,15 +214,20 @@ internal class SubscriptionManager : IAsyncDisposable
             {
                 var item = notification.MonitoredItems[i];
 
-                // Good and Uncertain are both usable: Uncertain means the server doubts the quality, not that
-                // there is no reading. Bad means the value is not usable and may not even be present.
-                if (!StatusCode.IsNotBad(item.Value.StatusCode))
+                if (!_monitoredItems.TryGetValue(item.ClientHandle, out var property))
                 {
                     continue;
                 }
 
-                if (!_monitoredItems.TryGetValue(item.ClientHandle, out var property))
+                // Good and Uncertain are both usable: Uncertain means the server doubts the quality, not that
+                // there is no reading. Bad means the value is not usable and may not even be present.
+                if (!StatusCode.IsNotBad(item.Value.StatusCode))
                 {
+                    // Debug, not Warning: a Bad status is sticky, so a permanently faulted sensor would
+                    // repeat this at the publishing rate. Silence made such a property indistinguishable
+                    // from one that had simply stopped updating.
+                    _logger.LogDebug("Skipped an inbound value for '{PropertyName}' (ClientHandle: {ClientHandle}): {Status}.",
+                        property.Name, item.ClientHandle, item.Value.StatusCode);
                     continue;
                 }
 
@@ -234,8 +239,10 @@ internal class SubscriptionManager : IAsyncDisposable
                 catch (Exception e)
                 {
                     // Contained per item: one property whose conversion fails must not discard the other
-                    // values delivered in the same notification.
-                    _logger.LogError(e, "Failed to convert an inbound value for {PropertyName}.", property.Name);
+                    // values delivered in the same notification. The client handle is the only node identity
+                    // in hand here; the value itself is left out because it is unbounded process data.
+                    _logger.LogError(e, "Failed to convert an inbound value of type {ValueType} for '{PropertyName}' (ClientHandle: {ClientHandle}).",
+                        item.Value.Value?.GetType(), property.Name, item.ClientHandle);
                     continue;
                 }
 

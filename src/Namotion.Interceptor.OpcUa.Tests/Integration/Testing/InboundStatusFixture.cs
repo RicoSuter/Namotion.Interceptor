@@ -144,6 +144,11 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
                 // The minimum the configuration allows, so a polled property does not add seconds per test.
                 configuration.PollingInterval = TimeSpan.FromMilliseconds(100);
 
+                // Notifications are then processed one at a time in sequence order. A test that uses one
+                // property's arrival as a barrier before asserting on another therefore holds even if the
+                // two are split across notifications, because the queue order is the processing order.
+                configuration.SubscriptionSequentialPublishing = true;
+
                 if (valueConverter is not null)
                 {
                     configuration.ValueConverter = valueConverter;
@@ -201,7 +206,10 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
             () => ClientRoot.Child?.Value == expected,
             message: $"the client should hold '{expected}'");
 
-    /// <summary>Drives both string properties in one lock hold, so they arrive in a single notification.</summary>
+    /// <summary>
+    /// Drives both string properties in one lock hold, so they normally arrive in a single notification.
+    /// The server's publish path does not take that lock, so co-delivery is the norm, not a guarantee.
+    /// </summary>
     public void PublishPair(object? value, StatusCode valueStatus, object? other, StatusCode otherStatus) =>
         OpcUaNodeStatusDriver.PublishMany(
             ServerService,
