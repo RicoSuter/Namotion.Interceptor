@@ -40,11 +40,19 @@ if ($LaunchCount -gt 1) { $ExtraArgs += "--launchCount"; $ExtraArgs += "$LaunchC
 if ($MemoryRandomization) { $ExtraArgs += "--memoryRandomization" }
 
 # BenchmarkDotNet rejects a repeated --filter flag, so several patterns have to travel as positional
-# values behind a single one. The first uses the combined --filter=<pattern> form because PowerShell on
-# Linux glob-expands a bare "*" against the working directory before the process sees it.
-$FilterArgs = @("--filter=$($Filter[0])")
-if ($Filter.Count -gt 1) { $FilterArgs += $Filter[1..($Filter.Count - 1)] }
-$FilterDisplay = $Filter -join " "
+# values behind a single one. PowerShell on Linux glob-expands a splatted pattern against the working
+# directory before the process sees it, and only the combined --filter=<pattern> form escapes that, so
+# exactly one pattern can be protected. Put a pattern that would otherwise expand into that slot.
+$Ordered = @($Filter)
+$Expanding = @($Ordered | Where-Object { @(Get-ChildItem -Path $_ -Force -ErrorAction SilentlyContinue).Count -gt 0 })
+if ($Expanding.Count -gt 1) {
+    Write-Error "More than one -Filter pattern matches a file or directory in $(Get-Location), and only one can be protected from shell expansion: $($Expanding -join ', '). Make them more specific."
+    exit 1
+}
+if ($Expanding.Count -eq 1) { $Ordered = @($Expanding[0]) + @($Ordered | Where-Object { $_ -ne $Expanding[0] }) }
+$FilterArgs = @("--filter=$($Ordered[0])")
+if ($Ordered.Count -gt 1) { $FilterArgs += $Ordered[1..($Ordered.Count - 1)] }
+$FilterDisplay = $Ordered -join " "
 
 # ============ HELPER FUNCTIONS ============
 
