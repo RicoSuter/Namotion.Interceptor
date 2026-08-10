@@ -44,11 +44,11 @@ That is a data race on model state, not only a silent divergence.
 Nodes are constructed at one site (`OpcUaNodeFactory.cs:227`), so they are ours to subclass. Add `SubjectVariableState : BaseDataVariableState`, holding only the server; the `PropertyReference` comes from `NodeState.Handle`, which already carries it (`CustomNodeManager.cs:372`). Override `WriteValueAttribute` (`protected virtual`, `NodeState.cs:4119`).
 
 ```
-if (indexRange is not Empty && Value is Array original)     // copy before the merge
-    masks = ChangeMasks; Value = CopyForMerge(original)
-
 if (property does not resolve to a registered property)
     return BadNoCommunication                                // node untouched
+
+if (indexRange is not Empty && Value is Array original)     // copy before the merge
+    masks = ChangeMasks; Value = CopyForMerge(original)
 
 result = base.WriteValueAttribute(...)                       // type check, merge, assignment
 if (result is bad) { restore Value and ChangeMasks if copied; return result }
@@ -83,7 +83,7 @@ This establishes the precondition locally at the one site that needs it, rather 
 
 `CopyForMerge` clones the outer array, and additionally clones the inner arrays of a `byte[][]`, because the nested ByteString merge mutates those in place (`NumericRange.cs:930-937`). Do not use `Opc.Ua.Utils.Clone`: it is deep but recurses through `Array.GetValue`/`SetValue`, boxing every element.
 
-The restore on a rejected merge matters because the `Value` setter ORs in the change mask on a reference difference (`BaseVariableState.cs:531-534`) and `CustomNodeManager.Write` skips its flush on a bad result, so a pending mask would otherwise be dispatched later. `ChangeMasks` has a `protected set` (`NodeState.cs:261`).
+The registration check runs **before** the copy. Reversed, an unregistered property would return with the node holding a copy and a change mask nothing clears, dispatching a spurious notification on a later flush. The restore on a rejected merge matters because the `Value` setter ORs in the change mask on a reference difference (`BaseVariableState.cs:531-534`) and `CustomNodeManager.Write` skips its flush on a bad result, so a pending mask would otherwise be dispatched later. `ChangeMasks` has a `protected set` (`NodeState.cs:261`).
 
 **Residual risk, stated honestly:** this is correct only while the index range merge remains the only in-place mutator of a node value. The `NumericRange`, read and monitored-item paths were audited; the whole SDK was not. The test asserts the model's array is unmutated rather than asserting the mechanism, so a new mutator on this path fails it.
 
