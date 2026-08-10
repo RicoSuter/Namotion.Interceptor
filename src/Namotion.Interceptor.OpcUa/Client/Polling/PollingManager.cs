@@ -351,12 +351,14 @@ internal sealed class PollingManager : IAsyncDisposable
                 var dataValue = response.Results[i];
                 var pollingItem = batch[i];
 
-                if (StatusCode.IsGood(dataValue.StatusCode))
+                // Good and Uncertain are both usable: Uncertain means the server doubts the quality, not that
+                // there is no reading. Bad means the value is not usable and may not even be present.
+                if (StatusCode.IsNotBad(dataValue.StatusCode))
                 {
                     _metrics.RecordRead();
                     ProcessValueChange(pollingItem, dataValue, DateTimeOffset.UtcNow);
                 }
-                else if (StatusCode.IsBad(dataValue.StatusCode))
+                else
                 {
                     _metrics.RecordFailedRead();
                     _logger.LogWarning("Polling read failed for {NodeId}: {Status}",
@@ -389,8 +391,22 @@ internal sealed class PollingManager : IAsyncDisposable
         // Only notify on actual change (same as subscription behavior)
         if (!ValuesAreEqual(newValue, oldValue))
         {
+            object? converted;
+            try
+            {
+                converted = _configuration.ValueConverter.ConvertToPropertyValue(newValue, pollingItem.Property);
+            }
+            catch (Exception e)
+            {
+                // Before the cache update on purpose: updating first would make the next poll see no change
+                // and lose this value permanently.
+                _logger.LogError(e, "Failed to convert a polled value for {NodeId}.", pollingItem.NodeId);
+                return;
+            }
+
             // Update cached value atomically - only if item still exists and hasn't changed
-            // This prevents resurrection of items removed between snapshot and processing
+            // This prevents resurrection of items removed between snapshot and processing.
+            // The cache keeps the raw value so change detection keeps comparing like with like.
             var key = pollingItem.NodeId.ToString();
             var updatedItem = pollingItem with { LastValue = newValue };
 
@@ -405,7 +421,7 @@ internal sealed class PollingManager : IAsyncDisposable
             var update = new PropertyUpdate
             {
                 Property = pollingItem.Property,
-                Value = newValue,
+                Value = converted,
                 Timestamp = dataValue.SourceTimestamp
             };
 

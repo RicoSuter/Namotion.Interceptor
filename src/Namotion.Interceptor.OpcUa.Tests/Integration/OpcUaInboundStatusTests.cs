@@ -52,4 +52,38 @@ public class OpcUaInboundStatusTests
 
         Assert.Equal("initial", fixture.ClientRoot.Child!.Value);
     }
+
+    [Fact]
+    public async Task WhenAPolledValueIsUncertain_ThenItIsApplied()
+    {
+        // Arrange
+        await using var fixture = await InboundStatusFixture.StartAsync(_output);
+        await fixture.WaitForPolledPropertiesAsync();
+
+        // Act: the double needs no conversion, so only the status handling of the polling path is under test.
+        OpcUaNodeStatusDriver.Publish(
+            fixture.ServerService, fixture.DoubleProperty, 42.5d, StatusCodes.UncertainLastUsableValue);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => fixture.ClientRoot.Child?.DoubleValue == 42.5d,
+            message: "the polled Uncertain value should reach the client");
+    }
+
+    [Fact]
+    public async Task WhenAPolledPropertyNeedsConversion_ThenItIsApplied()
+    {
+        // Arrange
+        await using var fixture = await InboundStatusFixture.StartAsync(_output);
+        await fixture.WaitForPolledPropertiesAsync();
+
+        // Act: the node is a Double on the wire, so only a converting path can land it in a decimal property.
+        OpcUaNodeStatusDriver.Publish(
+            fixture.ServerService, fixture.DecimalProperty, 12.5d, StatusCodes.Good);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => fixture.ClientRoot.Child?.DecimalValue == 12.5m,
+            message: "the polled value should be converted to the property's type");
+    }
 }

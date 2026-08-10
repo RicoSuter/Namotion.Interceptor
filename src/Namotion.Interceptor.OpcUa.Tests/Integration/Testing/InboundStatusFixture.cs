@@ -1,6 +1,7 @@
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -28,9 +29,18 @@ public partial class InboundStatusChild
     [Path("opc", "Other")]
     public partial string? Other { get; set; }
 
-    /// <summary>Decimal maps to Double on the wire, so this only round-trips if the path converts.</summary>
-    [Path("opc", "DecimalValue")]
+    /// <summary>
+    /// Decimal maps to Double on the wire, so this only round-trips if the path converts. The Percent
+    /// deadband is what routes it to the polling fallback: the server rejects the filter with
+    /// BadMonitoredItemFilterUnsupported because the variable has no EURange child. Only numeric
+    /// properties may carry it, a non-numeric one is rejected with a code that drops the item instead.
+    /// </summary>
+    [OpcUaNode("DecimalValue", DeadbandType = DeadbandType.Percent, DeadbandValue = 1.0)]
     public partial decimal DecimalValue { get; set; }
+
+    /// <summary>Polled like DecimalValue, but needs no conversion, so a test can isolate the status handling.</summary>
+    [OpcUaNode("DoubleValue", DeadbandType = DeadbandType.Percent, DeadbandValue = 1.0)]
+    public partial double DoubleValue { get; set; }
 }
 
 /// <summary>Throws from the inbound conversion when the incoming value equals a sentinel.</summary>
@@ -69,6 +79,9 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
 {
     private const string InitialValue = "initial";
 
+    /// <summary>The two numeric properties carrying a Percent deadband, which the server cannot honour.</summary>
+    private const int PolledPropertyCount = 2;
+
     private readonly PortLease _port;
     private readonly OpcUaTestServer<InboundStatusRoot> _server;
     private readonly OpcUaTestClient<InboundStatusRoot> _client;
@@ -100,6 +113,9 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
     public PropertyReference DecimalProperty =>
         new(ServerRoot.Child!, nameof(InboundStatusChild.DecimalValue));
 
+    public PropertyReference DoubleProperty =>
+        new(ServerRoot.Child!, nameof(InboundStatusChild.DoubleValue));
+
     public static async Task<InboundStatusFixture> StartAsync(
         ITestOutputHelper output,
         OpcUaValueConverter? valueConverter = null,
@@ -121,6 +137,9 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
 
             client = new OpcUaTestClient<InboundStatusRoot>(logger, configureClient: configuration =>
             {
+                // The minimum the configuration allows, so a polled property does not add seconds per test.
+                configuration.PollingInterval = TimeSpan.FromMilliseconds(100);
+
                 if (valueConverter is not null)
                 {
                     configuration.ValueConverter = valueConverter;
@@ -162,6 +181,16 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
             throw;
         }
     }
+
+    /// <summary>
+    /// Waits until both deadband-filtered properties have been moved to the polling fallback. Asserting
+    /// this before any value keeps a future SDK that rejects the filter with a different status code
+    /// (which drops the item instead of polling it) from surfacing as an unexplained value timeout.
+    /// </summary>
+    public Task WaitForPolledPropertiesAsync() =>
+        AsyncTestHelpers.WaitUntilAsync(
+            () => _client.Source!.Diagnostics.Polling?.ItemCount == PolledPropertyCount,
+            message: $"the {PolledPropertyCount} deadband-filtered properties should have fallen back to polling");
 
     public Task WaitForClientValueAsync(string expected) =>
         AsyncTestHelpers.WaitUntilAsync(
