@@ -497,6 +497,22 @@ internal static class SubjectMetadataExtractor
                 }
 
                 var methodName = fullMethodName.Substring(0, fullMethodName.Length - InterceptedMethodPostfix.Length);
+
+                // The wrapper is emitted into the same generated half as the plumbing, so a wrapper
+                // named like a plumbing member captures the generated call sites instead of the
+                // plumbing. In derived mode the plumbing is inherited, so this is a silent capture:
+                // the only compiler signal is CS0108, which a consumer without TreatWarningsAsErrors
+                // never sees, and the subject then reports whatever the wrapper returns. NI0013
+                // cannot catch it, because it scans declared members rather than emitted ones.
+                if (SubjectBaseContract.RootModePlumbingMemberNames.Contains(methodName))
+                {
+                    diagnostics.Add(Diagnostic.Create(
+                        Diagnostics.MemberSkipped, location,
+                        $"{typeSymbol.Name}.{fullMethodName}",
+                        $"the wrapper would be named '{methodName}', which is a generated subject plumbing member"));
+                    continue;
+                }
+
                 var returnType = GetFullTypeName(method.ReturnType, declarationModel);
 
                 var parameters = method.ParameterList.Parameters

@@ -351,13 +351,17 @@ Details that are easy to get wrong:
 - Members may be more accessible than listed, and a member the base class itself inherits from
   further up counts. A generic base class is checked with its type arguments substituted.
 - `InvokeMethod`'s last parameter must really be `params`. The generated call site passes arguments in
-  expanded form, so the same parameter types without `params` pass the check and then fail to compile.
+  expanded form, and the check tests for `params` explicitly, so the same parameter types without it
+  fail the contract. The subject then falls back to emitting its own plumbing, NI0012 is reported and
+  the build succeeds.
 - `DefaultProperties` may be a static property or a static field, but its type has to be
   `IReadOnlyDictionary<string, SubjectPropertyMetadata>` or something that implements it. A static of
   that name with any other type is reported rather than accepted.
 - The `IRaisePropertyChanged` row is the only one that is not needed for the generated code to
-  compile. A base class that satisfies everything else but not that one still works, and the subject
-  declares its own change notification plumbing.
+  compile. A base class that satisfies everything else but not that one still produces code that
+  compiles, with the subject declaring its own change notification plumbing, but it fails the
+  contract all the same: the subject re-emits the whole plumbing block and NI0012 is reported, which
+  `TreatWarningsAsErrors` turns into a build error.
 
 What happens when a base class does not satisfy the contract depends on `DefaultProperties`. If it is
 present and usable, the subject falls back to emitting its own plumbing and the generator reports
@@ -375,6 +379,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 
 public class TrackedEntityBase : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged

@@ -263,6 +263,68 @@ public class SubjectBaseDiagnosticsTests
         }
         """;
 
+    /// <summary>
+    /// A base that satisfies every clause of the contract except one: SetPropertyValue returns void
+    /// where the generated setter needs a bool. This is the single-typo shape a hand-written base
+    /// realistically has, and the name, arity and parameter count all still match.
+    /// </summary>
+    private const string WrongReturnTypeBase = """
+        using System;
+        using System.Collections.Concurrent;
+        using System.Collections.Generic;
+        using System.Collections.Frozen;
+        using System.ComponentModel;
+        using System.Linq;
+        using Namotion.Interceptor;
+        using Namotion.Interceptor.Interceptors;
+
+        namespace Repro
+        {
+            public class HandBase : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+            {
+                private IInterceptorExecutor? _context;
+                private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
+
+                public event PropertyChangedEventHandler? PropertyChanged;
+
+                void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
+                    => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+                IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
+                object IInterceptorSubject.SyncRoot { get; } = new object();
+                IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;
+
+                void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+                    => _properties = ((IInterceptorSubject)this).Properties
+                        .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                        .ToFrozenDictionary();
+
+                public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; }
+                    = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
+
+                protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;
+
+                protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
+                    => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+
+                protected void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                {
+                    if (_context is null)
+                    {
+                        setValue(this, newValue);
+                        return;
+                    }
+
+                    _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                }
+
+                protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
+                    => _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
+            }
+        }
+        """;
+
     private const string GeneratedDerived = """
 
         namespace Repro
@@ -789,5 +851,45 @@ public class SubjectBaseDiagnosticsTests
 
         // Assert
         Assert.Contains(result.GeneratorDiagnostics, d => d.Id == "NI0014");
+    }
+
+    [Fact]
+    public void WhenAWrapperWouldBeNamedLikeAnInheritedPlumbingMember_ThenNI0006IsReportedAndThePropertiesSurvive()
+    {
+        // Arrange: stripping the postfix yields "GetInstanceProperties", the inherited helper the
+        // generated IInterceptorSubject.Properties calls. Emitting the wrapper captures that call,
+        // so Properties reports whatever the wrapper returns and the registry sees nothing, while
+        // writes keep working and hide the breakage.
+        var source = LeafDeclaring(
+            "public IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstancePropertiesWithoutInterceptor()" +
+            " => new Dictionary<string, SubjectPropertyMetadata>();");
+
+        // Act
+        var result = GeneratorTestHost.RunForExecution(source);
+        var leaf = (IInterceptorSubject)result.CreateInstance("Repro.LeafSubject");
+
+        // Assert
+        Assert.Contains(result.GeneratorDiagnostics, d => d.Id == "NI0006");
+        Assert.Equal(["LeafName", "RootName"], leaf.Properties.Keys.OrderBy(name => name));
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+    }
+
+    [Fact]
+    public void WhenBaseDeclaresAPlumbingHelperWithTheWrongReturnType_ThenTheContractRejectsIt()
+    {
+        // Arrange: every plumbing member is present and only SetPropertyValue returns void. The
+        // generated setter tests that return value, so accepting this base means CS0029 inside a
+        // generated file, which is exactly the outcome the contract check exists to replace.
+        var source = WrongReturnTypeBase + GeneratedDerived;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert: rejected by the contract, so the subject falls back to its own plumbing (NI0012)
+        // instead of calling the base helper that does not fit.
+        Assert.Contains(result.GeneratorDiagnostics, d => d.Id == "NI0012");
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
     }
 }

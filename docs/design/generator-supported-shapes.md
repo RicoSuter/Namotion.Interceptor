@@ -302,8 +302,11 @@ for every consumer that recompiles. `AGENTS.md` ranks correctness above performa
 close call rather than an obvious one, and anyone revisiting it should start from the numbers above
 rather than from the phrase "rejected on performance".
 
-Full method and machine details are in
-`docs/superpowers/evidence/2026-08-07-hierarchy-benchmark.md`.
+The numbers come from BenchmarkDotNet 0.15.5 on an Apple M4 Max under .NET 9.0.10, with
+`WarmupCount=5 IterationCount=15 LaunchCount=1`, and every configuration was run twice in separate
+processes so that the run to run spread supplies the noise floor rather than the within process error
+bars. Re-run them with
+`dotnet run --project src/Namotion.Interceptor.Benchmark -c Release -- --filter "*SubjectHierarchyBenchmark*"`.
 
 ## Residual risks accepted with the per hierarchy plumbing
 

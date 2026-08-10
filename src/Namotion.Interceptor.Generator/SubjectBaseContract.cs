@@ -294,9 +294,23 @@ internal static class SubjectBaseContract
     }
 
     /// <summary>
+    /// The return type the contract check demands of one plumbing helper. An enum rather than a
+    /// symbol, because two of the four are answered from the method itself and one has to be
+    /// constructed from the compilation.
+    /// </summary>
+    private enum PlumbingReturnKind
+    {
+        OwnTypeParameter,
+        Boolean,
+        Object,
+        PropertyMetadataDictionary
+    }
+
+    /// <summary>
     /// The shape of one helper method root mode emits, in the single place both the contract check
-    /// and the hiding check read it from. Parameter types are approximated by counts, which is
-    /// enough to separate the emitted signature from an unrelated overload of the same name.
+    /// and the hiding check read it from. Parameter types are approximated by counts plus the two
+    /// positions a typo really lands on, the return type and the leading string, which is enough to
+    /// separate the emitted signature from an unrelated overload of the same name.
     /// </summary>
     /// <param name="Name">The emitted member name, from <see cref="MemberNames"/>.</param>
     /// <param name="TypeParameterCount">Type parameters on the emitted signature.</param>
@@ -308,27 +322,43 @@ internal static class SubjectBaseContract
     /// part of the signature C# hides by, so such a base does hide the emitted method and the 'new'
     /// modifier is still required.
     /// </param>
+    /// <param name="ReturnKind">
+    /// Consulted by the contract check only, never by the hiding check: C# hides by signature, which
+    /// excludes the return type, so a base helper returning the wrong type still hides the emitted
+    /// one and still needs the 'new' modifier.
+    /// </param>
+    /// <param name="RequiresLeadingString">
+    /// Whether the first parameter must be a string. The remaining parameters are left to the count,
+    /// because the emitted call site passes lambdas whose types the base would have to get wrong in
+    /// a way that still binds.
+    /// </param>
     /// <param name="Declaration">How the member is named in the NI0011 message.</param>
     private sealed record PlumbingMethodShape(
         string Name,
         int TypeParameterCount,
         int ParameterCount,
         bool RequiresParameterArray,
+        PlumbingReturnKind ReturnKind,
+        bool RequiresLeadingString,
         string Declaration);
 
     private static readonly PlumbingMethodShape[] PlumbingMethods =
     [
         new PlumbingMethodShape(
             MemberNames.GetPropertyValue, TypeParameterCount: 1, ParameterCount: 2, RequiresParameterArray: false,
+            PlumbingReturnKind.OwnTypeParameter, RequiresLeadingString: true,
             "protected TProperty GetPropertyValue<TProperty>(string, Func<IInterceptorSubject, TProperty>)"),
         new PlumbingMethodShape(
             MemberNames.SetPropertyValue, TypeParameterCount: 1, ParameterCount: 4, RequiresParameterArray: false,
+            PlumbingReturnKind.Boolean, RequiresLeadingString: true,
             "protected bool SetPropertyValue<TProperty>(string, TProperty, TProperty, Action<IInterceptorSubject, TProperty>)"),
         new PlumbingMethodShape(
             MemberNames.InvokeMethod, TypeParameterCount: 0, ParameterCount: 3, RequiresParameterArray: true,
+            PlumbingReturnKind.Object, RequiresLeadingString: true,
             "protected object? InvokeMethod(string, Func<IInterceptorSubject, object?[], object?>, params object?[])"),
         new PlumbingMethodShape(
             MemberNames.GetInstanceProperties, TypeParameterCount: 0, ParameterCount: 0, RequiresParameterArray: false,
+            PlumbingReturnKind.PropertyMetadataDictionary, RequiresLeadingString: false,
             "protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties()")
     ];
 
@@ -352,7 +382,11 @@ internal static class SubjectBaseContract
     /// ancestor, whose members have no symbol yet; <see cref="FindHiddenPlumbingMembers"/> reaches
     /// the same set member by member for a base that already exists.
     /// </summary>
-    private static readonly string[] RootModePlumbingMemberNames =
+    /// <remarks>
+    /// Also read by <see cref="SubjectMetadataExtractor"/> as the set of names the plumbing occupies
+    /// in every subject, root or derived, which no other emitted member may take.
+    /// </remarks>
+    public static readonly string[] RootModePlumbingMemberNames =
         GeneratedMemberNames.Concat([MemberNames.PropertyChanged, MemberNames.RaisePropertyChanged]).ToArray();
 
     /// <summary>
@@ -579,7 +613,38 @@ internal static class SubjectBaseContract
                 method.TypeParameters.Length == plumbingMethod.TypeParameterCount &&
                 method.Parameters.Length == plumbingMethod.ParameterCount &&
                 (!plumbingMethod.RequiresParameterArray ||
-                 method.Parameters[method.Parameters.Length - 1].IsParams));
+                 method.Parameters[method.Parameters.Length - 1].IsParams) &&
+                (!plumbingMethod.RequiresLeadingString ||
+                 method.Parameters[0].Type.SpecialType == SpecialType.System_String) &&
+                HasExpectedReturnType(method, plumbingMethod, compilation));
+
+    /// <summary>
+    /// Whether the base helper returns what the generated call sites consume. Nullability
+    /// annotations are deliberately not compared: the emitted code accepts both forms, and a base
+    /// compiled without a nullable context would otherwise fail the contract for no reason.
+    /// </summary>
+    private static bool HasExpectedReturnType(
+        IMethodSymbol method,
+        PlumbingMethodShape plumbingMethod,
+        Compilation compilation)
+    {
+        switch (plumbingMethod.ReturnKind)
+        {
+            case PlumbingReturnKind.OwnTypeParameter:
+                return SymbolEqualityComparer.Default.Equals(method.ReturnType, method.TypeParameters[0]);
+
+            case PlumbingReturnKind.Boolean:
+                return method.ReturnType.SpecialType == SpecialType.System_Boolean;
+
+            case PlumbingReturnKind.Object:
+                return method.ReturnType.SpecialType == SpecialType.System_Object;
+
+            default:
+                var expectedType = GetPropertyMetadataDictionaryType(compilation);
+                return expectedType is not null &&
+                       SymbolEqualityComparer.Default.Equals(method.ReturnType, expectedType);
+        }
+    }
 
     /// <summary>
     /// The members of a given name that member lookup from the subject would find on the ancestor
