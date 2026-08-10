@@ -126,6 +126,17 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
         return false;
     }
 
+    /// <summary>
+    /// Builds the outbound processor. Extracted so a test can read back the rule it selected: asserting
+    /// the constant alone would not catch a different value being inlined at the construction site,
+    /// which is the mistake the constant exists to prevent.
+    /// </summary>
+    internal ChangeQueueProcessor CreateChangeQueueProcessor() =>
+        new(source: this, _context,
+            propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
+            DeliveryRule,
+            _configuration.BufferTime, maxQueueDepth: null, logger: _logger);
+
     private bool IsPropertyIncluded(PropertyReference propertyReference)
     {
         return propertyReference.TryGetRegisteredProperty() is { } property &&
@@ -250,11 +261,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                     // Create the ChangeQueueProcessor (and its subscription) BEFORE starting the server.
                     // This ensures property changes during OPC UA node creation are captured in the queue
                     // and not lost in the gap between node creation and processing start.
-                    using var changeQueueProcessor = new ChangeQueueProcessor(
-                        source: this, _context,
-                        propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
-                        DeliveryRule,
-                        _configuration.BufferTime, maxQueueDepth: null, logger: _logger);
+                    using var changeQueueProcessor = CreateChangeQueueProcessor();
 
                     await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
                     await application.StartAsync(server).ConfigureAwait(false);

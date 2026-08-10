@@ -717,6 +717,33 @@ public class ChangeQueueProcessorTests
             deliveryRule: default));
     }
 
+    /// <summary>
+    /// Any value outside the two named ones has to be rejected here as well, not just the zero one. The
+    /// delivery decision throws on an unknown rule, and it runs inside the flush, outside the try that
+    /// wraps the write handler, so it would escape the periodic loop's catch and end delivery for the
+    /// processor's lifetime while the dequeue loop kept filling the buffer.
+    /// </summary>
+    [Fact]
+    public void WhenTheDeliveryRuleIsNotAKnownValue_ThenTheProcessorIsRejected()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            bufferTime: TimeSpan.FromMilliseconds(8),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: (ChangeDeliveryRule)3));
+    }
+
     private static (IInterceptorSubjectContext Context, Person Subject, ConcurrentQueue<string?> Written, object Source, ChangeQueueProcessor Processor)
         CreateImmediateProcessor()
     {

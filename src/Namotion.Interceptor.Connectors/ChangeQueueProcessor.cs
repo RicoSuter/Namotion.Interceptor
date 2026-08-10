@@ -131,12 +131,17 @@ public class ChangeQueueProcessor : IDisposable
     // The required parameter makes omitting the rule a compile error, but `default` and `0` still
     // compile in that slot and would silently pick a rule. Both wrong choices lose data without a
     // diagnostic, so the last silent path is closed here rather than left to the caller.
+    //
+    // Rejects anything outside the two named values, not just the zero one: the delivery decision throws
+    // on an unknown rule, and it runs inside the flush, outside the try that wraps the write handler, so
+    // it would escape the periodic loop's catch and end delivery for this processor's lifetime while the
+    // dequeue loop kept filling the buffer. Failing here turns that into an argument error at startup.
     private static ChangeDeliveryRule ValidateRule(ChangeDeliveryRule rule)
     {
-        if (rule == ChangeDeliveryRule.Unspecified)
+        if (rule is not (ChangeDeliveryRule.SourceValuesMayBeStale or ChangeDeliveryRule.SourceValuesAreSettled))
         {
             throw new ArgumentOutOfRangeException(nameof(rule), rule,
-                "A supersession rule must be chosen explicitly; see ChangeDeliveryRule for the condition that decides it.");
+                "A delivery rule must be chosen explicitly; see ChangeDeliveryRule for the condition that decides it.");
         }
 
         return rule;

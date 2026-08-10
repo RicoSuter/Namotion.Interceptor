@@ -97,7 +97,7 @@ internal static class ChangeDeliveryFilter
         ChangeDeliveryRule.SourceValuesAreSettled => true,
         ChangeDeliveryRule.SourceValuesMayBeStale => false,
         _ => throw new ArgumentOutOfRangeException(nameof(rule), rule,
-            "A supersession rule must be chosen explicitly; see ChangeDeliveryRule for the condition that decides it.")
+            "A delivery rule must be chosen explicitly; see ChangeDeliveryRule for the condition that decides it.")
     };
 
     private static bool IsSuperseded(in SubjectPropertyChange change, long marker)

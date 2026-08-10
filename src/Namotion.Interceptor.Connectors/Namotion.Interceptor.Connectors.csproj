@@ -11,6 +11,7 @@
 		<!-- Test-only: lets each connector pin which supersession rule it wired up. -->
 		<InternalsVisibleTo Include="Namotion.Interceptor.WebSocket.Tests" />
 		<InternalsVisibleTo Include="Namotion.Interceptor.Mqtt.Tests" />
+		<InternalsVisibleTo Include="Namotion.Interceptor.OpcUa.Tests" />
 	</ItemGroup>
 
 	<ItemGroup>

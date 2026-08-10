@@ -78,7 +78,7 @@ subject, which converged the two stores by accident while corrupting them in oth
 
 The survivor's old value comes from the lowest revision in the batch and its new value from the highest, rather than from whichever change happened to arrive first and last. Enqueuing happens after the commit and outside the subject lock, so a writer preempted between the two can present an older commit after a newer one. Under concurrent writers that inversion is real rather than theoretical, and taking the first and last arrivals would produce a survivor whose old value postdates its new one.
 
-Everything else on the survivor, its `Revision`, `Origin` and both timestamps, comes from the highest-revision change, so a handler keying off `Origin.Source` sees the newest commit's origin rather than a mixture. Under the arrival-position fallback below they come from the last arrival instead.
+Everything else on the survivor, its `Revision`, `Origin` and both timestamps, comes from the highest-revision change, so a handler keying off `Origin.Source` sees the newest commit's origin rather than a mixture. Under the arrival-position fallback below the origin and timestamps come from the last arrival instead, and the survivor carries no revision at all.
 
 ## Why revision 0 is delivered rather than dropped
 

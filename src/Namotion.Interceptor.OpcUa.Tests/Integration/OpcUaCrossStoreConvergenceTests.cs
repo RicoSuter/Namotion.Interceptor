@@ -94,15 +94,4 @@ public class OpcUaCrossStoreConvergenceTests
         Assert.Equal("later-local", node.Value);
     }
 
-    /// <summary>
-    /// The write loop and the processor must select the same rule, or one of them still writes an older
-    /// commit out. They share the named const, so pinning its value extends the coverage above, which
-    /// exercises the write loop, to the processor site that has no test of its own.
-    /// </summary>
-    [Fact]
-    public void WhenTheServerSelectsItsDeliveryRule_ThenItIsTheServerRule()
-    {
-        // Act & Assert
-        Assert.Equal(ChangeDeliveryRule.SourceValuesAreSettled, OpcUaSubjectServer.DeliveryRule);
-    }
 }

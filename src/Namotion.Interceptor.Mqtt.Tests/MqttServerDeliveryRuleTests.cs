@@ -14,10 +14,10 @@ namespace Namotion.Interceptor.Mqtt.Tests;
 /// and no transport test notices. Pins the wiring; the rule's behaviour is covered by
 /// <c>ChangeQueueProcessorTests</c> in the connectors suite.
 /// </summary>
-public partial class MqttServerDeliveryRuleTests
+public class MqttServerDeliveryRuleTests
 {
     [Fact]
-    public void WhenTheServerCreatesItsProcessor_ThenItSelectsTheServerRule()
+    public async Task WhenTheServerCreatesItsProcessor_ThenItSelectsTheServerRule()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -26,7 +26,7 @@ public partial class MqttServerDeliveryRuleTests
             .WithRegistry();
 
         var subject = new DeliveryRuleTestRoot(context);
-        var server = new MqttSubjectServer(subject, new MqttServerConfiguration(), NullLogger<MqttSubjectServer>.Instance);
+        await using var server = new MqttSubjectServer(subject, new MqttServerConfiguration(), NullLogger<MqttSubjectServer>.Instance);
 
         // Act
         using var processor = server.CreateChangeQueueProcessor();

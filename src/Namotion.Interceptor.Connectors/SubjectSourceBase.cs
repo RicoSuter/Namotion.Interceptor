@@ -396,7 +396,8 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// property and therefore to the same subject, so their revisions are comparable. A change
     /// carrying revision 0 was built outside a terminal write and orders against nothing, so
     /// capture order decides between those and the survivor carries no revision either, matching
-    /// the flush-path collapse in <c>ChangeMerger</c>.
+    /// the flush-path collapse in <c>ChangeMerger</c> on unordered changes. The two still differ on which
+    /// old value survives when every revision is ordered, which the delivery contract calls best effort.
     /// </para>
     /// </remarks>
     private static List<SubjectPropertyChange> CollapsePerProperty(SubjectPropertyChange[] changes)
