@@ -21,8 +21,7 @@ internal sealed class WriteRetryQueue : IDisposable
     private const int MaxBatchSize = 1024;
     private SubjectPropertyChange[] _scratchBuffer = new SubjectPropertyChange[64];
 
-    // Reused across flushes: a refused write fails every tick, so a per-flush dictionary would allocate
-    // for as long as the outage lasts. Only touched by the dequeue below, under _lock.
+    // Reused across flushes so a persistent outage does not allocate one per tick. Only used under _lock.
     private readonly Dictionary<PropertyReference, int> _collapseIndices = new(PropertyReference.Comparer);
 
     private readonly ILogger _logger;
@@ -225,22 +224,18 @@ internal sealed class WriteRetryQueue : IDisposable
 
     /// <summary>
     /// Compacts the dequeued batch in <see cref="_scratchBuffer"/> to one change per property, in place,
-    /// and returns the compacted length. Each survivor stays at its first occurrence's position. A batch
-    /// never carries a property twice: where two changes for one property cannot be merged, the batch is
-    /// cut before the second one and everything from there is pushed back to the head of the queue, so
-    /// the flush loop ships the pair in separate rounds.
+    /// and returns the compacted length. Each survivor stays at its first occurrence's position. Where two
+    /// changes for one property cannot be merged, the batch is cut before the second one and the rest is
+    /// pushed back to the head of the queue, so the flush loop ships the pair in separate rounds.
     /// </summary>
     /// <remarks>
     /// Collapsing at dequeue rather than on the requeued span is what bounds the queue: a failed flush
-    /// requeues its batch and the caller then appends the same tick's own changes, so only the dequeue
-    /// sees both producers. Without it a property the source keeps refusing costs entries per flush tick
-    /// rather than a fixed number.
+    /// requeues its batch and the caller then appends the same tick's changes, so only the dequeue sees both.
     /// <para>
     /// Two changes merge only when both carry a revision. A change built outside a terminal write carries
     /// none, orders against nothing, and passes the delivery filter's supersession check unconditionally,
     /// so merging one away could let a later reconcile restore an older parked write over a newer local
-    /// one. Nothing in this queue may lose its revision, which is also why the survivor is assembled by
-    /// revision rather than by position, and why an unmergeable pair is separated in time instead.
+    /// one. Nothing in this queue may lose its revision.
     /// </para>
     /// </remarks>
     private int CollapsePerProperty(int count)
@@ -255,8 +250,7 @@ internal sealed class WriteRetryQueue : IDisposable
         var kept = 0;
         for (var i = 0; i < count; i++)
         {
-            // By reference: a by-value copy of this struct is a large block move that the JIT emits a
-            // bulk write barrier for, because the struct carries object fields.
+            // By reference: this struct carries object fields, so copying it is a block move with barriers.
             ref readonly var change = ref _scratchBuffer[i];
 
             // Single lookup per change: the ref is only read and written before the next add.
@@ -268,10 +262,9 @@ internal sealed class WriteRetryQueue : IDisposable
                 {
                     // Unmergeable, and one write must never carry a property twice: split across two of
                     // the source's batches, a failure of the batch holding the older change requeues it
-                    // alone and settles the source on it for good. The rest goes back to the queue, whose
-                    // lock the caller already holds, and the flush loop ships it in the next round. That
-                    // round still ships something: seeing this property again means an earlier change was
-                    // kept, so kept is at least 1 here.
+                    // alone and settles the source on it for good. The queue's lock is the caller's, and
+                    // seeing this property again means an earlier change was kept, so the next round
+                    // still ships something.
                     _pendingWrites.InsertRange(0, _scratchBuffer.AsSpan(i, count - i));
                     break;
                 }
@@ -288,16 +281,14 @@ internal sealed class WriteRetryQueue : IDisposable
             survivorIndex = kept;
             if (kept != i)
             {
-                // Guarded because nothing collapsing is the common case, and a self-assignment here is
-                // still the full block move with its write barriers.
+                // Guarded because nothing collapsing is the common case, and a self-assignment still copies.
                 _scratchBuffer[kept] = change;
             }
 
             kept++;
         }
 
-        // Cleared on the way out as well: every key holds its subject alive, and a source that goes quiet
-        // after a wide collapse would otherwise pin them until the next batch of two or more.
+        // Cleared on the way out too: every key holds its subject alive until the next collapse otherwise.
         _collapseIndices.Clear();
 
         if (kept < count)

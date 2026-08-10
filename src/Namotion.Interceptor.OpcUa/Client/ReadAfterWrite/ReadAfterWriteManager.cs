@@ -348,8 +348,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 {
                     var result = response.Results[i];
 
-                    // Good and Uncertain are both usable: Uncertain means the server doubts the quality, not that
-                    // there is no reading. Bad means the value is not usable and may not even be present.
+                    // Uncertain is a reading the server doubts, not a missing one. Bad may carry no value at all.
                     if (!StatusCode.IsNotBad(result.StatusCode))
                     {
                         failedCount++;
@@ -391,8 +390,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     catch (Exception e)
                     {
                         // Contained per item: applying is local, so its failure says nothing about how the
-                        // server answers reads and must neither discard the values read back alongside it nor
-                        // count against the circuit breaker that tracks that.
+                        // server answers reads and must not count against the circuit breaker that tracks that.
                         _logger.LogError(e, "Failed to apply a read-after-write value for '{PropertyName}' ({NodeId}).",
                             property.Name, nodeId);
                     }

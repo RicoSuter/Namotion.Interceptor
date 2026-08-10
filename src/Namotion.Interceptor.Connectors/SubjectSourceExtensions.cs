@@ -13,10 +13,9 @@ public static class SubjectSourceExtensions
 
     /// <summary>
     /// Writes changes to the source in batches, respecting the source's maximum batch size.
-    /// Returns a <see cref="WriteResult"/> containing which changes failed. A failing batch does not
-    /// stop the ones behind it: every batch is attempted and their failures are reported together,
-    /// with the first error, joined with a later throw into an <see cref="AggregateException"/> when one
-    /// arrives. Never throws for write failures, errors are reported in the result.
+    /// Returns a <see cref="WriteResult"/> containing which changes failed. A failing batch does not stop
+    /// the ones behind it: every batch is attempted and their failures are reported together with the
+    /// first error. Never throws for write failures, errors are reported in the result.
     /// <para>
     /// Batches are only independent of each other because <paramref name="changes"/> carries at most one
     /// change per property. With two, a failure of the batch holding the older one while the batch holding
@@ -93,8 +92,7 @@ public static class SubjectSourceExtensions
                     : result;
             }
 
-            // Multi-batch: every batch is attempted and their failures accumulate into one result. One
-            // change the source refuses would otherwise starve everything queued behind it, since the
+            // One change the source refuses would otherwise starve everything queued behind it: the
             // batches after it would be condemned unattempted on every retry for as long as it fails.
             for (; batchStart < count; batchStart += batchSize)
             {
@@ -117,8 +115,7 @@ public static class SubjectSourceExtensions
 
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    // Pushing the rest at a source that is going away gains nothing, and a batch that is
-                    // never attempted is unconfirmed.
+                    // An unattempted batch is unconfirmed, and a source that is going away will not take it.
                     failedChanges.AddRange(changes.Span[(batchStart + currentBatchSize)..]);
                     break;
                 }
@@ -131,9 +128,8 @@ public static class SubjectSourceExtensions
         catch (Exception ex)
         {
             // The throwing batch's outcome is unknown and the remainder was never attempted, so both are
-            // unconfirmed. Batches attempted before it keep the verdict they already got: a slice from
-            // here would condemn those that succeeded after an earlier batch failed, and a change
-            // reported failed after reaching the source is never reverted by a source transaction.
+            // unconfirmed. Batches attempted before it keep the verdict they already got: slicing from
+            // here would condemn those that succeeded after an earlier batch failed.
             var unconfirmed = changes.Slice(batchStart);
             if (failedChanges is null)
             {
@@ -143,8 +139,7 @@ public static class SubjectSourceExtensions
             }
 
             // Consumers log only the reported error, so reporting the first one alone would drop the throw
-            // with its stack. AggregateException.ToString renders both, which Exception.Data does not.
-            // firstError is set together with failedChanges, so it is non-null.
+            // with its stack. firstError is set together with failedChanges, so it is non-null.
             failedChanges.AddRange(unconfirmed.Span);
             return CreatePartialFailure(failedChanges, new AggregateException(firstError!, ex));
         }

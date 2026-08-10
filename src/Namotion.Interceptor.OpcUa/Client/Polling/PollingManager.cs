@@ -351,8 +351,7 @@ internal sealed class PollingManager : IAsyncDisposable
                 var dataValue = response.Results[i];
                 var pollingItem = batch[i];
 
-                // Good and Uncertain are both usable: Uncertain means the server doubts the quality, not that
-                // there is no reading. Bad means the value is not usable and may not even be present.
+                // Uncertain is a reading the server doubts, not a missing one. Bad may carry no value at all.
                 if (StatusCode.IsNotBad(dataValue.StatusCode))
                 {
                     _metrics.RecordRead();
@@ -405,7 +404,7 @@ internal sealed class PollingManager : IAsyncDisposable
             }
 
             // Update cached value atomically - only if item still exists and hasn't changed
-            // This prevents resurrection of items removed between snapshot and processing.
+            // This prevents resurrection of items removed between snapshot and processing
             // The cache keeps the raw value so change detection keeps comparing like with like.
             var key = pollingItem.NodeId.ToString();
             var updatedItem = pollingItem with { LastValue = newValue };
