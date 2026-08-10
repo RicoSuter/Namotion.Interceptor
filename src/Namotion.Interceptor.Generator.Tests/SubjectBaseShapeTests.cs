@@ -1,3 +1,4 @@
+using System.Reflection;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking;
 using Xunit;
@@ -400,6 +401,69 @@ public class SubjectBaseShapeTests
     }
 
     [Fact]
+    public void WhenAPlainClassSitsBetweenTwoSubjectsAcrossAssemblies_ThenABaseDeclaredWriteReachesTheInterceptor()
+    {
+        // Arrange: the shape the nearest-subject-ancestor walk exists for, executed. Naming the
+        // right ancestor in the emitted text is only half the claim; the other half is that the
+        // ancestor's setter, compiled into the library one class above a plain intermediate, ends
+        // up on the leaf's executor.
+        const string librarySource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Library
+            {
+                [InterceptorSubject]
+                public partial class LibraryBase
+                {
+                    public partial string BaseName { get; set; }
+                }
+
+                public class PlainInBetween : LibraryBase
+                {
+                }
+            }
+            """;
+
+        const string mainSource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace App
+            {
+                [InterceptorSubject]
+                public partial class AppLeaf : Library.PlainInBetween
+                {
+                    public partial string LeafName { get; set; }
+                }
+            }
+            """;
+
+        var writeInterceptor = new RecordingWriteInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => writeInterceptor);
+
+        var result = GeneratorTestHost.RunWithLibraryReferenceForExecution(librarySource, mainSource);
+        var leafType = result.LoadAssembly().GetType("App.AppLeaf");
+        Assert.NotNull(leafType);
+        var leaf = (IInterceptorSubject)Activator.CreateInstance(leafType, context)!;
+
+        // Act
+        leafType.GetProperty("BaseName")!.SetValue(leaf, "base-written");
+        leafType.GetProperty("LeafName")!.SetValue(leaf, "leaf-written");
+
+        // Assert
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "BaseName" && Equals(write.Value, "base-written"));
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "LeafName" && Equals(write.Value, "leaf-written"));
+        Assert.Contains("BaseName", leaf.Properties.Keys);
+        Assert.Contains("LeafName", leaf.Properties.Keys);
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+    }
+
+    [Fact]
     public void WhenAPlainClassSitsBetweenAHandWrittenSubjectAndTheSubject_ThenTheWalkResolvesTheHandWrittenClass()
     {
         // Arrange: the ancestor carries no attribute and never names IInterceptorSubject directly,
@@ -625,6 +689,42 @@ public class SubjectBaseShapeTests
     }
 
     [Fact]
+    public void WhenTheDocumentedHandWrittenBaseHostsAGeneratedSubclass_ThenItsWritesReachTheInterceptor()
+    {
+        // Arrange: the other of the two directions goal 4 asks for, and the only test that runs it.
+        // The fixture is read out of docs/subject-guidelines.md instead of being copied here, so the
+        // contract the documentation asks a base class to satisfy and the contract this test proves
+        // cannot drift apart.
+        var source = ReadDocumentedConformingBaseFixture();
+
+        var writeInterceptor = new RecordingWriteInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => writeInterceptor);
+
+        var result = GeneratorTestHost.RunForExecution(source);
+        var machineType = result.LoadAssembly().GetType("Machine");
+        Assert.NotNull(machineType);
+        var machine = (IInterceptorSubject)Activator.CreateInstance(machineType, context)!;
+
+        // Act
+        machineType.GetProperty("SerialNumber")!.SetValue(machine, "serial-written");
+
+        // Assert: the generated setter routes through the hand-written base's SetPropertyValue and
+        // lands on the executor the base's Context published. The field count is what shows it is
+        // the base's and not a second copy emitted into the subclass, and the warning check is what
+        // shows that second copy is not merely unused but absent: a private helper hiding the
+        // inherited protected one is CS0108 in a file the consumer cannot edit.
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "SerialNumber" && Equals(write.Value, "serial-written"));
+        Assert.Contains("SerialNumber", machine.Properties.Keys);
+        Assert.Equal(1, CountExecutorFields(machineType));
+        Assert.DoesNotContain(result.GeneratorDiagnostics, diagnostic => diagnostic.Id is "NI0011" or "NI0012");
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+    }
+
+    [Fact]
     public void WhenBaseSubjectIsInAReferencedAssembly_ThenTheDerivedSubjectSharesItsPlumbing()
     {
         // Arrange: mode selection branch 2. The library is compiled WITH the generator, so its
@@ -667,6 +767,67 @@ public class SubjectBaseShapeTests
         Assert.Empty(result.CompilationWarnings);
         Assert.DoesNotContain("private IInterceptorExecutor? _context;", generated);
         Assert.DoesNotContain("void IInterceptorSubject.AddProperties", generated);
+    }
+
+    [Fact]
+    public void WhenBaseSubjectIsInAReferencedAssembly_ThenABaseDeclaredWriteReachesTheInterceptor()
+    {
+        // Arrange: the same shape as above, executed. The emitted text cannot show this: the base
+        // property's setter was compiled into the library against the library's own plumbing, and
+        // only running it shows that it reaches the executor the leaf's context published rather
+        // than a second one the leaf kept for itself. This is what a consumer deriving from a
+        // subject shipped in a package hits, and the contract check reads the base from metadata
+        // here rather than from source.
+        const string librarySource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Library
+            {
+                [InterceptorSubject]
+                public partial class LibraryBase
+                {
+                    public partial string BaseName { get; set; }
+                }
+            }
+            """;
+
+        const string mainSource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace App
+            {
+                [InterceptorSubject]
+                public partial class AppLeaf : Library.LibraryBase
+                {
+                    public partial string LeafName { get; set; }
+                }
+            }
+            """;
+
+        var writeInterceptor = new RecordingWriteInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => writeInterceptor);
+
+        var result = GeneratorTestHost.RunWithLibraryReferenceForExecution(librarySource, mainSource);
+        var leafType = result.LoadAssembly().GetType("App.AppLeaf");
+        Assert.NotNull(leafType);
+        var leaf = (IInterceptorSubject)Activator.CreateInstance(leafType, context)!;
+
+        // Act
+        leafType.GetProperty("BaseName")!.SetValue(leaf, "base-written");
+        leafType.GetProperty("LeafName")!.SetValue(leaf, "leaf-written");
+
+        // Assert
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "BaseName" && Equals(write.Value, "base-written"));
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "LeafName" && Equals(write.Value, "leaf-written"));
+        Assert.Contains("BaseName", leaf.Properties.Keys);
+        Assert.Contains("LeafName", leaf.Properties.Keys);
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
     }
 
     [Fact]
@@ -997,5 +1158,70 @@ public class SubjectBaseShapeTests
         // Assert
         Assert.DoesNotContain("new protected void RaisePropertyChanged", generated);
         Assert.Contains("protected void RaisePropertyChanged(string propertyName)", generated);
+    }
+
+    /// <summary>
+    /// The single fenced code block in docs/subject-guidelines.md that holds the base class
+    /// satisfying the whole contract, together with the generated subclass it hosts.
+    /// </summary>
+    private static string ReadDocumentedConformingBaseFixture()
+    {
+        var blocks = new List<string>();
+        var currentBlock = new List<string>();
+        var insideBlock = false;
+
+        foreach (var line in File.ReadAllLines(FindRepositoryFile(Path.Combine("docs", "subject-guidelines.md"))))
+        {
+            if (line.StartsWith("```", StringComparison.Ordinal))
+            {
+                if (insideBlock)
+                {
+                    blocks.Add(string.Join(Environment.NewLine, currentBlock));
+                    currentBlock.Clear();
+                }
+
+                insideBlock = !insideBlock;
+                continue;
+            }
+
+            if (insideBlock)
+            {
+                currentBlock.Add(line);
+            }
+        }
+
+        return Assert.Single(blocks, block => block.Contains("class TrackedEntityBase", StringComparison.Ordinal));
+    }
+
+    private static string FindRepositoryFile(string relativePath)
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            var candidate = Path.Combine(directory.FullName, relativePath);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new FileNotFoundException($"Could not find '{relativePath}' in any directory above '{AppContext.BaseDirectory}'.");
+    }
+
+    /// <summary>
+    /// Counts the executor fields over the whole hierarchy. A hand-written base that really hosts
+    /// its generated subclass carries the only one; a subclass that emits its own plumbing instead
+    /// adds a second that nothing above it ever populates.
+    /// </summary>
+    private static int CountExecutorFields(Type type)
+    {
+        var count = 0;
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            count += current
+                .GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+                .Count(field => field.Name == "_context");
+        }
+
+        return count;
     }
 }

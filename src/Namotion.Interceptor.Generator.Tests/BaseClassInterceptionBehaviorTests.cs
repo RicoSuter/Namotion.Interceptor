@@ -1,9 +1,11 @@
+using System.Reactive.Concurrency;
 using System.Reflection;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 using Xunit;
 
 namespace Namotion.Interceptor.Generator.Tests;
@@ -97,6 +99,36 @@ public class BaseClassInterceptionBehaviorTests
         Assert.Contains(writeInterceptor.Writes, w => w.PropertyName == "RootProperty" && Equals(w.Value, "r"));
         Assert.Contains(writeInterceptor.Writes, w => w.PropertyName == "MiddleProperty" && Equals(w.Value, "m"));
         Assert.Contains(writeInterceptor.Writes, w => w.PropertyName == "LeafProperty" && Equals(w.Value, "l"));
+    }
+
+    [Fact]
+    public void WhenPropertiesFromEveryLevelAreWritten_ThenAChangeIsPublishedForEachOfThem()
+    {
+        // Arrange: a recording interceptor shows a write entered the chain, which is one step short
+        // of what the bug cost. The OPC UA and MQTT connectors consume SubjectPropertyChange off the
+        // change observable, so this subscribes there instead. ImmediateScheduler delivers on the
+        // writing thread, which is why no synchronisation is needed below.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        var leaf = new HierarchyLeaf(context);
+
+        // Act
+        leaf.RootProperty = "root-value";
+        leaf.MiddleProperty = "middle-value";
+        leaf.LeafProperty = "leaf-value";
+
+        // Assert
+        Assert.Contains(changes, change => change.Property.Name == "RootProperty" && change.GetNewValue<string>() == "root-value");
+        Assert.Contains(changes, change => change.Property.Name == "MiddleProperty" && change.GetNewValue<string>() == "middle-value");
+        Assert.Contains(changes, change => change.Property.Name == "LeafProperty" && change.GetNewValue<string>() == "leaf-value");
+        Assert.All(changes, change => Assert.Same(leaf, change.Property.Subject));
     }
 
     [Fact]
