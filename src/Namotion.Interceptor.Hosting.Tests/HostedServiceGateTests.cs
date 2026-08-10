@@ -56,10 +56,13 @@ public class HostedServiceGateTests
 
         // Act
         gate.BeginDraining();
-        gate.CompleteDraining();
 
-        // Assert
-        await wait;
+        // Assert - awaited between the two calls, because CompleteDraining sets the same signal and
+        // would release the waiter whatever BeginDraining did.
+        await wait.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(HostedServiceGateState.Draining, gate.State);
+
+        gate.CompleteDraining();
         Assert.Equal(HostedServiceGateState.Drained, gate.State);
     }
 }

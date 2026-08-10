@@ -69,28 +69,33 @@ public class HostedServiceHandlerTests
         {
             var parent = new Parent(context);
             var child = new Person();
-            var created = new List<TrackedBackgroundService>();
+
+            // A concurrent queue, because the factory runs on the transition thread while the
+            // assertions below poll from the test thread.
+            var created = new ConcurrentQueue<TrackedBackgroundService>();
 
             child.AttachHostedService(() =>
             {
                 var instance = new TrackedBackgroundService();
-                created.Add(instance);
+                created.Enqueue(instance);
                 return instance;
             });
 
             parent.Child = child;
-            await AsyncTestHelpers.WaitUntilAsync(() => created.Count == 1 && created[0].IsStarted);
+            await AsyncTestHelpers.WaitUntilAsync(() => created.ToArray() is [{ IsStarted: true }]);
 
             // Act - detach and reattach with no quiescing in between
             parent.Child = null;
             parent.Child = child;
 
             // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => created.Count == 2 && created[1].IsStarted,
+            await AsyncTestHelpers.WaitUntilAsync(() => created.ToArray() is [_, { IsStarted: true }],
                 message: "The re-attach did not create a second instance.");
-            await AsyncTestHelpers.WaitUntilAsync(() => created[0].IsDisposed,
+            await AsyncTestHelpers.WaitUntilAsync(() => created.ToArray()[0].IsDisposed,
                 message: "The pre-detach instance was never disposed.");
-            Assert.False(created[1].IsDisposed);
+
+            var instances = created.ToArray();
+            Assert.False(instances[1].IsDisposed);
         });
     }
 
