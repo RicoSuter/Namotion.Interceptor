@@ -142,6 +142,7 @@ namespace Namotion.Interceptor.Connectors
         public new virtual Namotion.Interceptor.Connectors.Diagnostics.SourceDiagnostics Diagnostics { get; }
         public System.DateTimeOffset? LastSynchronizedAt { get; }
         protected new Namotion.Interceptor.Connectors.Diagnostics.SourceMetrics Metrics { get; }
+        public int RefusedWriteCount { get; }
         public Namotion.Interceptor.Connectors.Monitoring.SourceState State { get; }
         public System.DateTimeOffset StateChangeTime { get; }
         public virtual int WriteBatchSize { get; }
@@ -149,6 +150,7 @@ namespace Namotion.Interceptor.Connectors
         public override void Dispose() { }
         public abstract System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
         protected void ReportConnectionLost() { }
+        protected void RetryRefusedWrites() { }
         protected override sealed System.Threading.Tasks.Task RunAsync(System.Threading.CancellationToken stoppingToken) { }
         public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
         protected abstract System.Threading.Tasks.Task<System.IAsyncDisposable?> StartListeningAsync(Namotion.Interceptor.Connectors.SubjectPropertyWriter propertyWriter, System.Threading.CancellationToken cancellationToken);
@@ -170,7 +172,9 @@ namespace Namotion.Interceptor.Connectors
         public System.Exception? Error { get; }
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> FailedChanges { get; }
         public bool IsFullySuccessful { get; }
+        public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> RefusedUntilReconnect { get; }
         public static Namotion.Interceptor.Connectors.WriteResult Success { get; }
+        public Namotion.Interceptor.Connectors.WriteResult WithRefusedUntilReconnect(System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> refusedUntilReconnect) { }
         public static Namotion.Interceptor.Connectors.WriteResult CallFailed(System.Exception error) { }
         public static Namotion.Interceptor.Connectors.WriteResult Failure(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> failedChanges, System.Exception error) { }
     }

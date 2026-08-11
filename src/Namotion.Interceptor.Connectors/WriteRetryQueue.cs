@@ -24,6 +24,13 @@ internal sealed class WriteRetryQueue : IDisposable
     // Reused across flushes so a persistent outage does not allocate one per tick. Only used under _lock.
     private readonly Dictionary<PropertyReference, int> _collapseIndices = new(PropertyReference.Comparer);
 
+    // Writes the source refused for the lifetime of its current connection. Held out of _pendingWrites
+    // rather than skipped inside it, so an idle tick's flush still short-circuits on IsEmpty and
+    // PendingWriteCount still falls back to zero. One entry per property, so a property written
+    // repeatedly while refused costs one slot rather than one per write. Only used under _lock.
+    private readonly Dictionary<PropertyReference, SubjectPropertyChange> _refusedWrites = new(PropertyReference.Comparer);
+    private int _refusedCount;
+
     private readonly ILogger _logger;
     private readonly QueueMetrics _metrics;
     private readonly int _maxQueueSize;
@@ -42,6 +49,11 @@ internal sealed class WriteRetryQueue : IDisposable
     /// Gets the number of pending writes in the queue.
     /// </summary>
     public int PendingWriteCount => Volatile.Read(ref _count);
+
+    /// <summary>
+    /// Gets the number of writes held back because the source refuses them until it reconnects.
+    /// </summary>
+    public int RefusedWriteCount => Volatile.Read(ref _refusedCount);
 
     // Metrics is required rather than optional, so no construction site can drop writes uncounted.
     public WriteRetryQueue(int maxQueueSize, ILogger logger, QueueMetrics metrics)
@@ -97,6 +109,131 @@ internal sealed class WriteRetryQueue : IDisposable
                 droppedCount,
                 _maxQueueSize);
         }
+    }
+
+    /// <summary>
+    /// Queues a failed write's changes for retry, except those the source named as refused until it
+    /// reconnects: those are held back instead, since re-sending them on this connection cannot succeed
+    /// and starves everything behind them. Returns true when nothing was left to retry.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="WriteResult.RefusedUntilReconnect"/> is a subset of
+    /// <see cref="WriteResult.FailedChanges"/>, which is complete, so every change lands in one of the
+    /// two. A change failing without being named refused is queued even if the same property is held
+    /// back from an earlier answer: the source has just answered differently about it.
+    /// </remarks>
+    public bool EnqueueFailures(in WriteResult result)
+    {
+        var failedChanges = result.FailedChanges;
+        if (failedChanges.IsDefaultOrEmpty)
+        {
+            return true;
+        }
+
+        if (_maxQueueSize is 0)
+        {
+            // Buffering off: report and drop, which holding writes back instead would silently undo.
+            _metrics.AddDropped(failedChanges.Length);
+            _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes.", failedChanges.Length);
+            return true;
+        }
+
+        var refusedChanges = result.RefusedUntilReconnect;
+        if (refusedChanges.IsDefaultOrEmpty)
+        {
+            RequeueChanges(failedChanges.AsSpan());
+            return false;
+        }
+
+        // This answer's refused properties, not the held-back set: a property held back from an earlier
+        // answer that fails for another reason now has to be retried like any other failure.
+        var refusedProperties = new HashSet<PropertyReference>(refusedChanges.Length, PropertyReference.Comparer);
+        List<SubjectPropertyChange>? retryableChanges = null;
+
+        int droppedCount;
+        lock (_lock)
+        {
+            foreach (var change in refusedChanges)
+            {
+                refusedProperties.Add(change.Property);
+                HoldRefusedWrite(change);
+            }
+
+            Volatile.Write(ref _refusedCount, _refusedWrites.Count);
+
+            foreach (var change in failedChanges)
+            {
+                if (!refusedProperties.Contains(change.Property))
+                {
+                    (retryableChanges ??= new List<SubjectPropertyChange>(failedChanges.Length)).Add(change);
+                }
+            }
+
+            droppedCount = retryableChanges is null
+                ? 0
+                : RequeueLocked(CollectionsMarshal.AsSpan(retryableChanges));
+        }
+
+        _metrics.AddDropped(droppedCount);
+        return retryableChanges is null;
+    }
+
+    /// <summary>
+    /// Puts every held-back write back in line for retry. Call it whenever the connection the source
+    /// talks over is replaced: the refusals were scoped to the previous one, and the new one can hold
+    /// different permissions, a different address space and different access levels.
+    /// </summary>
+    public void RetryRefusedWrites()
+    {
+        lock (_lock)
+        {
+            if (_refusedWrites.Count == 0)
+            {
+                return;
+            }
+
+            ReleaseRefusedWrites();
+            Volatile.Write(ref _count, _pendingWrites.Count);
+        }
+    }
+
+    /// <summary>
+    /// Records a change the source refuses until it reconnects, merging it with one already held for
+    /// the same property. Caller holds <see cref="_lock"/>.
+    /// </summary>
+    private void HoldRefusedWrite(SubjectPropertyChange change)
+    {
+        ref var held = ref CollectionsMarshal.GetValueRefOrAddDefault(_refusedWrites, change.Property, out var propertyAlreadyHeld);
+        if (!propertyAlreadyHeld)
+        {
+            held = change;
+            return;
+        }
+
+        // Same rule as the collapses either side of this queue: the revision decides which new value is
+        // the current state, and a change carrying none orders against nothing, so the merged survivor
+        // carries none either rather than being ranked against a value it was not ordered by.
+        held = held.Revision == 0 || change.Revision == 0
+            ? held.MergeWithNewer(change).WithoutRevision()
+            : held.MergeByRevision(change);
+    }
+
+    /// <summary>
+    /// Moves every held-back write to the head of the pending queue. Caller holds <see cref="_lock"/>
+    /// and publishes <see cref="_count"/> afterwards.
+    /// </summary>
+    private void ReleaseRefusedWrites()
+    {
+        if (_refusedWrites.Count == 0)
+        {
+            return;
+        }
+
+        // At the head: these are older than anything queued since. Where that matters, the dequeue
+        // collapse ranks a pair for one property by revision rather than by position anyway.
+        _pendingWrites.InsertRange(0, _refusedWrites.Values);
+        _refusedWrites.Clear();
+        Volatile.Write(ref _refusedCount, 0);
     }
 
     /// <summary>
@@ -167,24 +304,35 @@ internal sealed class WriteRetryQueue : IDisposable
                 var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
                 if (result.Error is not null)
                 {
-                    var now = Environment.TickCount64;
-                    if (now - _lastFlushWarningTimestamp >= 5000)
+                    // FailedChanges is complete (see WriteChangesInBatchesAsync), so every dequeued item
+                    // is accounted for rather than lost track of: what the source refuses for this
+                    // connection is held back and the rest is queued again. Queueing again is still
+                    // subject to the bound, so a batch that was dequeued while the pump kept appending
+                    // can lose its oldest to the ring buffer, the same way a direct enqueue would.
+                    var nothingLeftToRetry = EnqueueFailures(in result);
+                    Array.Clear(_scratchBuffer, 0, count);
+
+                    if (!nothingLeftToRetry)
                     {
-                        var queueSize = count + PendingWriteCount;
-                        _lastFlushWarningTimestamp = now;
-                        _logger.LogWarning(result.Error,
-                            "Failed to flush queued writes to source, re-queuing failed items ({QueueSize} writes queued).",
-                            queueSize);
+                        var now = Environment.TickCount64;
+                        if (now - _lastFlushWarningTimestamp >= 5000)
+                        {
+                            var queueSize = PendingWriteCount;
+                            _lastFlushWarningTimestamp = now;
+                            _logger.LogWarning(result.Error,
+                                "Failed to flush queued writes to source, re-queuing failed items ({QueueSize} writes queued).",
+                                queueSize);
+                        }
+
+                        _hasFlushWarnings = true;
+                        return false;
                     }
 
-                    _hasFlushWarnings = true;
-
-                    // FailedChanges is complete (see WriteChangesInBatchesAsync), so every failed
-                    // item is restored before ring capacity is applied to the combined queue.
-                    var droppedCount = RequeueChanges(result.FailedChanges.AsSpan());
-                    _metrics.AddDropped(droppedCount);
-                    Array.Clear(_scratchBuffer, 0, count);
-                    return false;
+                    // Only refusals failed, and they are held back rather than queued. Reporting failure
+                    // here would have the caller divert the tick's own changes into the queue
+                    // unattempted, so every later write would reach the source one flush window late.
+                    totalFlushed += count - result.FailedChanges.Length;
+                    continue;
                 }
 
                 totalFlushed += count;
@@ -215,6 +363,10 @@ internal sealed class WriteRetryQueue : IDisposable
     {
         lock (_lock)
         {
+            // Held-back writes are still local intent, and the reconcile is what decides their fate on
+            // the new connection. Left here they would be stranded for the lifetime of the source.
+            ReleaseRefusedWrites();
+
             var changes = _pendingWrites.ToArray();
             _pendingWrites.Clear();
             Volatile.Write(ref _count, 0);
@@ -288,23 +440,35 @@ internal sealed class WriteRetryQueue : IDisposable
         return kept;
     }
 
-    private int RequeueChanges(ReadOnlySpan<SubjectPropertyChange> changes)
+    private void RequeueChanges(ReadOnlySpan<SubjectPropertyChange> changes)
     {
+        int droppedCount;
         lock (_lock)
         {
-            _pendingWrites.InsertRange(0, changes);
-
-            // The failed in-flight changes are older than anything enqueued while the write was in
-            // progress. Ring semantics therefore evict from the front after restoring the batch.
-            var droppedCount = _pendingWrites.Count - _maxQueueSize;
-            if (droppedCount > 0)
-            {
-                _pendingWrites.RemoveRange(0, droppedCount);
-            }
-
-            Volatile.Write(ref _count, _pendingWrites.Count);
-            return droppedCount;
+            droppedCount = RequeueLocked(changes);
         }
+
+        _metrics.AddDropped(droppedCount);
+    }
+
+    /// <summary>
+    /// Puts changes back at the head of the queue, applies the ring bound and returns how many writes
+    /// that dropped. Caller holds <see cref="_lock"/> and reports the count to the metrics outside it.
+    /// </summary>
+    private int RequeueLocked(ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        _pendingWrites.InsertRange(0, changes);
+
+        // The failed in-flight changes are older than anything enqueued while the write was in
+        // progress. Ring semantics therefore evict from the front after restoring the batch.
+        var droppedCount = _pendingWrites.Count - _maxQueueSize;
+        if (droppedCount > 0)
+        {
+            _pendingWrites.RemoveRange(0, droppedCount);
+        }
+
+        Volatile.Write(ref _count, _pendingWrites.Count);
+        return droppedCount;
     }
 
     /// <summary>

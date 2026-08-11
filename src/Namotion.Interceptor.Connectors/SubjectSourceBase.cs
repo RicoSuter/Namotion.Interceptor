@@ -50,6 +50,14 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
+    /// <summary>
+    /// Gets the number of writes held back because the source refuses them until it reconnects. They
+    /// are still owed to the source and are retried on its next connection; they are simply not
+    /// re-sent on this one, which is why they are not counted in the retry queue's depth.
+    /// </summary>
+    public int RefusedWriteCount => WriteRetryQueue?.RefusedWriteCount ?? 0;
+
+
     protected SubjectSourceBase(
         IInterceptorSubjectContext context,
         ILogger logger,
@@ -400,7 +408,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             {
                 _logger.LogWarning(result.Error, "Failed to write {Count} changes to source, queuing for retry.",
                     result.FailedChanges.Length);
-                WriteRetryQueue.Enqueue(result.FailedChanges.AsMemory());
+                WriteRetryQueue.EnqueueFailures(in result);
             }
         }
         catch (OperationCanceledException)
@@ -684,7 +692,22 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     protected void ReportConnectionLost()
     {
         _propertyWriter.InvalidateGeneration();
+        RetryRefusedWrites();
         TransitionStateTo(SourceState.Synchronizing);
+    }
+
+    /// <summary>
+    /// Puts every write the source refused for the lifetime of a connection back in line for retry.
+    /// Call it whenever the connection this source talks over is replaced.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ReportConnectionLost"/> already does this, which covers a connector that only reports
+    /// the outage. A connector whose connection can also be replaced without an outage it reported has
+    /// to call this itself, or its refusals outlive the connection they were scoped to.
+    /// </remarks>
+    protected void RetryRefusedWrites()
+    {
+        WriteRetryQueue?.RetryRefusedWrites();
     }
 
     /// <summary>

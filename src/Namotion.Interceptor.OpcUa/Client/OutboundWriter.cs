@@ -26,6 +26,12 @@ internal sealed class OutboundWriter
     // flush warning.
     private long _lastRefusedWriteLogTimestamp;
 
+    // Nodes already reported as refused for this session, so the warning fires once per node rather
+    // than once per write. The lock guards the write path's add against the session-change clear,
+    // which runs from the session-transition drain on another task.
+    private readonly Lock _refusedNodeIdsLock = new();
+    private readonly HashSet<NodeId> _refusedNodeIds = [];
+
     public OutboundWriter(
         Func<ISession?> sessionProvider,
         ReadAfterWriteManager? readAfterWriteManager,
@@ -43,6 +49,19 @@ internal sealed class OutboundWriter
     }
 
     public int WriteBatchSize => (int)(_sessionProvider()?.OperationLimits?.MaxNodesPerWrite ?? 0);
+
+    /// <summary>
+    /// Forgets which nodes were reported refused, so the next session reports its own. A new session can
+    /// hold different permissions, a different address space and different access levels, so a node
+    /// refused before is worth a fresh line whether it now writes or still does not.
+    /// </summary>
+    public void ClearRefusedNodeLog()
+    {
+        lock (_refusedNodeIdsLock)
+        {
+            _refusedNodeIds.Clear();
+        }
+    }
 
     /// <summary>
     /// Writes one batch. A failure these changes themselves caused comes back with them enumerated,
@@ -165,16 +184,50 @@ internal sealed class OutboundWriter
 
         var span = allChanges.Span;
         var failedChanges = new List<SubjectPropertyChange>(refusedCount + (conversionFailures?.Count ?? 0));
+        List<SubjectPropertyChange>? refusedChanges = null;
+        List<NodeId>? newlyRefusedNodeIds = null;
         for (var i = 0; i < results.Count; i++)
         {
-            if (!StatusCode.IsGood(results[i]))
+            var status = results[i];
+            if (!StatusCode.IsGood(status))
             {
                 // Attributed through the index recorded when this request position was built, never by
                 // re-deriving the selection: the selection consults live registry state, which a
                 // concurrent detach can change between building the request and processing the answer,
                 // and a skewed walk would pin a status on the wrong change.
-                failedChanges.Add(span[request.ChangeIndices[i]]);
+                var change = span[request.ChangeIndices[i]];
+                failedChanges.Add(change);
+
+                // A separate question from the subscription path's transient classification, and not
+                // its complement: a code that path calls transient because a server can flip it
+                // mid-session is still one a Write is answered the same way for the whole session.
+                if (OpcUaStatusCodeClassifier.IsRefusedUntilReconnect(status))
+                {
+                    (refusedChanges ??= []).Add(change);
+
+                    bool isFirstRefusalOfNode;
+                    var nodeId = request.WriteValues[i].NodeId;
+                    lock (_refusedNodeIdsLock)
+                    {
+                        isFirstRefusalOfNode = _refusedNodeIds.Add(nodeId);
+                    }
+
+                    if (isFirstRefusalOfNode)
+                    {
+                        (newlyRefusedNodeIds ??= []).Add(nodeId);
+                    }
+                }
             }
+        }
+
+        if (newlyRefusedNodeIds is not null)
+        {
+            // Once per node per session: the retry queue stops re-sending these, so an entry per
+            // attempt would report an outage that is not happening while the first one is what an
+            // operator needs.
+            _logger.LogWarning(
+                "OPC UA write: {Count} node(s) refused for this session, held back until the client reconnects: {NodeIds}.",
+                newlyRefusedNodeIds.Count, newlyRefusedNodeIds);
         }
 
         Exception error;
@@ -204,7 +257,11 @@ internal sealed class OutboundWriter
             failedChanges.AddRange(conversionFailures);
         }
 
-        return WriteResult.Failure(failedChanges.ToArray(), error);
+        var result = WriteResult.Failure(failedChanges.ToArray(), error);
+
+        return refusedChanges is null
+            ? result
+            : result.WithRefusedUntilReconnect([..refusedChanges]);
     }
 
     private static Exception CombineErrors(List<Exception> errors)

@@ -143,6 +143,7 @@ namespace Namotion.Interceptor.OpcUa.Client
         public Namotion.Interceptor.OpcUa.Client.PollingDiagnostics? Polling { get; }
         public Namotion.Interceptor.OpcUa.Client.ReadAfterWriteDiagnostics? ReadAfterWrite { get; }
         public Namotion.Interceptor.OpcUa.Client.ReconnectDiagnostics Reconnects { get; }
+        public int RefusedWriteCount { get; }
         public Opc.Ua.NodeId? SessionId { get; }
         public long SkippedBadSubscriptionValues { get; }
         public int SubscriptionCount { get; }
