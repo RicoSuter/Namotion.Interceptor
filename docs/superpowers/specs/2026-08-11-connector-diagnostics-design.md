@@ -2,7 +2,9 @@
 
 Status: designed, not implemented. Closes #277.
 
-Revision 5. Revisions 1 and 3 were each reviewed adversarially. Between them the reviews found two factual errors about existing code and a cluster of implementation defects, all corrected here. Two arguments the reviews made are answered rather than accepted, in "Why drop counting matters despite being zero in-repo" and in the naming section, so the next reader does not relitigate them.
+Revision 6. Three adversarial reviews ran against revisions 1, 3 and 5. Between them they found five factual errors about existing code and a cluster of implementation defects, all corrected here. The revision 5 review compiled the proposed type shape rather than reasoning about it, which is why the type model below differs materially from earlier revisions.
+
+Two review arguments are answered rather than accepted, in "Why drop counting matters despite being zero in-repo" and in the naming section, so the next reader does not relitigate them.
 
 Line citations were verified against the tree at the time of writing. Freeze the file before implementation, since they drift.
 
@@ -12,9 +14,9 @@ Connector diagnostics are defined per connector, but most of what they report is
 
 1. **Diagnostics exist only for OPC UA.** MQTT and WebSocket have no diagnostics type, so what an operator can learn depends on which connector they use.
 2. **Client and server name the same concepts differently.** Liveness is `IsConnected` on the OPC UA client, `IsRunning` on the OPC UA server, `IsListening` on the MQTT server. Failure history is four reconnect counters on the client and `ConsecutiveFailures` on the server. The server has `StartTime` and `Uptime`; the client has `LastConnectedAt` and no uptime.
-3. **The layering is inverted.** The retry queue, the change queue and the throughput counters live in `Namotion.Interceptor.Connectors`, but there is no diagnostics surface at that layer, so every number is re-exposed per connector. This is why #277 reads as a "cross-layer bridging" problem: it is a missing abstraction, not a bridging problem.
+3. **The layering is inverted.** The queues and throughput counters live in `Namotion.Interceptor.Connectors`, but there is no diagnostics surface at that layer, so every number is re-exposed per connector. This is why #277 reads as a "cross-layer bridging" problem: it is a missing abstraction, not a bridging problem.
 4. **Sub-blocks are applied inconsistently.** Read-after-write has both a nested `ReadAfterWrite` block and a flat `PendingReadAfterWrites`. Polling has the same duplication via `PollingItemCount`.
-5. **Outbound writes are dropped and nothing is counted.** Three retry-queue paths drop today; a fourth fires only for connectors that bound their change queue.
+5. **Three buffers exist and none is observable.** Two outbound, one inbound. Outbound writes are dropped on three paths that only log.
 
 ## Why drop counting matters despite being zero in-repo
 
@@ -23,17 +25,19 @@ Every in-repo connector constructs `ChangeQueueProcessor` with `maxQueueDepth: n
 - `maxQueueDepth` is a **public constructor parameter**. Any consumer-written connector can bound its queue today, and bounding an unbounded queue feeding a slow sink is the correct advice. The counter is live for them on day one.
 - The processor is created **per connect cycle**, so a naive implementation rebases the count on every reconnect: a metric that silently resets exactly when it matters. The accumulator must exist before the first bounded connector, not after.
 
-Independently of any bound, **three retry-queue paths drop data today and only log it**:
+Independently of any bound, **three outbound paths drop data today and only log it**:
 
 - `WriteRetryQueue` ring-buffer overflow (`WriteRetryQueue.cs:71-87`).
 - `ReconcileRetryQueueAsync` no-setter and per-change-exception branches (`SubjectSourceBase.cs:486-499`).
-- The direct-write discard (`SubjectSourceBase.cs:270-287`).
+- The direct-write discard when no retry queue exists (`SubjectSourceBase.cs:270-287`, reached only when the queue is absent per `:267`).
 
 These are unconditional outbound data loss in normal operation and are the immediate value of this change.
 
-**Deliberately not counted**: the disabled-queue drain at `SubjectSourceBase.cs:345-351`. Revision 3 counted it. That branch drains the *entire* subscription with no ownership filter (the filter is only in the else-branch at `:356-367`), and the subscription carries context-wide changes including other sources' properties and this source's own inbound applies. Counting it would report other sources' traffic as this source's lost writes.
+**Deliberately not counted**: the disabled-queue drain at `SubjectSourceBase.cs:345-351`. That branch drains the *entire* subscription with no ownership filter (the filter is only in the else-branch at `:356-367`), and `PropertyChangeInterceptor` fans every committed change to every queue subscription unfiltered (`:196`, `:244`), so the subscription carries other sources' properties and this source's own inbound applies. Counting it would report other sources' traffic as this source's lost writes.
 
-**Also not counted, and worth an issue rather than a silent omission**: `connectors.md:783` documents that writes to properties a source has not claimed yet are discarded (`SubjectSourceBase.cs:364-367`). That is a fifth loss path, outside this change because it needs an ownership-aware accumulator.
+That exclusion has a consequence worth stating rather than discovering later: with `writeRetryQueueSize: 0` the uncounted drain is the dominant loss path, so `OutboundRetries.TotalDropped` under-reports in exactly that configuration.
+
+**Also not counted**: `connectors.md:783` documents that writes to properties a source has not claimed yet are discarded (`SubjectSourceBase.cs:364-367`). A fifth path, outside this change because it needs an ownership-aware accumulator.
 
 ## Decisions
 
@@ -43,39 +47,33 @@ These are unconditional outbound data loss in normal operation and are the immed
 
 `PendingWriteCount` is the one misfiled member. `connectors-monitoring.md:160` already documents it as orthogonal to `State`, describing the outbound retry queue. It moves; the rest stay.
 
-A read-only `State` mirror on `SourceDiagnostics` was considered and rejected: it reintroduces the two-spellings pattern this change removes, and invites drift. Docs cross-reference instead.
+A read-only `State` mirror on `SourceDiagnostics` was considered and rejected: it reintroduces the two-spellings pattern this change removes, and invites drift.
 
-**`LastSynchronizedAt` is replaced by `StateChangedAt`, and this is a behaviour fix rather than a rename.** `_lastSynchronizedTicks` is stamped in exactly one place, the transition **into** `Synchronized` (`SubjectSourceBase.cs:589-592`). It is never updated while synchronized and never updated when synchronization is lost, so it records when the last good period *began*, not when it ended. A source that synchronized a week ago and dropped an hour ago reports a week. `connectors-monitoring.md:160` promises the opposite, that a `Synchronizing` source can be reported as "stale, last confirmed at T", and the implementation has never supported that claim. The doc is wrong and must be corrected regardless of what we do to the member.
+### `LastSynchronizedAt` becomes `StateChangedAt`
 
-`StateChangedAt` is stamped unconditionally in `TransitionStateTo`, where the lock is already held and `now` is already computed for the `SourceEvent`. Paired with the existing `State` it answers both questions the old member could not: `Synchronized` with `StateChangedAt` reads as in sync since T, and `Synchronizing` with `StateChangedAt` reads as stale since T. It also extends to `Stopped` and `Unclaimed`, which a synchronization-specific member could not.
+`_lastSynchronizedTicks` is stamped in one place, the transition **into** `Synchronized` (`SubjectSourceBase.cs:589-592`). So it records when the last good period began and cannot say when synchronization was lost. A source that synchronized a week ago and dropped an hour ago reports a week.
 
-`SynchronizedSince` with null-while-unsynchronized was considered. It fixes the name but discards the ability to say how long a source has been stale, which is what an operator actually wants during an outage, and it would compile everywhere while silently turning an existing "last confirmed at T" display into "never synchronized" during exactly that outage.
+Revision 5 claimed `connectors-monitoring.md:160` was therefore wrong. That was overstated: the doc says the member "records when the most recent initial synchronization completed", which is exactly what the code does. The accurate criticism is narrower, that the doc's "stale, last confirmed at T" phrasing invites a reading the member cannot support.
 
-This is the one place the change reaches into `ISubjectSource` beyond `PendingWriteCount`.
+`StateChangedAt` is stamped in `TransitionStateTo`, where the lock is already held and `now` is already computed for the `SourceEvent`, and at start so it is never null on a running source. Paired with the existing `State` it answers both questions: `Synchronized` plus T reads as in sync since T, `Synchronizing` plus T reads as stale since T.
 
-### One liveness spelling, applied consistently
+**This is a trade, not a pure win.** After it, nothing reports when a currently stale source was last in sync. That is acceptable because the stale-duration question is the one operators ask during an incident, but it is a loss and should not be sold as a fix. It does not extend to `Unclaimed`, which `SourceState.cs:9-10` documents is only ever returned by the property-level API and never by a source.
 
-**`IsOperational` and `OperationalChangedAt` are the only liveness members.** `IsConnected`, `IsRunning` and `IsListening` are all removed. `IsReconnecting` survives because it is a distinct sub-state, not a second spelling. Counts such as `ActiveSessionCount` are not liveness and are unaffected.
+This and `PendingWriteCount` are the only places the change touches `ISubjectSource`.
 
-The same rule removes three duplicate spellings left on the connector classes themselves: `MqttSubjectServer.NumberOfClients` (duplicating `ConnectedClientCount`), and `WebSocketSubjectServer.ConnectionCount` and `CurrentSequence` (duplicating the identically named diagnostics members).
+### One liveness spelling
 
-`PollingDiagnostics.IsRunning` survives, because it is a sub-component's state rather than connector liveness. It needs a doc note so the rule does not look unevenly applied.
+**`IsOperational` and `OperationalChangedAt` are the only liveness members.** `IsConnected`, `IsRunning` and `IsListening` are removed, as are the duplicate spellings on the connector classes themselves: `MqttSubjectServer.NumberOfClients`, and `WebSocketSubjectServer.ConnectionCount` and `CurrentSequence`. `IsReconnecting` survives as a distinct sub-state. `PollingDiagnostics.IsRunning` survives as a sub-component's state, with a doc note so the rule does not look unevenly applied.
 
-### The base owns liveness and last error; connectors push
+**Each connector must define its own operational predicate, and this is user-visible.** `HomeBlaze.OpcUa/OpcUaClient.cs:225` currently surfaces `IsConnected` (transport up, not reconnecting) as a device state property, so whatever the OPC UA client chooses replaces that meaning. The predicate for each of the six connectors is an implementation decision the plan must make explicitly, not infer.
 
-`ConnectorDiagnostics` holds `OperationalChangedAt` and `LastError` as its own state, and `SubjectConnectorBase` exposes `MarkOperational()`, `MarkNotOperational()` and `ReportError(Exception)`. Connectors call them at their transition points.
+### The diagnostics object owns its state and its mutators
 
-The alternative, abstract members each connector pulls from its own state, was in revision 3 and is worse for two reasons. First, it forced every source to define a concrete diagnostics type even when it added nothing, so `MqttClientDiagnostics` and `WebSocketClientDiagnostics` existed purely to satisfy the abstract members. With push, both disappear and those sources expose `SourceDiagnostics` directly. Second, `OperationalChangedAt` must be cleared on paths the connector does not own: the base's catch (`SubjectSourceBase.cs:249-255`), its `finally` (`:258-261`) and `Dispose()` (`:618`). A pulled member cannot be cleared there. Revision 3 delegated clearing to `ReportConnectionLost()`, which only OPC UA calls, so an MQTT or WebSocket source that faulted or was disposed would have kept reporting operational.
+`ConnectorDiagnostics` holds `IsOperational`, `OperationalChangedAt` and `LastError`, and exposes `MarkOperational()`, `MarkNotOperational()` and `ReportError(Exception)` on itself. `SubjectConnectorBase` forwards to them; a hand-written implementer calls them directly.
 
-Consequence: `ConnectorDiagnostics` and `SourceDiagnostics` are concrete, not abstract.
+Revision 5 put these on the base class and typed the diagnostics constructors as taking the base. That made `ISubjectConnector` unimplementable by the five plain classes that implement it today (`SourceSubscriptionTests.cs:245`, `SubjectSourceExtensionsTests.cs:500`, `SourceMonitorTests.cs:601`, `SubjectTransactionBenchmark.cs:109`, `FaultTargetResolverTests.cs:21`), while the interface required a non-null `Diagnostics`. `docs/connectors.md:277` documents direct implementation as supported, so this was not only a test problem.
 
-### Generic on the connector, specific on the implementation
-
-Servers are not sources. The split is therefore not client versus server:
-
-- **Every connector**: liveness, last error, start epoch, throughput, outbound change queue.
-- **Sources only**: the write retry queue.
-- **Protocol-specific**: sessions, subscriptions, monitored items, polling, read-after-write, active sessions.
+**`LastError` is not sticky today and going sticky is a behaviour change.** The OPC UA client clears it on every successful reconnection (`ClearLastError` at `OpcUaSubjectClientSource.cs:49`, called from `SessionManager.cs:413`, plus null-writes at `:156` and `:505`), the server clears it at `OpcUaSubjectServer.cs:269`, and `OpcUaClientDiagnostics.cs:98-103` documents the clearing contract. Revision 5 said "it stays sticky" as though that were the status quo. Sticky is still the right choice, since a cleared error erases the only evidence of a transient fault, but it is a change: `ClearLastError`, three null-writes and a documented contract are removed.
 
 ### Full break, no forwarding shims
 
@@ -88,32 +86,37 @@ Existing names move rather than being preserved or obsoleted. A deliberate call:
 
 public class ConnectorDiagnostics
 {
-    public ConnectorDiagnostics(SubjectConnectorBase owner, ThroughputDiagnostics throughput);
+    public ConnectorDiagnostics(QueueMetrics outboundChanges, ThroughputDiagnostics throughput);
 
-    public bool IsOperational { get; }                 // owner pushes; the base forces it false
-                                                       // on fault, exit and dispose
-    public DateTimeOffset? OperationalChangedAt { get; }   // when IsOperational last flipped;
-                                                       // null only before the first start
-    public Exception? LastError { get; }               // sticky, either direction
+    public bool IsOperational { get; }
+    public DateTimeOffset? OperationalChangedAt { get; }   // when IsOperational last flipped
+    public Exception? LastError { get; }                   // sticky
 
-    public DateTimeOffset? StartedAt { get; }          // totals epoch, does not move on reconnect
+    public DateTimeOffset? StartedAt { get; }              // totals epoch
 
     public ThroughputDiagnostics Throughput { get; }
-    public QueueDiagnostics ChangeQueue { get; }
+    public QueueDiagnostics OutboundChanges { get; }
+
+    public void MarkOperational();
+    public void MarkNotOperational();
+    public void ReportError(Exception error);
+    internal void MarkStarted();
 }
 
 public class SourceDiagnostics : ConnectorDiagnostics
 {
-    public SourceDiagnostics(SubjectSourceBase owner, ThroughputDiagnostics throughput);
+    public SourceDiagnostics(QueueMetrics outboundChanges, QueueMetrics outboundRetries,
+                             QueueMetrics inboundBuffer, ThroughputDiagnostics throughput);
 
-    public QueueDiagnostics WriteRetries { get; }
+    public QueueDiagnostics OutboundRetries { get; }
+    public QueueDiagnostics InboundBuffer { get; }
 }
 
-public sealed class QueueDiagnostics                   // read-only view over QueueMetrics
+public sealed class QueueDiagnostics                       // read-only view over QueueMetrics
 {
-    public int Depth { get; }                          // approximate; 0 when no buffer exists
-    public int? Capacity { get; }                      // null unbounded, 0 disabled
-    public long TotalDropped { get; }                  // accumulated + live, monotonic
+    public int Depth { get; }                              // approximate; 0 when no buffer exists
+    public int? Capacity { get; }                          // null unbounded, 0 disabled
+    public long TotalDropped { get; }                      // monotonic
 }
 
 public sealed class ThroughputDiagnostics
@@ -121,14 +124,14 @@ public sealed class ThroughputDiagnostics
     public ThroughputDiagnostics(ThroughputCounter? incoming, ThroughputCounter? outgoing);
     public static ThroughputDiagnostics NotInstrumented { get; }
 
-    public double? IncomingPerSecond { get; }          // null when not instrumented
+    public double? IncomingPerSecond { get; }              // null when not instrumented
     public double? OutgoingPerSecond { get; }
 }
 
 public sealed class QueueMetrics
 {
-    public void Register(Func<int> depth, Func<long> dropped, int? capacity);
-    public void Deregister();                          // folds the live drop count in, then clears
+    public void Register(Func<int> depth, Func<long>? dropped, int? capacity);
+    public void Deregister();                              // folds the live count in, then clears
     public void AddDropped(long count);
 }
 ```
@@ -150,7 +153,7 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
 
 public sealed class ReconnectDiagnostics
 {
-    public DateTimeOffset? LastConnectionEstablishedAt { get; }            // persists while down
+    public DateTimeOffset? LastConnectionEstablishedAt { get; }   // survives a disconnect
     public long TotalAttempts { get; }
     public long TotalSucceeded { get; }
     public long TotalFailed { get; }
@@ -180,42 +183,73 @@ public sealed class WebSocketServerDiagnostics : ConnectorDiagnostics
 }
 ```
 
-### `Diagnostics` is a covariant property override, not a hidden auto-property
+### `Diagnostics` is abstract with a single construction point
 
-`OpcUaSubjectClientSource:62` and `OpcUaSubjectServer:72` already declare their own `Diagnostics`. A non-virtual property on the base would be member hiding: CS0108 under the solution's warnings-as-errors, and with `new` an interface caller would receive the base's separate instance.
+Revision 5 proposed virtual auto-properties. Compiled under this repo's settings (`src/Directory.Build.props:3-4`, nullable enabled plus warnings as errors) that produces `CS0108` because `ISubjectSource.Diagnostics` hides the inherited interface member, and two `CS8618` because the overrides are never assigned. It also allocates one diagnostics object per inheritance level, two of them dead for an OPC UA client.
 
-C# 9 supports covariant returns on get-only **property overrides**, so the base declares it virtual and each connector overrides with its concrete type:
+Abstract on both bases, concrete only at the leaf, so exactly one object exists:
 
 ```csharp
+public interface ISubjectConnector           { ConnectorDiagnostics Diagnostics { get; } }
+public interface ISubjectSource : ISubjectConnector { new SourceDiagnostics Diagnostics { get; } }
+
 // SubjectConnectorBase
-public virtual ConnectorDiagnostics Diagnostics { get; }
+public abstract ConnectorDiagnostics Diagnostics { get; }
 ConnectorDiagnostics ISubjectConnector.Diagnostics => Diagnostics;
 
 // SubjectSourceBase
-public override SourceDiagnostics Diagnostics { get; }
+public abstract override SourceDiagnostics Diagnostics { get; }
 SourceDiagnostics ISubjectSource.Diagnostics => Diagnostics;
 
-// OpcUaSubjectClientSource
-public override OpcUaClientDiagnostics Diagnostics { get; }
+// OpcUaSubjectClientSource, the single construction point
+public override OpcUaClientDiagnostics Diagnostics { get; } = new(...);
 ```
 
-Interfaces genuinely have no covariant returns, which is why the explicit forwarders are needed at the interface level. Revision 3 used that fact to justify a non-virtual property, which foreclosed the class mechanism that solves the concrete level. Revision 1's claim that consumers "never cast, with no hop" was also wrong; the correct claim is that consumers never cast, and the forwarder is a non-virtual property read.
+The `new` on the interface member is required and was missing. Consumers never cast, but the forwarder is an interface dispatch plus a virtual call, not the free read revision 5 claimed.
 
-### Accessibility
+### `SubjectConnectorBase` seals `ExecuteAsync`
 
-Everything a connector in another assembly needs is public. `InternalsVisibleTo` on `Namotion.Interceptor.Connectors` covers test assemblies only, and all three servers build their processors from other assemblies, so an internal accessor would be unreachable for every one of them. Public: `QueueMetrics`, the `ConnectorDiagnostics`, `SourceDiagnostics` and `ThroughputDiagnostics` constructors, and the depth and drop accessors on `ChangeQueueProcessor`.
+Revision 5 said servers "change base class" and the base would force liveness false on fault, exit and dispose. That is true for sources, whose `ExecuteAsync` is already `sealed override` with the cited catch (`SubjectSourceBase.cs:249-255`) and finally (`:258-261`). It is false for the three servers, each of which owns its own loop with its own finally (`OpcUaSubjectServer.cs:210`, `MqttSubjectServer.cs:146`, `WebSocketSubjectServer.cs:80`). A faulting server would have kept reporting operational, which is the defect used to reject the pull model.
 
-### Naming: purpose, not direction
+So the base seals `ExecuteAsync` and hands down a template method:
 
-Both queues are outbound and there is no inbound counterpart, so a direction prefix would disambiguate nothing. They are named after what they hold and match the internals a consumer can grep: `ChangeQueue` matches `ChangeQueueProcessor`, `WriteRetries` matches `WriteRetryQueue` and the `writeRetryQueueSize` knob. `WriteRetries` deliberately does not repeat the internal class name, since a `QueueDiagnostics`-typed property called `WriteRetryQueue` would read as an instance of that class.
+```csharp
+protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
+{
+    Diagnostics.MarkStarted();
+    try                { await RunAsync(stoppingToken); }
+    catch (Exception e){ Diagnostics.ReportError(e); throw; }
+    finally            { Diagnostics.MarkNotOperational(); }
+}
 
-Direction stays in the throughput names, where both directions exist and the name does disambiguating work.
+protected abstract Task RunAsync(CancellationToken stoppingToken);
+```
 
-Grouping both queues into one `Outbound` block with `Pending` and `Retries` was rejected: retries are source-only, and the split already encodes that in the type system rather than through a nullable member.
+Each server renames its `ExecuteAsync` to `RunAsync`; `SubjectSourceBase` moves its sealed body into `RunAsync`. This also settles what revision 5 left contradictory: `MarkStarted` is **not** idempotent, it stamps once per `ExecuteAsync` entry, which is exactly a connector restart. The servers' internal restart loops live inside `RunAsync` and do not re-enter it, so a transport reconnect does not move the epoch while a host stop/start does, which is the intended semantics.
+
+`SubjectConnectorBase` must derive from `BackgroundService`; all six connectors already do. Dispose-time forcing works because all four `DisposeAsync` implementations chain to `Dispose()` (`MqttSubjectServer.cs:655`, `WebSocketSubjectServer.cs:224`, `OpcUaSubjectClientSource.cs:731`, `WebSocketSubjectClientSource.cs:713`).
+
+### Atomic state, not separate fields
+
+Three places pair a value with a timestamp or an accumulator, and all three must be read consistently without a lock. Each stores one immutable record swapped with `Interlocked.Exchange` and read with a single volatile read:
+
+- `(IsOperational, OperationalChangedAt)`, otherwise a reader can see the new flag with the previous timestamp, reporting "operational since the moment it went down".
+- `(State, StateChangedAt)` in `SubjectSourceBase`, same hazard.
+- `QueueMetrics`'s `(accumulated, dropProvider, depthProvider, capacity)`. Revision 5 specified separate fields with a lock only on deregistration, which cannot be lock-free, monotonic and non-double-counting at once: reading accumulated then provider can decrease across a deregistration, and the opposite order double counts. The spec's own test would catch it.
+
+`TotalDropped` is then `snapshot.Accumulated + (snapshot.Dropped?.Invoke() ?? 0)`, so it advances during a burst rather than jumping at reconnect, and `Deregister` publishes a new record with the live count folded in and the providers cleared.
+
+### Naming: direction, now that there is an inbound buffer
+
+Earlier revisions named the queues `ChangeQueue` and `WriteRetries` and rejected direction prefixes, on the argument that both were outbound and no inbound counterpart existed. That argument was false. `SubjectPropertyWriter.cs:22` holds `private List<Action>? _updates = []`, and `StartBuffering` (`:51-61`) replaces that list *and* bumps the generation; the generation is the stale-snapshot guard, not the suppression mechanism. There is a real unbounded inbound buffer.
+
+With three buffers across two directions, direction does disambiguating work: `OutboundChanges`, `OutboundRetries`, `InboundBuffer`.
+
+`InboundBuffer.TotalDropped` counts buffers discarded by a superseding `StartBuffering`. Those discards are deliberate rather than data loss, since the generation guard exists because applying a stale snapshot would be wrong, and the member documents that distinction. It is worth counting because it is the only signal of how often initial loads are being superseded, which is reconnect thrash.
 
 ### The existing sub-blocks are renamed to the same convention
 
-Eight cumulative counters in `PollingDiagnostics` and `ReadAfterWriteDiagnostics` omit the `Total` marker, so a reader cannot tell them from gauges.
+Eight cumulative counters omit the `Total` marker, so a reader cannot tell them from gauges. `TotalReads` renames for a different reason, so nine members move in total.
 
 | Today | Becomes |
 |---|---|
@@ -229,34 +263,32 @@ Eight cumulative counters in `PollingDiagnostics` and `ReadAfterWriteDiagnostics
 | `ReadAfterWriteDiagnostics.Coalesced` | `TotalCoalescedReads` |
 | `ReadAfterWriteDiagnostics.Failed` | `TotalFailedReads` |
 
-`TotalReads` already carried the prefix but counts **successful** reads only (`PollingMetrics.RecordRead()` fires only on success), so beside a new `TotalFailedReads` it would read as the sum. It becomes `TotalSuccessfulReads`.
+`TotalReads` counts successful reads only (`PollingManager.cs:364-366`), so beside a new `TotalFailedReads` it would read as the sum.
 
-The `ReadAfterWrite` members name their noun because that block name contains both "read" and "write", so a bare `TotalFailed` there reads as a failed write. `Reconnects` needs no such treatment: its parent supplies an unambiguous noun.
+The `ReadAfterWrite` members name their noun because that block name contains both "read" and "write", so a bare `TotalFailed` there reads as a failed write. `Reconnects` needs no such treatment.
 
-`Total` is a prefix, matching the library's own usage. The honest evidence is three members, not the six revision 3 claimed: `TotalReads`, `TotalAttempts` and `TotalReconnectionAttempts`. Of the others, `TotalCount` is a structured-logging placeholder, and `TotalWrites` and `TotalFailureCount` are per-batch fields on `OpcUaWriteException` rather than counters. Three precedents and no suffix usage in the library still settle it, and the prefix reads as English. A suffix was considered for matching Prometheus `_total`; that argument fails because both known consumers rename these into their own metric names rather than mapping one-to-one.
+`Total` is a prefix, matching the library's own usage: `TotalReads`, `TotalAttempts`, `TotalReconnectionAttempts`, with no suffix usage. A suffix was considered for matching Prometheus `_total`; that fails because both known consumers rename these into their own metric names rather than mapping one-to-one.
 
 ### The timestamp naming rule
 
-Two kinds, and no `*Since` anywhere. That vocabulary appears nowhere in this library, which uses `LastConnectedAt`, `RecoveredAt`, `DisruptedAt`, `ReadAt`, `StartTime` and several `*Timestamp` members, and nowhere in .NET, which has `Process.StartTime` and `ExitTime`, `FileInfo.CreationTime` and `LastWriteTime`, and `Activity.StartTimeUtc`. The closest ecosystem analogue for "when the current state began" is Kubernetes' `lastTransitionTime` on Conditions, which is also transition-named.
+No `*Since` anywhere. That vocabulary appears nowhere in this library, which uses `LastConnectedAt`, `RecoveredAt`, `DisruptedAt`, `ReadAt`, `StartTime` and several `*Timestamp`, and nowhere in .NET, which has `Process.StartTime` and `ExitTime`, `FileInfo.CreationTime` and `LastWriteTime`, and `Activity.StartTimeUtc`. The closest ecosystem analogue for "when the current state began" is Kubernetes' `lastTransitionTime`.
 
-- **`*ChangedAt`** pairs with a state member and moves whenever that state moves: `State` with `StateChangedAt`, `IsOperational` with `OperationalChangedAt`. Non-null once the connector has started, so a consumer reads the state and how long it has held in one place.
-- **`Last*At`** records a discrete past event and survives whatever came after it: `Reconnects.LastConnectionEstablishedAt`, which still answers "when did we last have a connection" while disconnected.
+- **`*ChangedAt`** pairs with a state member and moves whenever it moves: `State`/`StateChangedAt`, `IsOperational`/`OperationalChangedAt`. Non-null once the connector has started, which is why both are stamped at start rather than only on the first transition. Without that, a source that never leaves its initial `Synchronizing` (`SubjectSourceBase.cs:34`, with `TransitionStateTo` early-returning on a no-op at `:581-584`) would report null in exactly the "stale since when" case the member exists for.
+- **`Last*At`** records a discrete past event and survives it: `Reconnects.LastConnectionEstablishedAt`.
 
-`StartedAt` is a `Last*At` in spirit, the connector's own start, and is the epoch every `Total*` counts from. It does not move on reconnect.
+`StartedAt` is a `Last*At` in spirit, and is the epoch every `Total*` counts from.
 
-The distinction that matters is whether the value survives the state it describes. `LastConnectionEstablishedAt` does, which is why it takes event naming. A `*ChangedAt` cannot, because it always describes the present. Collapsing the two makes counters appear to rebase exactly when they matter most.
+The discriminator is whether the value survives the state it describes.
 
 ### Documentation obligations
 
-Five things are not inferable from the surface:
-
 1. **`ThroughputDiagnostics` states the reference frame once.** Incoming means into the subject tree, outgoing means out of it, for clients and servers alike.
-2. **`LastError` covers either direction.**
-3. **`ConnectorDiagnostics` says there is deliberately no inbound queue.** Inbound suppression is a generation bump in `SubjectPropertyWriter.StartBuffering`, not a buffer with a depth.
-4. **`ChangeQueue` and `WriteRetries` document their pipeline relationship.** `ChangeQueue` growing means changes are produced faster than they flush; `WriteRetries` growing means the far end is rejecting writes.
-5. **`ReadAfterWrite` notes its counters are verification reads following an outbound write.**
+2. **`LastError` covers either direction, and is sticky**, which is a change from the OPC UA connectors' current clear-on-recovery behaviour.
+3. **The three buffers document their relationship.** `OutboundChanges` growing means changes are produced faster than they flush; `OutboundRetries` growing means the far end is rejecting writes; `InboundBuffer` growing means an initial load is still in progress.
+4. **`ReadAfterWrite` notes its counters are verification reads following an outbound write.**
+5. **`InboundBuffer.TotalDropped` documents that discards are deliberate**, not loss.
 
-**The implementation PR description must carry the full member tree**, base types first and each connector's additions under it, marking gauges and `Total*` counters. The tree is what made two naming defects visible during design, the flat-versus-nested duplication and the eight convention violations. Prose surfaced neither.
+**The implementation PR description must carry the full member tree**, base types first and each connector's additions under it, marking gauges and `Total*` counters. The tree is what made three naming defects visible during design; prose surfaced none of them.
 
 ### The counter convention
 
@@ -264,113 +296,110 @@ Five things are not inferable from the surface:
 
 ## Ownership, lifetime and accuracy
 
-**Accumulator plus view, following `ThroughputCounter`.** A mutable `QueueMetrics` is owned by the connector for its whole lifetime; `QueueDiagnostics` is a read-only view. This is what makes `TotalDropped` survive a per-cycle `ChangeQueueProcessor`.
+**Accumulator plus view.** A mutable `QueueMetrics` is owned for the connector's lifetime; `QueueDiagnostics` is a read-only view. This is what makes `TotalDropped` survive a per-cycle `ChangeQueueProcessor`.
 
-**Depth and drops both come from `ChangeQueueProcessor`, not from the subscription.** Revision 1 read depth from the source-lifetime `PropertyChangeQueueSubscription`. That was wrong: `PropertyChangeInterceptor` fans every committed change to every queue subscription unfiltered (`:196`, `:244`), so its count is process-wide, not this connector's outbound buffer.
+**Depth and drops come from `ChangeQueueProcessor`, not from the subscription**, whose count is process-wide for the reason given above.
 
-**`TotalDropped` is accumulated plus live.** `QueueMetrics.Register` takes both a depth and a drop accessor. The reported total is the accumulated value plus the live processor's count, so it advances during a burst rather than jumping at reconnect. `Deregister` folds the live count into the accumulator and clears the provider in one step under a lock, so the value can neither double-count nor momentarily decrease.
+**Register takes an optional drop accessor.** The change queue supplies both; `WriteRetryQueue` has no drop counter of its own and reports through `AddDropped`, so it passes `null` and would otherwise force implementers to guess between `() => 0` and adding a counter that then double-counts.
 
-**Processor handover.** `Register` on creation, `Deregister` before disposal. All four creation sites currently use `using var` (`SubjectSourceBase.cs:233`, `OpcUaSubjectServer.cs:262`, `MqttSubjectServer.cs:188`, `WebSocketSubjectServer.cs:98`) and must become try/finally so deregistration precedes disposal. Clearing the provider before disposal narrows rather than closes the race: a reader can read a non-null provider and be preempted. That is safe only because the accessors read a `ConcurrentQueue<T>` that survives disposal, which is a dependency to state rather than rely on silently.
+**Processor handover.** `Register` on creation, `Deregister` before disposal. There are **five** creation sites, not four: `SubjectSourceBase.cs:233`, `OpcUaSubjectServer.cs:262`, `MqttSubjectServer.cs:188`, `WebSocketSubjectServer.cs:98`, and `WebSocketSubjectChangeProcessor.cs:33`. The last two share the factory `WebSocketSubjectHandler.CreateChangeQueueProcessor` (`:365`), so registration must live at the call site or embedded mode would wire itself into the server's metrics. All are `using var` today and become try/finally so deregistration precedes disposal.
 
-**`StartedAt` is stamped once by `MarkStarted()`**, which is idempotent. All three servers restart inside their own `ExecuteAsync` (`OpcUaSubjectServer.cs:239`, `MqttSubjectServer.cs:146`, `WebSocketSubjectServer.cs:82`), and the obvious call site sits inside that loop, which would move the epoch on every restart and rebase every counter. `SubjectSourceBase` calls it from its sealed `ExecuteAsync`; servers call it themselves and the idempotence makes placement forgiving.
+Clearing the providers before disposal narrows rather than closes the race: a reader can read a non-null provider and be preempted. That is safe only because `_changes` and `_dropCount` survive `ChangeQueueProcessor.Dispose`, which is a dependency to state rather than rely on silently.
 
-**Timestamps are stored as interlocked ticks.** `DateTimeOffset?` is a multi-field struct with no atomic read, and AGENTS.md names torn reads as a correctness concern. The repository already uses tick storage under `Interlocked` (`SubjectSourceBase.cs:531`, `ReconnectionMetrics.cs:19-26`). The OPC UA server's plain `DateTimeOffset? _startTime` (`OpcUaSubjectServer.cs:36`) is converted.
+**The inbound buffer count must not take a lock.** `_updates` is guarded by `SubjectPropertyWriter`'s `Lock`, and `StartBuffering` holds it while calling `TransitionStateTo`, which takes `_stateLock` and raises `StateChanged`; a handler reading a lock-taking getter would close an ABBA cycle, the same hazard `ISubjectSource` already documents. A `volatile int` maintained where the list is mutated, all of which already happens under that lock, and a `Volatile.Read` on the getter.
 
-**All reads are lock-free and none may throw.** Lock-free is not the same as cheap: `ConcurrentQueue<T>.Count` is a segment walk, so `Depth` is the one member a caller should not poll tightly.
+**Timestamps are stored as interlocked ticks.** `DateTimeOffset?` has no atomic read, and AGENTS.md names torn reads as correctness. The repository already uses tick storage under `Interlocked` (`SubjectSourceBase.cs:531`, `ReconnectionMetrics.cs:19-26`).
 
-**`Depth` is a snapshot; `TotalDropped` is monotonic.** An operator alarms on the total and glances at the depth.
+**All reads are lock-free and none may throw.** Lock-free is not cheap: `ConcurrentQueue<T>.Count` is a segment walk, so `Depth` should not be polled tightly.
 
-**`Depth` reads 0 where no buffer exists**, which is both between connect cycles and whenever `bufferTime <= 0`. `ChangeQueueProcessor` takes an immediate path in that configuration and never enqueues, so there is nothing to measure and `Capacity` advertises a bound that is never enforced. Documented rather than hidden.
+**`Depth` reads 0 where no buffer exists**, between connect cycles and whenever `bufferTime <= 0`, since `ChangeQueueProcessor` takes an immediate path then and never enqueues.
+
+**`Capacity` is ambiguous at 0** between "queue not constructed" and "constructed with `maxQueueDepth: 0`", which drops everything immediately (`ChangeQueueProcessor.cs:269-272`). The plan should either forbid the latter at construction or document the collision.
+
+**The direct-write discard is attributed to `OutboundRetries`**, which runs only when the retry queue is absent, so that block reports `Capacity == 0`, `Depth == 0` and a rising `TotalDropped`. Deliberate, and stated because it looks wrong otherwise.
 
 ## Production changes beyond plumbing
 
-**Drop counting on the three live paths**: `WriteRetryQueue` ring-buffer overflow, `ReconcileRetryQueueAsync`'s no-setter and exception branches, and the direct-write discard. Each gets an `Interlocked.Add` into the owning `QueueMetrics`. This is the immediate value of the change.
+**Drop counting on the three live outbound paths.** The immediate value of the change.
 
-**Liveness does not exist today and must be derived.** The OPC UA client has `SessionManager.IsConnected` and `ReconnectionMetrics.LastConnectedAt` but no notion of a current healthy period, and computing one as `IsConnected ? LastConnectedAt : null` is wrong during the initial load and during `PerformFullStateSyncIfNeededAsync`. Each connector calls `MarkOperational()` where it becomes healthy and `MarkNotOperational()` where it loses that; the base additionally forces the latter on fault, exit and dispose. Both stamp `OperationalChangedAt`.
+**Liveness does not exist today.** Each connector calls `MarkOperational()` where it becomes healthy and `MarkNotOperational()` where it loses that; the base forces the latter on fault, exit and dispose. For the OPC UA client the transition points live in `SessionManager`, outside the inheritance hierarchy, so it needs the internal-forwarder pattern already used at `OpcUaSubjectClientSource.cs:52`. MQTT is simpler, since `OnDisconnectedAsync` and `OnReconnectedAsync` are on the source.
 
-**`StateChangedAt` is one line plus a deletion.** `TransitionStateTo` already holds `_stateLock` and already computes `now` for the `SourceEvent`, so the conditional stamp on `Synchronized` becomes unconditional and `_lastSynchronizedTicks` is removed.
+**`StateChangedAt`** replaces the conditional stamp in `TransitionStateTo` with an unconditional one, plus a stamp at start, and deletes `_lastSynchronizedTicks`.
 
-**`LastError` state for MQTT and WebSocket.** Neither client source nor either server tracks one today. The base captures what it sees; connectors call `ReportError` for failures it cannot.
+**`LastError` state for MQTT and WebSocket**, neither of which tracks one, and removal of the OPC UA clearing paths.
 
-**The OPC UA server keeps its throughput.** Revision 1 wrongly said servers cannot report it. `OpcUaSubjectServer` already counts both directions (`:206`, `:418`), read by `HomeBlaze.OpcUa/OpcUaServer.cs:191-193` and asserted by the #425 regression tests. Its counters are passed into `ThroughputDiagnostics` unchanged.
+**The inbound buffer count** in `SubjectPropertyWriter`.
+
+**The OPC UA server keeps its throughput counters** (`:206`, `:418`), read by `HomeBlaze.OpcUa/OpcUaServer.cs:191-193` and asserted by the #425 regression tests. `StartTime` is not converted but replaced: it is nulled in the restart finally at `:274`, a per-run window, whereas `StartedAt` never moves on an internal restart.
 
 ## Scope boundaries
 
-**Outgoing throughput is not moved to the base.** Revision 3 moved it, on the belief that `SubjectSourceBase.WriteChangesViaRetryQueueAsync` sits on the outbound path for every source. It does not: the retry-queue flush calls `source.WriteChangesInBatchesAsync` directly (`WriteRetryQueue.cs:153`), and so does `SourceTransactionWriter` (`:164`, `:375`, `:416`). The mechanism also needed a written count on `WriteResult`, whose `Success` is a shared static (`WriteResult.cs:45`) returned by eight production sites and many test doubles, so the base would have read zero written on every fully-successful path. That is a public struct contract change on the hot write path, forced on every external implementer, bought for one rate. Each connector keeps its own counter; MQTT and WebSocket report null until someone wires them.
+**Outgoing throughput is not moved to the base.** `SubjectSourceBase.WriteChangesViaRetryQueueAsync` does not sit on every outbound path: the retry flush calls `WriteChangesInBatchesAsync` directly (`WriteRetryQueue.cs:153`), and so does `SourceTransactionWriter` (`:164`, `:375`, `:416`). It also needed a written count on `WriteResult`, whose `Success` is a shared static (`WriteResult.cs:45`) returned by eight production sites, so the base would read zero written on every fully-successful path.
 
-Also out:
-
-- **Incoming throughput for MQTT and WebSocket, and both directions for their servers.** Nullable rates make the absence honest rather than reporting a misleading zero.
-- **Embedded WebSocket mode.** `WebSocketSubjectChangeProcessor` is a plain `BackgroundService`, not an `ISubjectConnector`, so it has no owner for its metrics. Documented rather than left uneven.
-- **The unclaimed-property discard** (`SubjectSourceBase.cs:364-367`), which needs an ownership-aware accumulator.
-- **Making `LastError` self-clearing.** It stays sticky.
-- **Bounding any queue.** That is #281, gated on #352.
+Also out: incoming throughput for MQTT and WebSocket and both directions for their servers; making `LastError` self-clearing; bounding any queue (#281, gated on #352); the unclaimed-property discard.
 
 ## Breaking changes and migration
 
-**Removed or moved**: `ISubjectSource.PendingWriteCount` and `ISubjectSource.LastSynchronizedAt` (the latter replaced by `StateChangedAt`, a behaviour fix, see the monitoring section); on `OpcUaClientDiagnostics` the throughput pair, `LastError`, `IsConnected`, `PendingWriteCount`, `PendingReadAfterWrites`, `PollingItemCount`, the four reconnect counters and `LastConnectedAt` (renamed to `LastConnectionEstablishedAt`); on `OpcUaServerDiagnostics` the throughput pair, `LastError`, `IsRunning`, `StartTime` and `Uptime`; `MqttSubjectServer.IsListening` and `NumberOfClients`; `WebSocketSubjectServer.ConnectionCount` and `CurrentSequence`; the eight renamed sub-block counters.
+**Removed or moved**: `ISubjectSource.PendingWriteCount` and `LastSynchronizedAt`; on `OpcUaClientDiagnostics` the throughput pair, `LastError`, `IsConnected`, `PendingWriteCount`, `PendingReadAfterWrites`, `PollingItemCount`, the four reconnect counters and `LastConnectedAt`; on `OpcUaServerDiagnostics` the throughput pair, `LastError`, `IsRunning`, `StartTime`, `Uptime`; `MqttSubjectServer.IsListening` and `NumberOfClients`; `WebSocketSubjectServer.ConnectionCount` and `CurrentSequence`; nine renamed sub-block counters; `OpcUaSubjectClientSource.ClearLastError`.
 
-`LastSynchronizedAt` is the one member whose replacement changes behaviour rather than only its name, and it is the only change that touches a source's monitoring surface beyond `PendingWriteCount`. Every direct `ISubjectSource` implementer listed below must supply `StateChangedAt` instead, and `SubjectSourceBase` supplies it for everything that derives from the base.
-
-`Uptime` is dropped because with two timestamps it is ambiguous; consumers subtract whichever they mean.
-
-**Added**: `ConnectorDiagnostics`, `SourceDiagnostics`, `QueueDiagnostics`, `QueueMetrics`, `ThroughputDiagnostics`, `ReconnectDiagnostics`, `SubjectConnectorBase`, `MqttServerDiagnostics`, `WebSocketServerDiagnostics`, and `Diagnostics` on both interfaces.
+**Added**: `ConnectorDiagnostics`, `SourceDiagnostics`, `QueueDiagnostics`, `QueueMetrics`, `ThroughputDiagnostics`, `ReconnectDiagnostics`, `SubjectConnectorBase`, `MqttServerDiagnostics`, `WebSocketServerDiagnostics`, `Diagnostics` on both interfaces, `StateChangedAt` on `ISubjectSource`.
 
 **In-repo fallout**:
 
 | Where | What |
 |---|---|
-| `HomeBlaze.OpcUa/OpcUaClient.cs:221-227`, `:311-318` | seven reads plus the null-out block |
+| `HomeBlaze.OpcUa/OpcUaClient.cs:221-227`, `:311-318` | seven reads plus the null-out block; `IsConnected` is surfaced as a device state and changes meaning |
 | `HomeBlaze.OpcUa/OpcUaServer.cs:191-193` | throughput pair and `ActiveSessionCount` |
+| `Connectors.Tests/SourceStateTests.cs:71-84`, `:96`, `:105`, `:109-168` | the only file pinning `LastSynchronizedAt` semantics, including a 60-line concurrency test |
 | `Connectors.Tests/SourceSubscriptionTests.cs:245`, `SubjectSourceExtensionsTests.cs:500`, `SourceMonitorTests.cs:601` | direct `ISubjectSource` implementers |
-| `Connectors.Tests/SubjectSourceRetryQueueTests.cs:74` | reads `source.PendingWriteCount` |
-| `Benchmark/SubjectTransactionBenchmark.cs:135` | fake `ISubjectSource` |
-| `ConnectorTester.Tests/Connectors/FaultTargetResolverTests.cs:21` | hand-written `ISubjectConnector`; must return a non-null `ConnectorDiagnostics`, which the public constructor now permits |
-| OPC UA tests, 46 `Diagnostics.` reads | `OpcUaReconnectionTests`, `OpcUaStallDetectionTests`, `OpcUaConcurrencyTests`, `OpcUaReadWriteTests.cs:74-75`, `Client/OutageStateTests.cs:122`, `Integration/Testing/OpcUaTestClient.cs:120`, `OpcUaServerSelfWriteTests.cs:53,82,88`, `SelfEchoReproTests.cs:188` |
-| four processor creation sites | `using var` becomes try/finally so `Deregister` precedes disposal |
-| three server classes | change base to `SubjectConnectorBase` |
+| `Connectors.Tests/SubjectSourceRetryQueueTests.cs:74` | `source.PendingWriteCount` |
+| `Benchmark/SubjectTransactionBenchmark.cs:109` | fake `ISubjectSource` |
+| `ConnectorTester.Tests/Connectors/FaultTargetResolverTests.cs:21` | hand-written `ISubjectConnector` |
+| `WebSocket.Tests/WebSocketServerClientTests.cs:308,311,321,322,337,340,357,361` | `ConnectionCount` / `CurrentSequence` |
+| `WebSocket.Tests/SequenceNumberTests.cs:78,94,97,132,135,138,141,375,444,498,501,504,549,552` | same |
+| `WebSocket.Tests/Integration/OutageStateTests.cs:73,89` | `LastSynchronizedAt` |
+| `OpcUa.Tests/Client/OutageStateTests.cs:105,132` | `LastSynchronizedAt` |
+| OPC UA tests | roughly 40 reads of removed members across `OpcUaReconnectionTests`, `OpcUaStallDetectionTests`, `OpcUaConcurrencyTests`, `OpcUaReadWriteTests`, `OpcUaServerSelfWriteTests.cs:53,82,88`, `SelfEchoReproTests.cs:188` |
+| five processor creation sites | `using var` becomes try/finally |
+| three server classes | base becomes `SubjectConnectorBase`, `ExecuteAsync` renamed to `RunAsync` |
 
-`OpcUaServerSelfWriteTests` and `SelfEchoReproTests` assert incoming throughput is 0 and are the #425 regression tests; `OpcUaReadWriteTests.cs:74-75` asserts the positive mirror. All must keep asserting through the new path.
+`OpcUaServerSelfWriteTests` and `SelfEchoReproTests` assert incoming throughput is 0 and are the #425 regression tests; `OpcUaReadWriteTests.cs:74-75` asserts the positive mirror.
 
-**Snapshots**: three. `Connectors`, `OpcUa`, and `Mqtt` (`Mqtt.Tests/VerifyChecksTests.PublicApi.verified.txt:166` pins `MqttSubjectServer`'s base type, `:170` pins `NumberOfClients`). WebSocket has no snapshot test despite `WebSocketSubjectServer` being public: a pre-existing gap worth closing.
+**Snapshots**: Connectors, OpcUa, Mqtt (`Mqtt.Tests/…verified.txt:166,169,170`). WebSocket has none despite `WebSocketSubjectServer` being public: a pre-existing gap worth closing here, since this change moves its surface.
 
-**Docs**: `connectors-opcua-client.md:648`, `:650`, the dependency graph and responsibility table at `:746`, `:747`, `:759`, `:769`, `:774`, `:776`, `:784`, and the back-reference passage at `:782` which cites `OutboundWriter` as the preferred pattern; `connectors-opcua-server.md:259`; `connectors-opcua.md:48`, `:76`; `connectors.md:272`, `:277`, `:783`, `:785`; `connectors-monitoring.md:160`. `connectors.md:785` names `PendingWriteCount` as the observable signal for #362 and must be rewritten to the new path.
-
-**Known external fallout**: OPC UA telemetry gauges bound to the throughput pair, and any server-style connector implementing `ISubjectConnector`.
+**Docs**: `connectors-opcua-client.md:648`, `:650`, `:746`, `:747`, `:750`, `:769`, `:774`, `:775`, `:776`, `:782`, `:784`; `connectors-opcua-server.md:259`; `connectors-opcua.md:48`, `:76`; `connectors.md:271`, `:272`, `:277`, `:783`, `:785`; `connectors-monitoring.md:160`; and `HomeBlaze/Data/Docs/architecture/design/observability.md:58`, which documents the server diagnostics surface.
 
 ## Error handling
 
-**No diagnostics getter may throw.** A cleared provider reads `0`, a missing session manager makes `Polling` and `ReadAfterWrite` null, a never-started connector has `StartedAt` and `OperationalChangedAt` null.
+**No diagnostics getter may throw.** A cleared provider reads `0`, a missing session manager makes `Polling` and `ReadAfterWrite` null, a never-started connector has `StartedAt` null.
 
-**A disposed or faulted connector reports not operational.** The base forces `IsOperational` false on its catch, `finally` and `Dispose` paths and stamps `OperationalChangedAt` with the moment it did, so a consumer can see when the connector went down rather than only that it is down. Every other member returns last-known or zero after disposal.
+**A disposed or faulted connector reports not operational**, with `OperationalChangedAt` stamped at that moment.
 
-**A restart is a new epoch only when the connector restarts, not when its transport does.** `StartedAt` moves on a genuine restart and every `Total*` counter resets with it; a scraper seeing the epoch move knows the counters restarted.
+**A restart is a new epoch.** `StartedAt` moves on `ExecuteAsync` re-entry and every `Total*` resets with it; a transport reconnect inside `RunAsync` does not move it.
 
-**`Capacity` semantics**: `null` unbounded, `0` disabled. The retry queue is not constructed when `writeRetryQueueSize <= 0` (`SubjectSourceBase.cs:61`), and that reports `0`. Between connect cycles `Capacity` reports the last known bound, since the connector's configuration has not changed.
+**`Capacity`**: `null` unbounded, `0` disabled, with the collision noted above.
 
-**Null throughput is a construction-time property**, not a runtime one. `ThroughputCounter.CurrentRate` returns `0.0` when idle (`ThroughputCounter.cs:55`), so null is the only way to distinguish "idle" from "not measured" and must never be used for the former.
+**Null throughput is construction-time.** `ThroughputCounter.CurrentRate` returns `0.0` when idle (`ThroughputCounter.cs:55`), so null is the only way to distinguish idle from not-measured.
 
 ## Testing
 
 Repo conventions: `When<Condition>_Then<ExpectedBehavior>`, explicit Arrange/Act/Assert, no hardcoded waits.
 
-- **The three live drop paths**, each failing when its `Interlocked.Add` is removed.
-- **The disabled-queue drain does not count**, pinning the over-report that revision 3 would have shipped.
-- **`TotalDropped` advances during a burst**, not only at deregistration, and never decreases across a handover.
-- **Totals do not rebase across a processor recreate.** Written against `QueueMetrics` and a bounded `ChangeQueueProcessor` directly, since no in-repo connector sets a bound; the test documents that it stands in for a consumer-bounded connector.
-- **`MarkStarted` is idempotent**: a server restart loop does not move `StartedAt`.
-- **A faulted and a disposed source both report not operational**, with `OperationalChangedAt` stamped at the moment they did.
-- **`StateChangedAt` moves on every transition**, including into `Synchronizing` and `Stopped`. The regression case is explicit: a source that synchronizes, stays synchronized, then drops must report the drop time and not the synchronization time. That is the defect the member replaces.
-- **Concurrency**: a reader loop over every property while a writer loop recreates the processor; no exception escapes and `TotalDropped` never decreases.
-- **Snapshot and migration**: three snapshots accepted; the #425 regression assertions preserved through their new path.
+- **The three live outbound drop paths**, each failing when its `Interlocked.Add` is removed.
+- **The disabled-queue drain does not count**, pinning the over-report an earlier revision would have shipped.
+- **`TotalDropped` advances during a burst**, never decreases across a handover, and does not double-count. Written against `QueueMetrics` and a bounded processor directly, since no in-repo connector sets a bound.
+- **A faulted, a disposed and a stopped connector all report not operational**, for a server as well as a source, since the server path is the one revision 5 got wrong.
+- **`StateChangedAt` moves on every transition**, and is non-null on a source that never leaves its initial state.
+- **The `(value, timestamp)` pairs are never observed torn.**
+- **Concurrency**: a reader loop over every property while a writer loop recreates the processor.
+- **Snapshot and migration**: the #425 regression assertions preserved through their new path.
 
-Left to integration suites: per-connector `OperationalChangedAt` transitions for MQTT and WebSocket.
+Left to integration suites: per-connector liveness transitions for MQTT and WebSocket.
 
 ## Follow-ups
 
 - Throughput for the MQTT and WebSocket servers, and incoming for all four.
-- Counting the unclaimed-property discard, which needs an ownership-aware accumulator.
-- Making `WebSocketSubjectChangeProcessor` a connector so embedded mode reports diagnostics.
-- A public API snapshot test for `Namotion.Interceptor.WebSocket`.
-- #281 and #352: bounding the queues, which is what makes `ChangeQueue` fully meaningful in-repo.
+- Counting the unclaimed-property discard.
+- Making `WebSocketSubjectChangeProcessor` a connector so embedded mode reports its own metrics.
+- #281 and #352: bounding the queues.
 - Permanent documentation is updated to the implemented design as part of implementation; this spec is temporary.
