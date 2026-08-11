@@ -14,11 +14,13 @@ namespace Namotion.Interceptor.OpcUa.Server;
 internal sealed class OpcUaNodeFactory
 {
     private readonly ILogger _logger;
+    private readonly OpcUaSubjectServer _serverService;
     private readonly OpcUaNodeIdResolver _resolver;
 
-    public OpcUaNodeFactory(ILogger logger)
+    public OpcUaNodeFactory(ILogger logger, OpcUaSubjectServer serverService)
     {
         _logger = logger;
+        _serverService = serverService;
         _resolver = new OpcUaNodeIdResolver(logger);
     }
 
@@ -224,7 +226,9 @@ internal sealed class OpcUaNodeFactory
     {
         var parentNode = manager.FindNode(parentId);
 
-        var variable = new BaseDataVariableState(parentNode)
+        // The single construction site for a property's variable node, which is what lets the subclass own
+        // the inbound write path rather than the connector having to correct it afterwards.
+        var variable = new SubjectVariableState(parentNode, _serverService)
         {
             NodeId = nodeId,
 

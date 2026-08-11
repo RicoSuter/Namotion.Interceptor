@@ -23,8 +23,7 @@ public class OpcUaServerWriteIntegrityTests
 
     public OpcUaServerWriteIntegrityTests(ITestOutputHelper output) => _output = output;
 
-    [Fact(Skip = "Red: the node keeps the rejected value at Good quality and the client is told the write " +
-                 "succeeded. Remove this skip with the fix that refuses a write the model would not take.")]
+    [Fact]
     public async Task WhenValidationRejectsAClientWrite_ThenTheNodeKeepsTheModelValueAndTheClientIsTold()
     {
         // Arrange
@@ -43,8 +42,7 @@ public class OpcUaServerWriteIntegrityTests
         Assert.True(StatusCode.IsBad(statusCode), $"A refused write must not be answered with '{statusCode}'.");
     }
 
-    [Fact(Skip = "Red: a cancelled write leaves the node serving the cancelled value and the client is told " +
-                 "the write succeeded. Remove this skip with the fix that refuses a write the model would not take.")]
+    [Fact]
     public async Task WhenAnOnChangingHookCancelsAClientWrite_ThenTheNodeKeepsTheModelValueAndTheClientIsTold()
     {
         // Arrange
@@ -61,9 +59,7 @@ public class OpcUaServerWriteIntegrityTests
         Assert.True(StatusCode.IsBad(statusCode), $"A cancelled write must not be answered with '{statusCode}'.");
     }
 
-    [Fact(Skip = "Red: the conversion throws out of the SDK's Write, which faults the whole request with " +
-                 "BadUnexpectedError and leaves every node behind the failing one unwritten. Remove this skip " +
-                 "with the fix that contains an inbound conversion failure to its own node.")]
+    [Fact]
     public async Task WhenTheInboundConverterThrows_ThenTheRestOfTheWriteRequestStillCompletes()
     {
         // Arrange: the converter refuses one value, which is what a scaling or enum mapping converter does
@@ -96,9 +92,7 @@ public class OpcUaServerWriteIntegrityTests
         Assert.Equal("survivor", fixture.Node(nameof(WriteIntegrityChild.Other)).Value);
     }
 
-    [Fact(Skip = "Red: the model takes the clamped value while the node keeps serving the client's " +
-                 "untransformed one, permanently. Remove this skip with the fix that reconciles the node with " +
-                 "what the model accepted.")]
+    [Fact]
     public async Task WhenTheConverterPairDoesNotRoundTrip_ThenTheNodeHoldsTheConvertedModelValueAndTheClientReceivesGood()
     {
         // Arrange
@@ -170,8 +164,7 @@ public class OpcUaServerWriteIntegrityTests
         Assert.True(StatusCode.IsBad(statusCode), $"An unappliable write must not be answered with '{statusCode}'.");
     }
 
-    [Fact(Skip = "Red: the merge rewrites the elements of the array the subject already held, from the SDK's " +
-                 "write thread. Remove this skip with the fix that merges into a copy.")]
+    [Fact]
     public async Task WhenAClientWritesAnIndexRange_ThenTheSubjectsPreviousArrayIsNotMutated()
     {
         // Arrange
@@ -191,9 +184,7 @@ public class OpcUaServerWriteIntegrityTests
         Assert.Equal(contentsBeforeTheWrite, arrayBeforeTheWrite);
     }
 
-    [Fact(Skip = "Red: the merge mutates the array in place, so the apply writes the instance the property " +
-                 "already holds and the equality check drops it. Nothing downstream learns of the write. " +
-                 "Remove this skip with the fix that merges into a copy.")]
+    [Fact]
     public async Task WhenAClientWritesAnIndexRange_ThenAChangeIsPublishedThroughTheInterceptorChain()
     {
         // Arrange
@@ -222,8 +213,7 @@ public class OpcUaServerWriteIntegrityTests
         Assert.NotEmpty(changes);
     }
 
-    [Fact(Skip = "Red: the node keeps the refused write's source timestamp, dating a value that never " +
-                 "changed. Remove this skip with the fix that refuses a write the model would not take.")]
+    [Fact]
     public async Task WhenAWriteIsRefused_ThenTheNodeTimestampReflectsTheModel()
     {
         // Arrange

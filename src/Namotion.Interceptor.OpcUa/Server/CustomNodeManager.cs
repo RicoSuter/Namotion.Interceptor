@@ -38,7 +38,7 @@ internal class CustomNodeManager : CustomNodeManager2
         _configuration = configuration;
         _mapper = configuration.Mapper;
         _logger = logger;
-        _nodeFactory = new OpcUaNodeFactory(logger);
+        _nodeFactory = new OpcUaNodeFactory(logger, serverService);
     }
 
     // Expose protected members for OpcUaNodeFactory

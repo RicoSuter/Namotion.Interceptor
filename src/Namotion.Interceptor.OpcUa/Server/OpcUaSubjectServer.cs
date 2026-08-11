@@ -35,6 +35,10 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
 
     internal ThroughputCounter OutgoingThroughput => Metrics.Outgoing!;
 
+    // Both reached from SubjectVariableState, which applies a client write inside the node's own write.
+    internal OpcUaValueConverter ValueConverter => _configuration.ValueConverter;
+    internal ILogger Logger => _logger;
+
     // Thread-scoped, not an instance field: a client write on another thread must not be caught by it.
     [ThreadStatic]
     internal static bool IsWritingOwnNodeValues;
@@ -183,6 +187,12 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
 
                         node.Value = convertedValue;
                         node.Timestamp = change.ChangedTimestamp.UtcDateTime;
+
+                        // A representable value clears an Uncertain left by one that was not. The Value
+                        // setter only resets the status while the value has never been touched, and node
+                        // creation already touched it, so the reset has to be explicit.
+                        node.StatusCode = StatusCodes.Good;
+
                         SelfWrittenNodeValue = convertedValue;
                         node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
                         written++;
