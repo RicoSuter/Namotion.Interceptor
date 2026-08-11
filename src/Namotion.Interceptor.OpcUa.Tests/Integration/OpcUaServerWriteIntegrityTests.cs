@@ -230,6 +230,31 @@ public class OpcUaServerWriteIntegrityTests
     }
 
     [Fact]
+    public async Task WhenTheSdksOwnWriteThrows_ThenTheIndexRangeCopyLeavesNoTrace()
+    {
+        // Arrange: a handler the SDK invokes from inside the write it performs, which is where its type
+        // table lookups and the merge's own cast paths sit. Any of them throwing lands here.
+        await using var fixture = await WriteIntegrityFixture.StartAsync(_output);
+        var node = fixture.Node(nameof(WriteIntegrityChild.Numbers));
+        var arrayBeforeTheWrite = node.Value;
+
+        node.OnWriteValue = (ISystemContext context, NodeState state, NumericRange range,
+            QualifiedName encoding, ref object value, ref StatusCode status, ref DateTime timestamp) =>
+            throw new InvalidOperationException("Refusing to write.");
+
+        // Act
+        var statusCode = await fixture.Session.WriteAsync(node.NodeId, new[] { 20, 30 }, indexRange: "1:2");
+
+        // Assert: the copy exists only to be merged into, so a merge that threw must leave no trace, the
+        // same as one that was rejected. A node left holding it would serve an array the subject does not
+        // have, and the change mask the assignment set would have a later flush publish a change nobody
+        // made.
+        Assert.True(StatusCode.IsBad(statusCode), $"A write that threw must not be answered with '{statusCode}'.");
+        Assert.Same(arrayBeforeTheWrite, node.Value);
+        Assert.Equal(NodeStateChangeMasks.None, node.ChangeMasks);
+    }
+
+    [Fact]
     public async Task WhenAnEnumPropertyIsWritten_ThenTheClientReceivesGood()
     {
         // Arrange: an enum reaches the property setter as a boxed int, so a path that reports the apply's

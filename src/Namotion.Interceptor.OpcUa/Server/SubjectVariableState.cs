@@ -83,18 +83,22 @@ internal sealed class SubjectVariableState : BaseDataVariableState
             Value = CopyForMerge(arrayValue);
         }
 
-        var writeResult = base.WriteValueAttribute(context, indexRange, value, statusCode, sourceTimestamp);
+        ServiceResult writeResult;
+        try
+        {
+            writeResult = base.WriteValueAttribute(context, indexRange, value, statusCode, sourceTimestamp);
+        }
+        catch
+        {
+            // A throw leaves the copy installed exactly like a bad result does, and the node manager
+            // skips its flush on both, so both have to undo it.
+            RestoreMergeSource(mergeSource, masksBeforeCopy);
+            throw;
+        }
+
         if (ServiceResult.IsBad(writeResult))
         {
-            if (mergeSource is not null)
-            {
-                // The Value setter ORs in the value mask on a reference difference and the SDK's write
-                // service skips its flush on a bad result, so the copy would otherwise leave a mask for a
-                // later flush to dispatch as a change nobody made.
-                Value = mergeSource;
-                ChangeMasks = masksBeforeCopy;
-            }
-
+            RestoreMergeSource(mergeSource, masksBeforeCopy);
             return writeResult;
         }
 
@@ -178,6 +182,21 @@ internal sealed class SubjectVariableState : BaseDataVariableState
         return isApplied && ValuesMatch(modelValue, requestedValue)
             ? ServiceResult.Good
             : StatusCodes.BadOutOfRange;
+    }
+
+    /// <summary>
+    /// Puts back the array the index range merge was handed a copy of, for every way the merge can end
+    /// without having produced a value. The node's value setter ORs in the value mask on a reference
+    /// difference, so the copy would otherwise leave a mask for a later flush to dispatch as a change
+    /// nobody made.
+    /// </summary>
+    private void RestoreMergeSource(Array? mergeSource, NodeStateChangeMasks masksBeforeCopy)
+    {
+        if (mergeSource is not null)
+        {
+            Value = mergeSource;
+            ChangeMasks = masksBeforeCopy;
+        }
     }
 
     /// <summary>
