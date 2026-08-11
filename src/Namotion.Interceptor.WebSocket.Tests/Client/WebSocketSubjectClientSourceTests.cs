@@ -62,6 +62,49 @@ public class WebSocketSubjectClientSourceTests
     }
 
     [Fact]
+    public async Task WhenTheSourceIsDisposed_ThenTheFailureNamesNoChange()
+    {
+        // Arrange
+        var source = CreateSource();
+        var changes = new[] { CreateChange(source.RootSubject) };
+        await source.DisposeAsync();
+
+        // Act
+        var result = await source.WriteChangesAsync(changes, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result.Error);
+        Assert.Empty(result.FailedChanges);
+    }
+
+    [Fact]
+    public async Task WhenTheSocketIsNotConnected_ThenTheFailureNamesNoChange()
+    {
+        // Arrange: a source that never connected, so nothing is sent and no change is answered for.
+        var source = CreateSource();
+        var changes = new[] { CreateChange(source.RootSubject) };
+
+        // Act
+        var result = await source.WriteChangesAsync(changes, CancellationToken.None);
+
+        // Assert: naming no change is what tells the batching loop the call itself failed, so it stops
+        // instead of spending a blocking send on every remaining batch of the same flush.
+        Assert.NotNull(result.Error);
+        Assert.Empty(result.FailedChanges);
+    }
+
+    private static SubjectPropertyChange CreateChange(IInterceptorSubject subject)
+    {
+        return SubjectPropertyChange.Create(
+            new PropertyReference(subject, nameof(TestRoot.Name)),
+            ChangeOrigin.Local,
+            DateTimeOffset.UtcNow,
+            null,
+            "old",
+            "new");
+    }
+
+    [Fact]
     public void Constructor_WithNullSubject_ShouldThrow()
     {
         // Arrange
