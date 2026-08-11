@@ -142,6 +142,8 @@ dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile o
 
 When `--participant` is specified, only the named participant starts and the verification engine is skipped. Mutations run continuously with performance metrics.
 
+Splitting the run this way isolates each side's CPU and throughput, and stops one shared heap hiding which side grew. It is not the mode to measure memory in, though: skipping the verification engine means no cycles and no `cycles.csv`, and the `HeapMB` in `performance-{participant}.csv` is sampled without forcing a collection, which is not leak evidence. Use multi-process for throughput and attribution, and a single-process run for the post-GC heap trend.
+
 ### What to Look For
 
 **Success**: Each cycle prints `PASS` with convergence time and chaos event counts:
