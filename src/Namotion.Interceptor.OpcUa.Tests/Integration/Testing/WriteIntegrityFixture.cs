@@ -37,6 +37,7 @@ public partial class WriteIntegrityChild
     {
         Numbers = [1, 2, 3, 4, 5];
         Blobs = [[1, 2, 3, 4], [5, 6, 7, 8]];
+        CopiedNumbers = [1, 2, 3];
     }
 
     /// <summary>A plain writable property: the baseline for an accepted write and the target of the validation tests.</summary>
@@ -70,12 +71,24 @@ public partial class WriteIntegrityChild
     [Path("opc", "Vetoed")]
     public partial string? Vetoed { get; set; }
 
+    /// <summary>
+    /// Stored in an instance of its own, so the model ends an accepted write holding an array equal to the
+    /// client's rather than the client's. Stands in for any normalising hook or copying write interceptor.
+    /// </summary>
+    [Path("opc", "CopiedNumbers")]
+    public partial int[] CopiedNumbers { get; set; }
+
     partial void OnVetoedChanging(ref string? newValue, ref bool cancel)
     {
         if (newValue == VetoedValue)
         {
             cancel = true;
         }
+    }
+
+    partial void OnCopiedNumbersChanging(ref int[] newValue, ref bool cancel)
+    {
+        newValue = (int[])newValue.Clone();
     }
 }
 

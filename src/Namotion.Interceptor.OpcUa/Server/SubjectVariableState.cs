@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
@@ -186,6 +187,9 @@ internal sealed class SubjectVariableState : BaseDataVariableState
     /// underlying integer while the model stores a boxed enum, and <see cref="object.Equals(object,object)"/>
     /// across that pair is false, so every accepted enum write would otherwise be answered Bad. Only
     /// <see cref="int"/>-backed enums round-trip, which is what the OPC UA data type mapping produces.
+    /// Arrays are compared by content for the same reason: <see cref="object.Equals(object,object)"/> over
+    /// two arrays is instance identity, so a property that stores a copy of what it is given, which any
+    /// normalising hook or copying write interceptor does, would have every array write it accepts refused.
     /// </summary>
     private static bool ValuesMatch(object? modelValue, object? requestedValue)
     {
@@ -200,6 +204,48 @@ internal sealed class SubjectVariableState : BaseDataVariableState
             return Equals(modelValue, Enum.ToObject(modelValue.GetType(), requestedValue));
         }
 
+        if (modelValue is Array modelArray && requestedValue is Array requestedArray)
+        {
+            return ArrayContentsMatch(modelArray, requestedArray);
+        }
+
         return false;
+    }
+
+    /// <summary>
+    /// Whether two single-dimensional arrays of the same type hold equal elements. One level deep: the
+    /// inner arrays of a jagged array are compared by reference, which is what the merge produces anyway,
+    /// and a deeper walk would read the whole payload a second time to pick a status code.
+    /// </summary>
+    private static bool ArrayContentsMatch(Array modelArray, Array requestedArray)
+    {
+        if (modelArray.Rank != 1 || requestedArray.Rank != 1 ||
+            modelArray.Length != requestedArray.Length ||
+            modelArray.GetType() != requestedArray.GetType())
+        {
+            return false;
+        }
+
+        // Bit equality over the whole array where the elements are primitive, which covers every numeric
+        // and boolean node the type mapping produces. Vectorised, and it boxes nothing, where the element
+        // walk below boxes once per element for a value type.
+        if (modelArray.GetType().GetElementType()!.IsPrimitive)
+        {
+            var byteLength = Buffer.ByteLength(modelArray);
+            return MemoryMarshal
+                .CreateReadOnlySpan(ref MemoryMarshal.GetArrayDataReference(modelArray), byteLength)
+                .SequenceEqual(MemoryMarshal
+                    .CreateReadOnlySpan(ref MemoryMarshal.GetArrayDataReference(requestedArray), byteLength));
+        }
+
+        for (var index = 0; index < modelArray.Length; index++)
+        {
+            if (!Equals(modelArray.GetValue(index), requestedArray.GetValue(index)))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

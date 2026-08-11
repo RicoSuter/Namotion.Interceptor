@@ -135,6 +135,23 @@ public class OpcUaServerWriteIntegrityTests
     }
 
     [Fact]
+    public async Task WhenTheModelStoresAnAcceptedArrayInItsOwnInstance_ThenTheClientReceivesGood()
+    {
+        // Arrange: a hook that hands back a copy, which is what a normalising hook or a copying write
+        // interceptor does to every array that passes through it.
+        await using var fixture = await WriteIntegrityFixture.StartAsync(_output);
+        var nodeId = fixture.NodeId(nameof(WriteIntegrityChild.CopiedNumbers));
+
+        // Act
+        var statusCode = await fixture.Session.WriteAsync(nodeId, new[] { 7, 8, 9 });
+
+        // Assert: the model holds what the client asked for, so the write was taken. Answering on instance
+        // identity would refuse every array write such a property ever accepts.
+        Assert.Equal(new[] { 7, 8, 9 }, fixture.Child.CopiedNumbers);
+        Assert.True(StatusCode.IsGood(statusCode), $"An accepted write must not be answered with '{statusCode}'.");
+    }
+
+    [Fact]
     public async Task WhenAClientWritesAByteStringIndexRange_ThenTheSubjectsPreviousInnerArrayIsNotMutated()
     {
         // Arrange
