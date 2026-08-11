@@ -424,8 +424,11 @@ internal class SubscriptionManager : IAsyncDisposable
         // BadNotSupported - Server doesn't support subscriptions for this node
         // BadMonitoredItemFilterUnsupported - Filter not supported (data change filter)
         // Note: BadAttributeIdInvalid is a permanent error - polling won't work either, so excluded
-        return statusCode == StatusCodes.BadNotSupported ||
-               statusCode == StatusCodes.BadMonitoredItemFilterUnsupported;
+        //
+        // Code bits only: the low 16 bits describe the answer rather than name it, and a server that
+        // sets one would otherwise leave the item kept for retry instead of falling back to polling.
+        return statusCode.CodeBits == StatusCodes.BadNotSupported ||
+               statusCode.CodeBits == StatusCodes.BadMonitoredItemFilterUnsupported;
     }
 
     /// <summary>

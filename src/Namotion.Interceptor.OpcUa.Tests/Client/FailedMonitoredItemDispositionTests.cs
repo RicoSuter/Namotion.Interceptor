@@ -21,6 +21,10 @@ public class FailedMonitoredItemDispositionTests
     [InlineData(StatusCodes.BadNotSupported, true, nameof(FailedMonitoredItemDisposition.FallbackToPolling))]
     [InlineData(StatusCodes.BadMonitoredItemFilterUnsupported, true, nameof(FailedMonitoredItemDisposition.FallbackToPolling))]
     [InlineData(StatusCodes.BadNotSupported, false, nameof(FailedMonitoredItemDisposition.Drop))]
+    // The low 16 bits describe the answer rather than name it, so a server free to set one must not be
+    // able to turn a subscription-unsupported code into a code this check does not recognise.
+    [InlineData(StatusCodes.BadNotSupported | 0x0403u, true, nameof(FailedMonitoredItemDisposition.FallbackToPolling))]
+    [InlineData(StatusCodes.BadMonitoredItemFilterUnsupported | 0x0403u, true, nameof(FailedMonitoredItemDisposition.FallbackToPolling))]
     // Access-scoped errors: role permissions and AccessLevel are mutable server-side, so the item
     // is kept for retry. Dropping it would forfeit both in-session recovery routes and leave the
     // property dark until the next reconnect.
