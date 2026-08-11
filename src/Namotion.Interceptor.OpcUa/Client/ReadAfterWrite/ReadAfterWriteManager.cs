@@ -400,6 +400,12 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 // no revision leaves the question above unanswerable, so for it the comparison decides
                 // alone, which is the only ranking this path had before revisions ranked it. Dropping
                 // that fallback would let the read-back apply a pre-write value over a newer local write.
+                //
+                // That fallback compares two clocks, not one: a local commit stores the model's own
+                // timestamp, and a write no longer carries it to the server, so the read-back answers
+                // with the server's receive time instead. Being the later of the two, it errs toward
+                // applying the server's value rather than skipping it, which is the safe direction: a
+                // local write the revisions could rank was already handled above.
                 var timestampDecidesAlone = sentRevision == 0 || lastCommitRevision > localRevision;
 
                 if (timestampDecidesAlone &&
