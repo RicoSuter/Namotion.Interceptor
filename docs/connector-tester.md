@@ -30,13 +30,11 @@ The tester runs indefinitely until a cycle fails (exit code 1) or you stop it wi
 
 ### How long to run
 
-Neither mode runs in CI, and neither has a cycle limit, so how long to leave it running is a judgement you make per change. The two modes need very different durations because they are answering different questions.
+Neither mode runs in CI and neither stops on its own, so the duration is a judgement per change. Pick the mode by risk: reconnection, session handling and write ordering want chaos; batching, queueing and hot path allocation want load.
 
-**Chaos** needs cycles, not minutes. A cycle is a one minute mutate phase plus a convergence check, and the five chaos profiles rotate round robin, so a short run never exercises most of them and a pass means very little. Treat roughly a hundred cycles as the floor before a pass is evidence, which is a couple of hours. Bugs here surface as a single failed convergence after many good cycles, so stopping early is the main way to miss one.
+**Chaos** is counted in cycles, not minutes. A cycle is a one minute mutate phase plus a convergence check, and five chaos profiles rotate round robin, so a short run leaves most of them unseen. A hundred cycles is a starting point, several hundred for a change you would call dangerous. Failures look like one bad convergence after many good ones, which is why stopping early is how you miss them.
 
-**Load** answers two questions with different appetites. A cycle is a fifteen minute mutate phase at 20,000 changes per second. For throughput and latency one cycle is enough: the percentiles from it are the answer. For memory one cycle proves nothing, because a leak is a trend, not a level. Aim for at least eight cycles, about two hours, and longer when the change is one you would expect to leak slowly. Read that from the post-GC heap in `cycles.csv` across cycles rather than from any single number.
-
-Run the mode that matches the risk. A change to reconnection, session handling or write ordering wants chaos; a change to batching, queueing or allocation on the hot path wants load. A change that could plausibly do both wants both, which is several hours, so plan it rather than discovering it.
+**Load** answers two questions. Throughput and latency come from a single fifteen minute cycle. Memory needs eight cycles or more, read as a post-GC heap trend in `cycles.csv`, because one cycle shows a level and a leak is a trend.
 
 ## How It Works
 
