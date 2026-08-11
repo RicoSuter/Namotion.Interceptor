@@ -47,6 +47,8 @@ internal static class OpcUaStatusCodeClassifier
     /// </summary>
     public static bool IsTransientError(StatusCode statusCode)
     {
-        return StatusCode.IsBad(statusCode) && !PermanentCodes.Contains(statusCode.Code);
+        // Code bits only: the low 16 bits describe the answer rather than name it, and a server that
+        // sets one would otherwise turn a permanent code into a code this list does not hold.
+        return StatusCode.IsBad(statusCode) && !PermanentCodes.Contains(statusCode.CodeBits);
     }
 }
