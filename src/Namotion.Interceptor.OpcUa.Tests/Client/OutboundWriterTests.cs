@@ -133,6 +133,27 @@ public class OutboundWriterTests
         Assert.Equal(1, manager.PendingReadCount);
     }
 
+    [Fact]
+    public async Task WhenTheServerWillCompleteTheWriteAsynchronously_ThenNoReadBackIsScheduled()
+    {
+        // Arrange: GoodCompletesAsynchronously is a legal Write result for a gateway queueing writes down
+        // to a device, and it is good, so the change is confirmed and leaves the retry queue.
+        await using var manager = CreateReadAfterWriteManager();
+        var (writer, change) = CreateWriter(
+            AnswerWith(StatusCodes.GoodCompletesAsynchronously),
+            readAfterWriteManager: manager);
+
+        TrackForReadBack(manager, change);
+
+        // Act
+        var result = await writer.WriteChangesAsync(new[] { change }, CancellationToken.None);
+
+        // Assert: the server has said the write is not done, so a read-back firing before it lands would
+        // apply the pre-write value, and nothing redelivers the change.
+        Assert.True(result.IsFullySuccessful);
+        Assert.Equal(0, manager.PendingReadCount);
+    }
+
     /// <summary>
     /// A manager that tracks every registered node but never reads: nothing provides a session and the
     /// revised intervals are far out, so a scheduled read-back stays pending for the test to count.

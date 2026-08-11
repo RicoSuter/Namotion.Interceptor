@@ -108,7 +108,7 @@ internal sealed class OutboundWriter
             if (result.IsFullySuccessful || result.IsPartialFailure)
             {
                 _outgoingThroughput.Add(writeValues.Count - (result.FailedChanges.IsDefault ? 0 : result.FailedChanges.Length));
-                NotifyPropertiesWritten(changes, result);
+                NotifyPropertiesWritten(changes, writeResponse.Results);
             }
 
             return result;
@@ -234,18 +234,16 @@ internal sealed class OutboundWriter
     }
 
     /// <summary>
-    /// Schedules a read-back for each writable change the server accepted. A read-back for a refused write would
-    /// apply the server's pre-write value over the local one the retry queue still holds and will re-send,
-    /// so the model would flip to the stale value and back.
+    /// Schedules a read-back for each change the server reported written. A read-back for a refused write
+    /// would apply the server's pre-write value over the local one the retry queue still holds and will
+    /// re-send, so the model would flip to the stale value and back.
     /// </summary>
     /// <remarks>
-    /// Requires <paramref name="changes"/> to carry at most one change per property. The refusals are
-    /// separated out by position rather than by identity, so a property appearing twice would have the
-    /// wrong occurrence taken for the refused one. Nothing here enforces that: every path here collapses
-    /// per property first, an ordinary flush in <c>ChangeMerger</c>, a commit in <c>SubjectTransaction</c>,
-    /// a re-send in <c>WriteRetryQueue</c> and a resumed park in <c>SubjectSourceBase</c>.
+    /// Walks the same selection <see cref="CreateWriteValuesCollection"/> built the request from, so the
+    /// result at each position answers about the writable change at the same position. The result count
+    /// is checked against the request before this runs, which is what makes that alignment exact.
     /// </remarks>
-    private void NotifyPropertiesWritten(ReadOnlyMemory<SubjectPropertyChange> changes, in WriteResult result)
+    private void NotifyPropertiesWritten(ReadOnlyMemory<SubjectPropertyChange> changes, StatusCodeCollection results)
     {
         var manager = _readAfterWriteManager;
         if (manager is null)
@@ -253,34 +251,23 @@ internal sealed class OutboundWriter
             return;
         }
 
-        var failedChanges = result.FailedChanges;
-        var failedCount = failedChanges.IsDefaultOrEmpty ? 0 : failedChanges.Length;
-        if (failedCount == 0 && result.Error is not null)
-        {
-            // The result-count check makes every refusal attributable, so this cannot happen today. Kept
-            // because the alternative, on an error that named nothing, is scheduling read-backs for
-            // changes that may never have reached the server, each of which would revert its property.
-            return;
-        }
-
-        // ProcessWriteResults appends the refusals as it walks the batch, so they arrive as a subsequence
-        // of changes in the same order and one cursor separates them out without a lookup set.
         var span = changes.Span;
-        var nextFailed = 0;
-        for (var i = 0; i < span.Length; i++)
+        var resultIndex = 0;
+        for (var i = 0; i < span.Length && resultIndex < results.Count; i++)
         {
             var change = span[i];
-            if (nextFailed < failedCount &&
-                PropertyReference.Comparer.Equals(change.Property, failedChanges[nextFailed].Property))
+            if (!TryGetWritableNodeId(change, out var nodeId, out _))
             {
-                nextFailed++;
                 continue;
             }
 
-            // The same selection the request was built from: a property the client cannot write is not
-            // in the batch at all, so nothing about it was confirmed and a read-back would apply the
-            // server's value over a local one no write is going to replace.
-            if (TryGetWritableNodeId(change, out var nodeId, out _))
+            var status = results[resultIndex++];
+
+            // GoodCompletesAsynchronously confirms the write was taken, which a gateway queueing writes
+            // down to a device answers with, but says the processing is not finished. A read-back firing
+            // before the device write lands would apply the pre-write value, and nothing redelivers the
+            // change because it counts as written and has already left the retry queue.
+            if (StatusCode.IsGood(status) && status.Code != StatusCodes.GoodCompletesAsynchronously)
             {
                 // The change's own revision, not the property's current one, see OnPropertyWritten.
                 manager.OnPropertyWritten(nodeId, change.Revision);
