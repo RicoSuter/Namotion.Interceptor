@@ -36,6 +36,8 @@ Neither mode runs in CI and neither stops on its own, so the duration is a judge
 
 **Load** answers two questions. Throughput and latency come from a single fifteen minute cycle. Memory needs eight cycles or more, read as a post-GC heap trend in `cycles.csv`, because one cycle shows a level and a leak is a trend.
 
+Narrowing `ChaosProfiles` to `full-chaos` hits a known failure sooner and is worth it when reproducing one. It is not a shorter verification run: it drops the `no-chaos` baseline that catches convergence bugs having nothing to do with disruption, and `client-a-only`, the only profile that checks one client keeps working while another is down.
+
 ## How It Works
 
 The tester hosts a server and one or more clients in a single process, connected via the selected connector (OPC UA, MQTT, or WebSocket). Each participant has its own `TestNode` object graph and `MutationEngine` that continuously modifies properties. A `VerificationEngine` orchestrates repeating mutate/converge cycles: mutations run for a configured duration, then all engines pause and snapshots are compared. If all participants have identical state, the cycle passes. If not, the process logs the diff and exits with code 1.

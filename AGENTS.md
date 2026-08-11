@@ -26,9 +26,7 @@ Only run integration tests when changing connector implementations (OPC UA, MQTT
 - `dotnet test src/Namotion.Interceptor.OpcUa.Tests`
 - `dotnet test src/HomeBlaze/HomeBlaze.E2E.Tests`
 
-Risky connector work needs local verification beyond the test suites, via the [Connector Tester](docs/connector-tester.md): chaos profiles for correctness under kill and disconnect disruption, load profiles for throughput, latency and memory. Neither runs in CI and both take hours, so decide it while planning or brainstorming the change, ask the user which mode it warrants at that point, and confirm it ran before finalizing the pull request. Discovering it when the branch is otherwise ready costs an afternoon.
-
-The same applies to any long-running verification, benchmarks included: agree it up front, never start one mid-task on your own initiative.
+Risky connector work also needs the [Connector Tester](docs/connector-tester.md), which does not run in CI and takes hours. Agree any long-running verification, that and benchmarks alike, while planning the change rather than once the branch is ready, and confirm it ran before finalizing the pull request.
 
 ### Running Samples
 - `dotnet run --project src/Namotion.Interceptor.SampleConsole` - Run console sample
