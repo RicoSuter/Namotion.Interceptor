@@ -714,7 +714,16 @@ public class SubjectSourceExtensionsTests
     }
 
     /// <summary>
-    /// Runs all-success writes and returns the bytes allocated per write.
+    /// Independent measurement rounds taken per allocation reading, of which the lowest is reported.
+    /// </summary>
+    private const int MeasurementRounds = 5;
+
+    /// <summary>
+    /// Runs all-success writes and returns the bytes allocated per write, taken as the lowest of
+    /// several rounds. Stray allocation only ever inflates a round, so the cheapest round is the one
+    /// that ran clean, and any leftover one-time cost lands in the first round and is discarded. An
+    /// allocation on the measured path is present in every round and so survives the minimum, which
+    /// is what keeps the bound as sharp as a single sample.
     /// </summary>
     private static long MeasureSuccessfulWrites(ISubjectSource source, ReadOnlyMemory<SubjectPropertyChange> changes, int iterations)
     {
@@ -723,13 +732,19 @@ public class SubjectSourceExtensionsTests
             RunSynchronousWrite(source, changes);
         }
 
-        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < iterations; i++)
+        var lowest = long.MaxValue;
+        for (var round = 0; round < MeasurementRounds; round++)
         {
-            RunSynchronousWrite(source, changes);
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            for (var i = 0; i < iterations; i++)
+            {
+                RunSynchronousWrite(source, changes);
+            }
+
+            lowest = Math.Min(lowest, (GC.GetAllocatedBytesForCurrentThread() - allocatedBefore) / iterations);
         }
 
-        return (GC.GetAllocatedBytesForCurrentThread() - allocatedBefore) / iterations;
+        return lowest;
     }
 
     private static void RunSynchronousWrite(ISubjectSource source, ReadOnlyMemory<SubjectPropertyChange> changes)

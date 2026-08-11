@@ -607,9 +607,19 @@ public class WriteRetryQueueTests
     }
 
     /// <summary>
-    /// Runs failing flush ticks and returns the bytes allocated per tick. The queue holds the requeued
-    /// survivor alone, or that plus the tick's own write when <paramref name="writePerTick"/> is set,
-    /// which is what gives the collapse two entries for one property to merge.
+    /// Independent measurement rounds taken per allocation reading, of which the lowest is reported.
+    /// </summary>
+    private const int MeasurementRounds = 5;
+
+    /// <summary>
+    /// Runs failing flush ticks and returns the bytes allocated per tick, taken as the lowest of
+    /// several rounds. Stray allocation only ever inflates a round, so the cheapest round is the one
+    /// that ran clean, and any leftover one-time cost lands in the first round and is discarded. An
+    /// allocation per collapse is present in every round and so survives the minimum, which is what
+    /// keeps the bound as sharp as a single sample.
+    /// The queue holds the requeued survivor alone, or that plus the tick's own write when
+    /// <paramref name="writePerTick"/> is set, which is what gives the collapse two entries for one
+    /// property to merge.
     /// </summary>
     private static long MeasureFailingTicks(ISubjectSource source, PropertyReference property, int iterations, bool writePerTick)
     {
@@ -620,20 +630,26 @@ public class WriteRetryQueueTests
         queue.Enqueue(tickBuffer);
 
         // Warm up: the first ticks size the pending list, the flush scratch buffer and the collapse index.
-        for (var revision = 2; revision <= 21; revision++)
+        var revision = 2L;
+        for (; revision <= 21; revision++)
         {
             RunFailingTick(queue, source, property, revision, tickBuffer, writePerTick);
         }
 
-        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-        for (var revision = 22; revision < 22 + iterations; revision++)
+        var lowest = long.MaxValue;
+        for (var round = 0; round < MeasurementRounds; round++)
         {
-            RunFailingTick(queue, source, property, revision, tickBuffer, writePerTick);
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            for (var tick = 0; tick < iterations; tick++, revision++)
+            {
+                RunFailingTick(queue, source, property, revision, tickBuffer, writePerTick);
+            }
+
+            lowest = Math.Min(lowest, (GC.GetAllocatedBytesForCurrentThread() - allocatedBefore) / iterations);
         }
 
-        var allocatedPerTick = (GC.GetAllocatedBytesForCurrentThread() - allocatedBefore) / iterations;
         Assert.Equal(writePerTick ? 2 : 1, queue.PendingWriteCount);
-        return allocatedPerTick;
+        return lowest;
     }
 
     private static void RunFailingTick(
