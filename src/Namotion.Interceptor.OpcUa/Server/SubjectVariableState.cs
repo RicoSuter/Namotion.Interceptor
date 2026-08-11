@@ -17,7 +17,14 @@ namespace Namotion.Interceptor.OpcUa.Server;
 /// </summary>
 internal sealed class SubjectVariableState : BaseDataVariableState
 {
+    private const long ApplyFailureLogIntervalMilliseconds = 5000;
+
     private readonly OpcUaSubjectServer _server;
+
+    // A refused write is a repeated condition, not an event: a client's retry queue re-sends a change the
+    // model refuses on every flush and nothing supersedes it, so an untimed log is one exception stack per
+    // node per flush for as long as the client runs. Same window and same shape as WriteRetryQueue's.
+    private long _lastApplyFailureLogTimestamp;
 
     public SubjectVariableState(NodeState? parent, OpcUaSubjectServer server)
         : base(parent)
@@ -86,7 +93,13 @@ internal sealed class SubjectVariableState : BaseDataVariableState
         }
         catch (Exception e)
         {
-            _server.Logger.LogError(e, "Failed to apply an OPC UA client write to property '{Property}'.", property.Name);
+            var now = Environment.TickCount64;
+            if (now - _lastApplyFailureLogTimestamp >= ApplyFailureLogIntervalMilliseconds)
+            {
+                _lastApplyFailureLogTimestamp = now;
+                _server.Logger.LogError(
+                    e, "Failed to apply an OPC UA client write to property '{Property}'.", property.Name);
+            }
         }
 
         // Read outside every handler, and assigned unconditionally: a refused, cancelled or locally
@@ -128,6 +141,10 @@ internal sealed class SubjectVariableState : BaseDataVariableState
         // The comparison picks the status, never the value. The node already holds the model's value, so a
         // comparison that answers wrong mis-reports the outcome and cannot move data. It is also what
         // reports a cancelled write, which the apply itself signals nothing about.
+        //
+        // What was refused is the value, not the node, its type or its access level, and a model that
+        // refuses a value now may take it once the rest of it moves, so no code a client is entitled to
+        // read as final fits. The client learns the model's own value from the node either way.
         return isApplied && ValuesMatch(modelValue, requestedValue)
             ? ServiceResult.Good
             : StatusCodes.BadOutOfRange;
