@@ -17,7 +17,10 @@ public readonly struct WriteResult
     /// This is the source's answer about named changes, so enumerate the ones it refused. Leave the
     /// list empty, by way of <see cref="CallFailed"/>, only when the call itself failed and there is no
     /// per-change answer. <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/> expands the
-    /// empty list to the batch's own changes, so what a caller sees reported failed is the same either way.
+    /// empty list to the batch's own changes, so nothing about that batch is lost either way. What
+    /// differs is everything else in the same flush: an empty list stops the flush, so the batches behind
+    /// it are reported unconfirmed as well, where an enumerated one reports only this batch's own
+    /// refusals and lets them be attempted.
     /// </para>
     /// </summary>
     public ImmutableArray<SubjectPropertyChange> FailedChanges { get; }
