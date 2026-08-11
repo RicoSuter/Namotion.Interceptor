@@ -9,7 +9,11 @@ namespace Namotion.Interceptor.OpcUa.Server;
 /// The variable node behind a subject property. The SDK commits a client write into the node before
 /// anything outside the write can apply it to the subject, so the apply happens here, inside the write:
 /// the node ends every write holding what the model holds, and the client is answered with what the model
-/// actually took rather than with what the SDK managed to store.
+/// actually took rather than with what the SDK managed to store. One value cannot satisfy both: a model
+/// value this server cannot represent leaves the node on the last one it could, at
+/// <see cref="StatusCodes.UncertainLastUsableValue"/>, while the client is still answered Good, because
+/// the model did take the write. The status code is the only place that caveat can be carried, and it
+/// stands until the property changes again.
 /// </summary>
 internal sealed class SubjectVariableState : BaseDataVariableState
 {

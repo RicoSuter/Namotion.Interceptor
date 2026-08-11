@@ -113,6 +113,71 @@ public class OpcUaServerWriteIntegrityTests
     }
 
     [Fact]
+    public async Task WhenTheOutboundConverterThrows_ThenTheClientReceivesGoodAndTheNodeReportsUncertain()
+    {
+        // Arrange: the model takes the value, but nothing can put what it now holds onto the node.
+        await using var fixture = await WriteIntegrityFixture.StartAsync(
+            _output, valueConverter: new ThrowOnOutboundSentinelConverter("poison"));
+
+        var nodeId = fixture.NodeId(nameof(WriteIntegrityChild.Value));
+
+        // Act
+        var statusCode = await fixture.Session.WriteAsync(nodeId, "poison");
+
+        // Assert: the single path where the node does not end the write holding what the model holds. The
+        // write was accepted, so the client is told so, and the node serves the last value this server
+        // could represent rather than the client's, with the status code carrying the caveat.
+        var readBack = await fixture.Session.ReadAsync(nodeId);
+        Assert.Equal("poison", fixture.Child.Value);
+        Assert.True(StatusCode.IsGood(statusCode), $"An accepted write must not be answered with '{statusCode}'.");
+        Assert.Equal(WriteIntegrityFixture.InitialValue, readBack.Value);
+        Assert.Equal((StatusCode)StatusCodes.UncertainLastUsableValue, readBack.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenAClientWritesAByteStringIndexRange_ThenTheSubjectsPreviousInnerArrayIsNotMutated()
+    {
+        // Arrange
+        await using var fixture = await WriteIntegrityFixture.StartAsync(_output);
+        var nodeId = fixture.NodeId(nameof(WriteIntegrityChild.Blobs));
+
+        var innerArrayBeforeTheWrite = fixture.Child.Blobs[0];
+        var contentsBeforeTheWrite = innerArrayBeforeTheWrite.ToArray();
+
+        // Act: bytes 1 and 2 of the first byte string, which the merge rewrites inside that inner array
+        // rather than by replacing the element.
+        var statusCode = await fixture.Session.WriteAsync(
+            nodeId, new byte[][] { [0xAA, 0xBB] }, indexRange: "0,1:2");
+
+        // Assert: copying the outer array alone is not enough. The subject's own inner arrays are values
+        // like any other, and rewriting their bytes publishes nothing to anyone holding them.
+        Assert.True(StatusCode.IsGood(statusCode), $"The index range write should be accepted, got '{statusCode}'.");
+        Assert.Equal(contentsBeforeTheWrite, innerArrayBeforeTheWrite);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => fixture.Child.Blobs[0].SequenceEqual(new byte[] { 1, 0xAA, 0xBB, 4 }),
+            message: $"the subject should hold the merged byte string, holds [{string.Join(", ", fixture.Child.Blobs[0])}]");
+    }
+
+    [Fact]
+    public async Task WhenAnIndexRangeWriteIsRejected_ThenTheNodeKeepsTheModelsArrayWithNoPendingChange()
+    {
+        // Arrange
+        await using var fixture = await WriteIntegrityFixture.StartAsync(_output);
+        var node = fixture.Node(nameof(WriteIntegrityChild.Numbers));
+
+        // Act: past the end of a five element array, which the merge rejects after the copy was taken.
+        var statusCode = await fixture.Session.WriteAsync(node.NodeId, new[] { 20, 30 }, indexRange: "10:11");
+
+        // Assert: the copy exists only to be merged into, so a merge that never happened must leave no
+        // trace. A node left holding it would serve an array the subject does not have, and the change
+        // mask the assignment set would have a later flush publish a change nobody made.
+        Assert.True(StatusCode.IsBad(statusCode), $"A rejected index range write must not be answered with '{statusCode}'.");
+        Assert.Same(fixture.Child.Numbers, node.Value);
+        Assert.Equal(new[] { 1, 2, 3, 4, 5 }, fixture.Child.Numbers);
+        Assert.Equal(NodeStateChangeMasks.None, node.ChangeMasks);
+    }
+
+    [Fact]
     public async Task WhenAnEnumPropertyIsWritten_ThenTheClientReceivesGood()
     {
         // Arrange: an enum reaches the property setter as a boxed int, so a path that reports the apply's

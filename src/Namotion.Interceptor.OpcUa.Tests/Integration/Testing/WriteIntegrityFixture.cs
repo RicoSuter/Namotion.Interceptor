@@ -36,6 +36,7 @@ public partial class WriteIntegrityChild
     public WriteIntegrityChild()
     {
         Numbers = [1, 2, 3, 4, 5];
+        Blobs = [[1, 2, 3, 4], [5, 6, 7, 8]];
     }
 
     /// <summary>A plain writable property: the baseline for an accepted write and the target of the validation tests.</summary>
@@ -49,6 +50,13 @@ public partial class WriteIntegrityChild
     /// <summary>An array, so a client can write an index range into it.</summary>
     [Path("opc", "Numbers")]
     public partial int[] Numbers { get; set; }
+
+    /// <summary>
+    /// A byte string array, the one shape whose index range merge rewrites the inner arrays in place
+    /// rather than only the outer one.
+    /// </summary>
+    [Path("opc", "Blobs")]
+    public partial byte[][] Blobs { get; set; }
 
     /// <summary>An enum, which reaches the property setter as a boxed int unless something coerces it back.</summary>
     [Path("opc", "Mode")]
