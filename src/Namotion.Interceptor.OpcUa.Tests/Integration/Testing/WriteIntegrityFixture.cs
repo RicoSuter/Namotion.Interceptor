@@ -82,6 +82,14 @@ public partial class WriteIntegrityChild
     public partial string? Vetoed { get; set; }
 
     /// <summary>
+    /// Vetoed like <see cref="Vetoed"/> and never written, so the model carries no timestamp of its own
+    /// for the node to fall back to. A cancelled write reports nothing, so it is the one shape where the
+    /// client's timestamp can end up dating a value the model never produced.
+    /// </summary>
+    [Path("opc", "VetoedUnwritten")]
+    public partial string? VetoedUnwritten { get; set; }
+
+    /// <summary>
     /// Stored in an instance of its own, so the model ends an accepted write holding an array equal to the
     /// client's rather than the client's. Stands in for any normalising hook or copying write interceptor.
     /// </summary>
@@ -119,6 +127,14 @@ public partial class WriteIntegrityChild
     }
 
     partial void OnVetoedChanging(ref string? newValue, ref bool cancel)
+    {
+        if (newValue == VetoedValue)
+        {
+            cancel = true;
+        }
+    }
+
+    partial void OnVetoedUnwrittenChanging(ref string? newValue, ref bool cancel)
     {
         if (newValue == VetoedValue)
         {

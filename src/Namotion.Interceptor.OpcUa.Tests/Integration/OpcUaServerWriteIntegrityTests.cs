@@ -50,16 +50,51 @@ public class OpcUaServerWriteIntegrityTests
     {
         // Arrange
         await using var fixture = await WriteIntegrityFixture.StartAsync(_output);
-        var nodeId = fixture.NodeId(nameof(WriteIntegrityChild.Vetoed));
+        var node = fixture.Node(nameof(WriteIntegrityChild.Vetoed));
+        var timestampBeforeTheWrite = node.Timestamp;
+
+        // A timestamp no accepted write could plausibly carry, so the assertion cannot pass by coincidence.
+        var clientTimestamp = DateTime.UtcNow.AddDays(-1);
 
         // Act
-        var statusCode = await fixture.Session.WriteAsync(nodeId, WriteIntegrityChild.VetoedValue);
+        var statusCode = await fixture.Session.WriteAsync(
+            node.NodeId, WriteIntegrityChild.VetoedValue, sourceTimestamp: clientTimestamp);
 
-        // Assert
-        var readBack = await fixture.Session.ReadAsync(nodeId);
+        // Assert: the node still serves the model's value, so it must serve a timestamp that dates it. A
+        // cancelled write that leaves the client's behind dates a value that never changed.
+        var readBack = await fixture.Session.ReadAsync(node.NodeId);
         Assert.Equal(WriteIntegrityFixture.InitialValue, fixture.Child.Vetoed);
         Assert.Equal(WriteIntegrityFixture.InitialValue, readBack.Value);
         Assert.Equal((StatusCode)StatusCodes.BadOutOfRange, statusCode);
+        Assert.NotEqual(clientTimestamp, readBack.SourceTimestamp);
+        Assert.Equal(timestampBeforeTheWrite, readBack.SourceTimestamp);
+    }
+
+    [Fact]
+    public async Task WhenACancelledWriteTargetsANeverWrittenProperty_ThenTheNodeKeepsItsOwnTimestamp()
+    {
+        // Arrange: a cancelled write signals nothing, so the apply looks like it succeeded, and nothing
+        // seeds this property, so the model has no write timestamp of its own for the node to fall back to.
+        await using var fixture = await WriteIntegrityFixture.StartAsync(_output);
+
+        var node = fixture.Node(nameof(WriteIntegrityChild.VetoedUnwritten));
+        Assert.Null(fixture.Property(nameof(WriteIntegrityChild.VetoedUnwritten)).TryGetWriteTimestamp());
+        var timestampBeforeTheWrite = node.Timestamp;
+
+        // A timestamp no accepted write could plausibly carry, so the assertion cannot pass by coincidence.
+        var clientTimestamp = DateTime.UtcNow.AddDays(-1);
+
+        // Act
+        var statusCode = await fixture.Session.WriteAsync(
+            node.NodeId, WriteIntegrityChild.VetoedValue, sourceTimestamp: clientTimestamp);
+
+        // Assert: the node's timestamp dates the value the node holds. The write was cancelled, so the
+        // node holds the model's untouched value, and the client's timestamp claims a change that the
+        // model never made.
+        Assert.Equal((StatusCode)StatusCodes.BadOutOfRange, statusCode);
+        var readBack = await fixture.Session.ReadAsync(node.NodeId);
+        Assert.NotEqual(clientTimestamp, readBack.SourceTimestamp);
+        Assert.Equal(timestampBeforeTheWrite, readBack.SourceTimestamp);
     }
 
     [Fact]
@@ -205,6 +240,19 @@ public class OpcUaServerWriteIntegrityTests
         Assert.Equal(WriteIntegrityFixture.InitialValue, readBack.Value);
         Assert.Equal((StatusCode)StatusCodes.UncertainLastUsableValue, readBack.StatusCode);
         Assert.Equal(timestampBeforeTheWrite, readBack.SourceTimestamp);
+
+        // Act: a value this server can represent, which is what the caveat stands until.
+        fixture.Child.Value = "representable";
+
+        // Assert: it stands until the property changes again, and no further. A node that never leaves
+        // Uncertain serves a quality warning to every client for the rest of the process.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Equals(node.Value, "representable"),
+            message: "the representable value should have reached the node");
+
+        var clearedReadBack = await fixture.Session.ReadAsync(node.NodeId);
+        Assert.Equal("representable", clearedReadBack.Value);
+        Assert.Equal((StatusCode)StatusCodes.Good, clearedReadBack.StatusCode);
     }
 
     [Fact]

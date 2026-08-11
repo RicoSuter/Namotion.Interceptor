@@ -156,16 +156,18 @@ internal sealed class SubjectVariableState : BaseDataVariableState
 
             Value = nodeValue;
 
-            // Null whenever the current value never went through a terminal write, and the node's own
-            // timestamp is a non-nullable DateTime the SDK reads as unset at MinValue. An accepted write
-            // then keeps the one the SDK stored, the client's own, which dates a value the client did
-            // produce. A refused one must not: the node holds the model's value, and the base call has
-            // already stamped it with the time of a write that changed nothing.
+            // The node's timestamp has to date the value the node holds, which is the model's. The model's
+            // own is null only while no write of any origin has ever reached its terminal, and a write
+            // this one carried into the model would have, so the fallback runs exactly when the node is
+            // serving a value this write did not produce. Keeping what the base call stamped there would
+            // date the model's untouched value with the client's own time. A cancelled write is the case
+            // that needs it: it signals nothing, so the apply reports success for a write that never
+            // committed.
             if (property.TryGetWriteTimestamp() is { } writeTimestamp)
             {
                 Timestamp = writeTimestamp.UtcDateTime;
             }
-            else if (!isApplied)
+            else
             {
                 Timestamp = previousTimestamp;
             }
