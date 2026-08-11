@@ -72,6 +72,29 @@ public class OutboundWriterTests
     }
 
     [Fact]
+    public async Task WhenTheServerAnswersWithFewerResultsThanNodes_ThenNoChangesAreEnumerated()
+    {
+        // Arrange: the service call only validates the response header, and the SDK's own count check
+        // runs on a batched path this client never takes, so an under-length answer arrives unchecked.
+        var (writer, change) = CreateWriter(session => session
+            .Setup(s => s.WriteAsync(It.IsAny<RequestHeader>(), It.IsAny<WriteValueCollection>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WriteResponse
+            {
+                ResponseHeader = new ResponseHeader(),
+                Results = [],
+                DiagnosticInfos = []
+            }));
+
+        // Act
+        var result = await writer.WriteChangesAsync(new[] { change }, CancellationToken.None);
+
+        // Assert: an unanswered node must not be confirmed written, which would drop it from the retry
+        // queue for good and arm a read-back that reverts it.
+        Assert.NotNull(result.Error);
+        Assert.Empty(result.FailedChanges);
+    }
+
+    [Fact]
     public async Task WhenTheSessionIsNotConnected_ThenNoChangesAreEnumerated()
     {
         // Arrange

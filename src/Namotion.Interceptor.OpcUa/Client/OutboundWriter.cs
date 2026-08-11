@@ -92,6 +92,16 @@ internal sealed class OutboundWriter
             return WriteResult.CallFailed(ex);
         }
 
+        if (writeResponse.Results.Count != writeValues.Count)
+        {
+            // The service call validates only the response header, and the SDK's own count check runs on
+            // a batched path this client never takes because it batches to MaxNodesPerWrite itself. An
+            // unanswered node treated as written would leave the retry queue for good.
+            return WriteResult.CallFailed(new ServiceResultException(
+                StatusCodes.BadUnknownResponse,
+                $"OPC UA Write answered {writeResponse.Results.Count} results for {writeValues.Count} nodes."));
+        }
+
         try
         {
             var result = ProcessWriteResults(writeResponse.Results, changes);
@@ -247,10 +257,9 @@ internal sealed class OutboundWriter
         var failedCount = failedChanges.IsDefaultOrEmpty ? 0 : failedChanges.Length;
         if (failedCount == 0 && result.Error is not null)
         {
-            // Only the caller's own partial-failure results reach this, so an error with nothing
-            // enumerated means the server answered with more results than nodes were requested and
-            // ProcessWriteResults could not attribute the bad ones. Which changes reached the server
-            // is then unknown, and a read-back for one that did not would revert it.
+            // The result-count check makes every refusal attributable, so this cannot happen today. Kept
+            // because the alternative, on an error that named nothing, is scheduling read-backs for
+            // changes that may never have reached the server, each of which would revert its property.
             return;
         }
 
