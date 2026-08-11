@@ -360,7 +360,9 @@ public sealed class DatabaseSource : SubjectSourceBase
         }
         catch (Exception ex)
         {
-            return WriteResult.Failure(changes, ex);
+            // The call failed, so there is no answer about any single change. Reported
+            // unenumerated, which is what stops the rest of a multi-batch write.
+            return WriteResult.Failure(ReadOnlyMemory<SubjectPropertyChange>.Empty, ex);
         }
     }
 }
@@ -370,7 +372,7 @@ public sealed class DatabaseSource : SubjectSourceBase
 
 **Build the payload from `changes` only**: never read subject properties in `WriteChangesAsync`. Under transactions the built-in writer calls the source on the committing flow, where property reads and writes throw `InvalidOperationException`, because sibling and landed-model state is outside the frozen snapshot and can make the payload inconsistent with it. Capture any other subject state the write needs before `CommitAsync`, and see [Transactions](tracking-transactions.md) for the full committing access boundary.
 
-**WriteResult**: Return `WriteResult.Success` when all changes were written. Return `WriteResult.Failure(changes, exception)` when all changes failed, or `WriteResult.PartialFailure(changes, exception)` when some succeeded. The failed changes list everything not confirmed written; unlisted changes count as written, and an error with an empty list is treated as the whole batch having failed. A set of changes larger than `WriteBatchSize` is split into batches and every batch is attempted, so a batch the source refuses does not hold back the ones behind it; their failures are reported together in a single result. The base class enqueues the failed changes into the write retry queue automatically.
+**WriteResult**: Return `WriteResult.Success` when all changes were written. Return `WriteResult.Failure(changes, exception)` when all changes failed, or `WriteResult.PartialFailure(changes, exception)` when some succeeded. The failed changes list everything not confirmed written; unlisted changes count as written. Enumerate the changes the source refused, and leave the list empty only when the call itself failed (a timeout, a dropped connection, a faulted session): that reports the whole attempted batch failed and additionally stops the flush. A set of changes larger than `WriteBatchSize` is split into batches, and a batch that names the changes it refused does not hold back the ones behind it; their failures are reported together in a single result. A batch that fails without naming one stops there, so the batches behind it are not each handed to a source that is not answering, and they are reported unconfirmed. The base class enqueues the failed changes into the write retry queue automatically.
 
 #### Registering a Source
 

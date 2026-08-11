@@ -12,8 +12,15 @@ public readonly struct WriteResult
     /// <summary>
     /// Gets the changes not confirmed written to the external source; empty on full success, and
     /// unlisted changes count as written. Failed means unconfirmed, not rejected: consumers may retry
-    /// a failed change but never revert it. An empty list with <see cref="Error"/> set means the whole
-    /// attempted batch failed (normalized by <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/>).
+    /// a failed change but never revert it.
+    /// <para>
+    /// This is the source's answer about named changes, so enumerate the ones it refused. Leave the
+    /// list empty only when the call itself failed and there is no per-change answer: that reports the
+    /// whole attempted batch failed and additionally tells
+    /// <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/> to stop, rather than spend
+    /// another transport timeout on each remaining batch of the same flush. It expands the empty list
+    /// to the batch's own changes, so what a caller sees reported failed is the same either way.
+    /// </para>
     /// </summary>
     public ImmutableArray<SubjectPropertyChange> FailedChanges { get; }
 
