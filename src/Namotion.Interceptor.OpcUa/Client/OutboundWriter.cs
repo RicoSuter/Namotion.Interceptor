@@ -40,31 +40,36 @@ internal sealed class OutboundWriter
     /// </summary>
     public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
+        var session = _sessionManager.CurrentSession;
+        if (session is null || !session.Connected)
+        {
+            return WriteResult.Failure(
+                ReadOnlyMemory<SubjectPropertyChange>.Empty,
+                new InvalidOperationException("OPC UA session is not connected."));
+        }
+
+        WriteValueCollection writeValues;
         try
         {
-            var session = _sessionManager.CurrentSession;
-            if (session is null || !session.Connected)
-            {
-                return WriteResult.Failure(
-                    ReadOnlyMemory<SubjectPropertyChange>.Empty,
-                    new InvalidOperationException("OPC UA session is not connected."));
-            }
+            writeValues = CreateWriteValuesCollection(changes);
+        }
+        catch (Exception ex)
+        {
+            // The value converter is a user extension point and runs before anything is sent, so this is
+            // these changes being refused, not a call that failed. Reporting it as a failed call would
+            // condemn every batch behind them unattempted, on this flush and on every retry of it.
+            return WriteResult.Failure(changes, ex);
+        }
 
-            var writeValues = CreateWriteValuesCollection(changes);
-            if (writeValues.Count is 0)
-            {
-                return WriteResult.Success;
-            }
+        if (writeValues.Count is 0)
+        {
+            return WriteResult.Success;
+        }
 
-            var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
-            var result = ProcessWriteResults(writeResponse.Results, changes);
-            if (result.IsFullySuccessful || result.IsPartialFailure)
-            {
-                _outgoingThroughput.Add(writeValues.Count - (result.FailedChanges.IsDefault ? 0 : result.FailedChanges.Length));
-                NotifyPropertiesWritten(changes, result);
-            }
-
-            return result;
+        WriteResponse writeResponse;
+        try
+        {
+            writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
         }
         catch (InvalidCastException ex)
         {
@@ -74,6 +79,24 @@ internal sealed class OutboundWriter
         catch (Exception ex)
         {
             return WriteResult.Failure(ReadOnlyMemory<SubjectPropertyChange>.Empty, ex);
+        }
+
+        try
+        {
+            var result = ProcessWriteResults(writeResponse.Results, changes);
+            if (result.IsFullySuccessful || result.IsPartialFailure)
+            {
+                _outgoingThroughput.Add(writeValues.Count - (result.FailedChanges.IsDefault ? 0 : result.FailedChanges.Length));
+                NotifyPropertiesWritten(changes, result);
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            // The server has answered, so the batches behind this one are worth attempting and the
+            // writes may well have landed. Only the outcome of these changes is unknown.
+            return WriteResult.Failure(changes, ex);
         }
     }
 

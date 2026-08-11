@@ -57,6 +57,20 @@ internal sealed class ThrowOnSentinelConverter(object sentinel) : OpcUaValueConv
     }
 }
 
+/// <summary>Throws from the outbound conversion when the local value equals a sentinel.</summary>
+internal sealed class ThrowOnOutboundSentinelConverter(object sentinel) : OpcUaValueConverter
+{
+    public override object? ConvertToNodeValue(object? propertyValue, RegisteredSubjectProperty property)
+    {
+        if (Equals(propertyValue, sentinel))
+        {
+            throw new InvalidOperationException($"Refusing to convert '{propertyValue}'.");
+        }
+
+        return base.ConvertToNodeValue(propertyValue, property);
+    }
+}
+
 /// <summary>Rejects a specific value on write, standing in for a validation interceptor.</summary>
 internal sealed class ThrowOnValueInterceptor(object rejected) : IWriteInterceptor
 {
@@ -103,6 +117,8 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
     public IOpcUaSubjectServer ServerService => _server.Server!;
 
     public ISubjectSource ClientSource => (ISubjectSource)_client.Source!;
+
+    public IInterceptorSubjectContext ClientContext => _client.Context;
 
     public PropertyReference ServerProperty =>
         new(ServerRoot.Child!, nameof(InboundStatusChild.Value));
@@ -200,6 +216,13 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
         AsyncTestHelpers.WaitUntilAsync(
             () => _client.Source!.Diagnostics.Polling?.ItemCount == PolledPropertyCount,
             message: $"the {PolledPropertyCount} deadband-filtered properties should have fallen back to polling");
+
+    /// <summary>
+    /// Caps the client's write requests at one node, which is how a two-property flush becomes two
+    /// batches without a model of four thousand properties.
+    /// </summary>
+    public void LimitWritesToOneNodePerRequest() =>
+        _client.Source!.CurrentSession!.OperationLimits.MaxNodesPerWrite = 1;
 
     public Task WaitForClientValueAsync(string expected) =>
         AsyncTestHelpers.WaitUntilAsync(
