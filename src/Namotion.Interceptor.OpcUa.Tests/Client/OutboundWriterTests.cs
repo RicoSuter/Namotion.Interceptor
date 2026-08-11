@@ -154,6 +154,67 @@ public class OutboundWriterTests
         Assert.Equal(0, manager.PendingReadCount);
     }
 
+    [Fact]
+    public async Task WhenWriteSourceTimestampIsNotEnabled_ThenTheWriteCarriesNoSourceTimestamp()
+    {
+        // Arrange: Part 4 lets a server refuse any value, status and timestamp combination it does not
+        // support with BadWriteNotSupported and perform no write at all, and the OPC Foundation's own
+        // reference client never sets one. Against such a server every write would fail permanently.
+        var sent = new List<WriteValueCollection>();
+        var (writer, change) = CreateWriter(CaptureAndAnswerGood(sent));
+
+        // Act
+        await writer.WriteChangesAsync(new[] { change }, CancellationToken.None);
+
+        // Assert
+        var writeValue = Assert.Single(Assert.Single(sent));
+        Assert.Equal(DateTime.MinValue, writeValue.Value.SourceTimestamp);
+    }
+
+    [Fact]
+    public async Task WhenWriteSourceTimestampIsEnabled_ThenTheWriteCarriesTheChangeTimestamp()
+    {
+        // Arrange: the opt-in exists for a Namotion client and server pair, where the server stores the
+        // timestamp it is given instead of stamping its own receive time.
+        var sent = new List<WriteValueCollection>();
+        var (writer, change) = CreateWriter(
+            CaptureAndAnswerGood(sent),
+            configure: configuration => configuration.WriteSourceTimestamp = true);
+
+        // Act
+        await writer.WriteChangesAsync(new[] { change }, CancellationToken.None);
+
+        // Assert
+        var writeValue = Assert.Single(Assert.Single(sent));
+        Assert.Equal(change.ChangedTimestamp.UtcDateTime, writeValue.Value.SourceTimestamp);
+    }
+
+    /// <summary>
+    /// Records every request and answers each of its nodes with Good.
+    /// </summary>
+    private static Action<Mock<ISession>> CaptureAndAnswerGood(List<WriteValueCollection> sent)
+    {
+        return session => session
+            .Setup(s => s.WriteAsync(It.IsAny<RequestHeader>(), It.IsAny<WriteValueCollection>(), It.IsAny<CancellationToken>()))
+            .Returns((RequestHeader _, WriteValueCollection nodesToWrite, CancellationToken _) =>
+            {
+                sent.Add(nodesToWrite);
+
+                var results = new StatusCodeCollection(nodesToWrite.Count);
+                for (var i = 0; i < nodesToWrite.Count; i++)
+                {
+                    results.Add(StatusCodes.Good);
+                }
+
+                return Task.FromResult(new WriteResponse
+                {
+                    ResponseHeader = new ResponseHeader(),
+                    Results = results,
+                    DiagnosticInfos = []
+                });
+            });
+    }
+
     /// <summary>
     /// A manager that tracks every registered node but never reads: nothing provides a session and the
     /// revised intervals are far out, so a scheduled read-back stays pending for the test to count.
@@ -232,7 +293,8 @@ public class OutboundWriterTests
     private static (OutboundWriter Writer, SubjectPropertyChange Change) CreateWriter(
         Action<Mock<ISession>> configureSession,
         OpcUaValueConverter? valueConverter = null,
-        ReadAfterWriteManager? readAfterWriteManager = null)
+        ReadAfterWriteManager? readAfterWriteManager = null,
+        Action<OpcUaClientConfiguration>? configure = null)
     {
         var session = new Mock<ISession>();
         session.SetupGet(s => s.Connected).Returns(true);
@@ -254,6 +316,8 @@ public class OutboundWriterTests
             ValueConverter = valueConverter ?? new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance)
         };
+
+        configure?.Invoke(configuration);
 
         var writer = new OutboundWriter(
             () => session.Object,

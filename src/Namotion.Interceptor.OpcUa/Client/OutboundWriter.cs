@@ -225,7 +225,14 @@ internal sealed class OutboundWriter
                 {
                     Value = convertedValue,
                     StatusCode = StatusCodes.Good,
-                    SourceTimestamp = change.ChangedTimestamp.UtcDateTime
+
+                    // Off unless asked for: a server may refuse a value, status and timestamp
+                    // combination it does not support and is then required to perform no write at all,
+                    // which would fail every write against it permanently. Left unset, the server
+                    // stamps its own receive time.
+                    SourceTimestamp = _configuration.WriteSourceTimestamp
+                        ? change.ChangedTimestamp.UtcDateTime
+                        : DateTime.MinValue
                 }
             });
         }

@@ -132,6 +132,7 @@ namespace Namotion.Interceptor.OpcUa.Client
         public bool UseSecurity { get; set; }
         public Namotion.Interceptor.OpcUa.OpcUaValueConverter ValueConverter { get; set; }
         public int WriteRetryQueueSize { get; set; }
+        public bool WriteSourceTimestamp { get; set; }
         public virtual System.Threading.Tasks.Task<Opc.Ua.Configuration.ApplicationInstance> CreateApplicationInstanceAsync() { }
         public void Validate() { }
     }

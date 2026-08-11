@@ -167,6 +167,15 @@ public class OpcUaClientConfiguration
     public TimeSpan ReadAfterWriteBuffer { get; set; } = TimeSpan.FromMilliseconds(50);
 
     /// <summary>
+    /// Gets or sets whether a write carries the change's own timestamp as the value's SourceTimestamp
+    /// (default: false). A server may refuse any value, status and timestamp combination it does not
+    /// support, and is then required to perform no write at all, which would fail every write against it
+    /// permanently. Enable this only against a server known to accept it, to propagate origin timestamps
+    /// across a Namotion client and server pair; otherwise the server stamps its own receive time.
+    /// </summary>
+    public bool WriteSourceTimestamp { get; set; }
+
+    /// <summary>
     /// Gets or sets the default publishing interval for subscriptions in milliseconds (default: 0).
     /// Larger values reduce overhead by batching more notifications per publish.
     /// </summary>
