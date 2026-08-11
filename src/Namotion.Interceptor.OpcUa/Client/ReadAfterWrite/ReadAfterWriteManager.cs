@@ -358,7 +358,13 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     var (nodeId, property, sentRevision) = _dueReadsList[i];
                     var reference = property.Reference;
 
-                    var sourceTimestamp = (DateTimeOffset)result.SourceTimestamp;
+                    // A server answering without a SourceTimestamp leaves DateTime.MinValue with an
+                    // unspecified kind, which the conversion below reads as local time and then throws on
+                    // east of UTC. Ranked as the oldest instant instead, so an answer carrying no timestamp
+                    // never displaces what the model already holds.
+                    var sourceTimestamp = result.SourceTimestamp == DateTime.MinValue
+                        ? DateTimeOffset.MinValue
+                        : (DateTimeOffset)result.SourceTimestamp;
 
                     // Ranked in two domains, because the two candidates are not always produced by the same
                     // clock. A local write that committed after the one this read-back verifies is newer

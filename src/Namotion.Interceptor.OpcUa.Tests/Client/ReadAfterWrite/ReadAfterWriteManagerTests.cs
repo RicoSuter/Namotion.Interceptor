@@ -724,6 +724,44 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task WhenTheServerAnswersWithoutASourceTimestamp_ThenTheValueIsAppliedAndNoReadFailureIsRecorded()
+    {
+        // Arrange - an omitted SourceTimestamp arrives as DateTime.MinValue with an unspecified kind,
+        // which converts to DateTimeOffset by way of the local time zone and underflows east of UTC.
+        var registeredSubject = new RegisteredSubject(_testSubject);
+        var property = registeredSubject.TryGetProperty(nameof(TestPerson.FirstName))!;
+        var nodeId = new NodeId("Timestampless", 2);
+        var session = CreateSessionReturning("from-server", DateTime.MinValue);
+
+        var metrics = new ReadAfterWriteMetrics();
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(200)),
+            metrics,
+            reportError: static _ => { },
+            NullLogger.Instance);
+
+        manager.RegisterProperty(nodeId, property, requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(1));
+        _testSubject.FirstName = "local";
+
+        // Act - a revision above every local one, so the write being verified is the last local write
+        // and the read-back is ranked on timestamps alone.
+        manager.OnPropertyWritten(nodeId, sentRevision: long.MaxValue);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => metrics.Executed + metrics.Skipped + metrics.Failed >= 1,
+            message: "the read-back should have run");
+
+        Assert.Equal("from-server", _testSubject.FirstName);
+
+        // A conversion that throws locally would otherwise discard the batch and count against the
+        // circuit breaker that tracks how the server answers reads.
+        Assert.Equal(0, metrics.Failed);
+    }
+
+    [Fact]
     public async Task OnPropertyWritten_AfterDispose_IsIgnored()
     {
         // Arrange
