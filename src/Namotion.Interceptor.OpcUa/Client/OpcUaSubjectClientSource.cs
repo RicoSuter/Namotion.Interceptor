@@ -314,7 +314,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 try
                 {
                     var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
-                    property.SetValueFromSource(this, dataValue.SourceTimestamp, null, value);
+                    property.SetValueFromSource(this, dataValue.SourceTimestamp.ToUtcDateTimeOffset(), null, value);
                     applied++;
                 }
                 catch (Exception e)

@@ -24,6 +24,33 @@ internal static class OpcUaNodeStatusDriver
     }
 
     /// <summary>
+    /// Makes the node backing <paramref name="property"/> report a zero source timestamp from then on,
+    /// standing in for a server that leaves the field empty. Driven through the read hook because the SDK
+    /// substitutes the current time for a node whose own timestamp is unset, so assigning one is not enough.
+    /// </summary>
+    public static void ClearSourceTimestamp(IOpcUaSubjectServer server, PropertyReference property)
+    {
+        if (!server.TryGetVariableNode(property, out var variableNode))
+        {
+            throw new InvalidOperationException(
+                $"No variable node exists for '{property.Name}'. Wait for it with TryGetVariableNode first.");
+        }
+
+        variableNode.OnReadValue = (
+            ISystemContext context,
+            NodeState node,
+            NumericRange indexRange,
+            QualifiedName dataEncoding,
+            ref object value,
+            ref StatusCode statusCode,
+            ref DateTime sourceTimestamp) =>
+        {
+            sourceTimestamp = DateTime.MinValue;
+            return ServiceResult.Good;
+        };
+    }
+
+    /// <summary>
     /// Publishes several properties inside one lock hold, flushing only after every assignment, so a
     /// subscription delivers them in a single notification.
     /// </summary>

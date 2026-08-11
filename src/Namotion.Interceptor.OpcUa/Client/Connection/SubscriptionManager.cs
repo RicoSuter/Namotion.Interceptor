@@ -253,7 +253,7 @@ internal class SubscriptionManager : IAsyncDisposable
                 {
                     Property = property,
                     Value = converted,
-                    Timestamp = item.Value.SourceTimestamp
+                    Timestamp = item.Value.SourceTimestamp.ToUtcDateTimeOffset()
                 });
             }
         }

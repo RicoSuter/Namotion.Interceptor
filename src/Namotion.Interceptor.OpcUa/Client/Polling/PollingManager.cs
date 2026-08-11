@@ -421,7 +421,7 @@ internal sealed class PollingManager : IAsyncDisposable
             {
                 Property = pollingItem.Property,
                 Value = converted,
-                Timestamp = dataValue.SourceTimestamp
+                Timestamp = dataValue.SourceTimestamp.ToUtcDateTimeOffset()
             };
 
             // Queue update using same pattern as subscriptions

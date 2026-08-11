@@ -56,6 +56,25 @@ public class OpcUaInboundStatusTests
     }
 
     [Fact]
+    public async Task WhenANotificationCarriesNoSourceTimestamp_ThenTheRestOfItIsStillApplied()
+    {
+        // Arrange
+        await using var fixture = await InboundStatusFixture.StartAsync(_output);
+        OpcUaNodeStatusDriver.ClearSourceTimestamp(fixture.ServerService, fixture.ServerProperty);
+
+        // Act
+        fixture.PublishPair("undated", StatusCodes.Good, "survivor", StatusCodes.Good);
+
+        // Assert: the pair travels in one notification, so the sibling's arrival is what proves the
+        // undated value did not take the whole notification down with it.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => fixture.ClientRoot.Child?.Other == "survivor",
+            message: "the sibling in the same notification should still be applied");
+
+        Assert.Equal("undated", fixture.ClientRoot.Child!.Value);
+    }
+
+    [Fact]
     public async Task WhenAPolledValueIsUncertain_ThenItIsApplied()
     {
         // Arrange
