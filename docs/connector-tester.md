@@ -6,7 +6,7 @@ The Connector Tester covers three aspects of connector quality:
 - **Load**: throughput and latency meet expectations at high change rates (load profiles).
 - **Memory**: no leaks over extended runs. `cycles.csv` records post-GC heap size per cycle for trend analysis.
 
-Run it after any connector change.
+Run it locally before merging connector work that could affect correctness or throughput. It does not run in CI, and the mode and duration depend on the change, so see [How long to run](#how-long-to-run).
 
 ## Quick Start
 
@@ -24,9 +24,19 @@ dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile m
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-load --configuration Release
 ```
 
-**Chaos profiles** inject kill/disconnect faults and verify all participants converge to identical state. **Load profiles** push high throughput (configurable via `ValueMutationRate`) and report latency percentiles, memory, and allocation rate. Both modes use the same verification cycle: mutate, pause, compare snapshots. Both should pass before merging connector changes.
+**Chaos profiles** inject kill/disconnect faults and verify all participants converge to identical state. **Load profiles** push high throughput (configurable via `ValueMutationRate`) and report latency percentiles, memory, and allocation rate. Both modes use the same verification cycle: mutate, pause, compare snapshots. Whichever mode the change warrants has to pass before merging, run for long enough to mean something.
 
 The tester runs indefinitely until a cycle fails (exit code 1) or you stop it with Ctrl-C (exit code 0).
+
+### How long to run
+
+Neither mode runs in CI or stops on its own. Pick by risk: reconnection, session handling and write ordering want chaos; batching, queueing and hot path allocation want load.
+
+**Chaos** is counted in cycles, not minutes, a cycle being a one minute mutate phase plus a convergence check. Five profiles rotate round robin, so a short run leaves most unseen: a hundred cycles is a starting point, several hundred for a change you would call dangerous. Failures look like one bad convergence after many good ones, which is why stopping early is how you miss them.
+
+**Load** answers two questions. Throughput and latency come from a single fifteen minute cycle; memory needs eight or more, read as a post-GC heap trend in `cycles.csv`, because one cycle shows a level and a leak is a trend.
+
+Narrowing `ChaosProfiles` to `full-chaos` reaches a known failure sooner, so it helps when reproducing one, but it is not a shorter verification: it drops the `no-chaos` baseline, which catches convergence bugs unrelated to disruption, and `client-a-only`, the only profile checking that one client survives another going down.
 
 ## How It Works
 
@@ -131,6 +141,8 @@ dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile o
 ```
 
 When `--participant` is specified, only the named participant starts and the verification engine is skipped. Mutations run continuously with performance metrics.
+
+This isolates each side's CPU and throughput and stops one shared heap hiding which side grew, but it is not the mode for measuring memory: without the verification engine there are no cycles and no `cycles.csv`, and `HeapMB` in `performance-{participant}.csv` is sampled without forcing a collection, so it is not leak evidence. Split the run for throughput and attribution, and use a single-process run for the post-GC heap trend.
 
 ### What to Look For
 
