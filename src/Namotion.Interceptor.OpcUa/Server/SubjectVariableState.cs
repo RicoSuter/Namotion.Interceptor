@@ -122,11 +122,14 @@ internal sealed class SubjectVariableState : BaseDataVariableState
             }
         }
 
-        // Read outside every handler, and assigned unconditionally: a refused, cancelled or locally
-        // transformed write must not leave the client's value on the node whatever the apply reported.
-        var modelValue = registeredProperty.GetValue();
+        // Assigned unconditionally: a refused, cancelled or locally transformed write must not leave the
+        // client's value on the node whatever the apply reported. The read is inside the try because it
+        // runs the read chain, which is as extensible as the write chain: a throw escaping here would
+        // leave the client's value on the node with its change mask set and no code left to correct it.
+        object? modelValue = null;
         try
         {
+            modelValue = registeredProperty.GetValue();
             Value = _server.ValueConverter.ConvertToNodeValue(modelValue, registeredProperty);
 
             // Null whenever the current value never went through a terminal write, and the node's own

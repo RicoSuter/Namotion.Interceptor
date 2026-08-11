@@ -63,6 +63,32 @@ public class OpcUaServerWriteIntegrityTests
     }
 
     [Fact]
+    public async Task WhenReadingTheModelValueThrows_ThenTheNodeDoesNotKeepTheClientsValue()
+    {
+        // Arrange: reading back what the model ended up holding runs the read chain, which is as
+        // extensible as the write chain. The write is cancelled as well, so nothing publishes a change
+        // that would move the node afterwards and the read failure is what the assertions see.
+        var readInterceptor = new ThrowOnReadInterceptor(nameof(WriteIntegrityChild.Vetoed));
+        await using var fixture = await WriteIntegrityFixture.StartAsync(_output, readInterceptor: readInterceptor);
+
+        var node = fixture.Node(nameof(WriteIntegrityChild.Vetoed));
+        var valueBeforeTheWrite = node.Value;
+
+        // Act
+        readInterceptor.IsArmed = true;
+        var statusCode = await fixture.Session.WriteAsync(node.NodeId, WriteIntegrityChild.VetoedValue);
+        readInterceptor.IsArmed = false;
+
+        // Assert: a read that throws must not leave the client's value on the node, and must not leave a
+        // change mask behind for a later flush to dispatch it as a change nobody made. The node serves
+        // the last value this server could represent, marked as no longer current.
+        Assert.True(StatusCode.IsBad(statusCode), $"An unreadable write must not be answered with '{statusCode}'.");
+        Assert.Equal(valueBeforeTheWrite, node.Value);
+        Assert.Equal((StatusCode)StatusCodes.UncertainLastUsableValue, node.StatusCode);
+        Assert.Equal(NodeStateChangeMasks.None, node.ChangeMasks);
+    }
+
+    [Fact]
     public async Task WhenTheInboundConverterThrows_ThenTheRestOfTheWriteRequestStillCompletes()
     {
         // Arrange: the converter refuses one value, which is what a scaling or enum mapping converter does

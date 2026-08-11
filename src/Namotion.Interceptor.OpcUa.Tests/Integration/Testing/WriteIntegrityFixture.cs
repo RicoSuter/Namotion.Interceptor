@@ -93,6 +93,26 @@ public partial class WriteIntegrityChild
 }
 
 /// <summary>
+/// Throws from the read chain for one property once armed, standing in for any read interceptor a model
+/// carries. Armed rather than unconditional because the node tree is built by reading the same property,
+/// so an unconditional one would fail the server's startup instead of the read under test.
+/// </summary>
+internal sealed class ThrowOnReadInterceptor(string propertyName) : IReadInterceptor
+{
+    public bool IsArmed { get; set; }
+
+    public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
+    {
+        if (IsArmed && context.Property.Name == propertyName)
+        {
+            throw new InvalidOperationException($"Refusing to read '{propertyName}'.");
+        }
+
+        return next(ref context);
+    }
+}
+
+/// <summary>
 /// Clamps one property's inbound value, so what the model accepts is provably not what the client sent
 /// while every other property still round-trips. Stands in for the scaling, unit and enum mapping
 /// converters a real deployment carries.
@@ -152,7 +172,8 @@ internal sealed class WriteIntegrityFixture : IAsyncDisposable
     public static async Task<WriteIntegrityFixture> StartAsync(
         ITestOutputHelper output,
         OpcUaValueConverter? valueConverter = null,
-        IWriteInterceptor? writeInterceptor = null)
+        IWriteInterceptor? writeInterceptor = null,
+        IReadInterceptor? readInterceptor = null)
     {
         var logger = new TestLogger(output);
         var port = await OpcUaTestPortPool.AcquireAsync();
@@ -167,6 +188,11 @@ internal sealed class WriteIntegrityFixture : IAsyncDisposable
                     if (writeInterceptor is not null)
                     {
                         context.AddService(writeInterceptor);
+                    }
+
+                    if (readInterceptor is not null)
+                    {
+                        context.AddService(readInterceptor);
                     }
 
                     return new WriteIntegrityRoot(context);
