@@ -35,17 +35,14 @@ public enum ChangeDeliveryRule
     /// </summary>
     /// <remarks>
     /// A server, where the applied value is a client's own write. Check the condition rather than assuming
-    /// it, because the three servers satisfy it differently: the OPC UA server because the SDK has written
-    /// the node before the change reaches the subject, the MQTT and WebSocket servers because they apply
-    /// inbound writes under a source that is not their own, so nothing is skipped as an echo and the
-    /// superseding value is relayed onward. Changing either convention invalidates this for that server.
-    /// What the condition really asks is that the destination already holds the value the subject will
-    /// settle on, so where a server converts on the way in, as the OPC UA server does, it also needs that
-    /// conversion to round-trip. A converter that clamps, scales or narrows leaves the node holding
-    /// something the subject will not settle on. The shipped OPC UA converter is such a case: it maps a
-    /// decimal property onto a double node and back, keeping 15 significant digits. This rule does not
-    /// cause that divergence and dropping the older commit does not worsen it, since that commit carries
-    /// an even staler value, but do not read the round-trip requirement as hypothetical.
+    /// it, because the three servers satisfy it differently: the OPC UA server because it applies the write
+    /// inside the node's own write and then puts what the model took back onto the node, conversion
+    /// included, the MQTT and WebSocket servers because they apply inbound writes under a source that is
+    /// not their own, so nothing is skipped as an echo and the superseding value is relayed onward.
+    /// Changing either convention invalidates this for that server. What the condition really asks is that
+    /// the destination already holds the value the subject will settle on, which is why a converter that
+    /// clamps, scales or narrows no longer breaks it: the OPC UA server reconciles the node with the
+    /// model's own value rather than leaving the client's there.
     /// Choosing <see cref="SourceValuesMayBeStale"/> here delivers a commit the clients have already moved
     /// past, leaving them behind the model with nothing to correct them.
     /// </remarks>
