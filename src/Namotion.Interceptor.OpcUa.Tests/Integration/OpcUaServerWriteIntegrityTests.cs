@@ -404,6 +404,35 @@ public class OpcUaServerWriteIntegrityTests
     }
 
     [Fact]
+    public async Task WhenAClientWritesANonGoodStatusCode_ThenTheServerRefusesTheCombination()
+    {
+        // Arrange
+        await using var fixture = await WriteIntegrityFixture.StartAsync(_output);
+        var node = fixture.Node(nameof(WriteIntegrityChild.Value));
+
+        // Act: a full DataValue write, which is what a gateway forwarding a quality along with a value
+        // sends, and what a generic client offers when it writes a whole DataValue.
+        var statusCodes = await fixture.Session.WriteManyAsync(new WriteValue
+        {
+            NodeId = node.NodeId,
+            AttributeId = Opc.Ua.Attributes.Value,
+            Value = new DataValue
+            {
+                Value = "with-quality",
+                StatusCode = StatusCodes.UncertainLastUsableValue,
+                SourceTimestamp = DateTime.UtcNow
+            }
+        });
+
+        // Assert: nothing carries a quality into the model and the node's own status is decided by this
+        // server, so the combination is not supported. Part 4 requires saying so and performing no write,
+        // rather than taking the value and dropping the quality behind the client's back.
+        Assert.Equal((StatusCode)StatusCodes.BadWriteNotSupported, statusCodes[0]);
+        Assert.Equal(WriteIntegrityFixture.InitialValue, fixture.Child.Value);
+        Assert.Equal(WriteIntegrityFixture.InitialValue, node.Value);
+    }
+
+    [Fact]
     public async Task WhenAWriteIsAccepted_ThenBothStoresHoldIt()
     {
         // Arrange

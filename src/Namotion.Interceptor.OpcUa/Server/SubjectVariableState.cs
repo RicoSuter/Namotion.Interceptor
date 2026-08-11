@@ -48,6 +48,16 @@ internal sealed class SubjectVariableState : BaseDataVariableState
             return StatusCodes.BadNoCommunication;
         }
 
+        // Nothing carries a quality into the model, and the node's own status is decided by this write
+        // rather than by the client, so the value plus status combination is one this server does not
+        // support. Part 4 requires refusing it and performing no write at all, which is why this stands
+        // ahead of the copy below. Taking the value and dropping the quality reports Good for a write
+        // that was only half made.
+        if (statusCode != StatusCodes.Good)
+        {
+            return StatusCodes.BadWriteNotSupported;
+        }
+
         // The last value this server could represent and the time it carried, which is what the node falls
         // back to when it ends up serving something other than what this write brought.
         var previousValue = Value;
