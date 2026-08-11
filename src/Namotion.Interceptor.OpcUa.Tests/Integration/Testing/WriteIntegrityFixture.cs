@@ -33,11 +33,18 @@ public partial class WriteIntegrityChild
     /// <summary>The value the generated hook vetoes, so a write can be refused without an exception.</summary>
     public const string VetoedValue = "vetoed";
 
+    /// <summary>The value the local overwrite reacts to, so a client can trigger one.</summary>
+    public const string OverwrittenValue = "overwritten";
+
+    /// <summary>What the local overwrite puts back, which is the value the property already held.</summary>
+    public const string LocalValue = "local";
+
     public WriteIntegrityChild()
     {
         Numbers = [1, 2, 3, 4, 5];
         Blobs = [[1, 2, 3, 4], [5, 6, 7, 8]];
         CopiedNumbers = [1, 2, 3];
+        LocallyOverwritten = LocalValue;
     }
 
     /// <summary>A plain writable property: the baseline for an accepted write and the target of the validation tests.</summary>
@@ -77,6 +84,21 @@ public partial class WriteIntegrityChild
     /// </summary>
     [Path("opc", "CopiedNumbers")]
     public partial int[] CopiedNumbers { get; set; }
+
+    /// <summary>
+    /// Put back to the value it already held the moment a client write commits, which is what a local
+    /// controller owning this value does and is the one interleaving a client write cannot see coming.
+    /// </summary>
+    [Path("opc", "LocallyOverwritten")]
+    public partial string? LocallyOverwritten { get; set; }
+
+    partial void OnLocallyOverwrittenChanged(string? newValue)
+    {
+        if (newValue == OverwrittenValue)
+        {
+            LocallyOverwritten = LocalValue;
+        }
+    }
 
     partial void OnVetoedChanging(ref string? newValue, ref bool cancel)
     {

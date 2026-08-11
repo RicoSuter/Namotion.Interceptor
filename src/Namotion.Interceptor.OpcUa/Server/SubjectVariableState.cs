@@ -102,6 +102,14 @@ internal sealed class SubjectVariableState : BaseDataVariableState
             return writeResult;
         }
 
+        // The apply's critical section ends the moment the write terminal stores the value, and a local
+        // write takes no OPC UA lock at all, so one can commit between that and the read below. It moves
+        // the model out from under the comparison, which would then read a value this client never sent
+        // as a refusal of the one it did. Non-source commits only: this write's own commit is a source
+        // commit and is deliberately invisible here, so the two reads differ exactly when a local write
+        // landed. Both reads are a dictionary lookup and a volatile read, and allocate nothing.
+        property.TryGetWriteState(includeSourceCommitsInRevision: false, out var localRevisionBeforeApply, out _);
+
         // What the client asked the model to take. Stays null when the inbound conversion refused the
         // value, which is why the outcome is tracked separately: a model legitimately holding null would
         // otherwise compare equal to a conversion that never ran.
@@ -165,6 +173,9 @@ internal sealed class SubjectVariableState : BaseDataVariableState
                 e, "Failed to represent the value of property '{Property}' on its OPC UA node.", property.Name);
         }
 
+        // After the read above, so it covers the whole window the model could have moved in.
+        property.TryGetWriteState(includeSourceCommitsInRevision: false, out var localRevisionAfterApply, out _);
+
         _server.IncomingThroughput.Add(1);
 
         // On every path, so the corrected value is published whatever the answer: the SDK skips its own
@@ -179,7 +190,13 @@ internal sealed class SubjectVariableState : BaseDataVariableState
         // What was refused is the value, not the node, its type or its access level, and a model that
         // refuses a value now may take it once the rest of it moves, so no code a client is entitled to
         // read as final fits. The client learns the model's own value from the node either way.
-        return isApplied && ValuesMatch(modelValue, requestedValue)
+        return isApplied &&
+               (ValuesMatch(modelValue, requestedValue) ||
+                // A local write landed, so what the model holds now is not this write's outcome and the
+                // mismatch is not attributable to a refusal. Erring toward Good is the safe direction: the
+                // node already carries the model's own value, so a Good answer can never move wrong data,
+                // where a Bad one has a retrying client re-send its value and clobber the local one.
+                localRevisionAfterApply != localRevisionBeforeApply)
             ? ServiceResult.Good
             : StatusCodes.BadOutOfRange;
     }

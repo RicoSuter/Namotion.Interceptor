@@ -89,6 +89,24 @@ public class OpcUaServerWriteIntegrityTests
     }
 
     [Fact]
+    public async Task WhenALocalWriteLandsDuringTheApply_ThenTheClientIsNotToldTheWriteWasRefused()
+    {
+        // Arrange: nothing holds the subject between the apply's own commit and the read that decides
+        // what the client is told, so a local write can land in between. The hook is that write.
+        await using var fixture = await WriteIntegrityFixture.StartAsync(_output);
+        var nodeId = fixture.NodeId(nameof(WriteIntegrityChild.LocallyOverwritten));
+
+        // Act
+        var statusCode = await fixture.Session.WriteAsync(nodeId, WriteIntegrityChild.OverwrittenValue);
+
+        // Assert: the model took the write and then moved past it on its own account, which is not a
+        // refusal of anything. Answering Bad has this repository's own client re-send the value on every
+        // flush from then on, clobbering the local write each time, over nothing but timing.
+        Assert.Equal(WriteIntegrityChild.LocalValue, fixture.Child.LocallyOverwritten);
+        Assert.Equal((StatusCode)StatusCodes.Good, statusCode);
+    }
+
+    [Fact]
     public async Task WhenTheInboundConverterThrows_ThenTheRestOfTheWriteRequestStillCompletes()
     {
         // Arrange: the converter refuses one value, which is what a scaling or enum mapping converter does
