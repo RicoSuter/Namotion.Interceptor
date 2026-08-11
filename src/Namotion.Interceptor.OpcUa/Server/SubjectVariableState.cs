@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
@@ -9,14 +8,10 @@ namespace Namotion.Interceptor.OpcUa.Server;
 /// <summary>
 /// The variable node behind a subject property. The SDK commits a client write into the node before
 /// anything outside the write can apply it to the subject, so the apply happens here, inside the write:
-/// the node ends every write holding what the model holds, and the client is answered with what the model
-/// actually took rather than with what the SDK managed to store. Bad means the model refused the write:
-/// one it took and then adjusted is Good, because the subscription delivers the adjusted value and a
-/// client cannot act on the difference. The one exception is a model value this
-/// server cannot represent: the node then keeps the last value it could represent, at
-/// <see cref="StatusCodes.UncertainLastUsableValue"/>, while the client is still answered Good, because
-/// the model did take its write. The status code is the only place that caveat can be carried, and it
-/// stands until the property changes again.
+/// the node ends every write holding what the model holds rather than what the client sent, and the
+/// client is answered Bad only when the model threw the write back. A write the model adjusted and one a
+/// hook cancelled are the same observation from here, so both are answered Good. The client visible
+/// contract is documented in docs/connectors-opcua-server.md.
 /// </summary>
 internal sealed class SubjectVariableState : BaseDataVariableState
 {
@@ -104,24 +99,12 @@ internal sealed class SubjectVariableState : BaseDataVariableState
             return writeResult;
         }
 
-        // The apply's critical section ends the moment the write terminal stores the value, and a local
-        // write takes no OPC UA lock at all, so one can commit between that and the read below. It moves
-        // the model out from under the comparison, which would then read a value this client never sent
-        // as a refusal of the one it did. Non-source commits only: this write's own commit is a source
-        // commit and is deliberately invisible here, so the two reads differ exactly when a local write
-        // landed. Both reads are a dictionary lookup and a volatile read, and allocate nothing.
-        property.TryGetWriteState(includeSourceCommitsInRevision: false, out var localRevisionBeforeApply, out _);
-
-        // What the client asked the model to take. Stays null when the inbound conversion refused the
-        // value, which is why the outcome is tracked separately: a model legitimately holding null would
-        // otherwise compare equal to a conversion that never ran.
-        object? requestedValue = null;
         var isApplied = false;
         try
         {
             // The node's value, not the parameter: for an index range write the parameter carries only the
             // client's fragment while the model takes the merged whole.
-            requestedValue = _server.ValueConverter.ConvertToPropertyValue(Value, registeredProperty);
+            var requestedValue = _server.ValueConverter.ConvertToPropertyValue(Value, registeredProperty);
             property.SetValueFromSource(_server, Timestamp.ToUtcDateTimeOffset(), DateTimeOffset.UtcNow, requestedValue);
             isApplied = true;
         }
@@ -140,37 +123,19 @@ internal sealed class SubjectVariableState : BaseDataVariableState
         // client's value on the node whatever the apply reported. The read is inside the try because it
         // runs the read chain, which is as extensible as the write chain: a throw escaping here would
         // leave the client's value on the node with its change mask set and no code left to correct it.
-        object? modelValue = null;
-        var hasNodeValueChanged = false;
         try
         {
-            modelValue = registeredProperty.GetValue();
-            var nodeValue = _server.ValueConverter.ConvertToNodeValue(modelValue, registeredProperty);
-
-            // Whether the model took anything at all, which is what separates a write it adjusted from one
-            // it refused. Both sides are node space values, so this is the same comparison that answers
-            // whether the model holds what was requested: by reference for a scalar, by content for an
-            // array, because a model that stores a copy of what it is given would otherwise look like it
-            // had moved on every write.
-            hasNodeValueChanged = !ValuesAreEqual(nodeValue, previousValue);
-
-            Value = nodeValue;
+            Value = _server.ValueConverter.ConvertToNodeValue(registeredProperty.GetValue(), registeredProperty);
 
             // The node's timestamp has to date the value the node holds, which is the model's. The model's
-            // own is null only while no write of any origin has ever reached its terminal, and a write
-            // this one carried into the model would have, so the fallback runs exactly when the node is
-            // serving a value this write did not produce. Keeping what the base call stamped there would
-            // date the model's untouched value with the client's own time. A cancelled write is the case
-            // that needs it: it signals nothing, so the apply reports success for a write that never
-            // committed.
-            if (property.TryGetWriteTimestamp() is { } writeTimestamp)
-            {
-                Timestamp = writeTimestamp.UtcDateTime;
-            }
-            else
-            {
-                Timestamp = previousTimestamp;
-            }
+            // own is null only while no write of any origin has ever reached its terminal, so the fallback
+            // runs exactly when the node is serving a value this write did not produce. Keeping what the
+            // base call stamped there would date the model's untouched value with the client's own time.
+            // A cancelled write is the case that needs it: it signals nothing, so the apply reports
+            // success for a write that never committed.
+            Timestamp = property.TryGetWriteTimestamp() is { } writeTimestamp
+                ? writeTimestamp.UtcDateTime
+                : previousTimestamp;
 
             StatusCode = StatusCodes.Good;
         }
@@ -187,9 +152,6 @@ internal sealed class SubjectVariableState : BaseDataVariableState
                 e, "Failed to represent the value of property '{Property}' on its OPC UA node.", property.Name);
         }
 
-        // After the read above, so it covers the whole window the model could have moved in.
-        property.TryGetWriteState(includeSourceCommitsInRevision: false, out var localRevisionAfterApply, out _);
-
         _server.IncomingThroughput.Add(1);
 
         // On every path, so the corrected value is published whatever the answer: the SDK skips its own
@@ -198,29 +160,18 @@ internal sealed class SubjectVariableState : BaseDataVariableState
         ClearChangeMasks(context, false);
 
         // The answer picks the status, never the value. The node already holds the model's value, so one
-        // that answers wrong mis-reports the outcome and cannot move data. Bad is reserved for the one
-        // outcome that is a refusal, because write retries in this library are not gated by any status
-        // classifier: every Bad answer has a Namotion client re-send the value on every flush from then
-        // on, so a Bad answer for a write the model took stalls that client's write path for good.
+        // that answers wrong mis-reports the outcome and cannot move data. Bad is reserved for a model
+        // that threw the write back, because a write it adjusted and a write a hook cancelled leave the
+        // same state behind and nothing here can separate them, and because write retries in this library
+        // are not gated by any status classifier: every Bad answer has a Namotion client re-send the value
+        // on every flush from then on, so a Bad answer for a write the model took stalls that client's
+        // write path for good.
         //
         // Bad is BadOutOfRange because what was refused is the value, not the node, its type or its
         // access level, and a model that refuses a value now may take it once the rest of it moves, so no
         // code a client is entitled to read as final fits. The client learns the model's own value from
         // the node either way.
-        return isApplied &&
-               // The model holds what was asked of it.
-               (ValuesMatch(modelValue, requestedValue) ||
-                // A local write landed, so what the model holds now is not this write's outcome and the
-                // mismatch is not attributable to a refusal. Erring toward Good is the safe direction: the
-                // node already carries the model's own value, so a Good answer can never move wrong data,
-                // where a Bad one has a retrying client re-send its value and clobber the local one.
-                localRevisionAfterApply != localRevisionBeforeApply ||
-                // The model holds something else and it moved, so it took the write and adjusted it. That
-                // is an accepted write whose adjusted value the subscription delivers, and it is what a
-                // converter that clamps produces too, which has always been answered Good.
-                hasNodeValueChanged)
-            ? ServiceResult.Good
-            : StatusCodes.BadOutOfRange;
+        return isApplied ? ServiceResult.Good : StatusCodes.BadOutOfRange;
     }
 
     /// <summary>
@@ -260,95 +211,5 @@ internal sealed class SubjectVariableState : BaseDataVariableState
         }
 
         return copy;
-    }
-
-    /// <summary>
-    /// Whether two values are equal. Arrays are compared by content, because
-    /// <see cref="object.Equals(object,object)"/> over two arrays is instance identity, so a property
-    /// that stores a copy of what it is given, which any normalising hook or copying write interceptor
-    /// does, would look like it held something else on every write.
-    /// </summary>
-    private static bool ValuesAreEqual(object? left, object? right)
-    {
-        return Equals(left, right) ||
-               (left is Array leftArray && right is Array rightArray && ArrayContentsMatch(leftArray, rightArray));
-    }
-
-    /// <summary>
-    /// Whether the model took what the client asked for. Adds the enum coercion to
-    /// <see cref="ValuesAreEqual"/>: an enum-typed node stores its value as a boxed underlying integer
-    /// while the model stores a boxed enum, and <see cref="object.Equals(object,object)"/> across that
-    /// pair is false, so every accepted enum write would otherwise be answered Bad. Only
-    /// <see cref="int"/>-backed enums round-trip, which is what the OPC UA data type mapping produces.
-    /// </summary>
-    private static bool ValuesMatch(object? modelValue, object? requestedValue)
-    {
-        return ValuesAreEqual(modelValue, requestedValue) ||
-               (modelValue is Enum && requestedValue is not null &&
-                requestedValue.GetType() == Enum.GetUnderlyingType(modelValue.GetType()) &&
-                Equals(modelValue, Enum.ToObject(modelValue.GetType(), requestedValue)));
-    }
-
-    /// <summary>
-    /// Whether two arrays of the same type hold equal elements, at any rank. One level deep: the inner
-    /// arrays of a jagged array are compared by reference, which is what the merge produces anyway, and a
-    /// deeper walk would read the whole payload a second time to pick a status code.
-    /// </summary>
-    private static bool ArrayContentsMatch(Array modelArray, Array requestedArray)
-    {
-        var arrayType = modelArray.GetType();
-        if (arrayType != requestedArray.GetType() || modelArray.Length != requestedArray.Length)
-        {
-            return false;
-        }
-
-        // Equal type and equal element count do not imply equal shape above one dimension: a two by three
-        // and a three by two array of the same type both hold six elements.
-        for (var dimension = 1; dimension < modelArray.Rank; dimension++)
-        {
-            if (modelArray.GetLength(dimension) != requestedArray.GetLength(dimension))
-            {
-                return false;
-            }
-        }
-
-        // Bit equality over the whole array where the elements are primitive, which covers every numeric
-        // and boolean node the type mapping produces. Vectorised, and it boxes nothing, where the element
-        // walk below boxes once per element for a value type. The elements of an array are contiguous
-        // whatever its rank, so this reads them all either way.
-        var elementType = arrayType.GetElementType()!;
-        if (elementType.IsPrimitive)
-        {
-            var byteLength = Buffer.ByteLength(modelArray);
-            if (MemoryMarshal
-                .CreateReadOnlySpan(ref MemoryMarshal.GetArrayDataReference(modelArray), byteLength)
-                .SequenceEqual(MemoryMarshal
-                    .CreateReadOnlySpan(ref MemoryMarshal.GetArrayDataReference(requestedArray), byteLength)))
-            {
-                return true;
-            }
-
-            // Differing bits are conclusive for every primitive but the two floating point ones, where
-            // Equals calls 0.0 and -0.0 equal and two NaNs equal whatever their payloads. Letting the bits
-            // decide those would have the two answers below disagree with each other.
-            if (elementType != typeof(float) && elementType != typeof(double))
-            {
-                return false;
-            }
-        }
-
-        // Element by element, in the row major order both arrays are laid out in, which is what makes this
-        // work above one dimension where an indexed read does not.
-        var modelElements = modelArray.GetEnumerator();
-        var requestedElements = requestedArray.GetEnumerator();
-        while (modelElements.MoveNext() && requestedElements.MoveNext())
-        {
-            if (!Equals(modelElements.Current, requestedElements.Current))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 }

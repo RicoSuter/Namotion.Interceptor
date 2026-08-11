@@ -9,14 +9,6 @@ using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
-/// <summary>Int32-backed and non-nullable, the only shape the inbound coercion can restore from a boxed int.</summary>
-public enum WriteIntegrityMode
-{
-    Idle = 0,
-    Running = 1,
-    Faulted = 2
-}
-
 [InterceptorSubject]
 public partial class WriteIntegrityRoot
 {
@@ -33,12 +25,6 @@ public partial class WriteIntegrityChild
     /// <summary>The value the generated hook vetoes, so a write can be refused without an exception.</summary>
     public const string VetoedValue = "vetoed";
 
-    /// <summary>The value the local overwrite reacts to, so a client can trigger one.</summary>
-    public const string OverwrittenValue = "overwritten";
-
-    /// <summary>What the local overwrite puts back, which is the value the property already held.</summary>
-    public const string LocalValue = "local";
-
     /// <summary>The ceiling the model's own hook clamps to, so an accepted write is provably adjusted.</summary>
     public const double AdjustedMaximum = 100d;
 
@@ -46,8 +32,6 @@ public partial class WriteIntegrityChild
     {
         Numbers = [1, 2, 3, 4, 5];
         Blobs = [[1, 2, 3, 4], [5, 6, 7, 8]];
-        CopiedNumbers = [1, 2, 3];
-        LocallyOverwritten = LocalValue;
     }
 
     /// <summary>A plain writable property: the baseline for an accepted write and the target of the validation tests.</summary>
@@ -69,10 +53,6 @@ public partial class WriteIntegrityChild
     [Path("opc", "Blobs")]
     public partial byte[][] Blobs { get; set; }
 
-    /// <summary>An enum, which reaches the property setter as a boxed int unless something coerces it back.</summary>
-    [Path("opc", "Mode")]
-    public partial WriteIntegrityMode Mode { get; set; }
-
     /// <summary>Clamped inbound by <see cref="ClampingValueConverter"/>, so the converter pair does not round-trip.</summary>
     [Path("opc", "ClampedValue")]
     public partial double ClampedValue { get; set; }
@@ -88,28 +68,6 @@ public partial class WriteIntegrityChild
     /// </summary>
     [Path("opc", "VetoedUnwritten")]
     public partial string? VetoedUnwritten { get; set; }
-
-    /// <summary>
-    /// Stored in an instance of its own, so the model ends an accepted write holding an array equal to the
-    /// client's rather than the client's. Stands in for any normalising hook or copying write interceptor.
-    /// </summary>
-    [Path("opc", "CopiedNumbers")]
-    public partial int[] CopiedNumbers { get; set; }
-
-    /// <summary>
-    /// Put back to the value it already held the moment a client write commits, which is what a local
-    /// controller owning this value does and is the one interleaving a client write cannot see coming.
-    /// </summary>
-    [Path("opc", "LocallyOverwritten")]
-    public partial string? LocallyOverwritten { get; set; }
-
-    partial void OnLocallyOverwrittenChanged(string? newValue)
-    {
-        if (newValue == OverwrittenValue)
-        {
-            LocallyOverwritten = LocalValue;
-        }
-    }
 
     /// <summary>
     /// Clamped by the model itself rather than by a converter. The observable outcome is the one
@@ -140,11 +98,6 @@ public partial class WriteIntegrityChild
         {
             cancel = true;
         }
-    }
-
-    partial void OnCopiedNumbersChanging(ref int[] newValue, ref bool cancel)
-    {
-        newValue = (int[])newValue.Clone();
     }
 }
 

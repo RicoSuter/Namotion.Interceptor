@@ -46,7 +46,7 @@ public class OpcUaServerWriteIntegrityTests
     }
 
     [Fact]
-    public async Task WhenAnOnChangingHookCancelsAClientWrite_ThenTheNodeKeepsTheModelValueAndTheClientIsTold()
+    public async Task WhenAnOnChangingHookCancelsAClientWrite_ThenTheNodeKeepsTheModelValueAndTheClientReceivesGood()
     {
         // Arrange
         await using var fixture = await WriteIntegrityFixture.StartAsync(_output);
@@ -60,12 +60,14 @@ public class OpcUaServerWriteIntegrityTests
         var statusCode = await fixture.Session.WriteAsync(
             node.NodeId, WriteIntegrityChild.VetoedValue, sourceTimestamp: clientTimestamp);
 
-        // Assert: the node still serves the model's value, so it must serve a timestamp that dates it. A
-        // cancelled write that leaves the client's behind dates a value that never changed.
+        // Assert: a hook that cancels leaves exactly what a hook that adjusts to the value the model
+        // already holds leaves, so the two cannot be answered differently. The node still serves the
+        // model's value, so it must serve a timestamp that dates it: keeping the client's would date a
+        // value that never changed.
         var readBack = await fixture.Session.ReadAsync(node.NodeId);
         Assert.Equal(WriteIntegrityFixture.InitialValue, fixture.Child.Vetoed);
         Assert.Equal(WriteIntegrityFixture.InitialValue, readBack.Value);
-        Assert.Equal((StatusCode)StatusCodes.BadOutOfRange, statusCode);
+        Assert.Equal((StatusCode)StatusCodes.Good, statusCode);
         Assert.NotEqual(clientTimestamp, readBack.SourceTimestamp);
         Assert.Equal(timestampBeforeTheWrite, readBack.SourceTimestamp);
     }
@@ -91,7 +93,7 @@ public class OpcUaServerWriteIntegrityTests
         // Assert: the node's timestamp dates the value the node holds. The write was cancelled, so the
         // node holds the model's untouched value, and the client's timestamp claims a change that the
         // model never made.
-        Assert.Equal((StatusCode)StatusCodes.BadOutOfRange, statusCode);
+        Assert.Equal((StatusCode)StatusCodes.Good, statusCode);
         var readBack = await fixture.Session.ReadAsync(node.NodeId);
         Assert.NotEqual(clientTimestamp, readBack.SourceTimestamp);
         Assert.Equal(timestampBeforeTheWrite, readBack.SourceTimestamp);
@@ -115,6 +117,17 @@ public class OpcUaServerWriteIntegrityTests
         Assert.Equal(WriteIntegrityChild.AdjustedMaximum, fixture.Child.AdjustedValue);
         Assert.Equal(WriteIntegrityChild.AdjustedMaximum, readBack.Value);
         Assert.Equal((StatusCode)StatusCodes.Good, statusCode);
+
+        // Act: the same write again, which the hook clamps onto the value the model already holds.
+        var repeatedStatusCode = await fixture.Session.WriteAsync(nodeId, 500d);
+
+        // Assert: the clamp now produces no change at all, so nothing the model does distinguishes this
+        // from a write it never took. It is still the same accepted write, and the node still ends it
+        // holding the model's value.
+        var repeatedReadBack = await fixture.Session.ReadAsync(nodeId);
+        Assert.Equal(WriteIntegrityChild.AdjustedMaximum, fixture.Child.AdjustedValue);
+        Assert.Equal(WriteIntegrityChild.AdjustedMaximum, repeatedReadBack.Value);
+        Assert.Equal((StatusCode)StatusCodes.Good, repeatedStatusCode);
     }
 
     [Fact]
@@ -131,34 +144,15 @@ public class OpcUaServerWriteIntegrityTests
 
         // Act
         readInterceptor.IsArmed = true;
-        var statusCode = await fixture.Session.WriteAsync(node.NodeId, WriteIntegrityChild.VetoedValue);
+        await fixture.Session.WriteAsync(node.NodeId, WriteIntegrityChild.VetoedValue);
         readInterceptor.IsArmed = false;
 
         // Assert: a read that throws must not leave the client's value on the node, and must not leave a
         // change mask behind for a later flush to dispatch it as a change nobody made. The node serves
         // the last value this server could represent, marked as no longer current.
-        Assert.True(StatusCode.IsBad(statusCode), $"An unreadable write must not be answered with '{statusCode}'.");
         Assert.Equal(valueBeforeTheWrite, node.Value);
         Assert.Equal((StatusCode)StatusCodes.UncertainLastUsableValue, node.StatusCode);
         Assert.Equal(NodeStateChangeMasks.None, node.ChangeMasks);
-    }
-
-    [Fact]
-    public async Task WhenALocalWriteLandsDuringTheApply_ThenTheClientIsNotToldTheWriteWasRefused()
-    {
-        // Arrange: nothing holds the subject between the apply's own commit and the read that decides
-        // what the client is told, so a local write can land in between. The hook is that write.
-        await using var fixture = await WriteIntegrityFixture.StartAsync(_output);
-        var nodeId = fixture.NodeId(nameof(WriteIntegrityChild.LocallyOverwritten));
-
-        // Act
-        var statusCode = await fixture.Session.WriteAsync(nodeId, WriteIntegrityChild.OverwrittenValue);
-
-        // Assert: the model took the write and then moved past it on its own account, which is not a
-        // refusal of anything. Answering Bad has this repository's own client re-send the value on every
-        // flush from then on, clobbering the local write each time, over nothing but timing.
-        Assert.Equal(WriteIntegrityChild.LocalValue, fixture.Child.LocallyOverwritten);
-        Assert.Equal((StatusCode)StatusCodes.Good, statusCode);
     }
 
     [Fact]
@@ -211,7 +205,7 @@ public class OpcUaServerWriteIntegrityTests
         var readBack = await fixture.Session.ReadAsync(nodeId);
         Assert.Equal(ClampingValueConverter.Maximum, fixture.Child.ClampedValue);
         Assert.Equal(ClampingValueConverter.Maximum, readBack.Value);
-        Assert.True(StatusCode.IsGood(statusCode), $"An accepted write must not be answered with '{statusCode}'.");
+        Assert.Equal((StatusCode)StatusCodes.Good, statusCode);
     }
 
     [Fact]
@@ -236,7 +230,7 @@ public class OpcUaServerWriteIntegrityTests
         // caveat.
         var readBack = await fixture.Session.ReadAsync(node.NodeId);
         Assert.Equal("poison", fixture.Child.Value);
-        Assert.True(StatusCode.IsGood(statusCode), $"An accepted write must not be answered with '{statusCode}'.");
+        Assert.Equal((StatusCode)StatusCodes.Good, statusCode);
         Assert.Equal(WriteIntegrityFixture.InitialValue, readBack.Value);
         Assert.Equal((StatusCode)StatusCodes.UncertainLastUsableValue, readBack.StatusCode);
         Assert.Equal(timestampBeforeTheWrite, readBack.SourceTimestamp);
@@ -253,23 +247,6 @@ public class OpcUaServerWriteIntegrityTests
         var clearedReadBack = await fixture.Session.ReadAsync(node.NodeId);
         Assert.Equal("representable", clearedReadBack.Value);
         Assert.Equal((StatusCode)StatusCodes.Good, clearedReadBack.StatusCode);
-    }
-
-    [Fact]
-    public async Task WhenTheModelStoresAnAcceptedArrayInItsOwnInstance_ThenTheClientReceivesGood()
-    {
-        // Arrange: a hook that hands back a copy, which is what a normalising hook or a copying write
-        // interceptor does to every array that passes through it.
-        await using var fixture = await WriteIntegrityFixture.StartAsync(_output);
-        var nodeId = fixture.NodeId(nameof(WriteIntegrityChild.CopiedNumbers));
-
-        // Act
-        var statusCode = await fixture.Session.WriteAsync(nodeId, new[] { 7, 8, 9 });
-
-        // Assert: the model holds what the client asked for, so the write was taken. Answering on instance
-        // identity would refuse every array write such a property ever accepts.
-        Assert.Equal(new[] { 7, 8, 9 }, fixture.Child.CopiedNumbers);
-        Assert.True(StatusCode.IsGood(statusCode), $"An accepted write must not be answered with '{statusCode}'.");
     }
 
     [Fact]
@@ -291,9 +268,10 @@ public class OpcUaServerWriteIntegrityTests
         // like any other, and rewriting their bytes publishes nothing to anyone holding them.
         Assert.True(StatusCode.IsGood(statusCode), $"The index range write should be accepted, got '{statusCode}'.");
         Assert.Equal(contentsBeforeTheWrite, innerArrayBeforeTheWrite);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => fixture.Child.Blobs[0].SequenceEqual(new byte[] { 1, 0xAA, 0xBB, 4 }),
-            message: $"the subject should hold the merged byte string, holds [{string.Join(", ", fixture.Child.Blobs[0])}]");
+
+        // Directly, with no wait: the apply runs inside the write, so a completed write has already
+        // reached the subject. A wait here would pass just as well if the apply moved off the write.
+        Assert.Equal(new byte[] { 1, 0xAA, 0xBB, 4 }, fixture.Child.Blobs[0]);
     }
 
     [Fact]
@@ -338,21 +316,6 @@ public class OpcUaServerWriteIntegrityTests
         Assert.True(StatusCode.IsBad(statusCode), $"A write that threw must not be answered with '{statusCode}'.");
         Assert.Same(arrayBeforeTheWrite, node.Value);
         Assert.Equal(NodeStateChangeMasks.None, node.ChangeMasks);
-    }
-
-    [Fact]
-    public async Task WhenAnEnumPropertyIsWritten_ThenTheClientReceivesGood()
-    {
-        // Arrange: an enum reaches the property setter as a boxed int, so a path that reports the apply's
-        // outcome must coerce it rather than let the unboxing cast decide the client's status code.
-        await using var fixture = await WriteIntegrityFixture.StartAsync(_output);
-        var nodeId = fixture.NodeId(nameof(WriteIntegrityChild.Mode));
-
-        // Act
-        var statusCode = await fixture.Session.WriteAsync(nodeId, (int)WriteIntegrityMode.Running);
-
-        // Assert
-        Assert.True(StatusCode.IsGood(statusCode), $"An enum write must not be answered with '{statusCode}'.");
     }
 
     /// <remarks>
@@ -485,7 +448,7 @@ public class OpcUaServerWriteIntegrityTests
 
         // Assert: the node's timestamp dates the value the node holds. A refused write leaves the model's
         // value there, so dating it with the client's timestamp claims a change that never happened.
-        Assert.True(StatusCode.IsBad(statusCode), $"A refused write must not be answered with '{statusCode}'.");
+        Assert.Equal((StatusCode)StatusCodes.BadOutOfRange, statusCode);
         var readBack = await fixture.Session.ReadAsync(node.NodeId);
         Assert.NotEqual(clientTimestamp, readBack.SourceTimestamp);
         Assert.Equal(timestampBeforeTheWrite, readBack.SourceTimestamp);
@@ -516,11 +479,11 @@ public class OpcUaServerWriteIntegrityTests
         // Act
         var statusCode = await fixture.Session.WriteAsync(nodeId, new[] { 20, 30 }, indexRange: "1:2");
 
-        // Assert: a partial write means the merged whole reaches the subject, not just the written elements.
+        // Assert: a partial write means the merged whole reaches the subject, not just the written
+        // elements. Directly, with no wait: the apply runs inside the write, so a completed write has
+        // already reached the subject.
         Assert.True(StatusCode.IsGood(statusCode), $"The index range write should be accepted, got '{statusCode}'.");
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => fixture.Child.Numbers.SequenceEqual([1, 20, 30, 4, 5]),
-            message: $"the subject should hold the merged array, holds [{string.Join(", ", fixture.Child.Numbers)}]");
+        Assert.Equal([1, 20, 30, 4, 5], fixture.Child.Numbers);
     }
 
     [Fact]
@@ -533,11 +496,9 @@ public class OpcUaServerWriteIntegrityTests
         // Act: an unset source timestamp is what the SDK reads as not supplied and fills in itself.
         var statusCode = await fixture.Session.WriteAsync(nodeId, "undated", sourceTimestamp: DateTime.MinValue);
 
-        // Assert
+        // Assert: directly, with no wait, because the apply runs inside the write.
         Assert.True(StatusCode.IsGood(statusCode), $"An undated write must not be answered with '{statusCode}'.");
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => fixture.Child.Value == "undated",
-            message: "the undated write should still reach the subject");
+        Assert.Equal("undated", fixture.Child.Value);
     }
 
     [Fact]

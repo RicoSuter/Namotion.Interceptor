@@ -253,6 +253,18 @@ public class MyServerConfiguration : OpcUaServerConfiguration
 
 The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedded in the assembly of type `T`. The resource name follows the pattern `{AssemblyName}.{ResourcePath}`.
 
+## Writes
+
+A client write is applied to the subject inside the write request, and the node is then reconciled with the value the subject ends up holding. A read-back therefore returns the server's value, which is not necessarily the value that was written: a model that clamps or rounds reports its own value. This is deliberate.
+
+| Answer | When |
+|--------|------|
+| `Good` | The model took the write, including when a hook or a value converter adjusted the value. A write a hook cancels without throwing leaves exactly what an adjustment onto the current value leaves, so the two are indistinguishable and both answer `Good`. |
+| `BadOutOfRange` | The model rejected the write by throwing, for example from a validation interceptor. |
+| `BadWriteNotSupported` | The client wrote a non-`Good` `StatusCode` alongside the value. Nothing carries a quality into the model, so the server refuses the combination rather than taking the value and dropping the quality. |
+
+A node whose value the server cannot represent, for example when an outbound value converter throws, keeps the last value it could represent and reports `UncertainLastUsableValue`. It returns to `Good` as soon as the property changes to a value the server can represent.
+
 ## Diagnostics
 
 `IOpcUaSubjectServer.Diagnostics` exposes a live facade of type `OpcUaServerDiagnostics`. Resolve it once and poll (see [Resolving the Server](#resolving-the-server)).
