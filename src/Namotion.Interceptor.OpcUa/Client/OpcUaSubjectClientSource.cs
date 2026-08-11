@@ -672,11 +672,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     {
         if (_writer is null)
         {
-            // Unenumerated: nothing was asked of the server, so the batching loop stops here instead of
-            // handing the remaining batches to a client that is not running.
-            return WriteResult.Failure(
-                ReadOnlyMemory<SubjectPropertyChange>.Empty,
-                new InvalidOperationException("OPC UA client not started."));
+            return WriteResult.CallFailed(new InvalidOperationException("OPC UA client not started."));
         }
 
         return await _writer.WriteChangesAsync(changes, cancellationToken).ConfigureAwait(false);

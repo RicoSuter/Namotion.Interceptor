@@ -15,11 +15,9 @@ public readonly struct WriteResult
     /// a failed change but never revert it.
     /// <para>
     /// This is the source's answer about named changes, so enumerate the ones it refused. Leave the
-    /// list empty only when the call itself failed and there is no per-change answer: that reports the
-    /// whole attempted batch failed and additionally tells
-    /// <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/> to stop, rather than spend
-    /// another transport timeout on each remaining batch of the same flush. It expands the empty list
-    /// to the batch's own changes, so what a caller sees reported failed is the same either way.
+    /// list empty, by way of <see cref="CallFailed"/>, only when the call itself failed and there is no
+    /// per-change answer. <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/> expands the
+    /// empty list to the batch's own changes, so what a caller sees reported failed is the same either way.
     /// </para>
     /// </summary>
     public ImmutableArray<SubjectPropertyChange> FailedChanges { get; }
@@ -60,6 +58,21 @@ public readonly struct WriteResult
     {
         ArgumentNullException.ThrowIfNull(error);
         return new([..failedChanges.Span], error, isPartialFailure: false);
+    }
+
+    /// <summary>
+    /// Creates a result for a call that failed without answering about any single change, such as a
+    /// timeout, a dropped connection or a source that is not running. The whole attempted batch counts
+    /// as failed, and naming no change additionally tells
+    /// <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/> to stop rather than spend another
+    /// transport timeout on each remaining batch of the same flush. Use <see cref="Failure"/> instead
+    /// whenever the source did answer about these changes and refused them.
+    /// </summary>
+    /// <param name="error">The error that occurred.</param>
+    public static WriteResult CallFailed(Exception error)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        return new([], error, isPartialFailure: false);
     }
 
     /// <summary>

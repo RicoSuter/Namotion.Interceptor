@@ -49,9 +49,7 @@ internal sealed class OutboundWriter
         var session = _sessionProvider();
         if (session is null || !session.Connected)
         {
-            return WriteResult.Failure(
-                ReadOnlyMemory<SubjectPropertyChange>.Empty,
-                new InvalidOperationException("OPC UA session is not connected."));
+            return WriteResult.CallFailed(new InvalidOperationException("OPC UA session is not connected."));
         }
 
         WriteValueCollection writeValues;
@@ -80,7 +78,7 @@ internal sealed class OutboundWriter
         catch (InvalidCastException ex)
         {
             _logger.LogError(ex, "OPC UA WriteAsync returned a response that is not a WriteResponse.");
-            return WriteResult.Failure(ReadOnlyMemory<SubjectPropertyChange>.Empty, ex);
+            return WriteResult.CallFailed(ex);
         }
         catch (ServiceResultException ex) when (IsContentDependentFault(ex.StatusCode))
         {
@@ -91,7 +89,7 @@ internal sealed class OutboundWriter
         }
         catch (Exception ex)
         {
-            return WriteResult.Failure(ReadOnlyMemory<SubjectPropertyChange>.Empty, ex);
+            return WriteResult.CallFailed(ex);
         }
 
         try

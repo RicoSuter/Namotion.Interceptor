@@ -388,14 +388,12 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     {
         _logger.LogDebug("WriteChangesAsync called with {Count} changes", changes.Length);
 
-        // A disposed client, a closed socket and a failing send are all failures of the call itself, so
-        // they are reported unenumerated: the batching loop then stops instead of blocking on a send per
-        // remaining batch of the same flush, which a half-open socket makes expensive.
+        // A disposed client, a closed socket and a failing send all count as the call failing rather than
+        // these changes being refused, which is what keeps a half-open socket from costing a blocking
+        // send per remaining batch of the same flush.
         if (Volatile.Read(ref _disposed) == 1)
         {
-            return WriteResult.Failure(
-                ReadOnlyMemory<SubjectPropertyChange>.Empty,
-                new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
+            return WriteResult.CallFailed(new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
         }
 
         try
@@ -404,26 +402,20 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
         catch (ObjectDisposedException)
         {
-            return WriteResult.Failure(
-                ReadOnlyMemory<SubjectPropertyChange>.Empty,
-                new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
+            return WriteResult.CallFailed(new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
         }
 
         try
         {
             if (Volatile.Read(ref _disposed) == 1)
             {
-                return WriteResult.Failure(
-                    ReadOnlyMemory<SubjectPropertyChange>.Empty,
-                    new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
+                return WriteResult.CallFailed(new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
             }
 
             var webSocket = _webSocket;
             if (webSocket?.State != WebSocketState.Open)
             {
-                return WriteResult.Failure(
-                    ReadOnlyMemory<SubjectPropertyChange>.Empty,
-                    new InvalidOperationException("WebSocket is not connected"));
+                return WriteResult.CallFailed(new InvalidOperationException("WebSocket is not connected"));
             }
 
             try
@@ -456,7 +448,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send update to server");
-            return WriteResult.Failure(ReadOnlyMemory<SubjectPropertyChange>.Empty, ex);
+            return WriteResult.CallFailed(ex);
         }
         finally
         {

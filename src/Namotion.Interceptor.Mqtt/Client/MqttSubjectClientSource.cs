@@ -396,9 +396,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             var client = _client;
             if (client is null || !client.IsConnected)
             {
-                return WriteResult.Failure(
-                    ReadOnlyMemory<SubjectPropertyChange>.Empty,
-                    new InvalidOperationException("MQTT client is not connected."));
+                return WriteResult.CallFailed(new InvalidOperationException("MQTT client is not connected."));
             }
 
             var length = changes.Length;
@@ -538,10 +536,9 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         }
         catch (Exception ex)
         {
-            // Nothing outside the per-message publishing answers about a named change, so this is the
-            // call failing rather than the broker refusing these changes. The publishing loop above
-            // enumerates its own failures and keeps that shape.
-            return WriteResult.Failure(ReadOnlyMemory<SubjectPropertyChange>.Empty, ex);
+            // Only the per-message publishing above answers about a named change, and it enumerates its
+            // own failures, so anything reaching here is the call itself failing.
+            return WriteResult.CallFailed(ex);
         }
     }
 
