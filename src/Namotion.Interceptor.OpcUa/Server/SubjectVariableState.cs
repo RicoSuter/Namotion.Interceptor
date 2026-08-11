@@ -254,34 +254,60 @@ internal sealed class SubjectVariableState : BaseDataVariableState
     }
 
     /// <summary>
-    /// Whether two single-dimensional arrays of the same type hold equal elements. One level deep: the
-    /// inner arrays of a jagged array are compared by reference, which is what the merge produces anyway,
-    /// and a deeper walk would read the whole payload a second time to pick a status code.
+    /// Whether two arrays of the same type hold equal elements, at any rank. One level deep: the inner
+    /// arrays of a jagged array are compared by reference, which is what the merge produces anyway, and a
+    /// deeper walk would read the whole payload a second time to pick a status code.
     /// </summary>
     private static bool ArrayContentsMatch(Array modelArray, Array requestedArray)
     {
-        if (modelArray.Rank != 1 || requestedArray.Rank != 1 ||
-            modelArray.Length != requestedArray.Length ||
-            modelArray.GetType() != requestedArray.GetType())
+        var arrayType = modelArray.GetType();
+        if (arrayType != requestedArray.GetType() || modelArray.Length != requestedArray.Length)
         {
             return false;
         }
 
-        // Bit equality over the whole array where the elements are primitive, which covers every numeric
-        // and boolean node the type mapping produces. Vectorised, and it boxes nothing, where the element
-        // walk below boxes once per element for a value type.
-        if (modelArray.GetType().GetElementType()!.IsPrimitive)
+        // Equal type and equal element count do not imply equal shape above one dimension: a two by three
+        // and a three by two array of the same type both hold six elements.
+        for (var dimension = 1; dimension < modelArray.Rank; dimension++)
         {
-            var byteLength = Buffer.ByteLength(modelArray);
-            return MemoryMarshal
-                .CreateReadOnlySpan(ref MemoryMarshal.GetArrayDataReference(modelArray), byteLength)
-                .SequenceEqual(MemoryMarshal
-                    .CreateReadOnlySpan(ref MemoryMarshal.GetArrayDataReference(requestedArray), byteLength));
+            if (modelArray.GetLength(dimension) != requestedArray.GetLength(dimension))
+            {
+                return false;
+            }
         }
 
-        for (var index = 0; index < modelArray.Length; index++)
+        // Bit equality over the whole array where the elements are primitive, which covers every numeric
+        // and boolean node the type mapping produces. Vectorised, and it boxes nothing, where the element
+        // walk below boxes once per element for a value type. The elements of an array are contiguous
+        // whatever its rank, so this reads them all either way.
+        var elementType = arrayType.GetElementType()!;
+        if (elementType.IsPrimitive)
         {
-            if (!Equals(modelArray.GetValue(index), requestedArray.GetValue(index)))
+            var byteLength = Buffer.ByteLength(modelArray);
+            if (MemoryMarshal
+                .CreateReadOnlySpan(ref MemoryMarshal.GetArrayDataReference(modelArray), byteLength)
+                .SequenceEqual(MemoryMarshal
+                    .CreateReadOnlySpan(ref MemoryMarshal.GetArrayDataReference(requestedArray), byteLength)))
+            {
+                return true;
+            }
+
+            // Differing bits are conclusive for every primitive but the two floating point ones, where
+            // Equals calls 0.0 and -0.0 equal and two NaNs equal whatever their payloads. Letting the bits
+            // decide those would have the two answers below disagree with each other.
+            if (elementType != typeof(float) && elementType != typeof(double))
+            {
+                return false;
+            }
+        }
+
+        // Element by element, in the row major order both arrays are laid out in, which is what makes this
+        // work above one dimension where an indexed read does not.
+        var modelElements = modelArray.GetEnumerator();
+        var requestedElements = requestedArray.GetEnumerator();
+        while (modelElements.MoveNext() && requestedElements.MoveNext())
+        {
+            if (!Equals(modelElements.Current, requestedElements.Current))
             {
                 return false;
             }
