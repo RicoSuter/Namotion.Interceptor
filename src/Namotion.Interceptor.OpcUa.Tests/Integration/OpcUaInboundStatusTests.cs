@@ -61,6 +61,7 @@ public class OpcUaInboundStatusTests
         // Arrange
         await using var fixture = await InboundStatusFixture.StartAsync(_output);
         OpcUaNodeStatusDriver.ClearSourceTimestamp(fixture.ServerService, fixture.ServerProperty);
+        var beforeTheNotification = DateTimeOffset.UtcNow;
 
         // Act
         fixture.PublishPair("undated", StatusCodes.Good, "survivor", StatusCodes.Good);
@@ -72,6 +73,16 @@ public class OpcUaInboundStatusTests
             message: "the sibling in the same notification should still be applied");
 
         Assert.Equal("undated", fixture.ClientRoot.Child!.Value);
+
+        // An undated timestamp carries no ticks, which the write path reads as no timestamp given and
+        // stamps with the time it applied the value. The plain conversion turns the same wire value into
+        // a real year-1 instant wherever the host is behind UTC, which would be stamped as it stands, so
+        // this is what keeps a reverted call site from passing outside the zone the conversion throws in.
+        var stampedTimestamp = fixture.ClientValueProperty.TryGetWriteTimestamp();
+        Assert.NotNull(stampedTimestamp);
+        Assert.True(
+            stampedTimestamp >= beforeTheNotification,
+            $"The applied value should be stamped with the time it landed, but it is {stampedTimestamp:O}.");
     }
 
     [Fact]

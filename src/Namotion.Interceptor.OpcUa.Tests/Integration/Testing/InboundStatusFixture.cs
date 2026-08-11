@@ -123,6 +123,9 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
     public PropertyReference ServerProperty =>
         new(ServerRoot.Child!, nameof(InboundStatusChild.Value));
 
+    public PropertyReference ClientValueProperty =>
+        new(ClientRoot.Child!, nameof(InboundStatusChild.Value));
+
     public PropertyReference OtherProperty =>
         new(ServerRoot.Child!, nameof(InboundStatusChild.Other));
 
