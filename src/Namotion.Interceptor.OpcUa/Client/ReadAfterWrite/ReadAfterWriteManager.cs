@@ -272,6 +272,10 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Runs the reads that have fallen due. Never arms the timer: its only caller rearms afterwards
+    /// whichever way this returns, and with the cooldown floor applied.
+    /// </summary>
     private Task ProcessDueReadsAsync() => ProcessDueReadsAsync(DateTime.UtcNow);
 
     internal async Task ProcessDueReadsAsync(DateTime utcNow)
@@ -279,7 +283,6 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         if (!_circuitBreaker.ShouldAttempt())
         {
             _logger.LogDebug("Read-after-write circuit breaker open, skipping.");
-            RescheduleTimer(_circuitBreaker.GetCooldownRemaining());
             return;
         }
 
@@ -308,7 +311,6 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
         if (dueCount == 0)
         {
-            RescheduleTimer();
             return;
         }
 
@@ -316,7 +318,6 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         if (session is null || !session.Connected)
         {
             _logger.LogDebug("Skipping read-after-writes - session not connected.");
-            RescheduleTimer();
             return;
         }
 
@@ -328,145 +329,138 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
         try
         {
+            var readValues = new ReadValueIdCollection(dueCount);
+            for (var i = 0; i < dueCount; i++)
+            {
+                readValues.Add(new ReadValueId
+                {
+                    NodeId = _dueReadsList[i].NodeId,
+                    AttributeId = Opc.Ua.Attributes.Value
+                });
+            }
+
+            ReadResponse response;
             try
             {
-                var readValues = new ReadValueIdCollection(dueCount);
-                for (var i = 0; i < dueCount; i++)
-                {
-                    readValues.Add(new ReadValueId
-                    {
-                        NodeId = _dueReadsList[i].NodeId,
-                        AttributeId = Opc.Ua.Attributes.Value
-                    });
-                }
-
-                ReadResponse response;
-                try
-                {
-                    response = await session.ReadAsync(
-                        requestHeader: null,
-                        maxAge: 0,
-                        timestampsToReturn: TimestampsToReturn.Source,
-                        readValues,
-                        _cts.Token).ConfigureAwait(false);
-                }
-                catch (Exception) when (_cts.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                var receivedTimestamp = DateTimeOffset.UtcNow;
-                answeredCount = Math.Min(response.Results.Count, dueCount);
-
-                for (var i = 0; i < answeredCount; i++)
-                {
-                    var result = response.Results[i];
-
-                    // Uncertain is a reading the server doubts, not a missing one. Bad may carry no value at all.
-                    if (!StatusCode.IsNotBad(result.StatusCode))
-                    {
-                        notAppliedCount++;
-                        continue;
-                    }
-
-                    var (nodeId, property, sentRevision) = _dueReadsList[i];
-                    var reference = property.Reference;
-
-                    // A server answering without a SourceTimestamp ranks as the oldest instant. That only
-                    // decides anything where the timestamps decide alone below and the property carries a
-                    // stored write timestamp; a read-back the revisions rank is applied whatever it says.
-                    var sourceTimestamp = result.SourceTimestamp.ToUtcDateTimeOffset();
-
-                    // Ranked in two domains, because the two candidates are not always produced by the same
-                    // clock. A local write that committed after the one this read-back verifies is newer
-                    // than anything the server can have seen, and revisions order it without a clock at all.
-                    //
-                    // Both revisions are taken before either is used, the one counting source commits first.
-                    // A local commit landing between the two reads then only ever raises localRevision, which
-                    // skips below, instead of raising lastCommitRevision alone and passing a local commit off
-                    // as a source one. The window left, between these reads and the write timestamp, cannot be
-                    // closed here: the two live in separate slots and no lookup returns them together.
-                    reference.TryGetWriteState(true, out var lastCommitRevision, out _);
-                    reference.TryGetWriteState(false, out var localRevision, out _);
-
-                    if (sentRevision != 0 && localRevision > sentRevision)
-                    {
-                        skippedCount++;
-                        continue;
-                    }
-
-                    // Otherwise the last commit may have come from a source, and only then is the stored
-                    // write timestamp the server's own SourceTimestamp, which is what makes comparing it
-                    // against the read-back's a comparison of one clock with itself. A change that carried
-                    // no revision leaves the question above unanswerable, so for it the comparison decides
-                    // alone, which is the only ranking this path had before revisions ranked it. Dropping
-                    // that fallback would let the read-back apply a pre-write value over a newer local write.
-                    var timestampDecidesAlone = sentRevision == 0 || lastCommitRevision > localRevision;
-
-                    if (timestampDecidesAlone &&
-                        reference.TryGetWriteTimestamp() is { } writeTimestamp &&
-                        writeTimestamp >= sourceTimestamp)
-                    {
-                        skippedCount++;
-                        continue;
-                    }
-
-                    try
-                    {
-                        var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
-                        property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
-                        successCount++;
-                    }
-                    catch (Exception e)
-                    {
-                        // Contained per item: applying is local, so its failure says nothing about how the
-                        // server answers reads and must not count against the circuit breaker that tracks that.
-                        notAppliedCount++;
-                        _logger.LogError(e, "Failed to apply a read-after-write value for '{PropertyName}' ({NodeId}).",
-                            property.Name, nodeId);
-                    }
-                }
+                response = await session.ReadAsync(
+                    requestHeader: null,
+                    maxAge: 0,
+                    timestampsToReturn: TimestampsToReturn.Source,
+                    readValues,
+                    _cts.Token).ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (Exception) when (_cts.IsCancellationRequested)
             {
-                // Every due read that did not succeed or get skipped failed, including those a
-                // thrown batch never processed.
-                failedCount = dueCount - successCount - skippedCount;
-                _metrics.RecordExecuted(successCount);
-                _metrics.RecordFailed(failedCount);
-                ReportErrorIfRunning(ex);
-                if (_circuitBreaker.RecordFailure())
-                {
-                    _logger.LogError(ex, "Read-after-write circuit breaker opened after failures.");
-                }
-                else
-                {
-                    _logger.LogWarning(ex, "Failed to execute read-after-writes.");
-                }
-
                 return;
             }
 
-            // A response can carry fewer results than requested; the unanswered remainder failed.
+            var receivedTimestamp = DateTimeOffset.UtcNow;
+            answeredCount = Math.Min(response.Results.Count, dueCount);
+
+            for (var i = 0; i < answeredCount; i++)
+            {
+                var result = response.Results[i];
+
+                // Uncertain is a reading the server doubts, not a missing one. Bad may carry no value at all.
+                if (!StatusCode.IsNotBad(result.StatusCode))
+                {
+                    notAppliedCount++;
+                    continue;
+                }
+
+                var (nodeId, property, sentRevision) = _dueReadsList[i];
+                var reference = property.Reference;
+
+                // A server answering without a SourceTimestamp ranks as the oldest instant. That only
+                // decides anything where the timestamps decide alone below and the property carries a
+                // stored write timestamp; a read-back the revisions rank is applied whatever it says.
+                var sourceTimestamp = result.SourceTimestamp.ToUtcDateTimeOffset();
+
+                // Ranked in two domains, because the two candidates are not always produced by the same
+                // clock. A local write that committed after the one this read-back verifies is newer
+                // than anything the server can have seen, and revisions order it without a clock at all.
+                //
+                // Both revisions are taken before either is used, the one counting source commits first.
+                // A local commit landing between the two reads then only ever raises localRevision, which
+                // skips below, instead of raising lastCommitRevision alone and passing a local commit off
+                // as a source one. The window left, between these reads and the write timestamp, cannot be
+                // closed here: the two live in separate slots and no lookup returns them together.
+                reference.TryGetWriteState(true, out var lastCommitRevision, out _);
+                reference.TryGetWriteState(false, out var localRevision, out _);
+
+                if (sentRevision != 0 && localRevision > sentRevision)
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                // Otherwise the last commit may have come from a source, and only then is the stored
+                // write timestamp the server's own SourceTimestamp, which is what makes comparing it
+                // against the read-back's a comparison of one clock with itself. A change that carried
+                // no revision leaves the question above unanswerable, so for it the comparison decides
+                // alone, which is the only ranking this path had before revisions ranked it. Dropping
+                // that fallback would let the read-back apply a pre-write value over a newer local write.
+                var timestampDecidesAlone = sentRevision == 0 || lastCommitRevision > localRevision;
+
+                if (timestampDecidesAlone &&
+                    reference.TryGetWriteTimestamp() is { } writeTimestamp &&
+                    writeTimestamp >= sourceTimestamp)
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                try
+                {
+                    var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
+                    property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
+                    successCount++;
+                }
+                catch (Exception e)
+                {
+                    // Contained per item: applying is local, so its failure says nothing about how the
+                    // server answers reads and must not count against the circuit breaker that tracks that.
+                    notAppliedCount++;
+                    _logger.LogError(e, "Failed to apply a read-after-write value for '{PropertyName}' ({NodeId}).",
+                        property.Name, nodeId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Every due read that did not succeed or get skipped failed, including those a
+            // thrown batch never processed.
             failedCount = dueCount - successCount - skippedCount;
             _metrics.RecordExecuted(successCount);
-            _metrics.RecordSkipped(skippedCount);
             _metrics.RecordFailed(failedCount);
-            _circuitBreaker.RecordSuccess();
+            ReportErrorIfRunning(ex);
+            if (_circuitBreaker.RecordFailure())
+            {
+                _logger.LogError(ex, "Read-after-write circuit breaker opened after failures.");
+            }
+            else
+            {
+                _logger.LogWarning(ex, "Failed to execute read-after-writes.");
+            }
 
-            // Logging provider failures are not read failures. Let them propagate to the timer callback's
-            // unexpected-error guard without replaying metrics or changing the circuit state.
-            // The four counts partition the due reads, so a read that went missing shows up as a gap
-            // rather than being silently absent from the ratio.
-            _logger.LogDebug(
-                "Completed {SuccessCount}/{TotalCount} read-after-writes ({SkippedCount} skipped as stale, " +
-                "{NotAppliedCount} not applied, {UnansweredCount} unanswered).",
-                successCount, dueCount, skippedCount, notAppliedCount, dueCount - answeredCount);
+            return;
         }
-        finally
-        {
-            RescheduleTimer();
-        }
+
+        // A response can carry fewer results than requested; the unanswered remainder failed.
+        failedCount = dueCount - successCount - skippedCount;
+        _metrics.RecordExecuted(successCount);
+        _metrics.RecordSkipped(skippedCount);
+        _metrics.RecordFailed(failedCount);
+        _circuitBreaker.RecordSuccess();
+
+        // Logging provider failures are not read failures. Let them propagate to the timer callback's
+        // unexpected-error guard without replaying metrics or changing the circuit state.
+        // The four counts partition the due reads, so a read that went missing shows up as a gap
+        // rather than being silently absent from the ratio.
+        _logger.LogDebug(
+            "Completed {SuccessCount}/{TotalCount} read-after-writes ({SkippedCount} skipped as stale, " +
+            "{NotAppliedCount} not applied, {UnansweredCount} unanswered).",
+            successCount, dueCount, skippedCount, notAppliedCount, dueCount - answeredCount);
     }
 
     private void ReportErrorIfRunning(Exception error)
@@ -477,7 +471,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         }
     }
 
-    private void RescheduleTimer(TimeSpan minimumDelay = default)
+    private void RescheduleTimer(TimeSpan minimumDelay)
     {
         lock (_lock)
         {
