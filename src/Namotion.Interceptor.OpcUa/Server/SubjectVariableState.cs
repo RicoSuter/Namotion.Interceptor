@@ -10,10 +10,10 @@ namespace Namotion.Interceptor.OpcUa.Server;
 /// The variable node behind a subject property. The SDK commits a client write into the node before
 /// anything outside the write can apply it to the subject, so the apply happens here, inside the write:
 /// the node ends every write holding what the model holds, and the client is answered with what the model
-/// actually took rather than with what the SDK managed to store. One value cannot satisfy both: a model
-/// value this server cannot represent leaves the node on the last one it could, at
+/// actually took rather than with what the SDK managed to store. The one exception is a model value this
+/// server cannot represent: the node then keeps the last value it could represent, at
 /// <see cref="StatusCodes.UncertainLastUsableValue"/>, while the client is still answered Good, because
-/// the model did take the write. The status code is the only place that caveat can be carried, and it
+/// the model did take its write. The status code is the only place that caveat can be carried, and it
 /// stands until the property changes again.
 /// </summary>
 internal sealed class SubjectVariableState : BaseDataVariableState
@@ -48,9 +48,10 @@ internal sealed class SubjectVariableState : BaseDataVariableState
             return StatusCodes.BadNoCommunication;
         }
 
-        // The last value this server could represent, which is what the node falls back to when the
-        // model's own value turns out not to be representable.
+        // The last value this server could represent and the time it carried, which is what the node falls
+        // back to when it ends up serving something other than what this write brought.
         var previousValue = Value;
+        var previousTimestamp = Timestamp;
 
         // The index range merge is the only in-place mutator of a node value and this override is the only
         // route that reaches one, so copying here hands the merge a private instance. Anything else would
@@ -59,8 +60,9 @@ internal sealed class SubjectVariableState : BaseDataVariableState
         //
         // Gated on the access level because the copy runs before the base call, which is where the SDK
         // refuses a write. Without it, any client could spend a full array copy per request on a node the
-        // server was never going to let it write. UserAccessLevel is deliberately not part of the gate: a
-        // handler decides it per read, so reading it here could skip the copy for a write base then makes.
+        // server was never going to let it write. UserAccessLevel is deliberately not part of the gate: the
+        // SDK lets a handler raise it per read, so gating on it could skip the copy for a write the base
+        // call then performs.
         Array? mergeSource = null;
         var masksBeforeCopy = ChangeMasks;
         if (indexRange != NumericRange.Empty &&
@@ -118,11 +120,17 @@ internal sealed class SubjectVariableState : BaseDataVariableState
             Value = _server.ValueConverter.ConvertToNodeValue(modelValue, registeredProperty);
 
             // Null whenever the current value never went through a terminal write, and the node's own
-            // timestamp is a non-nullable DateTime the SDK reads as unset at MinValue. So an absent model
-            // timestamp leaves the node's alone, which is what node creation does too.
+            // timestamp is a non-nullable DateTime the SDK reads as unset at MinValue. An accepted write
+            // then keeps the one the SDK stored, the client's own, which dates a value the client did
+            // produce. A refused one must not: the node holds the model's value, and the base call has
+            // already stamped it with the time of a write that changed nothing.
             if (property.TryGetWriteTimestamp() is { } writeTimestamp)
             {
                 Timestamp = writeTimestamp.UtcDateTime;
+            }
+            else if (!isApplied)
+            {
+                Timestamp = previousTimestamp;
             }
 
             StatusCode = StatusCodes.Good;
@@ -134,6 +142,7 @@ internal sealed class SubjectVariableState : BaseDataVariableState
             // the last representable one is served instead and marked as no longer current. It clears on
             // the next representable value, which the outbound loop sets Good alongside.
             Value = previousValue;
+            Timestamp = previousTimestamp;
             StatusCode = StatusCodes.UncertainLastUsableValue;
             _server.Logger.LogError(
                 e, "Failed to represent the value of property '{Property}' on its OPC UA node.", property.Name);

@@ -19,6 +19,9 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 [Trait("Category", "Integration")]
 public class OpcUaServerWriteIntegrityTests
 {
+    /// <summary>A value the validation interceptor refuses, on a property nothing else writes.</summary>
+    private const double RefusedDouble = 42d;
+
     private readonly ITestOutputHelper _output;
 
     public OpcUaServerWriteIntegrityTests(ITestOutputHelper output) => _output = output;
@@ -119,19 +122,25 @@ public class OpcUaServerWriteIntegrityTests
         await using var fixture = await WriteIntegrityFixture.StartAsync(
             _output, valueConverter: new ThrowOnOutboundSentinelConverter("poison"));
 
-        var nodeId = fixture.NodeId(nameof(WriteIntegrityChild.Value));
+        var node = fixture.Node(nameof(WriteIntegrityChild.Value));
+        var timestampBeforeTheWrite = node.Timestamp;
+
+        // A timestamp no accepted write could plausibly carry, so the assertion cannot pass by coincidence.
+        var clientTimestamp = DateTime.UtcNow.AddDays(-1);
 
         // Act
-        var statusCode = await fixture.Session.WriteAsync(nodeId, "poison");
+        var statusCode = await fixture.Session.WriteAsync(node.NodeId, "poison", sourceTimestamp: clientTimestamp);
 
         // Assert: the single path where the node does not end the write holding what the model holds. The
         // write was accepted, so the client is told so, and the node serves the last value this server
-        // could represent rather than the client's, with the status code carrying the caveat.
-        var readBack = await fixture.Session.ReadAsync(nodeId);
+        // could represent rather than the client's, dated as it was, with the status code carrying the
+        // caveat.
+        var readBack = await fixture.Session.ReadAsync(node.NodeId);
         Assert.Equal("poison", fixture.Child.Value);
         Assert.True(StatusCode.IsGood(statusCode), $"An accepted write must not be answered with '{statusCode}'.");
         Assert.Equal(WriteIntegrityFixture.InitialValue, readBack.Value);
         Assert.Equal((StatusCode)StatusCodes.UncertainLastUsableValue, readBack.StatusCode);
+        Assert.Equal(timestampBeforeTheWrite, readBack.SourceTimestamp);
     }
 
     [Fact]
@@ -317,6 +326,32 @@ public class OpcUaServerWriteIntegrityTests
         var readBack = await fixture.Session.ReadAsync(nodeId);
         Assert.NotEqual(clientTimestamp, readBack.SourceTimestamp);
         Assert.Equal(modelTimestamp!.Value.UtcDateTime, readBack.SourceTimestamp);
+    }
+
+    [Fact]
+    public async Task WhenARefusedWriteTargetsANeverWrittenProperty_ThenTheNodeKeepsItsOwnTimestamp()
+    {
+        // Arrange: nothing seeds ClampedValue, so the model has no write timestamp for the node to fall
+        // back to, which is the case the model's own timestamp cannot cover.
+        await using var fixture = await WriteIntegrityFixture.StartAsync(
+            _output, writeInterceptor: new ThrowOnValueInterceptor(RefusedDouble));
+
+        var node = fixture.Node(nameof(WriteIntegrityChild.ClampedValue));
+        Assert.Null(fixture.Property(nameof(WriteIntegrityChild.ClampedValue)).TryGetWriteTimestamp());
+        var timestampBeforeTheWrite = node.Timestamp;
+
+        // A timestamp no accepted write could plausibly carry, so the assertion cannot pass by coincidence.
+        var clientTimestamp = DateTime.UtcNow.AddDays(-1);
+
+        // Act
+        var statusCode = await fixture.Session.WriteAsync(node.NodeId, RefusedDouble, sourceTimestamp: clientTimestamp);
+
+        // Assert: the node's timestamp dates the value the node holds. A refused write leaves the model's
+        // value there, so dating it with the client's timestamp claims a change that never happened.
+        Assert.True(StatusCode.IsBad(statusCode), $"A refused write must not be answered with '{statusCode}'.");
+        var readBack = await fixture.Session.ReadAsync(node.NodeId);
+        Assert.NotEqual(clientTimestamp, readBack.SourceTimestamp);
+        Assert.Equal(timestampBeforeTheWrite, readBack.SourceTimestamp);
     }
 
     [Fact]
