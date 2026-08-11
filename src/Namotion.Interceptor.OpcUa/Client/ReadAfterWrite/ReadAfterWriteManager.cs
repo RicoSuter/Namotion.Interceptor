@@ -379,7 +379,15 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     // Ranked in two domains, because the two candidates are not always produced by the same
                     // clock. A local write that committed after the one this read-back verifies is newer
                     // than anything the server can have seen, and revisions order it without a clock at all.
+                    //
+                    // Both revisions are taken before either is used, the one counting source commits first.
+                    // A local commit landing between the two reads then only ever raises localRevision, which
+                    // skips below, instead of raising lastCommitRevision alone and passing a local commit off
+                    // as a source one. The window left, between these reads and the write timestamp, cannot be
+                    // closed here: the two live in separate slots and no lookup returns them together.
+                    reference.TryGetWriteState(true, out var lastCommitRevision, out _);
                     reference.TryGetWriteState(false, out var localRevision, out _);
+
                     if (sentRevision != 0 && localRevision > sentRevision)
                     {
                         skippedCount++;
@@ -392,9 +400,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     // no revision leaves the question above unanswerable, so for it the comparison decides
                     // alone, which is the only ranking this path had before revisions ranked it. Dropping
                     // that fallback would let the read-back apply a pre-write value over a newer local write.
-                    var timestampDecidesAlone = sentRevision == 0 ||
-                        (reference.TryGetWriteState(true, out var lastCommitRevision, out _) &&
-                         lastCommitRevision > localRevision);
+                    var timestampDecidesAlone = sentRevision == 0 || lastCommitRevision > localRevision;
 
                     if (timestampDecidesAlone &&
                         reference.TryGetWriteTimestamp() is { } writeTimestamp &&
