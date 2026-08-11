@@ -258,6 +258,13 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         finally
         {
             Volatile.Write(ref _isProcessing, 0);
+
+            // Rearmed with the flag already down, so a tick that found this run in progress and
+            // returned without setting the timer is covered here. That tick is ordinary rather than
+            // exotic: a timer can fire just before the instant its delay was computed from, find
+            // nothing due yet, and reschedule so close that the next tick lands in this run's own
+            // tail. Without this the due read is left with no timer at all until the next write.
+            RescheduleTimer();
         }
     }
 
