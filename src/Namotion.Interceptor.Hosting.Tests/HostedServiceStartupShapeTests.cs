@@ -12,6 +12,20 @@ namespace Namotion.Interceptor.Hosting.Tests;
 /// than one each. An earlier implementation posted every start to one shared consumer loop and paid
 /// them in series.
 /// </summary>
+/// <remarks>
+/// This pins that the per subject cost does not accumulate, and nothing else. It does not pin that
+/// each target's own transitions are serialized, which
+/// <see cref="HostedServiceTargetTests.WhenTransitionsAreAppendedConcurrently_ThenTheyNeverOverlap"/>
+/// covers: an unsynchronized free for all would overlap just as well and pass here.
+/// <para>
+/// It also depends on <c>HostedServiceHandler.StartDelayMilliseconds</c> being large enough to
+/// dominate both measurements, which is what makes a healthy ratio sit near one and leaves room for a
+/// tolerance of four. Whoever removes that delay has to revisit this test rather than assume it still
+/// works: the denominator becomes sub millisecond, so scheduling jitter alone can exceed the tolerance,
+/// and the regression itself shrinks to thirty two times a fraction of a millisecond, which timing
+/// cannot see reliably. At that point this test needs a different mechanism or an honest deletion.
+/// </para>
+/// </remarks>
 public class HostedServiceStartupShapeTests
 {
     private const int ManySubjects = 32;
@@ -20,8 +34,8 @@ public class HostedServiceStartupShapeTests
     /// Deliberately a ratio and deliberately generous. Serialized starts separate the two measurements
     /// by roughly the subject count, so anything under that catches the regression; four leaves room
     /// for a loaded continuous integration machine to be slow in ways that are not proportional to the
-    /// number of subjects. An absolute threshold would be flaky here and would pin the delay constant,
-    /// which is a workaround rather than a guarantee.
+    /// number of subjects. An absolute threshold would be flaky here and would pin the delay constant.
+    /// The ratio does not pin that constant either, but it does depend on it: see the remarks above.
     /// </summary>
     private const int ToleratedRatio = 4;
 
