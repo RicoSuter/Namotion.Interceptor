@@ -73,7 +73,7 @@ public class OutboundWriterTests
     }
 
     [Fact]
-    public async Task WhenTheServerAnswersWithFewerResultsThanNodes_ThenNoChangesAreEnumerated()
+    public async Task WhenTheServerAnswersWithFewerResultsThanNodes_ThenTheBatchesChangesAreEnumerated()
     {
         // Arrange: the service call only validates the response header, and the SDK's own count check
         // runs on a batched path this client never takes, so an under-length answer arrives unchecked.
@@ -90,9 +90,11 @@ public class OutboundWriterTests
         var result = await writer.WriteChangesAsync(new[] { change }, CancellationToken.None);
 
         // Assert: an unanswered node must not be confirmed written, which would drop it from the retry
-        // queue for good and arm a read-back that reverts it.
+        // queue for good and arm a read-back that reverts it. What this batch asks for decides the short
+        // answer, so the retry queue re-forms it and it comes back short every time; naming no change
+        // would stop the flush on every attempt and starve the batches behind it for good.
         Assert.NotNull(result.Error);
-        Assert.Empty(result.FailedChanges);
+        Assert.Equal(change.Property, Assert.Single(result.FailedChanges).Property);
     }
 
     [Fact]

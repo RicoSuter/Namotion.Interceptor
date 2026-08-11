@@ -38,8 +38,9 @@ internal sealed class OutboundWriter
 
     /// <summary>
     /// Writes one batch. A failure these changes themselves caused comes back with them enumerated,
-    /// whether the server refused them per node, the value converter would not convert one, or the
-    /// request they encode cannot be sent at all; the batches behind them are then still attempted.
+    /// whether the server refused them per node, the value converter would not convert one, the request
+    /// they encode cannot be sent at all, or the answer does not cover every node the request carried;
+    /// the batches behind them are then still attempted.
     /// A call that never got an answer comes back with none, which is what tells the batching loop to
     /// stop rather than spend another operation timeout per remaining batch on a session that is not
     /// answering.
@@ -97,7 +98,12 @@ internal sealed class OutboundWriter
             // The service call validates only the response header, and the SDK's own count check runs on
             // a batched path this client never takes because it batches to MaxNodesPerWrite itself. An
             // unanswered node treated as written would leave the retry queue for good.
-            return WriteResult.CallFailed(new ServiceResultException(
+            //
+            // Enumerated for the same reason as the content-dependent faults above: what this batch asks
+            // for decides the short answer, so the retry queue re-forms the batch and it comes back short
+            // every time. Naming no change would stop the flush on every attempt and starve the batches
+            // behind it for good.
+            return WriteResult.Failure(changes, new ServiceResultException(
                 StatusCodes.BadUnknownResponse,
                 $"OPC UA Write answered {writeResponse.Results.Count} results for {writeValues.Count} nodes."));
         }
