@@ -6,8 +6,9 @@ using Xunit.Abstractions;
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 
 /// <summary>
-/// What the client reports when one batch of a multi-batch flush fails, which is what decides whether
-/// the batches behind it are attempted at all.
+/// What one unconvertible change costs the changes travelling with it, on both sides: which batches of a
+/// multi-batch client flush are still attempted, and which properties of one server batch still reach
+/// their nodes.
 /// </summary>
 [Trait("Category", "Integration")]
 public class OpcUaOutboundWriteTests
@@ -37,5 +38,28 @@ public class OpcUaOutboundWriteTests
         await AsyncTestHelpers.WaitUntilAsync(
             () => fixture.ServerRoot.Child?.Other == "outbound-survivor",
             message: "the batch behind the one that could not be converted should still have been written");
+    }
+
+    [Fact]
+    public async Task WhenOneChangesConversionThrows_ThenTheRestOfTheBatchIsStillWritten()
+    {
+        // Arrange: the server has one batch per flush, so a throw that escapes the loop costs every
+        // property in it rather than only the one that could not be converted.
+        await using var fixture = await WriteIntegrityFixture.StartAsync(
+            _output, valueConverter: new ThrowOnOutboundSentinelConverter("poison"));
+
+        // Act: both properties are written within one buffer window, the poisoned one first.
+        fixture.Child.Value = "poison";
+        fixture.Child.Other = "batch-survivor";
+
+        // Assert: the sibling reaching its node is what proves the loop kept going.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Equals(fixture.Node(nameof(WriteIntegrityChild.Other)).Value, "batch-survivor"),
+            timeout: TimeSpan.FromSeconds(10),
+            message: "the rest of the batch should still have reached its nodes");
+
+        // The merger has already marked the poisoned property published, so nothing retries it: its node
+        // keeps the value it had until the property changes again.
+        Assert.Equal(WriteIntegrityFixture.InitialValue, fixture.Node(nameof(WriteIntegrityChild.Value)).Value);
     }
 }

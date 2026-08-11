@@ -163,20 +163,35 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                     data is BaseDataVariableState node &&
                     change.Property.TryGetRegisteredProperty() is { } registeredProperty)
                 {
-                    var value = change.GetNewValue<object?>();
-                    var convertedValue = _configuration.ValueConverter
-                        .ConvertToNodeValue(value, registeredProperty);
+                    // Per change, so one converter that cannot represent a value costs its own property
+                    // rather than every property merged into the batch behind it. A plain try because
+                    // this runs per change at the connector's full throughput.
+                    try
+                    {
+                        var value = change.GetNewValue<object?>();
+                        var convertedValue = _configuration.ValueConverter
+                            .ConvertToNodeValue(value, registeredProperty);
 
-                    node.Value = convertedValue;
-                    node.Timestamp = change.ChangedTimestamp.UtcDateTime;
+                        node.Value = convertedValue;
+                        node.Timestamp = change.ChangedTimestamp.UtcDateTime;
 
-                    // A representable value clears an Uncertain left by one that was not. The Value
-                    // setter only resets the status while the value has never been touched, and node
-                    // creation already touched it, so the reset has to be explicit.
-                    node.StatusCode = StatusCodes.Good;
+                        // A representable value clears an Uncertain left by one that was not. The Value
+                        // setter only resets the status while the value has never been touched, and node
+                        // creation already touched it, so the reset has to be explicit.
+                        node.StatusCode = StatusCodes.Good;
 
-                    node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
-                    written++;
+                        // Before the flush, which only publishes what the node already holds.
+                        written++;
+                        node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
+                    }
+                    catch (Exception e) when (e is not OperationCanceledException)
+                    {
+                        // The merger marked this change published before handing it over, so nothing
+                        // retries it and the node keeps its previous value until the property changes
+                        // again. That makes this log the only trace of the gap.
+                        _logger.LogError(e,
+                            "Failed to write property '{Property}' to its OPC UA node.", change.Property.Name);
+                    }
                 }
             }
         }
