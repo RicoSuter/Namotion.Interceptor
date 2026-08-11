@@ -163,9 +163,9 @@ public class OutboundWriterTests
     [Fact]
     public async Task WhenWriteSourceTimestampIsNotEnabled_ThenTheWriteCarriesNoSourceTimestamp()
     {
-        // Arrange: Part 4 lets a server refuse any value, status and timestamp combination it does not
-        // support with BadWriteNotSupported and perform no write at all, and the OPC Foundation's own
-        // reference client never sets one. Against such a server every write would fail permanently.
+        // Arrange: BadWriteNotSupported says the server does not support writing the combination of
+        // value, status and timestamps provided, and the OPC Foundation's own reference client never
+        // sets one. Against such a server every write would fail permanently.
         var sent = new List<WriteValueCollection>();
         var (writer, change) = CreateWriter(CaptureAndAnswerGood(sent));
 

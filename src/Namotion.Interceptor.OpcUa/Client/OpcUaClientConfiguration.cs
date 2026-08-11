@@ -169,9 +169,9 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets whether a write carries the change's own timestamp as the value's SourceTimestamp
     /// (default: false). A server may refuse any value, status and timestamp combination it does not
-    /// support, and is then required to perform no write at all, which would fail every write against it
-    /// permanently. Enable this only against a server known to accept it, to propagate origin timestamps
-    /// across a Namotion client and server pair; otherwise the server stamps its own receive time.
+    /// support, which would fail every write against it permanently. Enable this only against a server
+    /// known to accept it, to propagate origin timestamps across a Namotion client and server pair;
+    /// otherwise the server stamps its own receive time.
     /// </summary>
     public bool WriteSourceTimestamp { get; set; }
 

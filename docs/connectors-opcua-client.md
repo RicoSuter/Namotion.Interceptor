@@ -172,7 +172,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 |----------|---------|-------------|
 | `WriteSourceTimestamp` | false | Send the change's own timestamp as the value's SourceTimestamp |
 
-A server may refuse any value, status and timestamp combination it does not support, and is then required to perform no write at all, so a write carrying a SourceTimestamp fails permanently against such a server. Left off, the server stamps its own receive time. Turn it on only against a server known to accept it, to propagate origin timestamps across a Namotion client and server pair.
+A server may refuse any value, status and timestamp combination it does not support, so a write carrying a SourceTimestamp fails permanently against such a server. Left off, the server stamps its own receive time. Turn it on only against a server known to accept it, to propagate origin timestamps across a Namotion client and server pair.
 
 **Read After Write:**
 
