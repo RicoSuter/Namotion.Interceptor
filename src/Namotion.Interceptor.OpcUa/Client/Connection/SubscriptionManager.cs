@@ -55,6 +55,10 @@ internal class SubscriptionManager : IAsyncDisposable
     // item keeps being retried and self-heals once the node recovers.
     internal const int MaxHealAttemptsBeforeEscalation = 3;
 
+    // The largest revised sampling interval a read-back is scheduled from, 48 days, which leaves the
+    // read-after-write buffer room under the delay a Timer can be armed for.
+    private const double MaxRevisedSamplingIntervalMilliseconds = 48d * 24 * 60 * 60 * 1000;
+
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
 
     /// <summary>
@@ -584,10 +588,32 @@ internal class SubscriptionManager : IAsyncDisposable
             if (item.Handle is RegisteredSubjectProperty property && item.Status?.Created == true)
             {
                 var requestedInterval = GetRequestedSamplingInterval(property);
-                var revisedInterval = TimeSpan.FromMilliseconds(item.Status.SamplingInterval);
+                var revisedInterval = ToRevisedSamplingInterval(item.Status.SamplingInterval);
                 _readAfterWriteManager.RegisterProperty(item.StartNodeId, property, requestedInterval, revisedInterval);
             }
         }
+    }
+
+    /// <summary>
+    /// Turns the server's revised sampling interval, a raw double, into one a read-back can be scheduled
+    /// from. Zero is returned for a value that cannot be one, which leaves the property untracked.
+    /// </summary>
+    /// <remarks>
+    /// A Timer refuses a delay past roughly 49.7 days, and the read-back timer is armed from this on the
+    /// write path, so an interval past that would throw there and report the whole batch failed on every
+    /// retry. The SDK server can legitimately revise to a year. Clamping keeps the read-back late enough
+    /// that the server has sampled, which is the only thing the interval is used for.
+    /// </remarks>
+    internal static TimeSpan ToRevisedSamplingInterval(double revisedMilliseconds)
+    {
+        if (double.IsNaN(revisedMilliseconds) || revisedMilliseconds <= 0)
+        {
+            return TimeSpan.Zero;
+        }
+
+        return revisedMilliseconds >= MaxRevisedSamplingIntervalMilliseconds
+            ? TimeSpan.FromMilliseconds(MaxRevisedSamplingIntervalMilliseconds)
+            : TimeSpan.FromMilliseconds(revisedMilliseconds);
     }
 
     /// <summary>
