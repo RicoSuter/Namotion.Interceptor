@@ -1004,4 +1004,59 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         internal Task WaitUntilOuterGuardLogsAsync() =>
             _outerGuardLogged.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
+
+    [Fact]
+    public void WhenReadIsOverdueAndMinimumDelayIsSet_ThenTimerWaitsForTheMinimumDelay()
+    {
+        // Arrange - the reads are already due, which is why the caller is rearming at all
+        var utcNow = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var earliestReadTime = utcNow - TimeSpan.FromSeconds(5);
+
+        // Act
+        var delay = ReadAfterWriteManager.CalculateTimerDelay(earliestReadTime, utcNow, TimeSpan.FromSeconds(30));
+
+        // Assert - arming at zero would refire immediately and spin for the whole cooldown
+        Assert.Equal(TimeSpan.FromSeconds(30), delay);
+    }
+
+    [Fact]
+    public void WhenNothingIsPending_ThenTimerIsInfiniteRegardlessOfMinimumDelay()
+    {
+        // Arrange
+        var utcNow = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+
+        // Act
+        var delay = ReadAfterWriteManager.CalculateTimerDelay(DateTime.MaxValue, utcNow, TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.Equal(Timeout.InfiniteTimeSpan, delay);
+    }
+
+    [Fact]
+    public void WhenReadIsFurtherOutThanMinimumDelay_ThenTimerWaitsForTheRead()
+    {
+        // Arrange
+        var utcNow = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var earliestReadTime = utcNow + TimeSpan.FromSeconds(45);
+
+        // Act
+        var delay = ReadAfterWriteManager.CalculateTimerDelay(earliestReadTime, utcNow, TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(45), delay);
+    }
+
+    [Fact]
+    public void WhenReadIsOverdueAndMinimumDelayIsZero_ThenTimerFiresImmediately()
+    {
+        // Arrange
+        var utcNow = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var earliestReadTime = utcNow - TimeSpan.FromSeconds(5);
+
+        // Act
+        var delay = ReadAfterWriteManager.CalculateTimerDelay(earliestReadTime, utcNow, TimeSpan.Zero);
+
+        // Assert
+        Assert.Equal(TimeSpan.Zero, delay);
+    }
 }

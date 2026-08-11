@@ -266,7 +266,9 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             // exotic: a timer can fire just before the instant its delay was computed from, find
             // nothing due yet, and reschedule so close that the next tick lands in this run's own
             // tail. Without this the due read is left with no timer at all until the next write.
-            RescheduleTimer();
+            // Rearming last, it also has to respect the cooldown the run may have decided on, otherwise
+            // it undoes that decision and the timer spins on reads that stay due while the breaker is open.
+            RescheduleTimer(_circuitBreaker.GetCooldownRemaining());
         }
     }
 
@@ -277,7 +279,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         if (!_circuitBreaker.ShouldAttempt())
         {
             _logger.LogDebug("Read-after-write circuit breaker open, skipping.");
-            RescheduleTimer();
+            RescheduleTimer(_circuitBreaker.GetCooldownRemaining());
             return;
         }
 
@@ -468,34 +470,37 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         }
     }
 
-    private void RescheduleTimer()
+    private void RescheduleTimer(TimeSpan minimumDelay = default)
     {
         lock (_lock)
         {
-            RescheduleTimerLocked();
+            RescheduleTimerLocked(minimumDelay);
         }
     }
 
-    private void RescheduleTimerLocked()
+    private void RescheduleTimerLocked(TimeSpan minimumDelay = default)
     {
         if (Volatile.Read(ref _disposed) == 1)
         {
             return;
         }
 
-        if (_earliestReadTime == DateTime.MaxValue)
+        _timer.Change(CalculateTimerDelay(_earliestReadTime, DateTime.UtcNow, minimumDelay), Timeout.InfiniteTimeSpan);
+    }
+
+    /// <summary>
+    /// Calculates when the timer should next fire. A due read gives a non-positive delay, so without a
+    /// minimum the timer refires at once, which spins for as long as the caller keeps refusing the work.
+    /// </summary>
+    internal static TimeSpan CalculateTimerDelay(DateTime earliestReadTime, DateTime utcNow, TimeSpan minimumDelay)
+    {
+        if (earliestReadTime == DateTime.MaxValue)
         {
-            _timer.Change(Timeout.Infinite, Timeout.Infinite);
-            return;
+            return Timeout.InfiniteTimeSpan;
         }
 
-        var delay = _earliestReadTime - DateTime.UtcNow;
-        if (delay < TimeSpan.Zero)
-        {
-            delay = TimeSpan.Zero;
-        }
-
-        _timer.Change(delay, Timeout.InfiniteTimeSpan);
+        var delay = earliestReadTime - utcNow;
+        return delay < minimumDelay ? minimumDelay : delay;
     }
 
     private void RecalculateEarliestLocked()
