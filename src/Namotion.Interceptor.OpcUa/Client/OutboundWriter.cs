@@ -234,7 +234,7 @@ internal sealed class OutboundWriter
     }
 
     /// <summary>
-    /// Schedules a read-back for each change the server accepted. A read-back for a refused write would
+    /// Schedules a read-back for each writable change the server accepted. A read-back for a refused write would
     /// apply the server's pre-write value over the local one the retry queue still holds and will re-send,
     /// so the model would flip to the stale value and back.
     /// </summary>
@@ -277,8 +277,10 @@ internal sealed class OutboundWriter
                 continue;
             }
 
-            if (change.Property.TryGetPropertyData(_opcUaNodeIdKey, out var nodeIdObj) &&
-                nodeIdObj is NodeId nodeId)
+            // The same selection the request was built from: a property the client cannot write is not
+            // in the batch at all, so nothing about it was confirmed and a read-back would apply the
+            // server's value over a local one no write is going to replace.
+            if (TryGetWritableNodeId(change, out var nodeId, out _))
             {
                 // The change's own revision, not the property's current one, see OnPropertyWritten.
                 manager.OnPropertyWritten(nodeId, change.Revision);
