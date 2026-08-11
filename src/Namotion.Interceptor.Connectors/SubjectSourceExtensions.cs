@@ -13,9 +13,11 @@ public static class SubjectSourceExtensions
 
     /// <summary>
     /// Writes changes to the source in batches, respecting the source's maximum batch size.
-    /// Returns a <see cref="WriteResult"/> containing which changes failed. A failing batch does not stop
-    /// the ones behind it: every batch is attempted and their failures are reported together with the
-    /// first error. Never throws for write failures, errors are reported in the result.
+    /// Returns a <see cref="WriteResult"/> containing which changes failed. A batch that names the changes
+    /// it refused does not stop the ones behind it: they are attempted too and the failures are reported
+    /// together with the first error. A batch that fails without naming any change stops the flush, and it
+    /// and the remainder are reported failed. Never throws for write failures, errors are reported in the
+    /// result.
     /// <para>
     /// Batches are only independent of each other because <paramref name="changes"/> carries at most one
     /// change per property. With two, a failure of the batch holding the older one while the batch holding
@@ -92,8 +94,6 @@ public static class SubjectSourceExtensions
                     : result;
             }
 
-            // One change the source refuses would otherwise starve everything queued behind it: the
-            // batches after it would be condemned unattempted on every retry for as long as it fails.
             for (; batchStart < count; batchStart += batchSize)
             {
                 var currentBatchSize = Math.Min(batchSize, count - batchStart);
@@ -108,10 +108,21 @@ public static class SubjectSourceExtensions
                 firstError ??= batchResult.Error;
                 failedChanges ??= [];
 
-                // The batch's failed changes, or the whole batch when the source left them unenumerated.
-                failedChanges.AddRange(batchResult.FailedChanges.IsEmpty
-                    ? batch.Span
-                    : batchResult.FailedChanges.AsSpan());
+                if (batchResult.FailedChanges.IsEmpty)
+                {
+                    // Naming no change means the source never answered per item, so the call itself
+                    // failed: a timeout, a dropped channel, a faulted session. Each batch behind it
+                    // would buy the same verdict at the price of another transport timeout, with the
+                    // write lock held for all of them, so the rest of the flush is left unattempted
+                    // and reported unconfirmed.
+                    failedChanges.AddRange(changes.Span[batchStart..]);
+                    break;
+                }
+
+                // An enumerated refusal is an answer about named changes, and says nothing about the
+                // batches behind it. One change the source refuses would otherwise starve everything
+                // queued behind it, condemned unattempted on every retry for as long as it fails.
+                failedChanges.AddRange(batchResult.FailedChanges.AsSpan());
 
                 if (cancellationToken.IsCancellationRequested)
                 {

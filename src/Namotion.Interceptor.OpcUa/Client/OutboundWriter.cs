@@ -32,6 +32,12 @@ internal sealed class OutboundWriter
 
     public int WriteBatchSize => (int)(_sessionManager.CurrentSession?.OperationLimits?.MaxNodesPerWrite ?? 0);
 
+    /// <summary>
+    /// Writes one batch. A refusal the server named per node comes back with those changes enumerated;
+    /// a call that never got an answer comes back with none, which is what tells the batching loop to
+    /// stop rather than spend another operation timeout per remaining batch on a session that is not
+    /// answering.
+    /// </summary>
     public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         try
@@ -39,7 +45,9 @@ internal sealed class OutboundWriter
             var session = _sessionManager.CurrentSession;
             if (session is null || !session.Connected)
             {
-                return WriteResult.Failure(changes, new InvalidOperationException("OPC UA session is not connected."));
+                return WriteResult.Failure(
+                    ReadOnlyMemory<SubjectPropertyChange>.Empty,
+                    new InvalidOperationException("OPC UA session is not connected."));
             }
 
             var writeValues = CreateWriteValuesCollection(changes);
@@ -61,11 +69,11 @@ internal sealed class OutboundWriter
         catch (InvalidCastException ex)
         {
             _logger.LogError(ex, "OPC UA WriteAsync returned unexpected response type (issue #287).");
-            return WriteResult.Failure(changes, ex);
+            return WriteResult.Failure(ReadOnlyMemory<SubjectPropertyChange>.Empty, ex);
         }
         catch (Exception ex)
         {
-            return WriteResult.Failure(changes, ex);
+            return WriteResult.Failure(ReadOnlyMemory<SubjectPropertyChange>.Empty, ex);
         }
     }
 

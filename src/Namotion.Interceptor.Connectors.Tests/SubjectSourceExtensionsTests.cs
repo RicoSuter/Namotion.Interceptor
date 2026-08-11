@@ -258,10 +258,11 @@ public class SubjectSourceExtensionsTests
     }
 
     [Fact]
-    public async Task WhenAMiddleBatchFailsWithoutEnumeratedFailedChanges_ThenOnlyThatBatchIsReportedFailed()
+    public async Task WhenAMiddleBatchFailsWithoutEnumeratingItsFailures_ThenTheRemainingBatchesAreNotAttempted()
     {
         // Arrange: 5 changes, batch size 2. The second batch fails with an error but no failed changes,
-        // which is the shorthand for "everything I was handed failed".
+        // which is how a call that never got an answer reports: a timeout, a dropped channel, a
+        // faulted session.
         var sourceMock = new Mock<ISubjectSource>();
         sourceMock.Setup(s => s.WriteBatchSize).Returns(2);
 
@@ -282,11 +283,15 @@ public class SubjectSourceExtensionsTests
         // Act
         var result = await sourceMock.Object.WriteChangesInBatchesAsync(changes, CancellationToken.None);
 
-        // Assert: the shorthand expands to the failing batch's own changes, not to the whole write, and
-        // the tail batch behind it is still attempted
-        Assert.Equal(3, callCount);
+        // Assert: the tail batch is never handed to a source that is not answering, and the failing
+        // batch plus the unattempted remainder are reported unconfirmed. The first batch was confirmed
+        // written before the failure, so it must not be condemned with them.
+        Assert.Equal(2, callCount);
         Assert.NotNull(result.Error);
-        Assert.Equal(new[] { "Property2", "Property3" }, result.FailedChanges.Select(change => change.Property.Name));
+        Assert.Equal("Wholesale boom", result.Error!.Message);
+        Assert.Equal(
+            new[] { "Property2", "Property3", "Property4" },
+            result.FailedChanges.Select(change => change.Property.Name));
     }
 
     [Fact]
