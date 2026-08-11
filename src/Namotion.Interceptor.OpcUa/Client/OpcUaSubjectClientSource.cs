@@ -175,9 +175,13 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
 
-        _sessionManager = new SessionManager(
+        var sessionManager = new SessionManager(
             this, propertyWriter, _configuration, PollingMetrics, ReadAfterWriteMetrics, _logger);
-        _writer = new OutboundWriter(_sessionManager, _configuration, OpcUaNodeIdKey, OutgoingThroughput, _logger);
+        _sessionManager = sessionManager;
+        _writer = new OutboundWriter(
+            () => sessionManager.CurrentSession,
+            sessionManager.ReadAfterWriteManager,
+            _configuration, OpcUaNodeIdKey, OutgoingThroughput, _logger);
 
         try
         {

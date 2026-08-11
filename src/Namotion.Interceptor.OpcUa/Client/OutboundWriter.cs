@@ -1,36 +1,40 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.OpcUa.Client.Connection;
+using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
+using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
 internal sealed class OutboundWriter
 {
-    private readonly SessionManager _sessionManager;
+    private readonly Func<ISession?> _sessionProvider;
+    private readonly ReadAfterWriteManager? _readAfterWriteManager;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly string _opcUaNodeIdKey;
     private readonly ThroughputCounter _outgoingThroughput;
     private readonly ILogger _logger;
 
     public OutboundWriter(
-        SessionManager sessionManager,
+        Func<ISession?> sessionProvider,
+        ReadAfterWriteManager? readAfterWriteManager,
         OpcUaClientConfiguration configuration,
         string opcUaNodeIdKey,
         ThroughputCounter outgoingThroughput,
         ILogger logger)
     {
-        _sessionManager = sessionManager;
+        _sessionProvider = sessionProvider;
+        _readAfterWriteManager = readAfterWriteManager;
         _configuration = configuration;
         _opcUaNodeIdKey = opcUaNodeIdKey;
         _outgoingThroughput = outgoingThroughput;
         _logger = logger;
     }
 
-    public int WriteBatchSize => (int)(_sessionManager.CurrentSession?.OperationLimits?.MaxNodesPerWrite ?? 0);
+    public int WriteBatchSize => (int)(_sessionProvider()?.OperationLimits?.MaxNodesPerWrite ?? 0);
 
     /// <summary>
     /// Writes one batch. A refusal the server named per node comes back with those changes enumerated;
@@ -40,7 +44,7 @@ internal sealed class OutboundWriter
     /// </summary>
     public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        var session = _sessionManager.CurrentSession;
+        var session = _sessionProvider();
         if (session is null || !session.Connected)
         {
             return WriteResult.Failure(
@@ -76,6 +80,13 @@ internal sealed class OutboundWriter
             _logger.LogError(ex, "OPC UA WriteAsync returned unexpected response type (issue #287).");
             return WriteResult.Failure(ReadOnlyMemory<SubjectPropertyChange>.Empty, ex);
         }
+        catch (ServiceResultException ex) when (IsContentDependentFault(ex.StatusCode))
+        {
+            // What this batch encodes decides these, not the state of the channel, so the retry queue
+            // re-forms the same batch and it faults identically every time. Reporting it as a failed
+            // call would stop the flush here on every attempt and starve everything behind it.
+            return WriteResult.Failure(changes, ex);
+        }
         catch (Exception ex)
         {
             return WriteResult.Failure(ReadOnlyMemory<SubjectPropertyChange>.Empty, ex);
@@ -98,6 +109,16 @@ internal sealed class OutboundWriter
             // writes may well have landed. Only the outcome of these changes is unknown.
             return WriteResult.Failure(changes, ex);
         }
+    }
+
+    /// <summary>
+    /// True for the faults a batch's own encoded content causes rather than the channel. The client
+    /// stack raises both while encoding the request, before the server is reached, and neither is
+    /// bounded by MaxNodesPerWrite, which counts nodes rather than encoded bytes.
+    /// </summary>
+    private static bool IsContentDependentFault(uint statusCode)
+    {
+        return statusCode is StatusCodes.BadRequestTooLarge or StatusCodes.BadEncodingLimitsExceeded;
     }
 
     private WriteResult ProcessWriteResults(StatusCodeCollection results, ReadOnlyMemory<SubjectPropertyChange> allChanges)
@@ -216,7 +237,7 @@ internal sealed class OutboundWriter
     /// </remarks>
     private void NotifyPropertiesWritten(ReadOnlyMemory<SubjectPropertyChange> changes, in WriteResult result)
     {
-        var manager = _sessionManager.ReadAfterWriteManager;
+        var manager = _readAfterWriteManager;
         if (manager is null)
         {
             return;
