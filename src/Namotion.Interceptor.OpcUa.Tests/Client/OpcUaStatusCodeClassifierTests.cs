@@ -109,6 +109,8 @@ public class OpcUaStatusCodeClassifierTests
     [InlineData(StatusCodes.BadNodeIdUnknown)]
     [InlineData(StatusCodes.BadUserAccessDenied)]
     [InlineData(StatusCodes.BadNotWritable)]
+    [InlineData(StatusCodes.BadNodeIdInvalid)]
+    [InlineData(StatusCodes.BadIndexRangeInvalid)]
     public void WhenAWriteIsRefusedForTheSession_ThenIsRefusedUntilReconnectReturnsTrue(uint statusCode)
     {
         // Arrange

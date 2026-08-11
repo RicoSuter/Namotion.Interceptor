@@ -48,6 +48,9 @@ internal static class OpcUaStatusCodeClassifier
 
     // Schema and type codes, permanent within a session by spec, plus the three state-dependent ones a
     // server decides once per session: address-space membership, role permissions and AccessLevel.
+    // The last two are decided by the request itself, so re-sending the identical change cannot change
+    // the answer. Every code here is a legal per-node Write result; a code a server can only raise for
+    // the request as a whole never reaches this classification.
     private static readonly HashSet<uint> WriteRefusalCodes =
     [
         StatusCodes.BadAttributeIdInvalid,
@@ -55,7 +58,9 @@ internal static class OpcUaStatusCodeClassifier
         StatusCodes.BadWriteNotSupported,
         StatusCodes.BadNodeIdUnknown,
         StatusCodes.BadUserAccessDenied,
-        StatusCodes.BadNotWritable
+        StatusCodes.BadNotWritable,
+        StatusCodes.BadNodeIdInvalid,
+        StatusCodes.BadIndexRangeInvalid
     ];
 
     /// <summary>
