@@ -34,7 +34,8 @@ public partial class InboundStatusChild
     /// Decimal maps to Double on the wire, so this only round-trips if the path converts. The Percent
     /// deadband is what routes it to the polling fallback: the server rejects the filter with
     /// BadMonitoredItemFilterUnsupported because the variable has no EURange child. Only numeric
-    /// properties may carry it, a non-numeric one is rejected with a code that drops the item instead.
+    /// properties may carry it, and a non-numeric one is rejected with BadFilterNotAllowed instead,
+    /// which this connector classifies as transient and keeps in the subscription for retry.
     /// </summary>
     [OpcUaNode("DecimalValue", DeadbandType = DeadbandType.Percent, DeadbandValue = 1.0)]
     public partial decimal DecimalValue { get; set; }
@@ -215,7 +216,7 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
     /// <summary>
     /// Waits until both deadband-filtered properties have been moved to the polling fallback. Asserting
     /// this before any value keeps a future SDK that rejects the filter with a different status code
-    /// (which drops the item instead of polling it) from surfacing as an unexplained value timeout.
+    /// (which keeps or drops the item instead of polling it) from surfacing as an unexplained value timeout.
     /// </summary>
     public Task WaitForPolledPropertiesAsync() =>
         AsyncTestHelpers.WaitUntilAsync(

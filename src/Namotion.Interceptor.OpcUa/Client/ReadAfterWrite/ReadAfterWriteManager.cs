@@ -372,8 +372,9 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     var (nodeId, property, sentRevision) = _dueReadsList[i];
                     var reference = property.Reference;
 
-                    // A server answering without a SourceTimestamp ranks as the oldest instant, so an answer
-                    // carrying no timestamp never displaces what the model already holds.
+                    // A server answering without a SourceTimestamp ranks as the oldest instant. That only
+                    // decides anything where the timestamps decide alone below and the property carries a
+                    // stored write timestamp; a read-back the revisions rank is applied whatever it says.
                     var sourceTimestamp = result.SourceTimestamp.ToUtcDateTimeOffset();
 
                     // Ranked in two domains, because the two candidates are not always produced by the same

@@ -252,7 +252,7 @@ internal sealed class WriteRetryQueue : IDisposable
         var kept = 0;
         for (var i = 0; i < count; i++)
         {
-            // By reference: this struct carries object fields, so copying it is a block move with barriers.
+            // By reference: this struct is more than a dozen words wide, and every change is read here.
             ref readonly var change = ref _scratchBuffer[i];
 
             // Single lookup per change: the ref is only read and written before the next add.
