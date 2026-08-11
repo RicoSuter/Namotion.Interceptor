@@ -39,6 +39,9 @@ public partial class WriteIntegrityChild
     /// <summary>What the local overwrite puts back, which is the value the property already held.</summary>
     public const string LocalValue = "local";
 
+    /// <summary>The ceiling the model's own hook clamps to, so an accepted write is provably adjusted.</summary>
+    public const double AdjustedMaximum = 100d;
+
     public WriteIntegrityChild()
     {
         Numbers = [1, 2, 3, 4, 5];
@@ -97,6 +100,21 @@ public partial class WriteIntegrityChild
         if (newValue == OverwrittenValue)
         {
             LocallyOverwritten = LocalValue;
+        }
+    }
+
+    /// <summary>
+    /// Clamped by the model itself rather than by a converter. The observable outcome is the one
+    /// <see cref="ClampedValue"/> produces, so the two must be answered the same way.
+    /// </summary>
+    [Path("opc", "AdjustedValue")]
+    public partial double AdjustedValue { get; set; }
+
+    partial void OnAdjustedValueChanging(ref double newValue, ref bool cancel)
+    {
+        if (newValue > AdjustedMaximum)
+        {
+            newValue = AdjustedMaximum;
         }
     }
 

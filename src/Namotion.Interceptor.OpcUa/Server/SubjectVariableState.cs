@@ -10,7 +10,9 @@ namespace Namotion.Interceptor.OpcUa.Server;
 /// The variable node behind a subject property. The SDK commits a client write into the node before
 /// anything outside the write can apply it to the subject, so the apply happens here, inside the write:
 /// the node ends every write holding what the model holds, and the client is answered with what the model
-/// actually took rather than with what the SDK managed to store. The one exception is a model value this
+/// actually took rather than with what the SDK managed to store. Bad means the model refused the write:
+/// one it took and then adjusted is Good, because the subscription delivers the adjusted value and a
+/// client cannot act on the difference. The one exception is a model value this
 /// server cannot represent: the node then keeps the last value it could represent, at
 /// <see cref="StatusCodes.UncertainLastUsableValue"/>, while the client is still answered Good, because
 /// the model did take its write. The status code is the only place that caveat can be carried, and it
@@ -139,10 +141,20 @@ internal sealed class SubjectVariableState : BaseDataVariableState
         // runs the read chain, which is as extensible as the write chain: a throw escaping here would
         // leave the client's value on the node with its change mask set and no code left to correct it.
         object? modelValue = null;
+        var hasNodeValueChanged = false;
         try
         {
             modelValue = registeredProperty.GetValue();
-            Value = _server.ValueConverter.ConvertToNodeValue(modelValue, registeredProperty);
+            var nodeValue = _server.ValueConverter.ConvertToNodeValue(modelValue, registeredProperty);
+
+            // Whether the model took anything at all, which is what separates a write it adjusted from one
+            // it refused. Both sides are node space values, so this is the same comparison that answers
+            // whether the model holds what was requested: by reference for a scalar, by content for an
+            // array, because a model that stores a copy of what it is given would otherwise look like it
+            // had moved on every write.
+            hasNodeValueChanged = !ValuesAreEqual(nodeValue, previousValue);
+
+            Value = nodeValue;
 
             // Null whenever the current value never went through a terminal write, and the node's own
             // timestamp is a non-nullable DateTime the SDK reads as unset at MinValue. An accepted write
@@ -183,20 +195,28 @@ internal sealed class SubjectVariableState : BaseDataVariableState
         // It does not double-notify, because NodeState guards on the mask this clears.
         ClearChangeMasks(context, false);
 
-        // The comparison picks the status, never the value. The node already holds the model's value, so a
-        // comparison that answers wrong mis-reports the outcome and cannot move data. It is also what
-        // reports a cancelled write, which the apply itself signals nothing about.
+        // The answer picks the status, never the value. The node already holds the model's value, so one
+        // that answers wrong mis-reports the outcome and cannot move data. Bad is reserved for the one
+        // outcome that is a refusal, because write retries in this library are not gated by any status
+        // classifier: every Bad answer has a Namotion client re-send the value on every flush from then
+        // on, so a Bad answer for a write the model took stalls that client's write path for good.
         //
-        // What was refused is the value, not the node, its type or its access level, and a model that
-        // refuses a value now may take it once the rest of it moves, so no code a client is entitled to
-        // read as final fits. The client learns the model's own value from the node either way.
+        // Bad is BadOutOfRange because what was refused is the value, not the node, its type or its
+        // access level, and a model that refuses a value now may take it once the rest of it moves, so no
+        // code a client is entitled to read as final fits. The client learns the model's own value from
+        // the node either way.
         return isApplied &&
+               // The model holds what was asked of it.
                (ValuesMatch(modelValue, requestedValue) ||
                 // A local write landed, so what the model holds now is not this write's outcome and the
                 // mismatch is not attributable to a refusal. Erring toward Good is the safe direction: the
                 // node already carries the model's own value, so a Good answer can never move wrong data,
                 // where a Bad one has a retrying client re-send its value and clobber the local one.
-                localRevisionAfterApply != localRevisionBeforeApply)
+                localRevisionAfterApply != localRevisionBeforeApply ||
+                // The model holds something else and it moved, so it took the write and adjusted it. That
+                // is an accepted write whose adjusted value the subscription delivers, and it is what a
+                // converter that clamps produces too, which has always been answered Good.
+                hasNodeValueChanged)
             ? ServiceResult.Good
             : StatusCodes.BadOutOfRange;
     }
@@ -241,33 +261,30 @@ internal sealed class SubjectVariableState : BaseDataVariableState
     }
 
     /// <summary>
-    /// Whether the model took what the client asked for. An enum-typed node stores its value as a boxed
-    /// underlying integer while the model stores a boxed enum, and <see cref="object.Equals(object,object)"/>
-    /// across that pair is false, so every accepted enum write would otherwise be answered Bad. Only
+    /// Whether two values are equal. Arrays are compared by content, because
+    /// <see cref="object.Equals(object,object)"/> over two arrays is instance identity, so a property
+    /// that stores a copy of what it is given, which any normalising hook or copying write interceptor
+    /// does, would look like it held something else on every write.
+    /// </summary>
+    private static bool ValuesAreEqual(object? left, object? right)
+    {
+        return Equals(left, right) ||
+               (left is Array leftArray && right is Array rightArray && ArrayContentsMatch(leftArray, rightArray));
+    }
+
+    /// <summary>
+    /// Whether the model took what the client asked for. Adds the enum coercion to
+    /// <see cref="ValuesAreEqual"/>: an enum-typed node stores its value as a boxed underlying integer
+    /// while the model stores a boxed enum, and <see cref="object.Equals(object,object)"/> across that
+    /// pair is false, so every accepted enum write would otherwise be answered Bad. Only
     /// <see cref="int"/>-backed enums round-trip, which is what the OPC UA data type mapping produces.
-    /// Arrays are compared by content for the same reason: <see cref="object.Equals(object,object)"/> over
-    /// two arrays is instance identity, so a property that stores a copy of what it is given, which any
-    /// normalising hook or copying write interceptor does, would have every array write it accepts refused.
     /// </summary>
     private static bool ValuesMatch(object? modelValue, object? requestedValue)
     {
-        if (Equals(modelValue, requestedValue))
-        {
-            return true;
-        }
-
-        if (modelValue is Enum && requestedValue is not null &&
-            requestedValue.GetType() == Enum.GetUnderlyingType(modelValue.GetType()))
-        {
-            return Equals(modelValue, Enum.ToObject(modelValue.GetType(), requestedValue));
-        }
-
-        if (modelValue is Array modelArray && requestedValue is Array requestedArray)
-        {
-            return ArrayContentsMatch(modelArray, requestedArray);
-        }
-
-        return false;
+        return ValuesAreEqual(modelValue, requestedValue) ||
+               (modelValue is Enum && requestedValue is not null &&
+                requestedValue.GetType() == Enum.GetUnderlyingType(modelValue.GetType()) &&
+                Equals(modelValue, Enum.ToObject(modelValue.GetType(), requestedValue)));
     }
 
     /// <summary>

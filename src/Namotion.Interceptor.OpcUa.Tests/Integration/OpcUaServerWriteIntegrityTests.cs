@@ -42,7 +42,7 @@ public class OpcUaServerWriteIntegrityTests
         var readBack = await fixture.Session.ReadAsync(nodeId);
         Assert.Equal(WriteIntegrityFixture.InitialValue, fixture.Child.Value);
         Assert.Equal(WriteIntegrityFixture.InitialValue, readBack.Value);
-        Assert.True(StatusCode.IsBad(statusCode), $"A refused write must not be answered with '{statusCode}'.");
+        Assert.Equal((StatusCode)StatusCodes.BadOutOfRange, statusCode);
     }
 
     [Fact]
@@ -59,7 +59,27 @@ public class OpcUaServerWriteIntegrityTests
         var readBack = await fixture.Session.ReadAsync(nodeId);
         Assert.Equal(WriteIntegrityFixture.InitialValue, fixture.Child.Vetoed);
         Assert.Equal(WriteIntegrityFixture.InitialValue, readBack.Value);
-        Assert.True(StatusCode.IsBad(statusCode), $"A cancelled write must not be answered with '{statusCode}'.");
+        Assert.Equal((StatusCode)StatusCodes.BadOutOfRange, statusCode);
+    }
+
+    [Fact]
+    public async Task WhenTheModelAdjustsAnAcceptedWrite_ThenTheClientReceivesGood()
+    {
+        // Arrange
+        await using var fixture = await WriteIntegrityFixture.StartAsync(_output);
+        var nodeId = fixture.NodeId(nameof(WriteIntegrityChild.AdjustedValue));
+
+        // Act
+        var statusCode = await fixture.Session.WriteAsync(nodeId, 500d);
+
+        // Assert: the write was taken and the subscription will deliver the adjusted value, so the client
+        // must not be told it was refused. A converter that clamps the very same value is answered Good
+        // and the observable outcome is identical, so the two cannot disagree. Bad here also has a
+        // Namotion client re-send the value forever, because write retries are not gated by the status.
+        var readBack = await fixture.Session.ReadAsync(nodeId);
+        Assert.Equal(WriteIntegrityChild.AdjustedMaximum, fixture.Child.AdjustedValue);
+        Assert.Equal(WriteIntegrityChild.AdjustedMaximum, readBack.Value);
+        Assert.Equal((StatusCode)StatusCodes.Good, statusCode);
     }
 
     [Fact]
@@ -512,7 +532,7 @@ public class OpcUaServerWriteIntegrityTests
         var statusCode = await fixture.Session.WriteAsync(nodeId, "accepted");
 
         // Assert
-        Assert.True(StatusCode.IsGood(statusCode), $"An accepted write must not be answered with '{statusCode}'.");
+        Assert.Equal((StatusCode)StatusCodes.Good, statusCode);
         Assert.Equal("accepted", fixture.Child.Value);
 
         var readBack = await fixture.Session.ReadAsync(nodeId);
