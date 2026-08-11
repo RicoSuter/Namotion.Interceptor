@@ -274,7 +274,7 @@ internal sealed class OutboundWriter
             // down to a device answers with, but says the processing is not finished. A read-back firing
             // before the device write lands would apply the pre-write value, and nothing redelivers the
             // change because it counts as written and has already left the retry queue.
-            if (StatusCode.IsGood(status) && status.Code != StatusCodes.GoodCompletesAsynchronously)
+            if (StatusCode.IsGood(status) && status.CodeBits != StatusCodes.GoodCompletesAsynchronously)
             {
                 // The change's own revision, not the property's current one, see OnPropertyWritten.
                 manager.OnPropertyWritten(nodeId, change.Revision);

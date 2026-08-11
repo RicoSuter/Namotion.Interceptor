@@ -133,14 +133,18 @@ public class OutboundWriterTests
         Assert.Equal(1, manager.PendingReadCount);
     }
 
-    [Fact]
-    public async Task WhenTheServerWillCompleteTheWriteAsynchronously_ThenNoReadBackIsScheduled()
+    [Theory]
+    [InlineData(StatusCodes.GoodCompletesAsynchronously)]
+    // The low 16 bits describe the answer rather than name it, so a server free to set one must not be
+    // able to turn this into a code the check does not recognise.
+    [InlineData(StatusCodes.GoodCompletesAsynchronously | 0x0403u)]
+    public async Task WhenTheServerWillCompleteTheWriteAsynchronously_ThenNoReadBackIsScheduled(uint statusCode)
     {
         // Arrange: GoodCompletesAsynchronously is a legal Write result for a gateway queueing writes down
         // to a device, and it is good, so the change is confirmed and leaves the retry queue.
         await using var manager = CreateReadAfterWriteManager();
         var (writer, change) = CreateWriter(
-            AnswerWith(StatusCodes.GoodCompletesAsynchronously),
+            AnswerWith(statusCode),
             readAfterWriteManager: manager);
 
         TrackForReadBack(manager, change);
