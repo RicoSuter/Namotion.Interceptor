@@ -55,9 +55,16 @@ internal sealed class SubjectVariableState : BaseDataVariableState
         // route that reaches one, so copying here hands the merge a private instance. Anything else would
         // rewrite the elements of the array the subject already holds, from this thread, under readers
         // that hold no lock and see no published change.
+        //
+        // Gated on the access level because the copy runs before the base call, which is where the SDK
+        // refuses a write. Without it, any client could spend a full array copy per request on a node the
+        // server was never going to let it write. UserAccessLevel is deliberately not part of the gate: a
+        // handler decides it per read, so reading it here could skip the copy for a write base then makes.
         Array? mergeSource = null;
         var masksBeforeCopy = ChangeMasks;
-        if (indexRange != NumericRange.Empty && Value is Array arrayValue)
+        if (indexRange != NumericRange.Empty &&
+            (AccessLevel & AccessLevels.CurrentWrite) != 0 &&
+            Value is Array arrayValue)
         {
             mergeSource = arrayValue;
             Value = CopyForMerge(arrayValue);
