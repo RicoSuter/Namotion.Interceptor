@@ -745,8 +745,8 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         manager.RegisterProperty(nodeId, property, requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(1));
         _testSubject.FirstName = "local";
 
-        // Act - a revision above every local one, so the write being verified is the last local write
-        // and the read-back is ranked on timestamps alone.
+        // Act - a revision above every local one, so nothing local outranks the write being verified and
+        // the read-back is applied. Its timestamp is what the conversion has to survive producing.
         manager.OnPropertyWritten(nodeId, sentRevision: long.MaxValue);
 
         // Assert

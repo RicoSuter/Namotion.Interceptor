@@ -210,8 +210,9 @@ internal sealed class OutboundWriter
     /// <remarks>
     /// Requires <paramref name="changes"/> to carry at most one change per property. The refusals are
     /// separated out by position rather than by identity, so a property appearing twice would have the
-    /// wrong occurrence taken for the refused one. Nothing here enforces that: the guarantee comes from
-    /// the collapses in <c>WriteRetryQueue</c> and <c>SubjectSourceBase</c>, one property per flush.
+    /// wrong occurrence taken for the refused one. Nothing here enforces that: every path here collapses
+    /// per property first, an ordinary flush in <c>ChangeMerger</c>, a commit in <c>SubjectTransaction</c>,
+    /// a re-send in <c>WriteRetryQueue</c> and a resumed park in <c>SubjectSourceBase</c>.
     /// </remarks>
     private void NotifyPropertiesWritten(ReadOnlyMemory<SubjectPropertyChange> changes, in WriteResult result)
     {
