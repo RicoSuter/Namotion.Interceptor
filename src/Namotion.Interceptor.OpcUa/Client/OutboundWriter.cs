@@ -37,8 +37,10 @@ internal sealed class OutboundWriter
     public int WriteBatchSize => (int)(_sessionProvider()?.OperationLimits?.MaxNodesPerWrite ?? 0);
 
     /// <summary>
-    /// Writes one batch. A refusal the server named per node comes back with those changes enumerated;
-    /// a call that never got an answer comes back with none, which is what tells the batching loop to
+    /// Writes one batch. A failure these changes themselves caused comes back with them enumerated,
+    /// whether the server refused them per node, the value converter would not convert one, or the
+    /// request they encode cannot be sent at all; the batches behind them are then still attempted.
+    /// A call that never got an answer comes back with none, which is what tells the batching loop to
     /// stop rather than spend another operation timeout per remaining batch on a session that is not
     /// answering.
     /// </summary>
@@ -77,7 +79,7 @@ internal sealed class OutboundWriter
         }
         catch (InvalidCastException ex)
         {
-            _logger.LogError(ex, "OPC UA WriteAsync returned unexpected response type (issue #287).");
+            _logger.LogError(ex, "OPC UA WriteAsync returned a response that is not a WriteResponse.");
             return WriteResult.Failure(ReadOnlyMemory<SubjectPropertyChange>.Empty, ex);
         }
         catch (ServiceResultException ex) when (IsContentDependentFault(ex.StatusCode))

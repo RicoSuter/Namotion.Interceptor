@@ -444,6 +444,11 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             }
 
             await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+
+            // These run after the bytes are on the wire, so a throw here reports an already-sent batch
+            // as an unanswered call. Only an out-of-memory buffer rent or a throwing ILogger gets that
+            // far, and neither could reach a corrected result anyway: the catch below allocates and
+            // logs before it returns.
             MaybeShrinkSendBuffer();
             _logger.LogDebug("Sent update successfully");
             return WriteResult.Success;
