@@ -84,6 +84,33 @@ public class OpcUaReadAfterWriteTests
     }
 
     [Fact]
+    public async Task WhenANotificationSampledBeforeTheWriteCommitsAfterIt_ThenTheReadBackIsStillApplied()
+    {
+        // Arrange
+        await using var fixture = await ReadAfterWriteFixture.StartAsync(_output);
+        var beforeTheWrite = DateTime.UtcNow;
+        fixture.ClientChild.Trigger = "command";
+        await fixture.WaitForScheduledReadBackAsync();
+
+        // Act: a sample the server took before our write, delivered after it. It commits from the
+        // source at a revision above the local write's and leaves its own pre-write timestamp behind,
+        // so counting source commits when asking whether a newer local write landed would rank this
+        // read-back as superseded by a value that is in fact older than it.
+        fixture.PublishToNode("sampled-before-the-write", StatusCodes.UncertainLastUsableValue, beforeTheWrite);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => fixture.ClientChild.Trigger == "sampled-before-the-write",
+            message: "the status change should carry the stale sample to the client");
+
+        // The node then moves on without touching the status, so no notification follows and this
+        // value reaches the client only if the read-back applies it.
+        fixture.PublishToNode("after-the-write", StatusCodes.UncertainLastUsableValue, DateTime.UtcNow);
+
+        // Assert
+        await fixture.WaitForAppliedReadBackAsync();
+        Assert.Equal("after-the-write", fixture.ClientChild.Trigger);
+    }
+
+    [Fact]
     public async Task WhenAWriteInTheBatchIsRefused_ThenNoReadBackIsScheduledForIt()
     {
         // Arrange

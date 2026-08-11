@@ -649,6 +649,80 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         Assert.Equal(0, metrics.Failed);
     }
 
+    /// <summary>
+    /// A connected session that answers every read with the same value and source timestamp.
+    /// </summary>
+    private static Mock<ISession> CreateSessionReturning(object? value, DateTime sourceTimestamp)
+    {
+        var session = new Mock<ISession>();
+        session.SetupGet(s => s.Connected).Returns(true);
+        session
+            .Setup(s => s.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection nodesToRead, CancellationToken _) =>
+            {
+                var results = new DataValueCollection(nodesToRead.Count);
+                for (var i = 0; i < nodesToRead.Count; i++)
+                {
+                    results.Add(new DataValue
+                    {
+                        Value = value,
+                        StatusCode = StatusCodes.Good,
+                        SourceTimestamp = sourceTimestamp
+                    });
+                }
+
+                return Task.FromResult(new ReadResponse
+                {
+                    ResponseHeader = new ResponseHeader(),
+                    Results = results,
+                    DiagnosticInfos = []
+                });
+            });
+
+        return session;
+    }
+
+    [Fact]
+    public async Task WhenTheWrittenChangeCarriedNoRevisionAndALocalWriteFollowed_ThenTheReadBackIsSkipped()
+    {
+        // Arrange - a rollback and a transaction snapshot both reach a source as a change with no
+        // revision, and nothing about them can be ranked by revision, so the write timestamps have to
+        // separate the read-back from a local write that landed after it.
+        var registeredSubject = new RegisteredSubject(_testSubject);
+        var property = registeredSubject.TryGetProperty(nameof(TestPerson.FirstName))!;
+        var nodeId = new NodeId("Revisionless", 2);
+        var session = CreateSessionReturning("from-server", DateTime.UtcNow.AddMinutes(-1));
+
+        var metrics = new ReadAfterWriteMetrics();
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(200)),
+            metrics,
+            reportError: static _ => { },
+            NullLogger.Instance);
+
+        manager.RegisterProperty(nodeId, property, requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(1));
+
+        // Act - the local write commits after the read-back is scheduled, so it is newer than anything
+        // the server's answer can carry.
+        manager.OnPropertyWritten(nodeId, sentRevision: 0);
+        _testSubject.FirstName = "newer-local";
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => metrics.Executed + metrics.Skipped >= 1,
+            message: "the read-back should have run");
+
+        Assert.Equal(1, metrics.Skipped);
+        Assert.Equal("newer-local", _testSubject.FirstName);
+    }
+
     [Fact]
     public async Task OnPropertyWritten_AfterDispose_IsIgnored()
     {

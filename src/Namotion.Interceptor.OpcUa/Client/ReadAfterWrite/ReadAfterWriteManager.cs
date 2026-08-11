@@ -358,6 +358,8 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     var (nodeId, property, sentRevision) = _dueReadsList[i];
                     var reference = property.Reference;
 
+                    var sourceTimestamp = (DateTimeOffset)result.SourceTimestamp;
+
                     // Ranked in two domains, because the two candidates are not always produced by the same
                     // clock. A local write that committed after the one this read-back verifies is newer
                     // than anything the server can have seen, and revisions order it without a clock at all.
@@ -370,10 +372,15 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
                     // Otherwise the last commit may have come from a source, and only then is the stored
                     // write timestamp the server's own SourceTimestamp, which is what makes comparing it
-                    // against the read-back's a comparison of one clock with itself.
-                    var sourceTimestamp = (DateTimeOffset)result.SourceTimestamp;
-                    if (reference.TryGetWriteState(true, out var lastCommitRevision, out _) &&
-                        lastCommitRevision > localRevision &&
+                    // against the read-back's a comparison of one clock with itself. A change that carried
+                    // no revision leaves the question above unanswerable, so for it the comparison decides
+                    // alone, which is the only ranking this path had before revisions ranked it. Dropping
+                    // that fallback would let the read-back apply a pre-write value over a newer local write.
+                    var timestampDecidesAlone = sentRevision == 0 ||
+                        (reference.TryGetWriteState(true, out var lastCommitRevision, out _) &&
+                         lastCommitRevision > localRevision);
+
+                    if (timestampDecidesAlone &&
                         reference.TryGetWriteTimestamp() is { } writeTimestamp &&
                         writeTimestamp >= sourceTimestamp)
                     {
