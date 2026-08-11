@@ -415,55 +415,66 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             var messageCount = 0;
             try
             {
-                var changesSpan = changes.Span;
-
-                // Build all messages first
-                for (var i = 0; i < length; i++)
+                try
                 {
-                    var change = changesSpan[i];
-                    var property = change.Property.TryGetRegisteredProperty();
-                    if (property is null || property.CanContainSubjects)
+                    var changesSpan = changes.Span;
+
+                    // Build all messages first
+                    for (var i = 0; i < length; i++)
                     {
-                        continue;
+                        var change = changesSpan[i];
+                        var property = change.Property.TryGetRegisteredProperty();
+                        if (property is null || property.CanContainSubjects)
+                        {
+                            continue;
+                        }
+
+                        var (topic, mapping) = TryGetTopicForProperty(change.Property, property);
+                        if (topic is null) continue;
+
+                        byte[] payload;
+                        try
+                        {
+                            payload = _configuration.ValueConverter.Serialize(
+                                change.GetNewValue<object?>(),
+                                property.Type);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to serialize value for property {PropertyName}.", property.Name);
+                            continue;
+                        }
+
+                        var message = new MqttApplicationMessage
+                        {
+                            Topic = topic,
+                            PayloadSegment = new ArraySegment<byte>(payload),
+                            QualityOfServiceLevel = mapping?.QualityOfService ?? _configuration.DefaultQualityOfService,
+                            Retain = mapping?.Retain ?? _configuration.UseRetainedMessages
+                        };
+
+                        if (userPropertiesArray is not null)
+                        {
+                            var userProps = UserPropertiesPool.Rent();
+                            userProps.Clear();
+                            userProps.Add(new MqttUserProperty(
+                                _configuration.SourceTimestampPropertyName!,
+                                _configuration.SourceTimestampSerializer(change.ChangedTimestamp)));
+                            message.UserProperties = userProps;
+                            userPropertiesArray[messageCount] = userProps;
+                        }
+
+                        changeIndices[messageCount] = i;
+                        messages[messageCount++] = message;
                     }
-
-                    var (topic, mapping) = TryGetTopicForProperty(change.Property, property);
-                    if (topic is null) continue;
-
-                    byte[] payload;
-                    try
-                    {
-                        payload = _configuration.ValueConverter.Serialize(
-                            change.GetNewValue<object?>(),
-                            property.Type);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to serialize value for property {PropertyName}.", property.Name);
-                        continue;
-                    }
-
-                    var message = new MqttApplicationMessage
-                    {
-                        Topic = topic,
-                        PayloadSegment = new ArraySegment<byte>(payload),
-                        QualityOfServiceLevel = mapping?.QualityOfService ?? _configuration.DefaultQualityOfService,
-                        Retain = mapping?.Retain ?? _configuration.UseRetainedMessages
-                    };
-
-                    if (userPropertiesArray is not null)
-                    {
-                        var userProps = UserPropertiesPool.Rent();
-                        userProps.Clear();
-                        userProps.Add(new MqttUserProperty(
-                            _configuration.SourceTimestampPropertyName!,
-                            _configuration.SourceTimestampSerializer(change.ChangedTimestamp)));
-                        message.UserProperties = userProps;
-                        userPropertiesArray[messageCount] = userProps;
-                    }
-
-                    changeIndices[messageCount] = i;
-                    messages[messageCount++] = message;
+                }
+                catch (Exception ex)
+                {
+                    // The mapper and the source-timestamp serializer are user extension points and run
+                    // before anything is published, so this is these changes being refused, not a call
+                    // that failed. Reporting it as a failed call would condemn every batch behind them
+                    // unattempted, on this flush and on every retry of it.
+                    return WriteResult.Failure(changes, ex);
                 }
 
                 if (messageCount <= 0)
@@ -536,8 +547,9 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         }
         catch (Exception ex)
         {
-            // Only the per-message publishing above answers about a named change, and it enumerates its
-            // own failures, so anything reaching here is the call itself failing.
+            // Everything that answers about a named change enumerates its own failures: the publishing
+            // loop names the messages it did not get out, and the message-building step names the whole
+            // batch. What is left here is the connection itself, so no change got an answer.
             return WriteResult.CallFailed(ex);
         }
     }
