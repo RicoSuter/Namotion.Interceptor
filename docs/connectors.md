@@ -358,9 +358,18 @@ public sealed class DatabaseSource : SubjectSourceBase
             await WriteToDatabaseAsync(changes, cancellationToken);
             return WriteResult.Success;
         }
+        catch (DbException ex) when (ex.IsTransient)
+        {
+            // The call itself failed, so no change got an answer. Naming none stops the
+            // flush instead of spending another connection timeout on each batch behind it.
+            return WriteResult.CallFailed(ex);
+        }
         catch (Exception ex)
         {
-            return WriteResult.CallFailed(ex);
+            // The database answered and refused these changes: a constraint violation, a
+            // type mismatch, a serializer. Naming them keeps the batches behind them
+            // attempted, which a blanket CallFailed would condemn on every retry.
+            return WriteResult.Failure(changes, ex);
         }
     }
 }
