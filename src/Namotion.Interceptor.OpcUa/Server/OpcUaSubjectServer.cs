@@ -168,9 +168,26 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                     // this runs per change at the connector's full throughput.
                     try
                     {
-                        var value = change.GetNewValue<object?>();
-                        var convertedValue = _configuration.ValueConverter
-                            .ConvertToNodeValue(value, registeredProperty);
+                        object? convertedValue;
+                        try
+                        {
+                            convertedValue = _configuration.ValueConverter
+                                .ConvertToNodeValue(change.GetNewValue<object?>(), registeredProperty);
+                        }
+                        catch (Exception e) when (e is not OperationCanceledException)
+                        {
+                            // Separate from the rest, because this is the one failure that leaves the node
+                            // serving a value the model has moved past. Nothing retries the change, so it
+                            // serves it until the property changes again, and Good would have subscribers
+                            // read a frozen value as live data. Same answer the inbound write path gives
+                            // the same condition. Flushed, so the drop reaches them at all.
+                            node.StatusCode = StatusCodes.UncertainLastUsableValue;
+                            node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
+                            _logger.LogError(e,
+                                "Failed to represent the value of property '{Property}' on its OPC UA node.",
+                                change.Property.Name);
+                            continue;
+                        }
 
                         node.Value = convertedValue;
                         node.Timestamp = change.ChangedTimestamp.UtcDateTime;

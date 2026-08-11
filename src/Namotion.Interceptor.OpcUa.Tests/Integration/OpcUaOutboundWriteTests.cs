@@ -1,6 +1,7 @@
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Transactions;
+using Opc.Ua;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
@@ -38,6 +39,30 @@ public class OpcUaOutboundWriteTests
         await AsyncTestHelpers.WaitUntilAsync(
             () => fixture.ServerRoot.Child?.Other == "outbound-survivor",
             message: "the batch behind the one that could not be converted should still have been written");
+    }
+
+    [Fact]
+    public async Task WhenAChangesConversionThrows_ThenItsNodeReportsUncertainAndIsFlushed()
+    {
+        // Arrange
+        await using var fixture = await WriteIntegrityFixture.StartAsync(
+            _output, valueConverter: new ThrowOnOutboundSentinelConverter("poison"));
+
+        var node = fixture.Node(nameof(WriteIntegrityChild.Value));
+
+        // Act
+        fixture.Child.Value = "poison";
+
+        // Assert: nothing retries the change, so the node serves its previous value from here on. It must
+        // stop claiming that value is current, which is the rule the inbound write path already applies to
+        // this exact condition. The cleared mask is what says the drop reached the monitored items rather
+        // than sitting on the node waiting for a flush that only a later change would bring.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => node.StatusCode == StatusCodes.UncertainLastUsableValue &&
+                  node.ChangeMasks == NodeStateChangeMasks.None,
+            timeout: TimeSpan.FromSeconds(10),
+            message: "the node should have dropped to UncertainLastUsableValue and been flushed");
+        Assert.Equal(WriteIntegrityFixture.InitialValue, node.Value);
     }
 
     [Fact]
