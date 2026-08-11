@@ -175,8 +175,10 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             {
                 _metrics.RecordCoalesced();
 
-                // Two flushes can complete out of order, so the highest revision is the last write we
-                // sent, and that is what the surviving read-back has to be ranked against.
+                // Never lower the bar the surviving read-back is ranked against. Writes to one source
+                // are serialized, so the pending revision is already the newest write sent; a later
+                // write carrying a lower revision, or none at all, would otherwise make the staleness
+                // check below skip less readily and let the read-back revert a local write.
                 sentRevision = Math.Max(sentRevision, pending.SentRevision);
             }
             else
@@ -319,6 +321,8 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         var successCount = 0;
         var failedCount = 0;
         var skippedCount = 0;
+        var notAppliedCount = 0;
+        var answeredCount = 0;
 
         try
         {
@@ -350,15 +354,16 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 }
 
                 var receivedTimestamp = DateTimeOffset.UtcNow;
+                answeredCount = Math.Min(response.Results.Count, dueCount);
 
-                for (var i = 0; i < response.Results.Count && i < dueCount; i++)
+                for (var i = 0; i < answeredCount; i++)
                 {
                     var result = response.Results[i];
 
                     // Uncertain is a reading the server doubts, not a missing one. Bad may carry no value at all.
                     if (!StatusCode.IsNotBad(result.StatusCode))
                     {
-                        failedCount++;
+                        notAppliedCount++;
                         continue;
                     }
 
@@ -407,6 +412,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     {
                         // Contained per item: applying is local, so its failure says nothing about how the
                         // server answers reads and must not count against the circuit breaker that tracks that.
+                        notAppliedCount++;
                         _logger.LogError(e, "Failed to apply a read-after-write value for '{PropertyName}' ({NodeId}).",
                             property.Name, nodeId);
                     }
@@ -441,9 +447,12 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
             // Logging provider failures are not read failures. Let them propagate to the timer callback's
             // unexpected-error guard without replaying metrics or changing the circuit state.
+            // The four counts partition the due reads, so a read that went missing shows up as a gap
+            // rather than being silently absent from the ratio.
             _logger.LogDebug(
-                "Completed {SuccessCount}/{TotalCount} read-after-writes ({SkippedCount} skipped as stale).",
-                successCount, dueCount, skippedCount);
+                "Completed {SuccessCount}/{TotalCount} read-after-writes ({SkippedCount} skipped as stale, " +
+                "{NotAppliedCount} not applied, {UnansweredCount} unanswered).",
+                successCount, dueCount, skippedCount, notAppliedCount, dueCount - answeredCount);
         }
         finally
         {

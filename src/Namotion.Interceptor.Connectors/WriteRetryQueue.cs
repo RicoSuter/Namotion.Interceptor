@@ -235,7 +235,9 @@ internal sealed class WriteRetryQueue : IDisposable
     /// Two changes merge only when both carry a revision. A change built outside a terminal write carries
     /// none, orders against nothing, and passes the delivery filter's supersession check unconditionally,
     /// so merging one away could let a later reconcile restore an older parked write over a newer local
-    /// one. Nothing in this queue may lose its revision.
+    /// one. This collapse therefore never merges such a pair, it splits the batch instead. The parking
+    /// collapse in <c>SubjectSourceBase</c> answers the same problem the other way, by dropping the
+    /// revision from the merged survivor, so revisionless changes do reach this queue.
     /// </para>
     /// </remarks>
     private int CollapsePerProperty(int count)

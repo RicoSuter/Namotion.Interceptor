@@ -184,6 +184,12 @@ internal sealed class OutboundWriter
     /// apply the server's pre-write value over the local one the retry queue still holds and will re-send,
     /// so the model would flip to the stale value and back.
     /// </summary>
+    /// <remarks>
+    /// Requires <paramref name="changes"/> to carry at most one change per property. The refusals are
+    /// separated out by position rather than by identity, so a property appearing twice would have the
+    /// wrong occurrence taken for the refused one. Nothing here enforces that: the guarantee comes from
+    /// the collapses in <c>WriteRetryQueue</c> and <c>SubjectSourceBase</c>, one property per flush.
+    /// </remarks>
     private void NotifyPropertiesWritten(ReadOnlyMemory<SubjectPropertyChange> changes, in WriteResult result)
     {
         var manager = _sessionManager.ReadAfterWriteManager;
@@ -196,7 +202,10 @@ internal sealed class OutboundWriter
         var failedCount = failedChanges.IsDefaultOrEmpty ? 0 : failedChanges.Length;
         if (failedCount == 0 && result.Error is not null)
         {
-            // A batch that failed without enumerating its failures failed whole.
+            // Only the caller's own partial-failure results reach this, so an error with nothing
+            // enumerated means the server answered with more results than nodes were requested and
+            // ProcessWriteResults could not attribute the bad ones. Which changes reached the server
+            // is then unknown, and a read-back for one that did not would revert it.
             return;
         }
 

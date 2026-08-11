@@ -223,9 +223,10 @@ internal class SubscriptionManager : IAsyncDisposable
                 if (!StatusCode.IsNotBad(item.Value.StatusCode))
                 {
                     // Debug, not Warning: a Bad status is sticky, so a permanently faulted sensor would
-                    // repeat this at the publishing rate. Guarded because that same stickiness would
-                    // otherwise pay for the params array and the boxes on every notification, at every
-                    // log level, on a path that is allocation-free by design.
+                    // repeat this at whatever rate its path delivers at. Guarded because that same
+                    // stickiness would otherwise pay for the params array and the boxes on every
+                    // delivery, at every log level, on a per-item path. The polling path skips a Bad
+                    // value under the same rule.
                     if (_logger.IsEnabled(LogLevel.Debug))
                     {
                         _logger.LogDebug("Skipped an inbound value for '{PropertyName}' (ClientHandle: {ClientHandle}): {Status}.",
