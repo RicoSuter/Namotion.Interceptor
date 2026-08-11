@@ -19,6 +19,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
     private readonly TestLogger _logger;
     private readonly Action<OpcUaClientConfiguration>? _configureClient;
+    private readonly ILoggerProvider? _extraLoggerProvider;
     private IHost? _host;
     private IInterceptorSubjectContext? _context;
     private int _disposed; // 0 = not disposed, 1 = disposed
@@ -29,10 +30,14 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
     public IOpcUaSubjectClientSource? Source { get; private set; }
 
-    public OpcUaTestClient(TestLogger logger, Action<OpcUaClientConfiguration>? configureClient = null)
+    public OpcUaTestClient(
+        TestLogger logger,
+        Action<OpcUaClientConfiguration>? configureClient = null,
+        ILoggerProvider? extraLoggerProvider = null)
     {
         _logger = logger;
         _configureClient = configureClient;
+        _extraLoggerProvider = extraLoggerProvider;
     }
 
     public async Task StartAsync(
@@ -55,6 +60,11 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
             logging.ClearProviders();
             logging.SetMinimumLevel(LogLevel.Debug);
             logging.AddXunit(_logger, "Client", LogLevel.Information);
+
+            if (_extraLoggerProvider is not null)
+            {
+                logging.AddProvider(_extraLoggerProvider);
+            }
         });
 
         _context = InterceptorSubjectContext

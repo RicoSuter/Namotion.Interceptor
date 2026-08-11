@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Interceptors;
@@ -142,7 +143,8 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
         ITestOutputHelper output,
         OpcUaValueConverter? valueConverter = null,
         IWriteInterceptor? clientInterceptor = null,
-        bool waitForInitialValue = true)
+        bool waitForInitialValue = true,
+        ILoggerProvider? extraClientLoggerProvider = null)
     {
         var logger = new TestLogger(output);
         var port = await OpcUaTestPortPool.AcquireAsync();
@@ -158,7 +160,7 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
                 baseAddress: port.BaseAddress,
                 certificateStoreBasePath: port.CertificateStoreBasePath);
 
-            client = new OpcUaTestClient<InboundStatusRoot>(logger, configureClient: configuration =>
+            client = new OpcUaTestClient<InboundStatusRoot>(logger, extraLoggerProvider: extraClientLoggerProvider, configureClient: configuration =>
             {
                 // The minimum the configuration allows, so a polled property does not add seconds per test.
                 configuration.PollingInterval = TimeSpan.FromMilliseconds(100);
@@ -226,6 +228,12 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
     /// </summary>
     public void LimitWritesToOneNodePerRequest() =>
         _client.Source!.CurrentSession!.OperationLimits.MaxNodesPerWrite = 1;
+
+    /// <summary>
+    /// The polled reads answered so far, which a test can use as a clock over poll cycles instead of
+    /// waiting for a fixed span.
+    /// </summary>
+    public long PolledReadCount => _client.Source!.Diagnostics.Polling?.TotalSuccessfulReads ?? 0;
 
     public Task WaitForClientValueAsync(string expected) =>
         AsyncTestHelpers.WaitUntilAsync(

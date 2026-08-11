@@ -120,6 +120,36 @@ public class OpcUaInboundStatusTests
     }
 
     [Fact]
+    public async Task WhenAPolledValueCannotBeConverted_ThenTheFailureIsNotLoggedOnEveryPoll()
+    {
+        // Arrange: the change-detection cache is deliberately left behind when a conversion fails, so a
+        // converter that starts working still recovers the value. Every later poll therefore retries the
+        // same failing conversion, and at the default one second interval an unguarded log never stops.
+        var conversionFailures = new CountingLoggerProvider("Failed to convert a polled value");
+        await using var fixture = await InboundStatusFixture.StartAsync(
+            _output,
+            valueConverter: new ThrowOnSentinelConverter(42.5d),
+            extraClientLoggerProvider: conversionFailures);
+        await fixture.WaitForPolledPropertiesAsync();
+
+        // Act
+        OpcUaNodeStatusDriver.Publish(
+            fixture.ServerService, fixture.DoubleProperty, 42.5d, StatusCodes.Good);
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => conversionFailures.Count >= 1,
+            message: "the failing conversion should be reported once");
+
+        // Assert: the polled read count is the clock, so this spans real poll cycles without a delay.
+        var readsWhenFirstReported = fixture.PolledReadCount;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => fixture.PolledReadCount >= readsWhenFirstReported + 20,
+            message: "further polls should have retried the same failing conversion");
+
+        Assert.Equal(1, conversionFailures.Count);
+    }
+
+    [Fact]
     public async Task WhenOnePropertysApplyThrowsDuringInitialLoad_ThenTheSourceStillReachesSynchronized()
     {
         // Arrange: the interceptor rejects the value both string nodes hold on the server, so applying

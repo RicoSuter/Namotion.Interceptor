@@ -17,6 +17,12 @@ namespace Namotion.Interceptor.OpcUa.Client.Polling;
 /// </summary>
 internal sealed class PollingManager : IAsyncDisposable
 {
+    /// <summary>
+    /// How long one node's conversion failures stay quiet after being reported. A value the converter
+    /// refuses is retried at the polling rate, which defaults to once a second and never stops.
+    /// </summary>
+    private const long ConversionErrorLogIntervalMilliseconds = 5000;
+
     private readonly OpcUaSubjectClientSource _source;
     private readonly ILogger _logger;
     private readonly Func<ISession?> _sessionProvider;
@@ -403,9 +409,21 @@ internal sealed class PollingManager : IAsyncDisposable
             }
             catch (Exception e)
             {
-                // Before the cache update on purpose: updating first would make the next poll see no change
-                // and lose this value permanently.
-                _logger.LogError(e, "Failed to convert a polled value for {NodeId}.", pollingItem.NodeId);
+                // The cache stays behind on purpose: advancing it would make the next poll see no change
+                // and lose this value permanently, so a converter that starts working could not recover
+                // it. That is also why the same value is retried at the polling rate, which is why only
+                // the log needs holding back.
+                var now = Environment.TickCount64;
+                if (now - pollingItem.LastConversionErrorTimestamp >= ConversionErrorLogIntervalMilliseconds)
+                {
+                    _pollingItems.TryUpdate(
+                        pollingItem.NodeId.ToString(),
+                        pollingItem with { LastConversionErrorTimestamp = now },
+                        pollingItem);
+
+                    _logger.LogError(e, "Failed to convert a polled value for {NodeId}.", pollingItem.NodeId);
+                }
+
                 return;
             }
 
@@ -533,6 +551,7 @@ internal sealed class PollingManager : IAsyncDisposable
     private record struct PollingItem(
         NodeId NodeId,
         RegisteredSubjectProperty Property,
-        object? LastValue
+        object? LastValue,
+        long LastConversionErrorTimestamp = 0
     );
 }
