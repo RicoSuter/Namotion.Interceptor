@@ -261,7 +261,7 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 **`IsOperational` here means the server has started and is accepting client connections.** The server restarts itself internally on failure, and the two timestamps split along that line: `OperationalChangeTime` moves on every internal restart, while the inherited `StartTime` marks the current run of the hosted service and does not.
 
-This server measures both throughput directions, so `Throughput.IncomingPerSecond` (client writes to the server) and `Throughput.OutgoingPerSecond` (subject changes pushed to OPC UA nodes) are never `null` here. `OutboundChanges` is the change queue feeding the address space, and its `Capacity` is `null` because that queue is unbounded.
+This server measures both throughput directions, so `Throughput.IncomingPerSecond` (client writes that reached a registered property, counted once each) and `Throughput.OutgoingPerSecond` (subject changes pushed to OPC UA nodes) are never `null` here. `OutboundChanges` is the change queue feeding the address space, and its `Capacity` is `null` because that queue is unbounded.
 
 | Member | Meaning |
 |---|---|

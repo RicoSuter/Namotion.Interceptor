@@ -60,8 +60,9 @@ skips as its own echo has already reached the destination when it is applied. Th
 that differently, and the difference is load-bearing:
 
 - **OPC UA** applies with `SetValueFromSource(this, ...)`, so the apply *is* echo-skipped. It is sound
-  because the SDK wrote the node before `StateChanged` fired, so the value is already there. Without
-  `SourceValuesAreSettled` the two stores diverge permanently, which is the failure this rule was added for.
+  because the apply runs inside the node's own write, by which point the SDK has already committed the
+  value into the node, so the value is already there. Without `SourceValuesAreSettled` the two stores
+  diverge permanently, which is the failure this rule was added for.
 - **MQTT and WebSocket** apply under a foreign source, `_mqttClientSource` and the originating connection,
   so nothing is echo-skipped and the precondition holds vacuously. Their failure without `SourceValuesAreSettled` is
   milder and different: within one flush the merger already picks by revision, so it only bites when the
