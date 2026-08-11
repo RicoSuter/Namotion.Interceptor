@@ -36,6 +36,23 @@ public class OpcUaInboundStatusTests
     }
 
     [Fact]
+    public async Task WhenASubscriptionNotificationIsBad_ThenTheSkipIsCounted()
+    {
+        // Arrange: a skip that is only logged at Debug leaves a permanently faulted sensor invisible,
+        // so the count is what a monitoring consumer can see at the default log level.
+        await using var fixture = await InboundStatusFixture.StartAsync(_output);
+        var skippedBeforeTheNotification = fixture.SkippedBadSubscriptionValues;
+
+        // Act
+        fixture.PublishPair("from-faulted-sensor", StatusCodes.BadDeviceFailure, "sentinel", StatusCodes.Good);
+
+        // Assert: at least one, because a server may resend the same Bad value.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => fixture.SkippedBadSubscriptionValues > skippedBeforeTheNotification,
+            message: "the skipped Bad value should be counted on the client diagnostics");
+    }
+
+    [Fact]
     public async Task WhenOneValuesConversionThrows_ThenTheRestOfTheNotificationIsStillApplied()
     {
         // Arrange

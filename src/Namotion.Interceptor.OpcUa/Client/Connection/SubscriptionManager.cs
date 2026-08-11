@@ -61,6 +61,13 @@ internal class SubscriptionManager : IAsyncDisposable
 
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
 
+    private long _skippedBadValues;
+
+    /// <summary>
+    /// Gets the number of notified values skipped because the server marked them Bad.
+    /// </summary>
+    public long SkippedBadValues => Interlocked.Read(ref _skippedBadValues);
+
     /// <summary>
     /// Gets the current list of subscriptions (thread-safe collection).
     /// </summary>
@@ -226,11 +233,16 @@ internal class SubscriptionManager : IAsyncDisposable
                 // Uncertain is a reading the server doubts, not a missing one. Bad may carry no value at all.
                 if (!StatusCode.IsNotBad(item.Value.StatusCode))
                 {
+                    // Counted, because the log below is the only other trace and it is off by default,
+                    // which would leave a permanently faulted sensor invisible: the property simply
+                    // stops changing while the source stays Synchronized. The polling path skips a Bad
+                    // value under the same rule and counts it as a failed read.
+                    Interlocked.Increment(ref _skippedBadValues);
+
                     // Debug, not Warning: a Bad status is sticky, so a permanently faulted sensor would
                     // repeat this at whatever rate its path delivers at. Guarded because that same
                     // stickiness would otherwise pay for the params array and the boxes on every
-                    // delivery, at every log level, on a per-item path. The polling path skips a Bad
-                    // value under the same rule.
+                    // delivery, at every log level, on a per-item path.
                     if (_logger.IsEnabled(LogLevel.Debug))
                     {
                         _logger.LogDebug("Skipped an inbound value for '{PropertyName}' (ClientHandle: {ClientHandle}): {Status}.",

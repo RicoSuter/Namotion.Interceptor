@@ -59,6 +59,14 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     public int MonitoredItemCount => ActiveSessionManager?.SubscriptionManager.MonitoredItemCount ?? 0;
 
     /// <summary>
+    /// Gets the number of values delivered by a subscription that were skipped because the server marked them Bad.
+    /// The property keeps its last value, so a rising count is what tells a faulted node from a quiet one.
+    /// The polled equivalent is <see cref="PollingDiagnostics.TotalFailedReads"/>, and like it this counts
+    /// from the moment the source started listening, surviving a reconnection but not a restart.
+    /// </summary>
+    public long SkippedBadSubscriptionValues => ActiveSessionManager?.SubscriptionManager.SkippedBadValues ?? 0;
+
+    /// <summary>
     /// Gets the reconnection history.
     /// </summary>
     public ReconnectDiagnostics Reconnects { get; }

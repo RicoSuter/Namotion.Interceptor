@@ -268,7 +268,7 @@ public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
 Server values reach the model through four paths: subscription notifications, [polling](#polling-fallback-for-unsupported-nodes), the state load that runs on connect and after every reconnection, and [read-after-write](#read-after-write-fallback). All four handle a value the same way:
 
 - A value whose status is **Good** or **Uncertain** is applied. Uncertain means the server doubts the quality of the reading, not that there is none, and it is routine on industrial servers.
-- A value whose status is **Bad** is skipped and the property keeps the value it already has. A Bad status usually carries no value at all, so applying it would clear the property. Subscriptions and polling log the skipped node at Debug, so a faulted node stays distinguishable there from one that simply stopped changing. The state load reports only how many of the requested nodes came back readable, and read-after-write counts it among the not-applied read-backs of its completion log without naming the node.
+- A value whose status is **Bad** is skipped and the property keeps the value it already has. A Bad status usually carries no value at all, so applying it would clear the property. Subscriptions and polling log the skipped node at Debug, so a faulted node stays distinguishable there from one that simply stopped changing, and both count the skip at any log level (`SkippedBadSubscriptionValues` and `Polling.FailedReads`, see [Diagnostics](#diagnostics)). The state load reports only how many of the requested nodes came back readable, and read-after-write counts it among the not-applied read-backs of its completion log without naming the node.
 - Values are converted with the configured `ValueConverter` (see [Custom Value Converter](connectors-opcua.md#custom-value-converter)), so `decimal`, arrays and custom conversions behave the same whichever path delivered the value.
 - A value that fails to convert or to apply is logged and skipped on its own. The other values delivered in the same notification, poll, load or read-back are still applied.
 
@@ -680,6 +680,7 @@ This client measures both throughput directions, so `Throughput.IncomingPerSecon
 | `SessionId` | The current session identifier, `null` when there is no session. |
 | `SubscriptionCount` | Active OPC UA subscriptions. |
 | `MonitoredItemCount` | Monitored items across all subscriptions. |
+| `SkippedBadSubscriptionValues` | Values delivered by a subscription that were skipped because the server marked them Bad. The property keeps its last value, so a rising count is what tells a faulted node from a quiet one. The polled equivalent is `Polling.TotalFailedReads`, and like it this counts from the moment the source started listening, surviving a reconnection but not a restart. |
 
 `Reconnects` is the reconnection history. Every counter is monotonic since `StartTime`, so a reconnect storm is visible as `TotalAttempts` climbing without `TotalSucceeded` keeping up. `LastConnectionTime` is the exception listed first below: it is not a counter and deliberately survives the epoch reset, because it records a discrete past event rather than an amount accumulated during the run.
 

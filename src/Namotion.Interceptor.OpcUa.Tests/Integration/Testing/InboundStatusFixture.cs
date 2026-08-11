@@ -236,6 +236,9 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
     /// </summary>
     public long PolledReadCount => _client.Source!.Diagnostics.Polling?.TotalSuccessfulReads ?? 0;
 
+    /// <summary>The notified values skipped so far because the server marked them Bad.</summary>
+    public long SkippedBadSubscriptionValues => _client.Source!.Diagnostics.SkippedBadSubscriptionValues;
+
     public Task WaitForClientValueAsync(string expected) =>
         AsyncTestHelpers.WaitUntilAsync(
             () => ClientRoot.Child?.Value == expected,
