@@ -180,9 +180,10 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                         // creation already touched it, so the reset has to be explicit.
                         node.StatusCode = StatusCodes.Good;
 
-                        // Before the flush, which only publishes what the node already holds.
-                        written++;
+                        // The flush is what dispatches the value to the monitored items, so it is what
+                        // decides whether this change became traffic. One that throws served nobody.
                         node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
+                        written++;
                     }
                     catch (Exception e) when (e is not OperationCanceledException)
                     {
@@ -196,7 +197,8 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
             }
         }
 
-        // What reached a node, not what the batch offered: a superseded or unmapped change is not traffic.
+        // What a node published, not what the batch offered: a superseded, unmapped or failed change is
+        // not traffic.
         OutgoingThroughput.Add(written);
         return ValueTask.CompletedTask;
     }
