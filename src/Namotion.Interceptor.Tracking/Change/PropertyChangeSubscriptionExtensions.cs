@@ -176,6 +176,45 @@ public static class PropertyChangeSubscriptionExtensions
         return property.Subscribe(new DelegateObserver(callback), scheduler, onError);
     }
 
+    /// <summary>
+    /// Strongly-typed scheduled subscription to a direct property of <paramref name="subject"/>, for example
+    /// <c>subject.SubscribeToProperty(x => x.Temperature, observer, scheduler)</c>.
+    /// </summary>
+    /// <remarks>
+    /// Same contract as
+    /// <see cref="Subscribe(PropertyReference, IPropertyChangeObserver, IScheduler, Action{Exception})"/>,
+    /// and the same selector restriction as
+    /// <see cref="SubscribeToProperty{TSubject,TValue}(TSubject, Expression{Func{TSubject,TValue}}, IPropertyChangeObserver)"/>.
+    /// </remarks>
+    public static ScheduledPropertySubscription SubscribeToProperty<TSubject, TValue>(
+        this TSubject subject,
+        Expression<Func<TSubject, TValue>> propertySelector,
+        IPropertyChangeObserver observer,
+        IScheduler scheduler,
+        Action<Exception>? onError = null)
+        where TSubject : IInterceptorSubject
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(propertySelector);
+
+        var name = ResolveDirectPropertyName(propertySelector);
+        return new PropertyReference(subject, name).Subscribe(observer, scheduler, onError);
+    }
+
+    /// <summary>Delegate overload of <see cref="SubscribeToProperty{TSubject,TValue}(TSubject, Expression{Func{TSubject,TValue}}, IPropertyChangeObserver, IScheduler, Action{Exception})"/>.</summary>
+    public static ScheduledPropertySubscription SubscribeToProperty<TSubject, TValue>(
+        this TSubject subject,
+        Expression<Func<TSubject, TValue>> propertySelector,
+        PropertyChangeCallback callback,
+        IScheduler scheduler,
+        Action<Exception>? onError = null)
+        where TSubject : IInterceptorSubject
+    {
+        // Wrapping first would bypass the callback null guard and fail on a writer thread at dispatch time.
+        ArgumentNullException.ThrowIfNull(callback);
+        return subject.SubscribeToProperty(propertySelector, new DelegateObserver(callback), scheduler, onError);
+    }
+
     private static void ThrowIfSynchronous(IScheduler scheduler)
     {
         // Only the two singletons are detectable. Any scheduler that runs actions inline has the same
