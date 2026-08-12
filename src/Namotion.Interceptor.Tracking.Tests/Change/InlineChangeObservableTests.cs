@@ -94,7 +94,9 @@ public class InlineChangeObservableTests
     [Fact]
     public void WhenComposedWithTakeOne_ThenTheUnderlyingSubscriptionIsReleased()
     {
-        // Arrange
+        // Arrange: single-threaded on purpose. The source does not serialize OnNext, so Take's unguarded sink
+        // state is only safe here because one thread writes; composing it over concurrent writers needs
+        // .Synchronize() first and is not what this covers.
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var received = new List<string?>();

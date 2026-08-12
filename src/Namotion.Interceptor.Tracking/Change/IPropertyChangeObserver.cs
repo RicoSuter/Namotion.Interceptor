@@ -15,7 +15,10 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// OnChange runs on the scheduler and MAY throw, which is reported to the subscription's <c>onError</c> and
 /// leaves the subscription live. It is never re-entered within one subscription, so it needs no
 /// synchronization of its own, but one instance shared across several subscriptions is still invoked
-/// concurrently and must synchronize.
+/// concurrently and must synchronize. It MUST still be non-blocking: the drain owns its scheduler thread for
+/// the whole call, so a blocking implementation starves every other subscription sharing that scheduler,
+/// which then stops being delivered at all while its queue grows and nothing is reported. The batch handoff
+/// bounds how long a cooperative observer holds the thread; it cannot preempt one that refuses to return.
 /// </para>
 /// Deliveries may arrive out of commit order under concurrent writes to the same property in both cases;
 /// re-read the property if you need the current value.

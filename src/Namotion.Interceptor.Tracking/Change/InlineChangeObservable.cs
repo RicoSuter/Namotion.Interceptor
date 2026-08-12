@@ -10,6 +10,14 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// subscription when the handler throws, which would diverge from the contract of
 /// <see cref="PropertyChangeSubscriptionExtensions.SubscribeInline(PropertyReference, IPropertyChangeObserver)"/>
 /// that this type deliberately mirrors.
+/// <para>
+/// Deliberately not Rx-grammar-conformant: OnNext is forwarded straight from the writing thread, so
+/// concurrent writers to one property call one observer's OnNext concurrently. It is not wrapped in
+/// <c>Subject.Synchronize</c> the way <see cref="PropertyChangeInterceptor"/> wraps the context-level
+/// observable, for the same reason it does not soften the throw contract: this is the inline channel wearing
+/// an <see cref="IObservable{T}"/>. Callers that need the grammar apply <c>.Synchronize()</c> themselves; see
+/// <see cref="PropertyChangeSubscriptionExtensions.GetInlineChangeObservable"/>.
+/// </para>
 /// </remarks>
 internal sealed class InlineChangeObservable(PropertyReference property) : IObservable<SubjectPropertyChange>
 {

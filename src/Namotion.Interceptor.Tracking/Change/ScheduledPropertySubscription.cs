@@ -23,19 +23,19 @@ public sealed class ScheduledPropertySubscription : IDisposable
     // either way, so accepted work is neither stranded nor drained twice at once.
     //
     // Dispose against enqueue: a writer already past its _state check can still enqueue and still schedule
-    // after Dispose returns. Two different primitives handle the two halves of that. The drain's in-loop
-    // _state re-check, together with the settle's _state check, stops the reschedule, and the _wip left behind
-    // gates nothing afterwards. It does not stop the delivery: a drain whose Volatile.Read(ref _state) ran
-    // before the CAS proceeds to TryDequeue and can dequeue a change a late writer enqueued after the CAS,
-    // because that enqueue lands in the fresh segment _queue.Clear() installed. What stops the delivery is
-    // Deliver's _observer null guard, and only from TransitionOutOfLive's Volatile.Write(ref _observer, null),
-    // which is a later statement than the CAS. So a change accepted after disposal began can still be
-    // delivered, bounded by Dispose not having returned yet.
+    // after Dispose returns. The settle's _state check alone stops the reschedule, and the _wip left behind
+    // gates nothing afterwards. The drain's in-loop _state re-check adds nothing to that argument and is only
+    // a harmless early exit: the transition clears the queue, so a drain that runs after it dequeues nothing,
+    // settles with processed == 0 and is suppressed by the settle's check anyway. Neither check stops the
+    // delivery: a drain whose Volatile.Read(ref _state) ran before the CAS proceeds to TryDequeue and can
+    // dequeue a change a late writer enqueued after the CAS, because that enqueue lands in the fresh segment
+    // _queue.Clear() installed. What stops the delivery is Deliver's _observer null guard, and only from
+    // TransitionOutOfLive's Volatile.Write(ref _observer, null), which is a later statement than the CAS. So a
+    // change accepted after disposal began can still be delivered, bounded by Dispose not having returned yet.
     //
     // Dispose against a mid-flight delivery: Deliver reads _observer and _onError into locals before use, and
     // ScheduleDrain reads _onError and _scheduler the same way, so a transition that nulls them cannot
-    // null-reference work already running. A delivery, and its onError, can therefore complete after Dispose
-    // returns.
+    // null-reference work already running.
     //
     // Fault against dispose: both go through the Interlocked.CompareExchange on _state out of Live, so
     // exactly one performs the release and the loser does nothing. The release runs through the upstream
@@ -43,20 +43,15 @@ public sealed class ScheduledPropertySubscription : IDisposable
     // makes a double decrement unreachable. That count gates a process-wide idle write fast path, so
     // reaching zero with live subscriptions elsewhere would silently stop per-property delivery host-wide.
     //
-    // A throwing ScheduleDrain against the counter: the throw is caught, reported and faults the
-    // subscription, so it never escapes into the property setter and never suppresses the other listeners on
-    // that write. The limit, stated honestly: a Schedule call that succeeds and whose work item never runs
-    // leaves _wip positive with no further ScheduleDrain, which is unrecoverable and undetectable from here,
-    // and is why a caller must dispose its subscriptions before the scheduler they run on.
+    // A throwing ScheduleDrain against the counter: the limit, stated honestly, is that a Schedule call that
+    // succeeds and whose work item never runs leaves _wip positive with no further ScheduleDrain, which is
+    // unrecoverable and undetectable from here, and is why a caller must dispose its subscriptions before the
+    // scheduler they run on.
     //
     // A drain exit against the next drain entry: the settling Interlocked.Add, the next writer's
     // Interlocked.Increment on the same field and the schedule that follows form a happens-before chain, so
     // a delivery observes state written by the previous delivery even when the two land on different
     // scheduler threads. This is what lets an observer of one subscription keep state without synchronizing.
-    //
-    // Subject detach against queued changes: detaching removes the interceptor from the chain, so acceptance
-    // stops, but changes already accepted still drain. That is deliberately the opposite of disposal, which
-    // drops them.
 
     private const int Live = 0;
     private const int Disposed = 1;
@@ -65,7 +60,10 @@ public sealed class ScheduledPropertySubscription : IDisposable
     /// <summary>
     /// Deliveries per scheduler work item before the drain hands off to a fresh one. Without a budget the
     /// drain would hold its scheduler thread for as long as a writer outruns the observer, which starves
-    /// sibling subscriptions and unrelated pool work. 1024 costs one work item per 1024 changes.
+    /// sibling subscriptions and unrelated pool work. 1024 is a ceiling on the handoff cost while a backlog
+    /// exists, not a rate: it is one work item per 1024 changes only for as long as the queue stays that deep.
+    /// When the observer keeps up, the counter settles to zero constantly and every new write schedules again,
+    /// measured at roughly one work item per five changes with eight concurrent writers.
     /// </summary>
     internal const int MaxBatch = 1024;
 
@@ -234,7 +232,9 @@ public sealed class ScheduledPropertySubscription : IDisposable
         {
             // Scheduling happens inside the write, so without suppression the observer would inherit the
             // writer's ambient AsyncLocal state, including SubjectTransaction.CurrentTransaction, and a whole
-            // batch would run under whichever writer enqueued first.
+            // batch would run under whichever writer enqueued first. This only governs the work item. Rx does
+            // not save or restore context per work item on a scheduler that owns its thread, so such a thread
+            // keeps the AsyncLocal values it was born with and nothing here can strip them.
             if (ExecutionContext.IsFlowSuppressed())
             {
                 // Not a guard against a throw: a nested SuppressFlow is legal on .NET 9 and leaves the outer
@@ -326,7 +326,9 @@ public sealed class ScheduledPropertySubscription : IDisposable
     /// <summary>
     /// Stops delivery, releases the upstream subscription and drops the queued changes. A delivery already
     /// running can finish after this returns, so an observer that touches state the caller owns and disposes
-    /// must tolerate a call arriving late. A change enqueued by a writer that had already passed its state
+    /// must tolerate a call arriving late. A drain work item already queued on the scheduler is not cancelled
+    /// either, because the handle <c>Schedule</c> returns is discarded; it runs and finds nothing left to
+    /// deliver. A change enqueued by a writer that had already passed its state
     /// check can land in the queue after it was cleared, and nothing is guaranteed to dequeue it afterwards,
     /// so <see cref="PendingCount"/> is not guaranteed to reach zero and such a change keeps pinning its
     /// subject. The number of them is bounded by the writers running concurrently with the disposal.
