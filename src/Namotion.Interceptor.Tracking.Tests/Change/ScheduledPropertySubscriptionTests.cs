@@ -138,14 +138,14 @@ public class ScheduledPropertySubscriptionTests
     }
 
     [Fact]
-    public void WhenScheduledObserverThrows_ThenAnUnscheduledListenerOnTheSamePropertyStillFires()
+    public void WhenScheduledObserverThrows_ThenAnInlineListenerOnTheSamePropertyStillFires()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var property = new PropertyReference(person, nameof(Person.FirstName));
         var scheduler = new ControllableScheduler();
-        var unscheduled = new List<string?>();
+        var inline = new List<string?>();
         var scheduledDeliveries = 0;
 
         using var scheduled = property.Subscribe(
@@ -155,7 +155,7 @@ public class ScheduledPropertySubscriptionTests
                 throw new InvalidOperationException("boom");
             },
             scheduler);
-        using var plain = property.Subscribe((in SubjectPropertyChange change) => unscheduled.Add(change.GetNewValue<string?>()));
+        using var plain = property.SubscribeInline((in SubjectPropertyChange change) => inline.Add(change.GetNewValue<string?>()));
 
         // Act
         person.FirstName = "one";
@@ -164,7 +164,7 @@ public class ScheduledPropertySubscriptionTests
         // Assert: the counter pins that the throwing observer really ran, so a drain delivering nothing
         // cannot leave this green, and the failure cannot suppress another channel on the same write.
         Assert.Equal(1, scheduledDeliveries);
-        Assert.Equal(["one"], unscheduled);
+        Assert.Equal(["one"], inline);
     }
 
     [Fact]

@@ -8,7 +8,7 @@ public static class PropertyChangeSubscriptionExtensions
 {
     /// <summary>
     /// Subscribes an observer to changes of a single property (subject instance + name). Delivery is
-    /// synchronous, on the writing thread, and dormant while the subject is not attached to a context
+    /// inline, on the writing thread, and dormant while the subject is not attached to a context
     /// with a <see cref="PropertyChangeInterceptor"/>. See <see cref="IPropertyChangeObserver"/> for the contract.
     /// </summary>
     /// <remarks>
@@ -19,12 +19,12 @@ public static class PropertyChangeSubscriptionExtensions
     /// dispatch runs outside the subject lock; if you need the current value, re-read the property rather
     /// than relying on the delivered new value.
     /// Provided the downstream interceptor chain returns normally after the commit, a write that commits
-    /// after Subscribe returns is always delivered while the subscription stays live and no earlier
-    /// synchronous observer of the same write throws. A write that committed before may not be, and reading
+    /// after SubscribeInline returns is always delivered while the subscription stays live and no earlier
+    /// inline observer of the same write throws. A write that committed before may not be, and reading
     /// the property after subscribing observes that earlier state. OldValue is the value the setter observed
     /// when it started, including when the subscription raced the write.
     /// </remarks>
-    public static IDisposable Subscribe(this PropertyReference property, IPropertyChangeObserver observer)
+    public static IDisposable SubscribeInline(this PropertyReference property, IPropertyChangeObserver observer)
     {
         // A null observer would install a silent never-firing subscription that still opens the process-wide gate.
         ArgumentNullException.ThrowIfNull(observer);
@@ -40,24 +40,24 @@ public static class PropertyChangeSubscriptionExtensions
         return PropertyChangeSubscription.Create(property, observer);
     }
 
-    /// <summary>Delegate overload of <see cref="Subscribe(PropertyReference, IPropertyChangeObserver)"/>.</summary>
-    public static IDisposable Subscribe(this PropertyReference property, PropertyChangeCallback callback)
+    /// <summary>Delegate overload of <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/>.</summary>
+    public static IDisposable SubscribeInline(this PropertyReference property, PropertyChangeCallback callback)
     {
         // A null callback wrapped in DelegateObserver would fail on a writer thread at dispatch time.
         ArgumentNullException.ThrowIfNull(callback);
-        return property.Subscribe(new DelegateObserver(callback));
+        return property.SubscribeInline(new DelegateObserver(callback));
     }
 
     /// <summary>
     /// Strongly-typed subscription to a direct property of <paramref name="subject"/>, for example
-    /// <c>subject.SubscribeToProperty(x => x.Temperature, observer)</c>. Only a direct property access on
+    /// <c>subject.SubscribeToPropertyInline(x => x.Temperature, observer)</c>. Only a direct property access on
     /// the lambda parameter is accepted; chained, captured, static, field, and method selectors throw.
     /// </summary>
     /// <remarks>
     /// Same ownership, concurrency, and delivery contract as
-    /// <see cref="Subscribe(PropertyReference, IPropertyChangeObserver)"/>.
+    /// <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/>.
     /// </remarks>
-    public static IDisposable SubscribeToProperty<TSubject, TValue>(
+    public static IDisposable SubscribeToPropertyInline<TSubject, TValue>(
         this TSubject subject,
         Expression<Func<TSubject, TValue>> propertySelector,
         IPropertyChangeObserver observer)
@@ -67,11 +67,11 @@ public static class PropertyChangeSubscriptionExtensions
         ArgumentNullException.ThrowIfNull(propertySelector);
 
         var name = ResolveDirectPropertyName(propertySelector);
-        return new PropertyReference(subject, name).Subscribe(observer);
+        return new PropertyReference(subject, name).SubscribeInline(observer);
     }
 
-    /// <summary>Delegate overload of <see cref="SubscribeToProperty{TSubject,TValue}(TSubject, Expression{Func{TSubject,TValue}}, IPropertyChangeObserver)"/>.</summary>
-    public static IDisposable SubscribeToProperty<TSubject, TValue>(
+    /// <summary>Delegate overload of <see cref="SubscribeToPropertyInline{TSubject,TValue}(TSubject, Expression{Func{TSubject,TValue}}, IPropertyChangeObserver)"/>.</summary>
+    public static IDisposable SubscribeToPropertyInline<TSubject, TValue>(
         this TSubject subject,
         Expression<Func<TSubject, TValue>> propertySelector,
         PropertyChangeCallback callback)
@@ -79,7 +79,7 @@ public static class PropertyChangeSubscriptionExtensions
     {
         // Wrapping first would bypass the observer null guard and fail on a writer thread at dispatch time.
         ArgumentNullException.ThrowIfNull(callback);
-        return subject.SubscribeToProperty(propertySelector, new DelegateObserver(callback));
+        return subject.SubscribeToPropertyInline(propertySelector, new DelegateObserver(callback));
     }
 
     /// <summary>
@@ -88,8 +88,8 @@ public static class PropertyChangeSubscriptionExtensions
     /// distinct instance.
     /// </summary>
     /// <remarks>
-    /// Delivery keeps the contract of <see cref="Subscribe(PropertyReference, IPropertyChangeObserver)"/>
-    /// exactly: synchronous, on the writing thread, possibly concurrent, and a throwing handler propagates
+    /// Delivery keeps the contract of <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/>
+    /// exactly: inline, on the writing thread, possibly concurrent, and a throwing handler propagates
     /// back into the setter. It is that channel wearing an <see cref="IObservable{T}"/>, not a safer one.
     /// The context-level <c>GetPropertyChangeObservable</c> reschedules onto a scheduler by default and is
     /// therefore not the same thing.
@@ -109,8 +109,8 @@ public static class PropertyChangeSubscriptionExtensions
     /// </para>
     /// </remarks>
     /// <param name="property">The property to observe.</param>
-    public static IObservable<SubjectPropertyChange> GetSynchronousChangeObservable(this PropertyReference property)
-        => new SynchronousChangeObservable(property);
+    public static IObservable<SubjectPropertyChange> GetInlineChangeObservable(this PropertyReference property)
+        => new InlineChangeObservable(property);
 
     /// <summary>
     /// Subscribes to changes of a single property and delivers them on <paramref name="scheduler"/> instead
@@ -118,7 +118,7 @@ public static class PropertyChangeSubscriptionExtensions
     /// </summary>
     /// <remarks>
     /// Same ownership and dormancy contract as
-    /// <see cref="Subscribe(PropertyReference, IPropertyChangeObserver)"/>, with four differences that follow
+    /// <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/>, with four differences that follow
     /// from delivery being scheduled. Within this subscription the observer is never re-entered, so it needs
     /// no synchronization of its own; an observer, closure, or <paramref name="onError"/> delegate shared
     /// across several subscriptions is still invoked concurrently. An exception from the observer cannot
@@ -131,8 +131,8 @@ public static class PropertyChangeSubscriptionExtensions
     /// <para>
     /// The queue is unbounded. A writer faster than the observer grows it without limit, and every buffered
     /// change keeps its subject alive; watch <see cref="ScheduledPropertySubscription.PendingCount"/>, or
-    /// compose <c>Sample</c> on <see cref="GetSynchronousChangeObservable"/> for a hot property. An observer
-    /// that writes the property it observes never drains, quietly, where the unscheduled overload would
+    /// compose <c>Sample</c> on <see cref="GetInlineChangeObservable"/> for a hot property. An observer
+    /// that writes the property it observes never drains, quietly, where the inline overload would
     /// raise a StackOverflowException.
     /// </para>
     /// <para>
@@ -186,7 +186,7 @@ public static class PropertyChangeSubscriptionExtensions
     /// Same contract as
     /// <see cref="Subscribe(PropertyReference, IPropertyChangeObserver, IScheduler, Action{Exception})"/>,
     /// and the same selector restriction as
-    /// <see cref="SubscribeToProperty{TSubject,TValue}(TSubject, Expression{Func{TSubject,TValue}}, IPropertyChangeObserver)"/>.
+    /// <see cref="SubscribeToPropertyInline{TSubject,TValue}(TSubject, Expression{Func{TSubject,TValue}}, IPropertyChangeObserver)"/>.
     /// </remarks>
     public static ScheduledPropertySubscription SubscribeToProperty<TSubject, TValue>(
         this TSubject subject,
@@ -226,9 +226,10 @@ public static class PropertyChangeSubscriptionExtensions
             || ReferenceEquals(scheduler, CurrentThreadScheduler.Instance))
         {
             throw new ArgumentException(
-                "A synchronous scheduler delivers on the writing thread, so one writer's setter can end up " +
-                "draining every other writer's changes and its latency becomes unbounded. Use " +
-                "property.Subscribe(callback) for synchronous delivery.",
+                "A synchronous scheduler does not deliver inline: the dispatcher's work-in-progress counter " +
+                "means one writer ends up draining every other writer's changes inside its own setter, so " +
+                "that writer's latency grows with total throughput. Use property.SubscribeInline(callback) " +
+                "for inline delivery.",
                 nameof(scheduler));
         }
     }

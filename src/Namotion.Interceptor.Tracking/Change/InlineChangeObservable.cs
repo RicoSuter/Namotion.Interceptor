@@ -8,18 +8,18 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// Implements <see cref="IObservable{T}"/> directly rather than deriving from <c>ObservableBase&lt;T&gt;</c>
 /// or being produced by an Rx operator. Both of those wrap observers in a decorator that disposes the
 /// subscription when the handler throws, which would diverge from the contract of
-/// <see cref="PropertyChangeSubscriptionExtensions.Subscribe(PropertyReference, IPropertyChangeObserver)"/>
+/// <see cref="PropertyChangeSubscriptionExtensions.SubscribeInline(PropertyReference, IPropertyChangeObserver)"/>
 /// that this type deliberately mirrors.
 /// </remarks>
-internal sealed class SynchronousChangeObservable(PropertyReference property) : IObservable<SubjectPropertyChange>
+internal sealed class InlineChangeObservable(PropertyReference property) : IObservable<SubjectPropertyChange>
 {
     public IDisposable Subscribe(IObserver<SubjectPropertyChange> observer)
     {
         ArgumentNullException.ThrowIfNull(observer);
 
         // OnError is never raised: the per-property channel has no error signal, and a throwing observer
-        // is the observer's own problem, exactly as for an unscheduled subscription.
-        return property.Subscribe(new ObserverAdapter(observer));
+        // is the observer's own problem, exactly as for an inline subscription.
+        return property.SubscribeInline(new ObserverAdapter(observer));
     }
 
     // Adapting instead of passing a lambda drops the closure, the PropertyChangeCallback, and the internal

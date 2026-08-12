@@ -9,6 +9,7 @@ public class PerPropertySubscriptionConventionsTests
     [
         "PropertyChangeSubscriptions.",
         "PropertyChangeSubscription.Create",
+        // Also matches SubscribeToPropertyInline as a substring.
         "SubscribeToProperty",
         "SubscribeToPath",
         "IPropertyChangeObserver",
@@ -18,10 +19,12 @@ public class PerPropertySubscriptionConventionsTests
         // (.Subscribe(change => ...)), which matches none of the lambda markers below. One marker
         // covers both the extension method and the type backing it, in any construction form,
         // and cannot collide with the unrelated context-level GetPropertyChangeObservable.
-        "SynchronousChangeObservable",
+        "InlineChangeObservable",
         "ScheduledPropertySubscription",
-        // The low-level PropertyReference.Subscribe overloads taking an inline callback name none
-        // of the types above, so match the lambda form itself (both `in` spellings).
+        // The low-level PropertyReference.SubscribeInline overloads taking a callback name none
+        // of the types above, so match the method itself and the scheduled lambda form (both `in`
+        // spellings), since the scheduled overloads keep the plain Subscribe name.
+        "SubscribeInline",
         ".Subscribe((in ",
         ".Subscribe(static (in ",
     ];

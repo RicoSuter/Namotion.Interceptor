@@ -131,7 +131,7 @@ public sealed class ScheduledPropertySubscription : IDisposable
         var subscription = new ScheduledPropertySubscription(observer, scheduler, onError);
 
         // Installs the upstream and can start delivering before the publication below.
-        var upstream = property.Subscribe(new Forwarder(subscription));
+        var upstream = property.SubscribeInline(new Forwarder(subscription));
 
         // Creator-side Dekker half: an interlocked publication, not a release store, because only an RMW
         // orders this store against the state load below. It pairs with TransitionOutOfLive's

@@ -3,8 +3,8 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// <summary>
 /// Per-property change observer. What it must guarantee depends on how it was subscribed.
 /// <para>
-/// Unscheduled, through
-/// <see cref="PropertyChangeSubscriptionExtensions.Subscribe(PropertyReference, IPropertyChangeObserver)"/>:
+/// Inline, through
+/// <see cref="PropertyChangeSubscriptionExtensions.SubscribeInline(PropertyReference, IPropertyChangeObserver)"/>:
 /// OnChange runs on the writing thread, inside the write, outside the subject lock. Implementations MUST be
 /// thread-safe (they may be invoked concurrently), fast, non-blocking, and MUST NOT throw, because a throw
 /// propagates out of the setter and suppresses later deliveries for that write.

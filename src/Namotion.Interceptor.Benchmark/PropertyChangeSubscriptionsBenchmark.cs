@@ -82,7 +82,7 @@ public class PropertyChangeSubscriptionsBenchmark
     public void SetupListenerOnWrittenProperty()
     {
         _car = CreateCarInFreshContext();
-        _perPropertySubscription = _car.SubscribeToProperty(x => x.Name, (in SubjectPropertyChange _) => { });
+        _perPropertySubscription = _car.SubscribeToPropertyInline(x => x.Name, (in SubjectPropertyChange _) => { });
     }
 
     // listener-elsewhere: a per-property listener on a DIFFERENT property, so the live count is nonzero
@@ -92,7 +92,7 @@ public class PropertyChangeSubscriptionsBenchmark
     {
         _car = CreateCarInFreshContext();
         _perPropertySubscription = new PropertyReference(_car, nameof(Car.Name_MaxLength_Unit))
-            .Subscribe((in SubjectPropertyChange _) => { });
+            .SubscribeInline((in SubjectPropertyChange _) => { });
     }
 
     // observable-subscribed-then-fully-unsubscribed: subscribe an observer then dispose it, so the gate

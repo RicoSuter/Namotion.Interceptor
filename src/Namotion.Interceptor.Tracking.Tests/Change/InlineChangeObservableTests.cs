@@ -6,9 +6,9 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
 [Collection(PerPropertySubscriptionCollection.Name)]
-public class SynchronousChangeObservableTests
+public class InlineChangeObservableTests
 {
-    public SynchronousChangeObservableTests() => PropertyChangeSubscriptions.ResetForTests();
+    public InlineChangeObservableTests() => PropertyChangeSubscriptions.ResetForTests();
 
     [Fact]
     public void WhenObservableIsNotSubscribed_ThenNoSubscriptionIsInstalled()
@@ -18,7 +18,7 @@ public class SynchronousChangeObservableTests
         var person = new Person(context);
 
         // Act
-        _ = new PropertyReference(person, nameof(Person.FirstName)).GetSynchronousChangeObservable();
+        _ = new PropertyReference(person, nameof(Person.FirstName)).GetInlineChangeObservable();
 
         // Assert
         Assert.Equal(0, PropertyChangeSubscriptions.ReadSubscriptionCount());
@@ -30,7 +30,7 @@ public class SynchronousChangeObservableTests
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
-        var observable = new PropertyReference(person, nameof(Person.FirstName)).GetSynchronousChangeObservable();
+        var observable = new PropertyReference(person, nameof(Person.FirstName)).GetInlineChangeObservable();
         var first = new List<string?>();
         var second = new List<string?>();
 
@@ -54,7 +54,7 @@ public class SynchronousChangeObservableTests
         var person = new Person(context);
         var received = new List<string?>();
         var subscription = new PropertyReference(person, nameof(Person.FirstName))
-            .GetSynchronousChangeObservable()
+            .GetInlineChangeObservable()
             .Subscribe(change => received.Add(change.GetNewValue<string?>()));
 
         // Act
@@ -77,7 +77,7 @@ public class SynchronousChangeObservableTests
         var deliveries = 0;
 
         using var subscription = new PropertyReference(person, nameof(Person.FirstName))
-            .GetSynchronousChangeObservable()
+            .GetInlineChangeObservable()
             .Subscribe(_ =>
             {
                 deliveries++;
@@ -100,7 +100,7 @@ public class SynchronousChangeObservableTests
         var received = new List<string?>();
 
         using var subscription = new PropertyReference(person, nameof(Person.FirstName))
-            .GetSynchronousChangeObservable()
+            .GetInlineChangeObservable()
             .Take(1)
             .Subscribe(change => received.Add(change.GetNewValue<string?>()));
 
@@ -119,7 +119,7 @@ public class SynchronousChangeObservableTests
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
-        var observable = new PropertyReference(person, nameof(Person.FirstName)).GetSynchronousChangeObservable();
+        var observable = new PropertyReference(person, nameof(Person.FirstName)).GetInlineChangeObservable();
 
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() => observable.Subscribe(null!));
@@ -136,8 +136,8 @@ public class SynchronousChangeObservableTests
         var firstReceived = new List<string?>();
         var secondReceived = new List<string?>();
 
-        var first = property.GetSynchronousChangeObservable();
-        var second = property.GetSynchronousChangeObservable();
+        var first = property.GetInlineChangeObservable();
+        var second = property.GetInlineChangeObservable();
 
         using var firstSubscription = first.Subscribe(change => firstReceived.Add(change.GetNewValue<string?>()));
         using var secondSubscription = second.Subscribe(change => secondReceived.Add(change.GetNewValue<string?>()));
