@@ -5,15 +5,9 @@ using Namotion.Interceptor.Tracking.Transactions;
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
 [Collection(PerPropertySubscriptionCollection.Name)]
-public class ScheduledPropertySubscriptionProtocolTests : IDisposable
+public class ScheduledPropertySubscriptionProtocolTests
 {
-    public ScheduledPropertySubscriptionProtocolTests()
-    {
-        PropertyChangeSubscriptions.ResetForTests();
-        ScheduledPropertySubscription.EnableReentrancyInstrumentation = true;
-    }
-
-    public void Dispose() => ScheduledPropertySubscription.EnableReentrancyInstrumentation = false;
+    public ScheduledPropertySubscriptionProtocolTests() => PropertyChangeSubscriptions.ResetForTests();
 
     [Fact]
     public void WhenChangesAreWritten_ThenOneDrainIsScheduledAndDeliversThemInOrder()
@@ -141,17 +135,11 @@ public class ScheduledPropertySubscriptionProtocolTests : IDisposable
 
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
-        var delivered = 0;
 
         using var allDelivered = new CountdownEvent(writers * writesPerWriter);
+        var observer = new ReentrancyProbeObserver(allDelivered);
         using var subscription = new PropertyReference(person, nameof(Person.FirstName))
-            .Subscribe(
-                (in SubjectPropertyChange _) =>
-                {
-                    delivered++; // deliberately unsynchronized: serialization is the contract under test
-                    allDelivered.Signal();
-                },
-                System.Reactive.Concurrency.Scheduler.Default);
+            .Subscribe(observer, System.Reactive.Concurrency.Scheduler.Default);
 
         // Act
         await Task.WhenAll(Enumerable.Range(0, writers).Select(writer => Task.Run(() =>
@@ -162,11 +150,13 @@ public class ScheduledPropertySubscriptionProtocolTests : IDisposable
             }
         })));
 
-        Assert.True(allDelivered.Wait(TimeSpan.FromSeconds(30)), $"only {delivered} of {writers * writesPerWriter} arrived");
+        Assert.True(
+            allDelivered.Wait(TimeSpan.FromSeconds(30)),
+            $"only {observer.DeliveryCount} of {writers * writesPerWriter} arrived");
 
         // Assert
-        Assert.Equal(0, subscription.ReentrancyCountForTests);
-        Assert.Equal(writers * writesPerWriter, delivered);
+        Assert.Equal(0, observer.ReentrancyCount);
+        Assert.Equal(writers * writesPerWriter, observer.DeliveryCount);
         Assert.Equal(0, subscription.PendingCount);
     }
 
@@ -294,6 +284,63 @@ public class ScheduledPropertySubscriptionProtocolTests : IDisposable
         Assert.Empty(errors);
         Assert.True(subscription.IsObserverReleasedForTests);
         Assert.Equal(0, subscription.PendingCount);
+    }
+
+    [Fact]
+    public void WhenTheObserverDisposesItsOwnSubscriptionAndThenThrows_ThenTheExceptionStillReachesOnError()
+    {
+        // Arrange: the shape is a stop-on-first-failure observer, which handles a failure by tearing its
+        // subscription down and rethrowing. Its own disposal nulls the error handler field, so a report that
+        // reads the field after the observer ran instead of before loses the exception it deliberately threw.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        var inner = new ControllableScheduler();
+        var scheduler = new RecordingScheduler(inner);
+        var errors = new List<Exception>();
+        ScheduledPropertySubscription? subscription = null;
+
+        subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe(
+                (in SubjectPropertyChange _) =>
+                {
+                    subscription!.Dispose();
+                    throw new InvalidOperationException("observer failed");
+                },
+                scheduler,
+                errors.Add);
+
+        // Act
+        person.FirstName = "one";
+        inner.RunUntilIdle();
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(Assert.Single(errors));
+        Assert.Empty(scheduler.Escaped);
+    }
+
+    [Fact]
+    public void WhenTheSchedulerFaultsASubscription_ThenIsFaultedReportsItAndDisposalDoesNot()
+    {
+        // Arrange: with the default null onError this flag is the only channel a consumer has for a
+        // subscription the scheduler killed, since PendingCount reads the same zero either way.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        using var healthy = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe((in SubjectPropertyChange _) => { }, new ControllableScheduler());
+        using var faulting = new PropertyReference(person, nameof(Person.LastName))
+            .Subscribe((in SubjectPropertyChange _) => { }, new ThrowingScheduler());
+
+        // Precondition: nothing has failed yet, so the flag cannot be reading true from the start.
+        Assert.False(healthy.IsFaulted);
+        Assert.False(faulting.IsFaulted);
+
+        // Act
+        healthy.Dispose();
+        person.LastName = "one";
+
+        // Assert: disposal is a deliberate stop and stays false, and the fault is visible without onError.
+        Assert.False(healthy.IsFaulted);
+        Assert.True(faulting.IsFaulted);
     }
 
     [Fact]
@@ -530,5 +577,41 @@ public class ScheduledPropertySubscriptionProtocolTests : IDisposable
         // Assert
         Assert.True(delivered.Wait(TimeSpan.FromSeconds(30)));
         Assert.Null(observedTransaction);
+    }
+
+    /// <summary>
+    /// Detects re-entrancy from the observer side, which is where the promise is made: a delivery entering
+    /// <see cref="OnChange"/> while another has not left it raises the in-flight count above one and is
+    /// counted. Everything needed is inside the observer, so the subscription pays nothing for the check.
+    /// </summary>
+    private sealed class ReentrancyProbeObserver(CountdownEvent allDelivered) : IPropertyChangeObserver
+    {
+        private int _inFlight;
+        private int _reentrancyCount;
+        private int _deliveryCount;
+
+        public int ReentrancyCount => Volatile.Read(ref _reentrancyCount);
+
+        // Deliberately unsynchronized: serialized delivery is the contract under test, and the countdown the
+        // test waits on orders the last increment before the read.
+        public int DeliveryCount => _deliveryCount;
+
+        public void OnChange(in SubjectPropertyChange change)
+        {
+            if (Interlocked.Increment(ref _inFlight) != 1)
+            {
+                Interlocked.Increment(ref _reentrancyCount);
+            }
+
+            try
+            {
+                _deliveryCount++;
+                allDelivered.Signal();
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _inFlight);
+            }
+        }
     }
 }

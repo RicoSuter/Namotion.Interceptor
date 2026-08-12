@@ -32,9 +32,10 @@ public sealed class ScheduledPropertySubscription : IDisposable
     // which is a later statement than the CAS. So a change accepted after disposal began can still be
     // delivered, bounded by Dispose not having returned yet.
     //
-    // Dispose against a mid-flight delivery: Deliver and ReportError read _observer and _onError into locals
-    // before use, so a transition that nulls them cannot null-reference a delivery already running. A
-    // delivery, and its onError, can therefore complete after Dispose returns.
+    // Dispose against a mid-flight delivery: Deliver reads _observer and _onError into locals before use, and
+    // ScheduleDrain reads _onError and _scheduler the same way, so a transition that nulls them cannot
+    // null-reference work already running. A delivery, and its onError, can therefore complete after Dispose
+    // returns.
     //
     // Fault against dispose: both go through the Interlocked.CompareExchange on _state out of Live, so
     // exactly one performs the release and the loser does nothing. The release runs through the upstream
@@ -68,10 +69,6 @@ public sealed class ScheduledPropertySubscription : IDisposable
     /// </summary>
     internal const int MaxBatch = 1024;
 
-    // Re-entrancy accounting is test-only: two interlocked operations per delivery is not a cost the
-    // production path should pay for an assertion.
-    internal static bool EnableReentrancyInstrumentation;
-
     // Cached and static so no closure or delegate is allocated per Schedule call.
     private static readonly Func<IScheduler, ScheduledPropertySubscription, IDisposable> DrainAction =
         static (_, subscription) =>
@@ -81,16 +78,14 @@ public sealed class ScheduledPropertySubscription : IDisposable
         };
 
     private readonly ConcurrentQueue<SubjectPropertyChange> _queue = new();
-    private readonly IScheduler _scheduler;
 
     private IPropertyChangeObserver? _observer;
     private Action<Exception>? _onError;
     private IDisposable? _upstream;
+    private IScheduler? _scheduler;
 
     private int _state;
     private int _wip;
-    private int _inDeliver;
-    private int _reentrancyCount;
 
     private ScheduledPropertySubscription(IPropertyChangeObserver observer, IScheduler scheduler, Action<Exception>? onError)
     {
@@ -107,17 +102,25 @@ public sealed class ScheduledPropertySubscription : IDisposable
     /// enqueue after <see cref="Dispose"/> cleared the queue, and nothing is guaranteed to dequeue such a
     /// change afterwards, so this is not guaranteed to reach zero once the subscription is disposed.
     /// A fault stops acceptance and clears the queue the same way, so a faulted subscription reads zero here
-    /// apart from that same late enqueue, which is indistinguishable from a healthy idle one. With the
-    /// default null <c>onError</c> that failure is otherwise silent, so a consumer that needs to detect it
-    /// has to supply an error handler rather than watch this value.
+    /// apart from that same late enqueue, which is indistinguishable from a healthy idle one. Use
+    /// <see cref="IsFaulted"/> to tell the two apart rather than this value.
     /// </summary>
     public int PendingCount => _queue.Count;
+
+    /// <summary>
+    /// Whether the subscription was killed by a scheduler failure, which stops delivery and acceptance for
+    /// good and cannot be undone. False for a live subscription and false after <see cref="Dispose"/>, since
+    /// disposal is a deliberate stop rather than a failure. With the default null <c>onError</c> this is the
+    /// only way to detect such a subscription: the failure is otherwise silent, and
+    /// <see cref="PendingCount"/> reads the same zero a healthy idle subscription does. It does not cover
+    /// the other half of the scheduler-failure space, a <c>Schedule</c> call that succeeds and whose work
+    /// item never runs, which stays live and simply goes quiet.
+    /// </summary>
+    public bool IsFaulted => Volatile.Read(ref _state) == Faulted;
 
     internal int WorkInProgressForTests => Volatile.Read(ref _wip);
 
     internal bool IsObserverReleasedForTests => Volatile.Read(ref _observer) is null;
-
-    internal int ReentrancyCountForTests => Volatile.Read(ref _reentrancyCount);
 
     internal static ScheduledPropertySubscription Create(
         PropertyReference property,
@@ -218,6 +221,15 @@ public sealed class ScheduledPropertySubscription : IDisposable
         // Captured before the try rather than read inside the catch: a winning Dispose nulls _onError, and a
         // read that lands after that null-write would swallow the scheduler fault silently.
         var onError = Volatile.Read(ref _onError);
+
+        // A transition out of Live releases the scheduler too, and both callers can race one, so a null here
+        // means the subscription is already gone and there is nothing left to drain for.
+        var scheduler = Volatile.Read(ref _scheduler);
+        if (scheduler is null)
+        {
+            return;
+        }
+
         try
         {
             // Scheduling happens inside the write, so without suppression the observer would inherit the
@@ -228,13 +240,13 @@ public sealed class ScheduledPropertySubscription : IDisposable
                 // Not a guard against a throw: a nested SuppressFlow is legal on .NET 9 and leaves the outer
                 // scope intact. It saves the ExecutionContext clone SuppressFlow makes, and it is reachable
                 // because a writer can write from inside its own suppressed-flow scope.
-                _scheduler.Schedule(this, DrainAction);
+                scheduler.Schedule(this, DrainAction);
             }
             else
             {
                 using (ExecutionContext.SuppressFlow())
                 {
-                    _scheduler.Schedule(this, DrainAction);
+                    scheduler.Schedule(this, DrainAction);
                 }
             }
         }
@@ -247,18 +259,16 @@ public sealed class ScheduledPropertySubscription : IDisposable
 
     private void Deliver(in SubjectPropertyChange change)
     {
-        // Read into a local so a disposal racing this delivery cannot null-reference it, matching
-        // PropertyChangeSubscription.Dispatch.
+        // Read into locals so a disposal racing this delivery cannot null-reference either, matching
+        // PropertyChangeSubscription.Dispatch. The handler is captured before the observer runs rather than
+        // inside the catch, for the same reason ScheduleDrain captures it: an observer that disposes its own
+        // subscription and then throws, which is what a stop-on-first-failure observer does, nulls the field
+        // itself, and a read taken afterwards would drop the exception it deliberately rethrew.
         var observer = Volatile.Read(ref _observer);
+        var onError = Volatile.Read(ref _onError);
         if (observer is null)
         {
             return;
-        }
-
-        var instrumented = EnableReentrancyInstrumentation;
-        if (instrumented && Interlocked.Increment(ref _inDeliver) != 1)
-        {
-            Interlocked.Increment(ref _reentrancyCount);
         }
 
         try
@@ -267,18 +277,9 @@ public sealed class ScheduledPropertySubscription : IDisposable
         }
         catch (Exception exception)
         {
-            ReportError(exception);
-        }
-        finally
-        {
-            if (instrumented)
-            {
-                Interlocked.Decrement(ref _inDeliver);
-            }
+            ReportError(onError, exception);
         }
     }
-
-    private void ReportError(Exception exception) => ReportError(Volatile.Read(ref _onError), exception);
 
     private static void ReportError(Action<Exception>? onError, Exception exception)
     {
@@ -307,6 +308,11 @@ public sealed class ScheduledPropertySubscription : IDisposable
 
         Volatile.Write(ref _observer, null);
         Volatile.Write(ref _onError, null);
+
+        // Dropped for the same reason as the observer, and it matters more: an EventLoopScheduler owns a
+        // thread, so a disposed handle still holding one keeps that thread reachable. A ScheduleDrain racing
+        // this reads the field into a local and no-ops on the null.
+        Volatile.Write(ref _scheduler, null);
 
         // Releasing through the upstream's own one-shot Dispose is what makes the process-wide gate
         // decrement unreachable twice when a fault races a disposal.

@@ -70,4 +70,24 @@ public class TestSchedulersTests
         Assert.Equal(new[] { "first", "second" }, ran);
         Assert.Equal(0, scheduler.QueuedCount);
     }
+
+    [Fact]
+    public void WhenAWorkItemKeepsReschedulingItself_ThenRunUntilIdleThrowsInsteadOfPumpingForever()
+    {
+        // Arrange: a drain that reschedules without making progress has no symptom other than a test run
+        // that never ends, which costs a reviewer the whole run instead of failing one test.
+        var scheduler = new ControllableScheduler();
+
+        scheduler.Schedule(0, SelfRescheduling);
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => scheduler.RunUntilIdle());
+        Assert.Contains("self-sustaining reschedule loop", exception.Message);
+
+        static IDisposable SelfRescheduling(IScheduler current, int state)
+        {
+            current.Schedule(state, SelfRescheduling);
+            return System.Reactive.Disposables.Disposable.Empty;
+        }
+    }
 }

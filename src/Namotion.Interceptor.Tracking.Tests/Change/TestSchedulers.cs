@@ -1,6 +1,8 @@
 using System.Reactive.Concurrency;
 using System.Reactive.Disposables;
 
+using Namotion.Interceptor.Tracking.Change;
+
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
 /// <summary>
@@ -87,11 +89,28 @@ internal sealed class ControllableScheduler : IScheduler
         return ran;
     }
 
-    /// <summary>Runs items, including ones scheduled by earlier items, until nothing is left.</summary>
+    /// <summary>
+    /// Runs items, including ones scheduled by earlier items, until nothing is left or the budget below is
+    /// spent. The budget is what turns a drain that reschedules itself without making progress into a red
+    /// test instead of a hung test run, which is otherwise the only symptom such a regression has.
+    /// </summary>
     public void RunUntilIdle()
     {
+        // Eight full batches: far more work items than any test here queues, and still bounded. Naming
+        // ScheduledPropertySubscription for the batch size does not make this a per-property test file, so
+        // PerPropertySubscriptionCollection membership does not apply: it holds no tests and subscribes to
+        // nothing.
+        const int budget = ScheduledPropertySubscription.MaxBatch * 8;
+
+        var ran = 0;
         while (RunOne())
         {
+            if (++ran > budget)
+            {
+                throw new InvalidOperationException(
+                    $"RunUntilIdle ran more than {budget} work items without the queue going idle, " +
+                    "which means a self-sustaining reschedule loop rather than slow progress.");
+            }
         }
     }
 }

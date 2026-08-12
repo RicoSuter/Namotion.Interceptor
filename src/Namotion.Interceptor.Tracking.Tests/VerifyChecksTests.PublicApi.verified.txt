@@ -67,6 +67,7 @@ namespace Namotion.Interceptor.Tracking.Change
     }
     public sealed class ScheduledPropertySubscription : System.IDisposable
     {
+        public bool IsFaulted { get; }
         public int PendingCount { get; }
         public void Dispose() { }
     }

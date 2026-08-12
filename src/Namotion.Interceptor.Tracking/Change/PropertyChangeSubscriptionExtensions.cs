@@ -137,8 +137,10 @@ public static class PropertyChangeSubscriptionExtensions
     /// </para>
     /// <para>
     /// The caller owns the scheduler and must dispose subscriptions before it. A schedule that throws is
-    /// reported to <paramref name="onError"/> and faults the subscription; a schedule that succeeds and whose
-    /// work item never runs cannot be detected, and that subscription goes quiet. Give a subscription its own
+    /// reported to <paramref name="onError"/> and faults the subscription, which
+    /// <see cref="ScheduledPropertySubscription.IsFaulted"/> reports even when no handler was supplied; a
+    /// schedule that succeeds and whose work item never runs cannot be detected, and that subscription goes
+    /// quiet. Give a subscription its own
     /// scheduler or use <c>Scheduler.Default</c>: ambient <c>AsyncLocal</c> state is suppressed per work item,
     /// but a scheduler whose worker thread was created by someone else exposes the state frozen at that
     /// thread's creation.
