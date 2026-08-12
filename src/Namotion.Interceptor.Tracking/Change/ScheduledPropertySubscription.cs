@@ -106,10 +106,10 @@ public sealed class ScheduledPropertySubscription : IDisposable
     /// instead of discovering it through memory pressure. A writer already past its state check can still
     /// enqueue after <see cref="Dispose"/> cleared the queue, and nothing is guaranteed to dequeue such a
     /// change afterwards, so this is not guaranteed to reach zero once the subscription is disposed.
-    /// A fault clears the queue the same way, so a faulted subscription reads zero from here forever with
-    /// acceptance already stopped, which is indistinguishable from a healthy idle one. With the default null
-    /// <c>onError</c> that failure is otherwise silent, so a consumer that needs to detect it has to supply an
-    /// error handler rather than watch this value.
+    /// A fault stops acceptance and clears the queue the same way, so a faulted subscription reads zero here
+    /// apart from that same late enqueue, which is indistinguishable from a healthy idle one. With the
+    /// default null <c>onError</c> that failure is otherwise silent, so a consumer that needs to detect it
+    /// has to supply an error handler rather than watch this value.
     /// </summary>
     public int PendingCount => _queue.Count;
 
