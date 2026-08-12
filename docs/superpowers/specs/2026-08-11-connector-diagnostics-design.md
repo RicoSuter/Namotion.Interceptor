@@ -2,7 +2,7 @@
 
 Status: designed, not implemented. Closes #277.
 
-Revision 7. Three adversarial reviews ran against revisions 1, 3 and 5. Between them they found five factual errors about existing code and a cluster of implementation defects, all corrected here. The revision 5 review compiled the proposed type shape rather than reasoning about it, which is why the type model below differs materially from earlier revisions.
+Revision 8. Three adversarial reviews ran against revisions 1, 3 and 5. Between them they found five factual errors about existing code and a cluster of implementation defects, all corrected here. The revision 5 review compiled the proposed type shape rather than reasoning about it, which is why the type model below differs materially from earlier revisions.
 
 Two review arguments are answered rather than accepted, in "Why drop counting matters despite being zero in-repo" and in the naming section, so the next reader does not relitigate them.
 
@@ -81,6 +81,16 @@ Revision 5 put these on the base class and typed the diagnostics constructors as
 
 **`LastError` is not sticky today and going sticky is a behaviour change.** The OPC UA client clears it on every successful reconnection (`ClearLastError` at `OpcUaSubjectClientSource.cs:49`, called from `SessionManager.cs:413`, plus null-writes at `:156` and `:505`), the server clears it at `OpcUaSubjectServer.cs:269`, and `OpcUaClientDiagnostics.cs:98-103` documents the clearing contract. Revision 5 said "it stays sticky" as though that were the status quo. Sticky is still the right choice, since a cleared error erases the only evidence of a transient fault, but it is a change: `ClearLastError`, three null-writes and a documented contract are removed.
 
+### Claimed-property count belongs to diagnostics, not monitoring
+
+`ClaimedPropertyCount` reports how many properties a source currently owns, which is the aggregate of the `PropertyClaimed` and `PropertyReleased` events monitoring already emits. It sits on `SourceDiagnostics` rather than `ISubjectSource` by the same test that moved `PendingWriteCount`: it gates no behaviour. Servers never claim, so it is source-only.
+
+**It must not be read through `SourceOwnershipManager.Properties`.** That getter does `_properties.ToArray()` under the lock (`SourceOwnershipManager.cs:59-66`), so a `.Count` on it allocates an array the size of the claim set on every metrics scrape, which for an OPC UA client is thousands of entries per poll. `SourceOwnershipManager` instead gains a `volatile int` recomputed at each of its four mutation sites (`:86`, `:99`, `:119`, `:143`), all of which already hold the lock, so the value is exact at each write and needs no increment arithmetic. The getter is a `Volatile.Read`.
+
+`SubjectSourceBase` owns no ownership manager; each client source constructs its own (`OpcUaSubjectClientSource.cs:83`, `WebSocketSubjectClientSource.cs:71`, `MqttSubjectClientSource.cs:63`). So the count is registered rather than inherited, following the same shape as `QueueMetrics.Register`, and reports 0 for a source that registers nothing.
+
+`TotalClaimed` and `TotalReleased` churn counters were considered and left out: the gauge plus the existing event stream covers the stated need.
+
 ### Full break, no forwarding shims
 
 Existing names move rather than being preserved or obsoleted. A deliberate call: the doubled surface of a deprecation cycle is not worth carrying for a diagnostics API.
@@ -108,6 +118,8 @@ public class SourceMetrics : ConnectorMetrics
 {
     public QueueMetrics OutboundRetries { get; }
     public QueueMetrics InboundBuffer { get; }
+
+    public void RegisterClaimedProperties(Func<int> count);   // reports 0 until registered
 }
 
 // --- read side: exposed through ISubjectConnector.Diagnostics ---
@@ -130,6 +142,7 @@ public class SourceDiagnostics : ConnectorDiagnostics
 {
     public SourceDiagnostics(SourceMetrics metrics);
 
+    public int ClaimedPropertyCount { get; }               // gauge; 0 when no provider registered
     public QueueDiagnostics OutboundRetries { get; }
     public QueueDiagnostics InboundBuffer { get; }
 }
@@ -350,7 +363,7 @@ Clearing the providers before disposal narrows rather than closes the race: a re
 
 **`LastError` state for MQTT and WebSocket**, neither of which tracks one, and removal of the OPC UA clearing paths.
 
-**The inbound buffer count** in `SubjectPropertyWriter`.
+**The inbound buffer count** in `SubjectPropertyWriter`, and **the claimed-property count** in `SourceOwnershipManager`, both volatile counters maintained under locks that already exist.
 
 **The OPC UA server keeps its throughput counters** (`:206`, `:418`), read by `HomeBlaze.OpcUa/OpcUaServer.cs:191-193` and asserted by the #425 regression tests. `StartTime` is not converted but replaced: it is nulled in the restart finally at `:274`, a per-run window, whereas `StartTime` never moves on an internal restart.
 
@@ -364,7 +377,7 @@ Also out: incoming throughput for MQTT and WebSocket and both directions for the
 
 **Removed or moved**: `ISubjectSource.PendingWriteCount` and `LastSynchronizedAt`; on `OpcUaClientDiagnostics` the throughput pair, `LastError`, `IsConnected`, `PendingWriteCount`, `PendingReadAfterWrites`, `PollingItemCount`, the four reconnect counters and `LastConnectedAt`; on `OpcUaServerDiagnostics` the throughput pair, `LastError`, `IsRunning`, `StartTime`, `Uptime`; `MqttSubjectServer.IsListening` and `NumberOfClients`; `WebSocketSubjectServer.ConnectionCount` and `CurrentSequence`; nine renamed sub-block counters; `OpcUaSubjectClientSource.ClearLastError`.
 
-**Added**: `ConnectorMetrics`, `SourceMetrics`, `ConnectorDiagnostics`, `SourceDiagnostics`, `QueueDiagnostics`, `QueueMetrics`, `ThroughputDiagnostics`, `ReconnectDiagnostics`, `SubjectConnectorBase`, `MqttServerDiagnostics`, `WebSocketServerDiagnostics`, `Diagnostics` on both interfaces, `StateChangeTime` on `ISubjectSource`.
+**Added**: `ConnectorMetrics`, `SourceMetrics` (with `RegisterClaimedProperties`), `SourceOwnershipManager.Count`, `ConnectorDiagnostics`, `SourceDiagnostics`, `QueueDiagnostics`, `QueueMetrics`, `ThroughputDiagnostics`, `ReconnectDiagnostics`, `SubjectConnectorBase`, `MqttServerDiagnostics`, `WebSocketServerDiagnostics`, `Diagnostics` on both interfaces, `StateChangeTime` on `ISubjectSource`.
 
 **In-repo fallout**:
 
@@ -412,7 +425,8 @@ Repo conventions: `When<Condition>_Then<ExpectedBehavior>`, explicit Arrange/Act
 - **`TotalDropped` advances during a burst**, never decreases across a handover, and does not double-count. Written against `QueueMetrics` and a bounded processor directly, since no in-repo connector sets a bound.
 - **A faulted, a disposed and a stopped connector all report not operational**, for a server as well as a source, since the server path is the one revision 5 got wrong.
 - **`StateChangeTime` moves on every transition**, and is non-null on a source that never leaves its initial state.
-- **The `(value, timestamp)` pairs are never observed torn.**
+- **The  pairs are never observed torn.**
+- **`ClaimedPropertyCount` tracks all four mutation sites**, including detach cleanup and dispose, since a missed site drifts permanently rather than transiently.
 - **Concurrency**: a reader loop over every property while a writer loop recreates the processor.
 - **Snapshot and migration**: the #425 regression assertions preserved through their new path.
 
