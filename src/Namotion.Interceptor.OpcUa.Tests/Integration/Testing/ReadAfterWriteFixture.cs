@@ -124,10 +124,11 @@ internal sealed class GatedValueConverter : OpcUaValueConverter, IDisposable
 
 /// <summary>
 /// A client connected to a server whose Trigger node behaves like a PLC that consumes a command: it
-/// accepts every write, keeps <see cref="ServerValue"/> as the node's value, and leaves the
-/// client-supplied SourceTimestamp alone. Leaving it alone is what a conforming server does, and it is
-/// what makes the read-back's SourceTimestamp equal to the one the client stored for its own write,
-/// which is the case a timestamp comparison on its own cannot rank.
+/// accepts every write and keeps <see cref="ServerValue"/> as the node's value. The write is therefore
+/// a no-op for the server's model, and this server dates a node from the model rather than from the
+/// write, so the read-back comes back carrying a timestamp the client's own write never moved. That is
+/// the case a timestamp comparison on its own cannot rank, which is what this fixture is built to set
+/// up, and it holds whether or not the client sends a SourceTimestamp.
 /// </summary>
 internal sealed class ReadAfterWriteFixture : IAsyncDisposable
 {

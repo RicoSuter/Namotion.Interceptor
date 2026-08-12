@@ -416,11 +416,13 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     // that fallback would let the read-back apply a pre-write value over a newer local
                     // write.
                     //
-                    // That fallback compares two clocks, not one: a local commit stores the model's own
-                    // timestamp, and a write no longer carries it to the server, so the read-back answers
-                    // with the server's receive time instead. Being the later of the two, it errs toward
-                    // applying the server's value rather than skipping it, which is the safe direction: a
-                    // local write the revisions could rank was already handled above.
+                    // What that fallback compares depends on WriteSourceTimestamp. Sent, which is the
+                    // default, the server records the instant the change was made, so the read-back
+                    // answers with the timestamp the write itself carried and the comparison ties, which
+                    // skips. Turned off, the server stamps its own receive time instead, which is later
+                    // than the model's own, so the same comparison errs toward applying. Either way a
+                    // local write the revisions could rank was already handled above, so what is left to
+                    // decide alone is a change that carried no revision at all.
                     var timestampDecidesAlone = sentRevision == 0 || lastCommitRevision > localRevision;
 
                     if (timestampDecidesAlone &&
