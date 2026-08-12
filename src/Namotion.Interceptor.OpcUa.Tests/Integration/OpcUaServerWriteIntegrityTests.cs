@@ -195,15 +195,54 @@ public class OpcUaServerWriteIntegrityTests
         // Act
         readInterceptor.IsArmed = true;
         var statusCode = await fixture.Session.WriteAsync(node.NodeId, WriteIntegrityChild.AdjustedMaximum + 50d);
-        readInterceptor.IsArmed = false;
 
-        // Assert
+        // Assert: the interceptor stays armed across the wait, so the reconciliation inside the write
+        // cannot be what puts the value on the node. The outbound loop reads the change's own captured
+        // value rather than the getter, so a repair arriving while the getter still throws is provably
+        // the outbound one, which is the claim this test exists to make.
         Assert.True(StatusCode.IsGood(statusCode));
-        Assert.Equal(WriteIntegrityChild.AdjustedMaximum, fixture.Child.AdjustedValue);
         await AsyncTestHelpers.WaitUntilAsync(
             () => Equals(node.Value, WriteIntegrityChild.AdjustedMaximum) &&
                   node.StatusCode == (StatusCode)StatusCodes.Good,
             message: "the local change the adjustment published should reach the node and clear the Uncertain status");
+
+        readInterceptor.IsArmed = false;
+        Assert.Equal(WriteIntegrityChild.AdjustedMaximum, fixture.Child.AdjustedValue);
+    }
+
+    [Fact]
+    public async Task WhenAConverterAdjustsTheWriteAndTheReadThrows_ThenTheNodeStaysBehind()
+    {
+        // Arrange: an inbound value converter is not the same case as a hook, though both adjust. It runs
+        // before the apply, so its output is both what the model stores and what the write is stamped as
+        // having sent, the origin survives as this server's own, and the change it produces is dropped as
+        // an echo. A hook adjusts inside the write chain instead, which is what demotes the origin there.
+        var readInterceptor = new ThrowOnReadInterceptor(nameof(WriteIntegrityChild.ClampedValue));
+        await using var fixture = await WriteIntegrityFixture.StartAsync(
+            _output, valueConverter: new ClampingValueConverter(), readInterceptor: readInterceptor);
+
+        var node = fixture.Node(nameof(WriteIntegrityChild.ClampedValue));
+        var valueBeforeTheWrite = node.Value;
+
+        // Act
+        readInterceptor.IsArmed = true;
+        var statusCode = await fixture.Session.WriteAsync(node.NodeId, ClampingValueConverter.Maximum + 50d);
+        readInterceptor.IsArmed = false;
+
+        // Assert: a second property carries the barrier. Once its change has reached its own node the
+        // outbound loop has completed a cycle, so a repair for this one would have arrived with it, and
+        // asserting the absence straight after the write would prove nothing.
+        Assert.True(StatusCode.IsGood(statusCode));
+        Assert.Equal(ClampingValueConverter.Maximum, fixture.Child.ClampedValue);
+
+        fixture.Child.Other = "flush-barrier";
+        var barrierNode = fixture.Node(nameof(WriteIntegrityChild.Other));
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Equals(barrierNode.Value, "flush-barrier"),
+            message: "the barrier change should reach its node, proving the outbound loop ran a full cycle");
+
+        Assert.Equal(valueBeforeTheWrite, node.Value);
+        Assert.Equal((StatusCode)StatusCodes.UncertainLastUsableValue, node.StatusCode);
     }
 
     [Fact]

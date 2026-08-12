@@ -269,8 +269,10 @@ The inbound path enters the same state for a second reason: reading the model's 
 
 How long the two stay apart depends on what the model did with the value:
 
-- **Stored as sent.** The change the write produced carries this server as its origin and is dropped as its echo, so nothing corrects the node. It stays behind until that property changes from another origin, or until the next client write to the same node, which re-runs the reconciliation whatever the model then answers.
-- **Adjusted by a hook or an inbound converter.** The stored value differs from the one this server applied, so the change is published as a local one instead, which is not an echo. It reaches the outbound path and sets the node to the model's value at `Good` on the next flush.
+- **Stored as this server applied it.** The change the write produced carries this server as its origin and is dropped as its echo, so nothing corrects the node. It stays behind until that property changes from another origin, or until the next client write to the same node, which re-runs the reconciliation whatever the model then answers. **An inbound value converter belongs here, not below**: it runs before the apply, so its output is both what the model stores and what the write is stamped as having sent, and the origin survives.
+- **Adjusted inside the write chain**, by a changing hook or a write interceptor. The stored value then differs from the one this server applied, the origin is demoted to a local one, and the change is no longer an echo. It reaches the outbound path and sets the node to the model's value at `Good` on the next flush.
+
+An adjustment that lands on the value the property already holds publishes no change at all, so it repairs nothing either way.
 
 ## Diagnostics
 
