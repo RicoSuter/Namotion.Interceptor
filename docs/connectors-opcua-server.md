@@ -265,6 +265,8 @@ A client write is applied to the subject inside the write request, and the node 
 
 A node whose value the server cannot represent, for example when an outbound value converter throws, keeps the last value it could represent and reports `UncertainLastUsableValue`. It returns to `Good` as soon as the property changes to a value the server can represent.
 
+The inbound path enters the same state for a second reason: reading the model's value after a write runs the read chain, which is as extensible as the write chain, so a read interceptor can throw where the converter would not. The write itself already committed in that case, so the client is answered `Good` while the node keeps the older value at `UncertainLastUsableValue`. Model and node stay apart until that property changes again from another origin, because the change the write produced is this server's own and is dropped as its echo. The Uncertain status is the signal to a client that what it is reading is not current.
+
 ## Diagnostics
 
 `IOpcUaSubjectServer.Diagnostics` exposes a live facade of type `OpcUaServerDiagnostics`. Resolve it once and poll (see [Resolving the Server](#resolving-the-server)).

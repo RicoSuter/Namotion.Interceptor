@@ -156,6 +156,32 @@ public class OpcUaServerWriteIntegrityTests
     }
 
     [Fact]
+    public async Task WhenReadingTheModelValueThrowsAfterAnAcceptedWrite_ThenTheClientIsAnsweredGoodAndTheNodeSaysItIsBehind()
+    {
+        // Arrange: the companion to the case above, on a property that takes the write instead of
+        // cancelling it. The model moves and the node cannot follow, and the change the apply produced is
+        // this server's own, so it is dropped as its echo and nothing corrects the node afterwards.
+        var readInterceptor = new ThrowOnReadInterceptor(nameof(WriteIntegrityChild.Value));
+        await using var fixture = await WriteIntegrityFixture.StartAsync(_output, readInterceptor: readInterceptor);
+
+        var node = fixture.Node(nameof(WriteIntegrityChild.Value));
+        var valueBeforeTheWrite = node.Value;
+
+        // Act
+        readInterceptor.IsArmed = true;
+        var statusCode = await fixture.Session.WriteAsync(node.NodeId, "accepted");
+        readInterceptor.IsArmed = false;
+
+        // Assert: the answer reports whether the model threw the write back, and it did not, so Good is
+        // the truthful answer to what the client asked. That the value it can read is not the one the
+        // model now holds is what the Uncertain status on the node is there to say.
+        Assert.True(StatusCode.IsGood(statusCode));
+        Assert.Equal("accepted", fixture.Child.Value);
+        Assert.Equal(valueBeforeTheWrite, node.Value);
+        Assert.Equal((StatusCode)StatusCodes.UncertainLastUsableValue, node.StatusCode);
+    }
+
+    [Fact]
     public async Task WhenTheInboundConverterThrows_ThenTheRestOfTheWriteRequestStillCompletes()
     {
         // Arrange: the converter refuses one value, which is what a scaling or enum mapping converter does

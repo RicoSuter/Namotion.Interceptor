@@ -42,7 +42,9 @@ public enum ChangeDeliveryRule
     /// Changing either convention invalidates this for that server. What the condition really asks is that
     /// the destination already holds the value the subject will settle on, which is why a converter that
     /// clamps, scales or narrows no longer breaks it: the OPC UA server reconciles the node with the
-    /// model's own value rather than leaving the client's there.
+    /// model's own value rather than leaving the client's there. The one case it cannot reconcile is a
+    /// model value it fails to read or represent after taking the write, where the node keeps the older
+    /// value and says so with an Uncertain status rather than holding the settled one.
     /// Choosing <see cref="SourceValuesMayBeStale"/> here delivers a commit the clients have already moved
     /// past, leaving them behind the model with nothing to correct them.
     /// </remarks>
