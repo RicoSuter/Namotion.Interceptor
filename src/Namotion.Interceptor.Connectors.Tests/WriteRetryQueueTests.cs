@@ -752,9 +752,132 @@ public class WriteRetryQueueTests
         Assert.Equal(0, queue.RefusedWriteCount);
     }
 
+    [Fact]
+    public async Task WhenTheConnectionIsReplacedWhileAWriteIsInFlight_ThenItsRefusalIsRetriedRatherThanHeld()
+    {
+        // Arrange - releasing on replacement can only reach what is already held, so a write still in
+        // flight is the one case it cannot cover: its answer does not exist yet
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                // The reconnect lands before this write is answered
+                queue.RetryRefusedWrites();
+
+                var batch = changes.ToArray();
+                return new ValueTask<WriteResult>(WriteResult
+                    .Failure(batch, new InvalidOperationException("Refused"))
+                    .WithRefusedUntilReconnect(batch.ToImmutableArray()));
+            });
+
+        queue.Enqueue(new[] { CreateChange(CreateProperty("Refused"), 1, revision: 1) });
+
+        // Act
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - held against the replaced connection, it would wait for the next replacement to be sent
+        Assert.Equal(0, queue.RefusedWriteCount);
+        Assert.Equal(1, queue.PendingWriteCount);
+    }
+
+    [Fact]
+    public async Task WhenAFailedFlushRequeuesIntoAFilledQueue_ThenTheOldestAreDropped()
+    {
+        // Arrange - the requeue paths grow the queue exactly as the enqueue does, so the bound
+        // writeRetryQueueSize promises has to hold on both
+        var queue = new WriteRetryQueue(2, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                // The pump keeps appending while the write is in flight, which is what makes the requeue
+                // overflow rather than land back in the space it was dequeued from
+                for (var i = 0; i < 3; i++)
+                {
+                    queue.Enqueue(new[] { CreateChange(CreateProperty($"Later{i}"), i, revision: 10 + i) });
+                }
+
+                return new ValueTask<WriteResult>(
+                    WriteResult.Failure(changes, new InvalidOperationException("Down")));
+            });
+
+        queue.Enqueue(new[] { CreateChange(CreateProperty("First"), 1, revision: 1) });
+        queue.Enqueue(new[] { CreateChange(CreateProperty("Second"), 2, revision: 2) });
+
+        // Act
+        var flushed = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert
+        Assert.False(flushed);
+        Assert.Equal(2, queue.PendingWriteCount);
+    }
+
+    [Fact]
+    public async Task WhenMoreWritesAreRefusedThanTheQueueHolds_ThenEveryOneIsStillHeld()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(2, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = CreateAlwaysRefusingSource();
+
+        // Act - five distinct properties, well past the queue's capacity of two
+        for (var i = 0; i < 5; i++)
+        {
+            queue.Enqueue(new[] { CreateChange(CreateProperty($"Refused{i}"), i, revision: i + 1) });
+            await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        }
+
+        // Assert - held-back writes sit outside the queue's bound on purpose, since dropping one loses a
+        // write the next connection would have taken. One slot per property is what bounds them instead.
+        Assert.Equal(5, queue.RefusedWriteCount);
+        Assert.Equal(0, queue.PendingWriteCount);
+    }
+
+    [Fact]
+    public async Task WhenReleasedRefusalsOverflowTheQueue_ThenTheOldestAreDropped()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(2, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = CreateAlwaysRefusingSource();
+
+        for (var i = 0; i < 5; i++)
+        {
+            queue.Enqueue(new[] { CreateChange(CreateProperty($"Refused{i}"), i, revision: i + 1) });
+            await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        }
+
+        // Act
+        queue.RetryRefusedWrites();
+
+        // Assert - once released they are ordinary pending writes, and the bound applies again from there
+        Assert.Equal(0, queue.RefusedWriteCount);
+        Assert.Equal(2, queue.PendingWriteCount);
+    }
+
     private static PropertyReference CreateProperty(string name)
     {
         return new PropertyReference(new Mock<IInterceptorSubject>().Object, name);
+    }
+
+    /// <summary>
+    /// A source that refuses every change it is handed until its connection is re-established.
+    /// </summary>
+    private static Mock<ISubjectSource> CreateAlwaysRefusingSource()
+    {
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                var batch = changes.ToArray();
+                return new ValueTask<WriteResult>(WriteResult
+                    .Failure(batch, new InvalidOperationException("Refused"))
+                    .WithRefusedUntilReconnect(batch.ToImmutableArray()));
+            });
+
+        return sourceMock;
     }
 
     /// <summary>

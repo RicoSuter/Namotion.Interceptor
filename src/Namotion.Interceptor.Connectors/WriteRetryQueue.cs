@@ -28,8 +28,19 @@ internal sealed class WriteRetryQueue : IDisposable
     // rather than skipped inside it, so an idle tick's flush still short-circuits on IsEmpty and
     // PendingWriteCount still falls back to zero. One entry per property, so a property written
     // repeatedly while refused costs one slot rather than one per write. Only used under _lock.
+    //
+    // Deliberately not trimmed to _maxQueueSize: dropping a held write loses one a reconnect would have
+    // delivered, since the refusal is only permanent for this connection. One entry per property is what
+    // bounds it instead, by the model's property count rather than by the write rate. Released writes
+    // rejoin _pendingWrites and are subject to its bound again from there.
     private readonly Dictionary<PropertyReference, SubjectPropertyChange> _refusedWrites = new(PropertyReference.Comparer);
     private int _refusedCount;
+
+    // Bumped whenever the connection the refusals are scoped to is replaced. A write reads it before it
+    // is issued and hands it back with the answer, because releasing only what is held at the moment of
+    // the bump cannot reach a write still in flight: its answer arrives afterwards and would be held
+    // against a connection that no longer exists, for the whole life of the one that replaced it.
+    private int _connectionGeneration;
 
     private readonly ILogger _logger;
     private readonly QueueMetrics _metrics;
@@ -54,6 +65,12 @@ internal sealed class WriteRetryQueue : IDisposable
     /// Gets the number of writes held back because the source refuses them until it reconnects.
     /// </summary>
     public int RefusedWriteCount => Volatile.Read(ref _refusedCount);
+
+    /// <summary>
+    /// Gets the generation identifying the connection writes are currently being issued over. Read it
+    /// before issuing a write and hand it back to <see cref="EnqueueFailures"/> with that write's answer.
+    /// </summary>
+    public int ConnectionGeneration => Volatile.Read(ref _connectionGeneration);
 
     // Metrics is required rather than optional, so no construction site can drop writes uncounted.
     public WriteRetryQueue(int maxQueueSize, ILogger logger, QueueMetrics metrics)
@@ -121,8 +138,13 @@ internal sealed class WriteRetryQueue : IDisposable
     /// <see cref="WriteResult.FailedChanges"/>, which is complete, so every change lands in one of the
     /// two. A change failing without being named refused is queued even if the same property is held
     /// back from an earlier answer: the source has just answered differently about it.
+    /// <para>
+    /// <paramref name="connectionGeneration"/> is the value <see cref="ConnectionGeneration"/> held when
+    /// the write was issued. A refusal is only permanent for the connection that gave it, so one answered
+    /// over a connection since replaced is retried rather than held.
+    /// </para>
     /// </remarks>
-    public bool EnqueueFailures(in WriteResult result)
+    public bool EnqueueFailures(in WriteResult result, int connectionGeneration)
     {
         var failedChanges = result.FailedChanges;
         if (failedChanges.IsDefaultOrEmpty)
@@ -145,37 +167,49 @@ internal sealed class WriteRetryQueue : IDisposable
             return false;
         }
 
-        // This answer's refused properties, not the held-back set: a property held back from an earlier
-        // answer that fails for another reason now has to be retried like any other failure.
-        var refusedProperties = new HashSet<PropertyReference>(refusedChanges.Length, PropertyReference.Comparer);
-        List<SubjectPropertyChange>? retryableChanges = null;
-
+        var nothingLeftToRetry = false;
         int droppedCount;
         lock (_lock)
         {
-            foreach (var change in refusedChanges)
+            if (connectionGeneration != _connectionGeneration)
             {
-                refusedProperties.Add(change.Property);
-                HoldRefusedWrite(change);
+                // Answered over a connection since replaced. The refusals were scoped to that connection,
+                // and the release that came with the replacement ran before this answer existed, so
+                // holding them now would strand these writes until the connection is replaced again.
+                droppedCount = RequeueLocked(failedChanges.AsSpan());
             }
-
-            Volatile.Write(ref _refusedCount, _refusedWrites.Count);
-
-            foreach (var change in failedChanges)
+            else
             {
-                if (!refusedProperties.Contains(change.Property))
+                // This answer's refused properties, not the held-back set: a property held back from an
+                // earlier answer that fails for another reason now has to be retried like any other failure.
+                var refusedProperties = new HashSet<PropertyReference>(refusedChanges.Length, PropertyReference.Comparer);
+                List<SubjectPropertyChange>? retryableChanges = null;
+
+                foreach (var change in refusedChanges)
                 {
-                    (retryableChanges ??= new List<SubjectPropertyChange>(failedChanges.Length)).Add(change);
+                    refusedProperties.Add(change.Property);
+                    HoldRefusedWrite(change);
                 }
-            }
 
-            droppedCount = retryableChanges is null
-                ? 0
-                : RequeueLocked(CollectionsMarshal.AsSpan(retryableChanges));
+                Volatile.Write(ref _refusedCount, _refusedWrites.Count);
+
+                foreach (var change in failedChanges)
+                {
+                    if (!refusedProperties.Contains(change.Property))
+                    {
+                        (retryableChanges ??= new List<SubjectPropertyChange>(failedChanges.Length)).Add(change);
+                    }
+                }
+
+                nothingLeftToRetry = retryableChanges is null;
+                droppedCount = nothingLeftToRetry
+                    ? 0
+                    : RequeueLocked(CollectionsMarshal.AsSpan(retryableChanges));
+            }
         }
 
         _metrics.AddDropped(droppedCount);
-        return retryableChanges is null;
+        return nothingLeftToRetry;
     }
 
     /// <summary>
@@ -185,16 +219,33 @@ internal sealed class WriteRetryQueue : IDisposable
     /// </summary>
     public void RetryRefusedWrites()
     {
+        int droppedCount;
         lock (_lock)
         {
+            // Before the empty check, not after: a write issued over the replaced connection and still in
+            // flight is exactly the case where nothing is held yet, and it is the one this has to reach.
+            _connectionGeneration++;
+
             if (_refusedWrites.Count == 0)
             {
                 return;
             }
 
             ReleaseRefusedWrites();
+
+            // Released refusals go to the head, so a queue already at capacity drops them first. That is
+            // the ring buffer's own rule rather than an exception to it: they are the oldest writes here,
+            // and holding them past the bound would be the one path that grows the queue without limit.
+            droppedCount = _pendingWrites.Count - _maxQueueSize;
+            if (droppedCount > 0)
+            {
+                _pendingWrites.RemoveRange(0, droppedCount);
+            }
+
             Volatile.Write(ref _count, _pendingWrites.Count);
         }
+
+        _metrics.AddDropped(droppedCount);
     }
 
     /// <summary>
@@ -301,6 +352,11 @@ internal sealed class WriteRetryQueue : IDisposable
                 }
 
                 var memory = new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count);
+
+                // Read before the write is issued, since the connection can be replaced while it is in
+                // flight. Reading it late would be the unsafe direction: it would hold a refusal the
+                // replacement had already released against the connection that replaced it.
+                var connectionGeneration = ConnectionGeneration;
                 var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
                 if (result.Error is not null)
                 {
@@ -309,7 +365,7 @@ internal sealed class WriteRetryQueue : IDisposable
                     // connection is held back and the rest is queued again. Queueing again is still
                     // subject to the bound, so a batch that was dequeued while the pump kept appending
                     // can lose its oldest to the ring buffer, the same way a direct enqueue would.
-                    var nothingLeftToRetry = EnqueueFailures(in result);
+                    var nothingLeftToRetry = EnqueueFailures(in result, connectionGeneration);
                     Array.Clear(_scratchBuffer, 0, count);
 
                     if (!nothingLeftToRetry)

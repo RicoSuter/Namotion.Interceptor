@@ -403,12 +403,14 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         // Write current changes
         try
         {
+            // Read before the write is issued, since the connection can be replaced while it is in flight.
+            var connectionGeneration = WriteRetryQueue.ConnectionGeneration;
             var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
             if (!result.IsFullySuccessful)
             {
                 _logger.LogWarning(result.Error, "Failed to write {Count} changes to source, queuing for retry.",
                     result.FailedChanges.Length);
-                WriteRetryQueue.EnqueueFailures(in result);
+                WriteRetryQueue.EnqueueFailures(in result, connectionGeneration);
             }
         }
         catch (OperationCanceledException)
