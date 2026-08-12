@@ -99,17 +99,17 @@ public class ChangeQueueProcessor : IDisposable
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
 
-        if (maxQueueDepth is <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(maxQueueDepth),
-                "A bound of zero or less would drop every change immediately. Pass null for an unbounded queue.");
-        }
-
-        _maxQueueDepth = maxQueueDepth;
-        _deliveryRule = ValidateRule(deliveryRule);
-
         try
         {
+            if (maxQueueDepth is <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(maxQueueDepth),
+                    "A bound of zero or less would drop every change immediately. Pass null for an unbounded queue.");
+            }
+
+            _maxQueueDepth = maxQueueDepth;
+            _deliveryRule = ValidateRule(deliveryRule);
+
             _subscription = context.CreatePropertyChangeQueueSubscription();
             _ownsSubscription = true;
         }
@@ -141,16 +141,24 @@ public class ChangeQueueProcessor : IDisposable
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
 
-        if (maxQueueDepth is <= 0)
+        try
         {
-            throw new ArgumentOutOfRangeException(nameof(maxQueueDepth),
-                "A bound of zero or less would drop every change immediately. Pass null for an unbounded queue.");
-        }
+            if (maxQueueDepth is <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(maxQueueDepth),
+                    "A bound of zero or less would drop every change immediately. Pass null for an unbounded queue.");
+            }
 
-        _maxQueueDepth = maxQueueDepth;
-        _subscription = subscription;
-        _ownsSubscription = false;
-        _deliveryRule = ValidateRule(deliveryRule);
+            _maxQueueDepth = maxQueueDepth;
+            _subscription = subscription;
+            _ownsSubscription = false;
+            _deliveryRule = ValidateRule(deliveryRule);
+        }
+        catch
+        {
+            _changeMerger.Dispose();
+            throw;
+        }
     }
 
     // Rejects every unnamed value, not just zero: the delivery decision throws on an unknown rule from
