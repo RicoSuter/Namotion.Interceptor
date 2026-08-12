@@ -219,6 +219,8 @@ public class ScheduledPropertySubscriptionProtocolTests : IDisposable
 
         person.FirstName = "one";
         person.FirstName = "two";
+
+        // Precondition: both changes are queued and undelivered.
         Assert.Equal(2, subscription.PendingCount);
 
         // Act
@@ -277,6 +279,11 @@ public class ScheduledPropertySubscriptionProtocolTests : IDisposable
         Assert.Equal("one", person.FirstName);
         Assert.IsType<ObjectDisposedException>(Assert.Single(errors));
         Assert.Equal(0, PropertyChangeSubscriptions.ReadSubscriptionCount());
+
+        // Releasing has to go through the upstream's own one-shot Dispose rather than decrementing the
+        // gate directly: only the former also drops the subject-stored listener entry.
+        Assert.False(new PropertyReference(person, nameof(Person.FirstName))
+            .TryGetPropertyData(PropertyChangeSubscription.ListenersKey, out _));
     }
 
     [Fact]
@@ -420,8 +427,10 @@ public class ScheduledPropertySubscriptionProtocolTests : IDisposable
 
         // Act
         ambient.Value = "writer-scope";
+
+        // The observer reads this ambient value back only if the writer's ExecutionContext flowed into the
+        // scheduled delivery, which is exactly what the suppression under test rules out.
         person.FirstName = "one";
-        ambient.Value = null;
 
         // Assert
         Assert.True(delivered.Wait(TimeSpan.FromSeconds(30)));
