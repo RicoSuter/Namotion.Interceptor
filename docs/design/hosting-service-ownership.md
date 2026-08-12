@@ -264,6 +264,49 @@ rather than fixed, because forcing the strong reading at shutdown would mean ign
 Context attach is the mirror image, also under the lock: a start on the subject's chain if it is an
 `IHostedService`, and a create and start on each attachment's chain.
 
+### A subject created from inside a lifecycle handler
+
+Giving a container a default child from the container's own context attach is a legitimate pattern,
+and it is the one place where a subject enters the graph while another subject's attach event is still
+being dispatched:
+
+```csharp
+public void HandleLifecycleChange(SubjectLifecycleChange change)
+{
+    if (change.IsContextAttach && change.Subject is Container { Child: null } container)
+    {
+        container.Child = new ChildSubject();
+    }
+}
+```
+
+The assignment runs under `_attachedSubjects`, which is re-entrant, so the child's own context attach
+is raised before the assigning handler returns. It is **not** raised inside `AttachSubject`, though.
+`LifecycleInterceptor.InvokeAddedLifecycleHandlers` walks the handler array one entry at a time, so a
+handler that creates children either runs ahead of `HostedServiceHandler`, in which case the child is
+handled to completion before the container is, or behind it, in which case the container is handled to
+completion first. Either way the child's attach is an ordinary one, carrying its own liveness write,
+its own ownership take, its own appended start and its own pair of gate reads, and the two orders
+reach the same state. Pinned for both orders by
+`NestedAttachTests.WhenAnAttachHandlerCreatesTheContainersChild_ThenBothStartOnceAndEachOwnsItsOwnTarget`.
+
+The way back out is the same shape. The child is reached by the detach cascade through the container's
+property rather than by anything an explicit `AttachHostedService` left behind, and both ownerships are
+released, which is what lets a re-attach start the same two subjects again rather than finding targets
+no handler can claim. Pinned by
+`NestedAttachTests.WhenAContainerWhoseChildAnAttachHandlerCreatedLeavesTheGraph_ThenBothStopAndTheGraphCanRunThemAgain`.
+
+The one caller that really does re-enter `AttachSubject` is an `IStartupCompletionDeferrer`, because
+`TakeStartupHolds` calls it synchronously from inside `TryTakeOwnershipAndStart`, which is inside the
+outer `AttachSubject`. A deferrer that assigns a subject typed property therefore runs the whole inner
+attach before the outer call has taken its own target. Nothing is shared between the two: liveness is
+per subject, ownership is per target, and the holds are counted, so the inner attach takes and
+releases its own while the outer one is still outstanding. Pinned by
+`NestedAttachTests.WhenADeferrerCreatesTheChildWhileTheContainersOwnAttachIsStillRunning_ThenBothStartOnceAndEveryHoldIsReleased`,
+which reads the container's owner from inside the deferrer to prove the inner attach really did run
+first. This is [residual hazard 4](#4-a-deferrer-that-takes-a-lock-of-its-own) territory rather than a
+recommendation: what it costs a deferrer is the constraint stated there, not re-entrancy.
+
 ## Ownership
 
 A target's `Owner` is taken with `Interlocked.CompareExchange`. Finding this handler already installed
@@ -609,6 +652,31 @@ test the other does not satisfy, and deleting either one alone fails exactly tha
   the target inside that window loses the exchange for good, because nothing retries it. The seam is
   reached only when the read on entry is gone, so on an intact build the attach simply returns and the
   second handler wins.
+
+### The two gate reads in `AttachSubject`
+
+What these two protect is the liveness entry rather than the owner: whichever of them is missing, the
+take itself is still refused by `TryTakeOwnershipAndStart`'s own reads, and the damage that survives is
+a subject rooted on a dead handler.
+
+- The re-read:
+  `NestedAttachTests.WhenTheDrainBeginsWhileANestedAttachHoldsTheOuterOne_ThenNeitherSubjectStaysLiveOnTheDrainingHandler`.
+  A deferrer creates a child from inside the container's attach, and the hold that nested attach takes
+  starts the drain, so both calls wrote their liveness entries while the gate was still `Running` and
+  both have to notice on the way out. The set is read while the drain is held at `DrainGate`, which is
+  ahead of the liveness clear, because letting the drain go clears both entries for an unrelated reason
+  and hides the difference. Deleting the re-read alone fails it.
+- The pair:
+  `NestedAttachTests.WhenAnAttachHandlerCreatesAChildAfterTheDrainClearedLiveness_ThenNeitherSubjectIsLeftLive`,
+  which attaches a container, and the child its attach handler creates, into a drain parked inside a
+  stop body, past the liveness clear. Parking there rather than on `DrainGate` is what makes the damage
+  permanent: an entry written while the drain is held at `DrainGate` is swept up by the clear that
+  follows it. Deleting either read alone leaves it green, because the write and the removal cancel out,
+  so it fails only when both are gone.
+
+The read on entry has no test that fails for it alone, and that is a coverage limit rather than
+redundancy. The window it covers is a drain beginning between it and the liveness write beside it, and
+those two statements are adjacent, so no seam can drive anything into the gap.
 
 ## Activation and Waiting for a Start
 
