@@ -395,9 +395,10 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     // Both revisions are taken before either is used, the one counting source commits
                     // first. A local commit landing between the two reads then only ever raises
                     // localRevision, which skips below, instead of raising lastCommitRevision alone and
-                    // passing a local commit off as a source one. What stays open is the apply itself:
-                    // SetValueFromSource runs the whole inbound interceptor chain, and outside the
-                    // subject lock, so no lookup here can close it.
+                    // passing a local commit off as a source one. What stays open is ranking-then-apply as
+                    // a whole: these reads take no lock, and the apply serializes on a per-subject lock
+                    // its own terminal enters, so a commit can still land between them and no lookup here
+                    // can close that.
                     reference.TryGetWriteState(true, out var lastCommitRevision, out _);
                     reference.TryGetWriteState(false, out var localRevision, out _);
 
