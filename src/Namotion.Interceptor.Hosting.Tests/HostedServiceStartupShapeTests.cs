@@ -125,8 +125,6 @@ public partial class StartupShapeGraph
 [InterceptorSubject]
 public partial class StartupShapeSubject : IHostedService
 {
-    public partial string? Name { get; set; }
-
     public StartupRendezvous? Rendezvous { get; set; }
 
     public Task StartAsync(CancellationToken cancellationToken)

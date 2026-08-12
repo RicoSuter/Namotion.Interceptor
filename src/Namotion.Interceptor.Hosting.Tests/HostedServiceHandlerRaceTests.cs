@@ -1269,23 +1269,35 @@ public class HostedServiceHandlerRaceTests
             Volatile.Write(ref detachFinished, 1);
         });
 
+        // Conditions are recorded rather than asserted here: the seam runs while holding the target's
+        // chain lock and the lifecycle lock, so throwing would unwind out of a property write with the
+        // target owned and its startup holds unreleased, which makes a failing round far noisier than
+        // the failure it is reporting.
+        var detachStarted = false;
+        var detachSettled = false;
+
         target.ChainLockGate = () =>
         {
             takeReached.Set();
-            Assert.True(detachRunning.Wait(TimeSpan.FromSeconds(30)), "The detaching thread never started.");
+            detachStarted = detachRunning.Wait(TimeSpan.FromSeconds(30));
+            if (!detachStarted)
+            {
+                return;
+            }
 
-            var settled = SpinWait.SpinUntil(
+            detachSettled = SpinWait.SpinUntil(
                 () => Volatile.Read(ref detachFinished) == 1
                       || (detaching.ThreadState & ThreadState.WaitSleepJoin) != 0,
                 TimeSpan.FromSeconds(30));
-
-            Assert.True(settled, "The detaching thread neither blocked on the chain lock nor finished.");
         };
 
         detaching.Start();
 
         parent.Child = child;
         detaching.Join();
+
+        Assert.True(detachStarted, "The detaching thread never started.");
+        Assert.True(detachSettled, "The detaching thread neither blocked on the chain lock nor finished.");
 
         // An empty transition drains everything both paths appended, so the outcome is read after the
         // chain has run rather than after a delay.

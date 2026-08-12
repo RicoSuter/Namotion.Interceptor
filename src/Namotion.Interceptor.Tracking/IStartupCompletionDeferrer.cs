@@ -19,18 +19,20 @@ namespace Namotion.Interceptor.Tracking;
 /// <see cref="Lifecycle.LifecycleInterceptor"/>'s attach lock during a property write, and it disposes
 /// the returned hold from that same place when the start it was taken for is refused. An implementation
 /// must therefore not block in either method on anything that can be waiting for the lifecycle lock, and
-/// must not take a lock that a thread already holding the lifecycle lock can be waiting for. Either one
-/// closes a cycle that nothing resolves: a caller holds the implementation's lock and waits for a hosted
-/// service transition, that transition writes a subject typed property and so needs the lifecycle lock,
-/// and the thread holding the lifecycle lock is inside <see cref="DeferCompletion"/> waiting for the
-/// implementation's lock. The lifecycle lock is held throughout, so every structural property write in
-/// the graph queues behind it rather than only the caller.
+/// a lock it takes in either method is safe only when that lock is never held while waiting on anything
+/// that needs the lifecycle lock. Break either rule and a cycle closes that nothing resolves: a caller
+/// holds the implementation's lock and waits for a hosted service transition, that transition writes a
+/// subject typed property and so needs the lifecycle lock, and the thread holding the lifecycle lock is
+/// inside <see cref="DeferCompletion"/> waiting for the implementation's lock. The lifecycle lock is held
+/// throughout, so every structural property write in the graph queues behind it rather than only the
+/// caller.
 /// </para>
 /// <para>
-/// The take can avoid locking altogether: an interlocked increment returning a counted handle is enough,
-/// which is what SourceMonitor in Namotion.Interceptor.Connectors does. A lock taken on the release path
-/// is safe only when it is never held while waiting on anything that needs the lifecycle lock, so that
-/// the two are always acquired in the same order.
+/// Taking a lock at all is avoidable on the take path: an interlocked increment returning a counted
+/// handle is enough, which is what SourceMonitor in Namotion.Interceptor.Connectors does. Its release
+/// path does take a lock, and that is allowed under the rule above, because the same order is already
+/// fixed elsewhere in that type: its own lifecycle handler reaches that lock from inside the lifecycle
+/// lock, never the reverse.
 /// </para>
 /// </remarks>
 public interface IStartupCompletionDeferrer
