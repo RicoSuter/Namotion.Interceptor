@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Reactive.Concurrency;
 using System.Reflection;
 
 namespace Namotion.Interceptor.Tracking.Change;
@@ -110,6 +111,83 @@ public static class PropertyChangeSubscriptionExtensions
     /// <param name="property">The property to observe.</param>
     public static IObservable<SubjectPropertyChange> GetSynchronousChangeObservable(this PropertyReference property)
         => new SynchronousChangeObservable(property);
+
+    /// <summary>
+    /// Subscribes to changes of a single property and delivers them on <paramref name="scheduler"/> instead
+    /// of on the writing thread, one at a time and in dispatch order.
+    /// </summary>
+    /// <remarks>
+    /// Same ownership and dormancy contract as
+    /// <see cref="Subscribe(PropertyReference, IPropertyChangeObserver)"/>, with four differences that follow
+    /// from delivery being scheduled. Within this subscription the observer is never re-entered, so it needs
+    /// no synchronization of its own; an observer, closure, or <paramref name="onError"/> delegate shared
+    /// across several subscriptions is still invoked concurrently. An exception from the observer cannot
+    /// reach the writer and is reported to <paramref name="onError"/>, leaving the subscription live. A
+    /// change still queued when the subscription is disposed is dropped. And a change accepted before the
+    /// subject detaches is still delivered afterwards, which disposal is not: dormancy stops acceptance, not
+    /// the drain.
+    /// <para>
+    /// The queue is unbounded. A writer faster than the observer grows it without limit, and every buffered
+    /// change keeps its subject alive; watch <see cref="ScheduledPropertySubscription.PendingCount"/>, or
+    /// compose <c>Sample</c> on <see cref="GetSynchronousChangeObservable"/> for a hot property. An observer
+    /// that writes the property it observes never drains, quietly, where the unscheduled overload would
+    /// raise a StackOverflowException.
+    /// </para>
+    /// <para>
+    /// The caller owns the scheduler and must dispose subscriptions before it. A schedule that throws is
+    /// reported to <paramref name="onError"/> and faults the subscription; a schedule that succeeds and whose
+    /// work item never runs cannot be detected, and that subscription goes quiet. Give a subscription its own
+    /// scheduler or use <c>Scheduler.Default</c>: ambient <c>AsyncLocal</c> state is suppressed per work item,
+    /// but a scheduler whose worker thread was created by someone else exposes the state frozen at that
+    /// thread's creation.
+    /// </para>
+    /// </remarks>
+    /// <param name="property">The property to subscribe to.</param>
+    /// <param name="observer">The observer, invoked on <paramref name="scheduler"/>.</param>
+    /// <param name="scheduler">The scheduler each change is delivered on. Synchronous schedulers are rejected.</param>
+    /// <param name="onError">Invoked when the observer or the scheduler throws; the exception is swallowed
+    /// when null, which also makes a permanently throwing observer invisible. It must not throw, may run
+    /// after Dispose returns, is serialized per subscription rather than per delegate, and can run
+    /// synchronously on the writer thread under a transaction commit lock, so it must not write properties,
+    /// start a transaction, or block.</param>
+    public static ScheduledPropertySubscription Subscribe(
+        this PropertyReference property,
+        IPropertyChangeObserver observer,
+        IScheduler scheduler,
+        Action<Exception>? onError = null)
+    {
+        ArgumentNullException.ThrowIfNull(observer);
+        ArgumentNullException.ThrowIfNull(scheduler);
+        ThrowIfSynchronous(scheduler);
+
+        return ScheduledPropertySubscription.Create(property, observer, scheduler, onError);
+    }
+
+    /// <summary>Delegate overload of <see cref="Subscribe(PropertyReference, IPropertyChangeObserver, IScheduler, Action{Exception})"/>.</summary>
+    public static ScheduledPropertySubscription Subscribe(
+        this PropertyReference property,
+        PropertyChangeCallback callback,
+        IScheduler scheduler,
+        Action<Exception>? onError = null)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        return property.Subscribe(new DelegateObserver(callback), scheduler, onError);
+    }
+
+    private static void ThrowIfSynchronous(IScheduler scheduler)
+    {
+        // Only the two singletons are detectable. Any scheduler that runs actions inline has the same
+        // hazard, including DisableOptimizations wrappers over these, and cannot be rejected.
+        if (ReferenceEquals(scheduler, ImmediateScheduler.Instance)
+            || ReferenceEquals(scheduler, CurrentThreadScheduler.Instance))
+        {
+            throw new ArgumentException(
+                "A synchronous scheduler delivers on the writing thread, so one writer's setter can end up " +
+                "draining every other writer's changes and its latency becomes unbounded. Use " +
+                "property.Subscribe(callback) for synchronous delivery.",
+                nameof(scheduler));
+        }
+    }
 
     private static string ResolveDirectPropertyName<TSubject, TValue>(Expression<Func<TSubject, TValue>> propertySelector)
     {
