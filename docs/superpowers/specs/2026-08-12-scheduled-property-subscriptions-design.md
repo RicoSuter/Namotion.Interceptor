@@ -101,8 +101,14 @@ var processed = 0;
 try
 {
     var pending = Volatile.Read(ref _wip);
-    while (processed < pending && processed < MaxBatch)
+    while (processed < MaxBatch)
     {
+        if (processed >= pending)
+        {
+            pending = Volatile.Read(ref _wip);   // work accepted mid-batch, budget untouched
+            if (processed >= pending) break;
+        }
+
         if (Volatile.Read(ref _state) != Live) return;
         if (!_queue.TryDequeue(out var change)) break;
         processed++;                 // counts the dequeue, not the delivery
@@ -120,7 +126,7 @@ Three properties carry the design, and each replaces a defect found in the unbou
 
 **At most one drain is active.** Only the zero-to-one transition in enqueue schedules, and only a settling drain that observed a non-zero result reschedules. Those cannot both fire: if the settle returned non-zero the counter never reached zero, so no enqueue can see the zero-to-one transition; if it returned zero the drain does not reschedule and the next enqueue does.
 
-**The drain always yields.** It processes at most `MaxBatch` items and then hands off through a fresh work item rather than looping until the counter empties. Without this, a subscription whose writer outruns its observer holds its scheduler thread for as long as production continues. Measured on the unbounded draft with the pool capped at four workers and eight sustained writers: two of eight subscriptions delivered nothing at all in three seconds while their queues grew past a hundred million entries, and unrelated thread pool work saw start latencies up to 79 ms. That is the trap this design exists to avoid, in a worse form than `ObserveOn` has it, because a held pool thread starves siblings while a dedicated thread does not. `MaxBatch` is 1024: measured over 20 000 saturated changes it costs 20 scheduler calls against 312 for a budget of 64, at the same bytes per change.
+**The drain always yields.** It processes at most `MaxBatch` items and then hands off through a fresh work item rather than looping until the counter empties. It refreshes its `_wip` snapshot when that snapshot is exhausted, so work accepted while a batch runs is delivered inside the remaining budget instead of waiting for a whole new work item; without the refresh, a saturated writer costs roughly twice the scheduler work items, and each one is a `Schedule` call plus a suppress-and-restore `ExecutionContext` pair. The `MaxBatch` ceiling still bounds the loop, so the refresh cannot extend how long one work item holds its thread. Without this, a subscription whose writer outruns its observer holds its scheduler thread for as long as production continues. Measured on the unbounded draft with the pool capped at four workers and eight sustained writers: two of eight subscriptions delivered nothing at all in three seconds while their queues grew past a hundred million entries, and unrelated thread pool work saw start latencies up to 79 ms. That is the trap this design exists to avoid, in a worse form than `ObserveOn` has it, because a held pool thread starves siblings while a dedicated thread does not. `MaxBatch` is 1024: measured over 20 000 saturated changes it costs 20 scheduler calls against 312 for a budget of 64, at the same bytes per change.
 
 **The counter always settles.** The subtraction is in a `finally`, and `processed` counts the dequeue rather than the delivery, so an escape from `Deliver` leaves the counter consistent with the queue and the handoff picks the remainder up. `Deliver` wraps the observer call and routes a throw to `onError`, which is itself wrapped and swallowed, so an escape should be unreachable. The `finally` is there because the draft relied on that reasoning instead, which is the same "it cannot throw" assumption this document refuses to make when it declines to log.
 

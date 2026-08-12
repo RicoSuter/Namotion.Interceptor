@@ -97,6 +97,41 @@ public class ScheduledPropertySubscriptionProtocolTests : IDisposable
     }
 
     [Fact]
+    public void WhenAnObserverWritesTheSamePropertyDuringDelivery_ThenTheSuccessorIsDeliveredInTheSameBatch()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        var scheduler = new ControllableScheduler();
+        var received = new List<string?>();
+
+        using var subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe(
+                (in SubjectPropertyChange change) =>
+                {
+                    received.Add(change.GetNewValue<string?>());
+                    if (received.Count == 1)
+                    {
+                        // Written once only, so the drain terminates instead of feeding itself forever.
+                        person.FirstName = "two";
+                    }
+                },
+                scheduler);
+
+        // Act
+        person.FirstName = "one";
+        scheduler.RunUntilIdle();
+
+        // Assert: the write landed mid-batch, and the drain refreshed its snapshot rather than settling, so
+        // it spent the remaining budget on it. A failure here means the refresh is gone and every change a
+        // running batch accepts costs its own scheduler work item.
+        Assert.Equal(["one", "two"], received);
+        Assert.Equal(1, scheduler.ScheduleCallCount);
+        Assert.Equal(0, subscription.WorkInProgressForTests);
+        Assert.Equal(0, subscription.PendingCount);
+    }
+
+    [Fact]
     public async Task WhenManyWritersRaceOneProperty_ThenTheObserverIsNeverReenteredAndNothingIsLost()
     {
         // Arrange

@@ -123,7 +123,9 @@ public static class PropertyChangeSubscriptionExtensions
     /// no synchronization of its own; an observer, closure, or <paramref name="onError"/> delegate shared
     /// across several subscriptions is still invoked concurrently. An exception from the observer cannot
     /// reach the writer and is reported to <paramref name="onError"/>, leaving the subscription live. A
-    /// change still queued when the subscription is disposed is dropped. And a change accepted before the
+    /// change still queued when the subscription is disposed is dropped, except one enqueued by a writer that
+    /// had already passed its own state check, which stays queued and keeps pinning its subject for as long
+    /// as the handle is reachable. And a change accepted before the
     /// subject detaches is still delivered afterwards, which disposal is not: dormancy stops acceptance, not
     /// the drain.
     /// <para>
