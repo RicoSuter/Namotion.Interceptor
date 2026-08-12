@@ -133,12 +133,22 @@ public class SynchronousChangeObservableTests
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var property = new PropertyReference(person, nameof(Person.FirstName));
+        var firstReceived = new List<string?>();
+        var secondReceived = new List<string?>();
 
         // Act
         var first = property.GetSynchronousChangeObservable();
         var second = property.GetSynchronousChangeObservable();
 
-        // Assert: nothing may key observables by identity.
+        using var firstSubscription = first.Subscribe(change => firstReceived.Add(change.GetNewValue<string?>()));
+        using var secondSubscription = second.Subscribe(change => secondReceived.Add(change.GetNewValue<string?>()));
+
+        person.FirstName = "Rico";
+
+        // Assert: nothing may key observables by identity, and each instance carries its own subscription.
         Assert.NotSame(first, second);
+        Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount());
+        Assert.Equal(["Rico"], firstReceived);
+        Assert.Equal(["Rico"], secondReceived);
     }
 }

@@ -19,6 +19,13 @@ internal sealed class SynchronousChangeObservable(PropertyReference property) : 
 
         // OnError is never raised: the per-property channel has no error signal, and a throwing observer
         // is the observer's own problem, exactly as for an unscheduled subscription.
-        return property.Subscribe((in SubjectPropertyChange change) => observer.OnNext(change));
+        return property.Subscribe(new ObserverAdapter(observer));
+    }
+
+    // Adapting instead of passing a lambda drops the closure, the PropertyChangeCallback, and the internal
+    // DelegateObserver per subscribe, plus one delegate hop per delivery on the write path.
+    private sealed class ObserverAdapter(IObserver<SubjectPropertyChange> observer) : IPropertyChangeObserver
+    {
+        public void OnChange(in SubjectPropertyChange change) => observer.OnNext(change);
     }
 }
