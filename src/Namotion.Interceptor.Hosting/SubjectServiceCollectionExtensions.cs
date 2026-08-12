@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Namotion.Interceptor.Hosting;
@@ -15,8 +16,8 @@ public static class SubjectServiceCollectionExtensions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Registration is idempotent, which has a sharp edge worth knowing: a second call for the same
-    /// type silently drops its <paramref name="configure"/> and <paramref name="contextResolver"/>,
+    /// One instance per type. A second call for the same type throws rather than silently dropping its
+    /// <paramref name="configure"/> and <paramref name="contextResolver"/>,
     /// and if the caller already registered <typeparamref name="T"/> themselves, neither the context
     /// nor <paramref name="configure"/> is applied.
     /// </para>
@@ -56,6 +57,8 @@ public static class SubjectServiceCollectionExtensions
         Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
         where T : class, IInterceptorSubject
     {
+        GuardDuplicateRegistration<T>(services);
+
         var contextFactory = TryCreateContextFactory<T>();
 
         services.TryAddSingleton<T>(serviceProvider =>
@@ -109,6 +112,26 @@ public static class SubjectServiceCollectionExtensions
         services.AddHostedService<SubjectActivation<T>>();
 
         return services;
+    }
+
+    /// <summary>
+    /// Throws when the same subject type is registered twice. The activation is the marker: it is
+    /// registered once per call, so finding one already there means this is a second call. Silently
+    /// keeping the first registration would drop this call's configure and context resolver, which
+    /// reads as a working registration and is not one.
+    /// </summary>
+    private static void GuardDuplicateRegistration<T>(IServiceCollection services)
+        where T : class, IInterceptorSubject
+    {
+        if (services.Any(descriptor =>
+                descriptor.ServiceType == typeof(IHostedService) &&
+                descriptor.ImplementationType == typeof(SubjectActivation<T>)))
+        {
+            throw new InvalidOperationException(
+                $"{typeof(T).Name} is already registered with AddSubject. Register it once. To run " +
+                "several instances of one subject type, construct them and attach them to the object " +
+                "graph rather than registering each one.");
+        }
     }
 
     /// <summary>

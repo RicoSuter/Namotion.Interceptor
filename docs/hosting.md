@@ -92,7 +92,7 @@ If `T` also implements `IHostedService`, the handler starts it as usual, and hos
 
 Three sharp edges:
 
-- Registration is idempotent. A second `AddSubject<T>()` for the same `T` silently drops its `configure` and `contextResolver`.
+- One instance per type. A second `AddSubject<T>()` for the same `T` throws, because its `configure` and `contextResolver` could not take effect. To run several instances of one type, construct them and attach them to the object graph rather than registering each one.
 - If you already registered `T` yourself, `AddSubject<T>()` applies neither the context nor `configure`.
 - When the resolved context has no hosting handler, because `WithHostedServices()` was never called on it or because `contextResolver` returned null, there is nothing to hand the subject to. `AddSubject<T>()` then starts an `IHostedService` subject itself at host start and stops that same instance at host shutdown. It never disposes it.
 

@@ -94,30 +94,20 @@ public class AddSubjectTests
     }
 
     [Fact]
-    public async Task WhenAddSubjectIsCalledTwice_ThenOnlyOneActivationIsRegistered()
+    public void WhenAddSubjectIsCalledTwiceForOneType_ThenItThrows()
     {
-        // Arrange
+        // Arrange - the second call cannot take effect: the singleton registration is a TryAdd, so its
+        // configure and contextResolver would be dropped while reading as a working registration.
         var builder = Host.CreateApplicationBuilder();
         var context = CreateContext(builder);
         builder.Services.AddSingleton(context);
         builder.Services.AddSubject<SubjectWithDependencies>();
-        builder.Services.AddSubject<SubjectWithDependencies>();
 
-        var host = builder.Build();
-        await host.StartAsync();
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => builder.Services.AddSubject<SubjectWithDependencies>());
 
-        try
-        {
-            // Act
-            var subject = host.Services.GetRequiredService<SubjectWithDependencies>();
-
-            // Assert
-            Assert.Equal(1, subject.StartCount);
-        }
-        finally
-        {
-            await host.StopAsync();
-        }
+        Assert.Contains(nameof(SubjectWithDependencies), exception.Message);
     }
 
     [Fact]
