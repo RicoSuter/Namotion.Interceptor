@@ -214,7 +214,7 @@ Without this, one permanently refused property stalls the whole write path: the 
 - The set is additive. `FailedChanges` stays the complete answer about what did not reach the source, so a transaction still counts a refused change unwritten and rolls it back. Removing it from `FailedChanges` instead would count it written and skip the rollback.
 - Nothing is dropped. Refused changes are held one per property and returned to the queue when the connection is replaced, so a node a reconnect would have accepted is still delivered. They are reported separately from `PendingWriteCount`, which falls back to zero, through `SubjectSourceBase.RefusedWriteCount`.
 - `SubjectSourceBase.ReportConnectionLost` releases them. A connector whose connection can be replaced without an outage it reported calls the protected `RetryRefusedWrites` itself; the OPC UA client does this on every session transition.
-- Only the OPC UA client names refusals today, from six status codes. See [Writes refused for a session](connectors-opcua-client.md#writes-refused-for-a-session).
+- Only the OPC UA client names refusals today, from eight status codes. See [Writes refused for a session](connectors-opcua-client.md#writes-refused-for-a-session).
 
 ### Monitoring Synchronization State
 
