@@ -37,4 +37,37 @@ public class TestSchedulersTests
         var escaped = Assert.Single(scheduler.Escaped);
         Assert.IsType<InvalidOperationException>(escaped);
     }
+
+    [Fact]
+    public void WhenAWorkItemSchedulesASuccessor_ThenRunAllStopsAtItWhileRunUntilIdleFollowsIt()
+    {
+        // Arrange
+        var scheduler = new ControllableScheduler();
+        var ran = new List<string>();
+
+        scheduler.Schedule(0, (successorScheduler, _) =>
+        {
+            ran.Add("first");
+            successorScheduler.Schedule(0, (_, _) =>
+            {
+                ran.Add("second");
+                return System.Reactive.Disposables.Disposable.Empty;
+            });
+
+            return System.Reactive.Disposables.Disposable.Empty;
+        });
+
+        // Act
+        var runAllCount = scheduler.RunAll();
+
+        // Assert
+        Assert.Equal(1, runAllCount);
+        Assert.Equal(new[] { "first" }, ran);
+        Assert.Equal(1, scheduler.QueuedCount);
+        Assert.Equal(2, scheduler.ScheduleCallCount);
+
+        scheduler.RunUntilIdle();
+        Assert.Equal(new[] { "first", "second" }, ran);
+        Assert.Equal(0, scheduler.QueuedCount);
+    }
 }

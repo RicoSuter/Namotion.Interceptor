@@ -1378,32 +1378,76 @@ Append to `ScheduledPropertySubscriptionProtocolTests`:
     {
         // Arrange: an unsuppressed ExecutionContext would let a delivery observe the writer's
         // SubjectTransaction.CurrentTransaction and mutate a pooled, already-returned dictionary.
+        // This must run on a real scheduler. ControllableScheduler enqueues a bare closure and runs it
+        // inline on the pump thread, so it captures no ExecutionContext and would pass with the
+        // suppression removed, making the assertion vacuous.
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
-        var scheduler = new ControllableScheduler();
         var ambient = new AsyncLocal<string?>();
         string? observed = "not-run";
 
+        using var delivered = new CountdownEvent(1);
         using var subscription = new PropertyReference(person, nameof(Person.FirstName))
-            .Subscribe((in SubjectPropertyChange _) => observed = ambient.Value, scheduler);
+            .Subscribe(
+                (in SubjectPropertyChange _) =>
+                {
+                    observed = ambient.Value;
+                    delivered.Signal();
+                },
+                System.Reactive.Concurrency.Scheduler.Default);
 
         // Act
         ambient.Value = "writer-scope";
         person.FirstName = "one";
         ambient.Value = null;
-        scheduler.RunUntilIdle();
 
         // Assert
+        Assert.True(delivered.Wait(TimeSpan.FromSeconds(30)));
         Assert.Null(observed);
     }
+
+    [Fact]
+    public async Task WhenDeliveryHappensDuringATransactionCommit_ThenTheObserverDoesNotSeeTheTransaction()
+    {
+        // Arrange: the corruption this guards against is an observer writing a property under an
+        // inherited transaction whose pending-change dictionary has already been returned to a pool.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithTransactions();
+        var person = new Person(context);
+        var observedTransaction = new object();
+
+        using var delivered = new CountdownEvent(1);
+        using var subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe(
+                (in SubjectPropertyChange _) =>
+                {
+                    observedTransaction = SubjectTransaction.Current;
+                    delivered.Signal();
+                },
+                System.Reactive.Concurrency.Scheduler.Default);
+
+        // Act
+        using (var transaction = SubjectTransaction.Create(context))
+        {
+            person.FirstName = "one";
+            transaction.Commit();
+        }
+
+        await Task.Yield();
+
+        // Assert
+        Assert.True(delivered.Wait(TimeSpan.FromSeconds(30)));
+        Assert.Null(observedTransaction);
+    }
 ```
+
+Check the real names on `SubjectTransaction` before writing the second test: it needs whatever the ambient accessor and the create/commit entry points are actually called in `src/Namotion.Interceptor.Tracking/Transactions/SubjectTransaction.cs`, and the registration extension may be named differently from `WithTransactions`. Adjust the test to the real API; the assertion is what matters, which is that the observer sees no ambient transaction.
 
 - [ ] **Step 2: Run tests to verify they fail or pass**
 
 Run: `DiffEngine_Disabled=true dotnet test src/Namotion.Interceptor.Tracking.Tests --filter "FullyQualifiedName~ScheduledPropertySubscriptionProtocolTests"`
 Expected: 13 tests. The eight new ones exercise code Task 4 already wrote, so they should PASS. If any fails, the Task 4 implementation is wrong; fix `ScheduledPropertySubscription.cs` rather than weakening the test.
 
-Note on `WhenTheWriterCarriesAmbientState_...`: `ControllableScheduler` captures nothing itself, so this test passes only because `ScheduleDrain` suppresses flow before calling `Schedule`. To confirm the test is real, temporarily delete the `SuppressFlow` branch, re-run, and see it fail with `"writer-scope"`. Restore it afterwards.
+Note on the two ambient-state tests: both must run on `Scheduler.Default`, not on `ControllableScheduler`, which enqueues a bare closure and runs it inline on the pump thread and therefore captures no `ExecutionContext` at all. On the controllable scheduler these assertions hold whether or not `ScheduleDrain` suppresses flow, so they would pin nothing. To confirm the tests are real, temporarily delete the `SuppressFlow` branch and re-run: both must fail, the first with `"writer-scope"`. Restore it afterwards.
 
 - [ ] **Step 3: Commit**
 

@@ -59,19 +59,32 @@ internal sealed class ControllableScheduler : IScheduler
     /// <summary>Runs every item queued at entry, without following items those items queue.</summary>
     public int RunAll()
     {
-        Action[] batch;
+        int budget;
         lock (_gate)
         {
-            batch = _queue.ToArray();
-            _queue.Clear();
+            budget = _queue.Count;
         }
 
-        foreach (var work in batch)
+        // Dequeued one at a time so an item that throws leaves its untouched siblings queued.
+        var ran = 0;
+        while (ran < budget)
         {
+            Action work;
+            lock (_gate)
+            {
+                if (_queue.Count == 0)
+                {
+                    break;
+                }
+
+                work = _queue.Dequeue();
+            }
+
+            ran++;
             work();
         }
 
-        return batch.Length;
+        return ran;
     }
 
     /// <summary>Runs items, including ones scheduled by earlier items, until nothing is left.</summary>
@@ -144,11 +157,13 @@ internal sealed class RecordingScheduler(IScheduler inner) : IScheduler
     public IDisposable Schedule<TState>(TState state, Func<IScheduler, TState, IDisposable> action)
     {
         Interlocked.Increment(ref _scheduleCallCount);
-        return inner.Schedule(state, (scheduler, innerState) =>
+        return inner.Schedule(state, (_, innerState) =>
         {
             try
             {
-                return action(scheduler, innerState);
+                // The work item gets this wrapper, not the inner scheduler, so anything it schedules
+                // from inside itself is still counted and still has its exceptions recorded.
+                return action(this, innerState);
             }
             catch (Exception exception)
             {
