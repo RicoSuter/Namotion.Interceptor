@@ -27,7 +27,7 @@
 ## File Structure
 
 **Production**
-- Create `src/Namotion.Interceptor.Tracking/Change/PropertyChangeObservable.cs`: internal `IObservable<SubjectPropertyChange>` adapter for one property (layer 1).
+- Create `src/Namotion.Interceptor.Tracking/Change/SynchronousChangeObservable.cs`: internal `IObservable<SubjectPropertyChange>` adapter for one property (layer 1).
 - Create `src/Namotion.Interceptor.Tracking/Change/ScheduledPropertySubscription.cs`: the public handle and the whole dispatch protocol (layer 2). All queue, counter, state, and scheduling logic lives here and nowhere else.
 - Modify `src/Namotion.Interceptor.Tracking/Change/PropertyChangeSubscriptionExtensions.cs`: five new public methods, thin wrappers over the two files above.
 - Modify `src/Namotion.Interceptor.Tracking/Change/IPropertyChangeObserver.cs` and `PropertyChangeCallback.cs`: XML docs only.
@@ -73,12 +73,11 @@ Replace the `SensitiveMarkers` array:
         "PropertyChangeCallback",
         // The scheduled channel and the observable adapter install real per-property subscriptions
         // without naming any type above: the observable is subscribed in Rx form
-        // (.Subscribe(change => ...)), which matches none of the lambda markers below. The observable
-        // marker matches the construction expression rather than the bare type name, which is a
-        // substring of the unrelated context-level GetPropertyChangeObservable.
-        "GetSynchronousChangeObservable",
+        // (.Subscribe(change => ...)), which matches none of the lambda markers below. One marker
+        // covers both the extension method and the type backing it, in any construction form,
+        // and cannot collide with the unrelated context-level GetPropertyChangeObservable.
+        "SynchronousChangeObservable",
         "ScheduledPropertySubscription",
-        "new PropertyChangeObservable",
         // The low-level PropertyReference.Subscribe overloads taking an inline callback name none
         // of the types above, so match the lambda form itself (both `in` spellings).
         ".Subscribe((in ",
@@ -103,7 +102,7 @@ git commit -m "test: Guard the scheduled subscription names in the collection co
 ### Task 2: Layer 1, the synchronous change observable
 
 **Files:**
-- Create: `src/Namotion.Interceptor.Tracking/Change/PropertyChangeObservable.cs`
+- Create: `src/Namotion.Interceptor.Tracking/Change/SynchronousChangeObservable.cs`
 - Modify: `src/Namotion.Interceptor.Tracking/Change/PropertyChangeSubscriptionExtensions.cs` (append one method before `ResolveDirectPropertyName`)
 - Modify: `src/Namotion.Interceptor.Tracking.Tests/VerifyChecksTests.PublicApi.verified.txt`
 - Test: `src/Namotion.Interceptor.Tracking.Tests/Change/SynchronousChangeObservableTests.cs`
@@ -270,7 +269,7 @@ Expected: build FAILS with `CS1061: 'PropertyReference' does not contain a defin
 
 - [ ] **Step 3: Create the observable**
 
-Create `src/Namotion.Interceptor.Tracking/Change/PropertyChangeObservable.cs`:
+Create `src/Namotion.Interceptor.Tracking/Change/SynchronousChangeObservable.cs`:
 
 ```csharp
 namespace Namotion.Interceptor.Tracking.Change;
@@ -286,7 +285,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// <see cref="PropertyChangeSubscriptionExtensions.Subscribe(PropertyReference, IPropertyChangeObserver)"/>
 /// that this type deliberately mirrors.
 /// </remarks>
-internal sealed class PropertyChangeObservable(PropertyReference property) : IObservable<SubjectPropertyChange>
+internal sealed class SynchronousChangeObservable(PropertyReference property) : IObservable<SubjectPropertyChange>
 {
     public IDisposable Subscribe(IObserver<SubjectPropertyChange> observer)
     {
@@ -329,7 +328,7 @@ In `src/Namotion.Interceptor.Tracking/Change/PropertyChangeSubscriptionExtension
     /// </remarks>
     /// <param name="property">The property to observe.</param>
     public static IObservable<SubjectPropertyChange> GetSynchronousChangeObservable(this PropertyReference property)
-        => new PropertyChangeObservable(property);
+        => new SynchronousChangeObservable(property);
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**
@@ -355,7 +354,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/Namotion.Interceptor.Tracking/Change/PropertyChangeObservable.cs \
+git add src/Namotion.Interceptor.Tracking/Change/SynchronousChangeObservable.cs \
         src/Namotion.Interceptor.Tracking/Change/PropertyChangeSubscriptionExtensions.cs \
         src/Namotion.Interceptor.Tracking.Tests/Change/SynchronousChangeObservableTests.cs \
         src/Namotion.Interceptor.Tracking.Tests/VerifyChecksTests.PublicApi.verified.txt
