@@ -11,6 +11,46 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// </summary>
 public sealed class ScheduledPropertySubscription : IDisposable
 {
+    // Interleavings that are hazardous here, each with the field, the primitive that orders it, and the
+    // property that primitive buys.
+    //
+    // Enqueue against enqueue: only the zero to one transition of _wip schedules, so concurrent writers
+    // cannot both start a drain and lose the in-subscription serialization.
+    //
+    // Enqueue against a settling drain: the settling Interlocked.Add and the enqueue Interlocked.Increment
+    // are RMWs on _wip and therefore totally ordered. Either the settle observes the new work and
+    // reschedules, or it returns zero and the increment returns one and schedules. Exactly one successor
+    // either way, so accepted work is neither stranded nor drained twice at once.
+    //
+    // Dispose against enqueue: a writer already past its _state check can still enqueue and still schedule
+    // after Dispose returns. Nothing is delivered because the drain re-checks _state, and the _wip it leaves
+    // behind gates nothing afterwards, since every reschedule is conditioned on _state too.
+    //
+    // Dispose against a mid-flight delivery: Deliver and ReportError read _observer and _onError into locals
+    // before use, so a transition that nulls them cannot null-reference a delivery already running. A
+    // delivery, and its onError, can therefore complete after Dispose returns.
+    //
+    // Fault against dispose: both go through the Interlocked.CompareExchange on _state out of Live, so
+    // exactly one performs the release and the loser does nothing. The release runs through the upstream
+    // subscription's own one-shot Dispose and never touches the process-wide count itself, which is what
+    // makes a double decrement unreachable. That count gates a process-wide idle write fast path, so
+    // reaching zero with live subscriptions elsewhere would silently stop per-property delivery host-wide.
+    //
+    // A throwing ScheduleDrain against the counter: the throw is caught, reported and faults the
+    // subscription, so it never escapes into the property setter and never suppresses the other listeners on
+    // that write. The limit, stated honestly: a Schedule call that succeeds and whose work item never runs
+    // leaves _wip positive with no further ScheduleDrain, which is unrecoverable and undetectable from here,
+    // and is why a caller must dispose its subscriptions before the scheduler they run on.
+    //
+    // A drain exit against the next drain entry: the settling Interlocked.Add, the next writer's
+    // Interlocked.Increment on the same field and the schedule that follows form a happens-before chain, so
+    // a delivery observes state written by the previous delivery even when the two land on different
+    // scheduler threads. This is what lets an observer of one subscription keep state without synchronizing.
+    //
+    // Subject detach against queued changes: detaching removes the interceptor from the chain, so acceptance
+    // stops, but changes already accepted still drain. That is deliberately the opposite of disposal, which
+    // drops them.
+
     private const int Live = 0;
     private const int Disposed = 1;
     private const int Faulted = 2;
@@ -81,7 +121,10 @@ public sealed class ScheduledPropertySubscription : IDisposable
         // Creator-side Dekker half: an interlocked publication, not a release store, because only an RMW
         // orders this store against the state load below. It pairs with TransitionOutOfLive's
         // CAS-then-Exchange, and without the StoreLoad ordering both halves can miss each other and strand
-        // the upstream forever. Mirrors the barriers in PropertyChangeSubscription.Create.
+        // the upstream forever. Mirrors the barriers in PropertyChangeSubscription.Create. A release store
+        // followed by an acquire load leaves StoreLoad free, so the orphan is reachable on x86-64 and only
+        // accidentally excluded on arm64, where the stlr/ldar pair happens to close it. That asymmetry is
+        // why local testing does not surface it.
         Interlocked.Exchange(ref subscription._upstream, upstream);
 
         // A change arriving during Subscribe can fault the subscription through a throwing scheduler, and
