@@ -116,7 +116,11 @@ This library has two ambient `AsyncLocal`s that this corrupts:
 
 Derived-property tracking is unaffected: `DerivedPropertyChangeHandler`'s recorder and `SubjectChangeContext` are `[ThreadStatic]`, not `AsyncLocal`.
 
-`ScheduleDrain` therefore wraps its `scheduler.Schedule` call in `using (ExecutionContext.SuppressFlow())`. Since `scheduler` is required there is no second dispatch path to keep in step. Accepted cost, documented: `Activity.Current` and logger scopes stop flowing to observers too. That is the correct trade, and it matches what a queue consumer on its own thread already sees.
+`ScheduleDrain` therefore wraps its `scheduler.Schedule` call in `using (ExecutionContext.SuppressFlow())`. Since `scheduler` is required there is no second dispatch path to keep in step.
+
+Suppression costs `Activity.Current`, logger scopes, and consumer-owned `AsyncLocal`s, which do not reach observers. That is a forced choice rather than a preference, because the obvious alternative is worse than absence. A single drain batch delivers changes from many writers under whichever writer enqueued first, so letting the context flow attributes a device-write span to an unrelated property write and stamps one request's correlation ID onto another's changes. Absent context is uninformative; flowed context is wrong, and wrong is harder to debug. Suppression is also consistent with the queue channel, where the consumer already runs under its own context and never sees the writer's.
+
+The only correct way to preserve ambient context is to capture it per change rather than per batch, which is recorded under Scope boundaries rather than built now.
 
 The same defect exists today on `GetPropertyChangeObservable(scheduler)` (`InterceptorSubjectContextExtensions.cs:124`). Fixing it there is out of scope and becomes a follow-up issue, because it changes behaviour for an already-released API and deserves its own decision.
 
@@ -322,6 +326,7 @@ Three capabilities were considered and deferred, each because no consumer needs 
 - **Demand-driven conflation** (keep the latest undelivered change, drop the rest). Rx offers only the time-based `Sample` and `Throttle`, so this is the one gap Rx cannot express, and it is the reason the unbounded queue is documented rather than fixed. Owning the dispatcher makes it straightforward to add later.
 - **Current value at subscribe time.** The current value is publicly reachable in one hop through `PropertyReference.Metadata.GetValue`, which is what `SubjectPropertyChange.GetCurrentValue<TValue>()` already uses (`SubjectPropertyChange.cs:129`), so reading it is not the blocker. The blocker is that a raw read carries no `Revision`, so an incoming older change cannot be reconciled against it.
 - **Async serialized handlers** (`Func<SubjectPropertyChange, CancellationToken, Task>`). An `async void` lambda passed to the scheduled overload silently loses serialization after the first await, which the XML docs must mention while this stays deferred.
+- **Per-change ambient context**, for consumers who need `Activity.Current` or a correlation `AsyncLocal` to reach the observer. The shape is known: `ExecutionContext.Capture()` at enqueue stored alongside the change, and `ExecutionContext.Run` per delivery, which allocates nothing in the common case because `Capture` returns the existing immutable instance. It is deferred because it is not purely additive. Restoring the writer's context also restores `SubjectTransaction.CurrentTransaction` and `ReadPropertyRecorder`'s scopes, so it needs new internal API on both to scrub them inside the delivery, and it cannot be added by touching this component alone. Suppression stays the default even then, since it is the correct behaviour for observers that do unrelated work.
 
 ### Sequencing
 
