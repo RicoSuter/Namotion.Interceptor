@@ -146,7 +146,7 @@ builder.Services.AddWebSocketSubjectServer<Device>(configuration =>
     configuration.HelloTimeout = TimeSpan.FromSeconds(10);  // Default: 10s
 
     // Heartbeat / sequence numbers
-    configuration.HeartbeatInterval = TimeSpan.FromSeconds(30);  // Default: 30s (0 to disable)
+    configuration.HeartbeatInterval = TimeSpan.FromSeconds(30);  // Default: 30s (0 to disable, otherwise min 1s)
 
     // Broadcast
     configuration.BroadcastTimeout = TimeSpan.FromSeconds(10);  // Default: 10s
@@ -390,6 +390,8 @@ The server periodically sends Heartbeat messages to all connected clients. This 
 ```csharp
 configuration.HeartbeatInterval = TimeSpan.FromSeconds(30);  // Default
 configuration.HeartbeatInterval = TimeSpan.Zero;              // Disable heartbeats
+// Anything positive must be at least WebSocketServerConfiguration.MinimumHeartbeatInterval (1s):
+// a heartbeat is broadcast to every connected client, so a sub-second interval floods rather than probes.
 ```
 
 - The heartbeat loop runs as a parallel task alongside the change queue processor.
