@@ -583,7 +583,7 @@ The write side. Every mutable piece of connector diagnostics lives here, on an o
 
 **Interfaces:**
 - Consumes: `QueueMetrics`, `IResettableMetrics` from Task 1.
-- Produces: `ThroughputDiagnostics(ThroughputCounter?, ThroughputCounter?)` with `NotInstrumented`, `IncomingPerSecond`, `OutgoingPerSecond`; `ConnectorMetrics(ThroughputCounter? incoming = null, ThroughputCounter? outgoing = null)` with public `Incoming`, `Outgoing`, `OutboundChanges`, `MarkStarted()`, `RegisterResettable(IResettableMetrics)`, `MarkOperational()`, `MarkNotOperational()`, `MarkStopped()`, `ReportError(Exception)` and internal `IsOperational`, `OperationalChangeTime`, `LastError`, `StartTime`; `SourceMetrics` adding `OutboundRetries`, `InboundBuffer`, `RegisterClaimedProperties(Func<int>)` and internal `ClaimedPropertyCount`.
+- Produces: `ThroughputDiagnostics(ThroughputCounter?, ThroughputCounter?)` with `IncomingPerSecond` and `OutgoingPerSecond`; `ConnectorMetrics(ThroughputCounter? incoming = null, ThroughputCounter? outgoing = null)` with public `Incoming`, `Outgoing`, `OutboundChanges`, `MarkStarted()`, `RegisterResettable(IResettableMetrics)`, `MarkOperational()`, `MarkNotOperational()`, `MarkStopped()`, `ReportError(Exception)` and internal `IsOperational`, `OperationalChangeTime`, `LastError`, `StartTime`; `SourceMetrics` adding `OutboundRetries`, `InboundBuffer`, `RegisterClaimedProperties(Func<int>)` and internal `ClaimedPropertyCount`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -869,7 +869,6 @@ public sealed class ThroughputDiagnostics
     /// <summary>
     /// Gets a view that measures neither direction.
     /// </summary>
-    public static ThroughputDiagnostics NotInstrumented { get; } = new(null, null);
 
     /// <summary>
     /// Gets the average changes per second flowing into the subject tree, or <c>null</c> if this
@@ -1535,11 +1534,9 @@ public abstract class SubjectConnectorBase : BackgroundService, ISubjectConnecto
 }
 ```
 
-`MarkStopped` latches, so the epoch reset in `MarkStarted` must also clear it. Add to `ConnectorMetrics.MarkStarted`, before `ResetTotals()`:
+`MarkStopped` latches, so the epoch reset in `MarkStarted` must also clear it. Add a private `ResetLiveness()` to `ConnectorMetrics` and call it from `MarkStarted` before `ResetTotals()`.
 
-```csharp
-        Interlocked.Exchange(ref _liveness, new Liveness(false, 0, false));
-```
+It must be a compare-exchange loop, not a blind `Interlocked.Exchange`. `_liveness` is maintained everywhere else by the loop in `SetOperational`, and a blind exchange against it can clobber a concurrent `MarkStopped` or be immediately re-latched by one. Contention is unlikely, since `MarkStarted` runs before `RunAsync`, but the loop costs nothing and keeps one field under one discipline. Compare the compare-exchange result with `ReferenceEquals`, never `==`: `Liveness` is a record, so `==` is value equality and a genuinely failed swap would read as success.
 
 and extend the Task 2 test `WhenRestarted_ThenStartTimeMovesAndEveryTotalResets` with:
 
@@ -4272,6 +4269,8 @@ WebSocketSubjectClientSource.Diagnostics  -> SourceDiagnostics (no additions)
 **Spec coverage.** Every section of the spec maps to a task: the problem's five consequences to Tasks 9 through 15; drop counting to Task 8; the type model to Tasks 1 through 3; the abstract-`Diagnostics` mechanics to Tasks 6 and 12; the sealed `ExecuteAsync` to Task 4; atomic state to Tasks 2 and 7; naming and the `Total` convention to Task 14; the hoist to Task 13; ownership and lifetime to Tasks 1, 5 and 8; production changes to Tasks 8 through 15; breaking changes to Tasks 7, 9, 11, 14 and 16; error handling to Tasks 2 and 4; testing to every task's first step; documentation obligations to Task 17 and the tree above.
 
 **Not covered, and deliberately so.** The spec's follow-ups stay follow-ups: throughput for the MQTT and WebSocket servers, counting the unclaimed-property discard, making `WebSocketSubjectChangeProcessor` its own connector, and bounding the queues (#281, #352).
+
+**A guarantee the spec overstated, corrected during Task 2's review.** The spec justified packing each value-and-timestamp pair into one record by saying that otherwise "a reader can see the new flag with the previous timestamp, reporting operational since the moment it went down". The record makes each individual read internally consistent and makes the terminal latch implementable without a lock, but it cannot deliver atomicity across two property reads: `IsOperational` and `OperationalChangeTime` each take their own snapshot, so a consumer calling both in sequence can still pair a stale flag with a fresh timestamp. The same applies to `State` and `StateChangeTime` in Task 7. What is actually guaranteed is that each read is internally consistent and that the timestamps are monotonic. Say that in the XML docs and in Task 17's documentation rather than repeating the stronger claim. Closing the gap properly would mean exposing a snapshot-returning member, which no consumer has asked for and which is not in scope here.
 
 **Known risks the plan carries rather than resolves.** Two facts are stated in the tasks that use them and are worth naming once more. `OutboundRetries.TotalDropped` under-reports when a source is configured with `writeRetryQueueSize: 0`, because the dominant loss path in that configuration is the unfiltered drain, which cannot be attributed to one source. And `StateChangeTime` loses the ability to say when a currently stale source was last in sync.
 
