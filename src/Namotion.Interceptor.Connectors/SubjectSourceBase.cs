@@ -130,33 +130,44 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         }
         catch
         {
-            // A half-registered source that never pumps hangs every in-scope wait, which is worse
-            // than not being monitored at all. Unwind and let the failure propagate.
-            ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
-            foreach (var monitor in monitors)
+            // Read before the transition below sets it, so Stopped still means Dispose, whose own
+            // unwind may have found nothing registered yet.
+            if (State == SourceState.Stopped)
             {
-                monitor.Unregister(this);
+                UnwindRegistrations(monitors);
+                throw;
             }
 
+            // This source will never pump. Reporting a stop keeps it in scope as never-synchronized,
+            // so in-scope waits answer Incomplete; unwinding left them on a vacuous Synchronized.
+            // Nothing unregisters it until Dispose, which a graph-attached source may never get.
+            TransitionStateTo(SourceState.Stopped);
             throw;
         }
 
-        // Dispose can interleave with the registration above. Stopped is terminal, so seeing it here
-        // means Dispose already ran: unwind what was just registered. Through the LOCAL array, not
-        // the field, which Dispose has already emptied - re-reading it would strand these
-        // registrations. Unregister no-ops on an unregistered source, so a double unwind is safe.
+        // Dispose can interleave with the registration above, and Stopped is terminal, so seeing it
+        // here means Dispose already ran.
         if (State == SourceState.Stopped)
         {
-            ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
-            foreach (var monitor in monitors)
-            {
-                monitor.Unregister(this);
-            }
-
+            UnwindRegistrations(monitors);
             return Task.CompletedTask;
         }
 
         return base.StartAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Drops the registrations <see cref="StartAsync"/> just made, through its LOCAL array rather
+    /// than the field, which a concurrent <see cref="Dispose"/> may already have emptied: re-reading
+    /// it would strand them. Unregister no-ops on an unregistered source, so a double unwind is safe.
+    /// </summary>
+    private void UnwindRegistrations(ImmutableArray<SourceMonitor> monitors)
+    {
+        ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
+        foreach (var monitor in monitors)
+        {
+            monitor.Unregister(this);
+        }
     }
 
     /// <inheritdoc />

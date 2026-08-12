@@ -65,6 +65,14 @@ public interface ISubjectSource : ISubjectConnector
     /// While <see cref="SourceState.Synchronizing"/> after a drop, this is how a dashboard says
     /// "stale, last confirmed at T".
     /// </summary>
+    /// <remarks>
+    /// Load-bearing, not only diagnostic: branch waits use it to tell a source that stopped having
+    /// delivered from one that never did. An implementation reaching
+    /// <see cref="SourceState.Synchronized"/> must stamp it, never clear it, and make the stamp
+    /// visible before <see cref="State"/> becomes <see cref="SourceState.Stopped"/>, or every branch
+    /// it participates in reports <see cref="SourceSynchronizationResult.Incomplete"/> once it stops.
+    /// Only a stopped source's value is read, so <c>null</c> while synchronized costs nothing.
+    /// </remarks>
     DateTimeOffset? LastSynchronizedAt { get; }
 
     /// <summary>

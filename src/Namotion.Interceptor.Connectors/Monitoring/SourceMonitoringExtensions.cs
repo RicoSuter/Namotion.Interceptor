@@ -87,22 +87,51 @@ public static class SourceMonitoringExtensions
     }
 
     /// <summary>
-    /// Waits until every source that can claim into this subject's branch has completed its initial
-    /// load. The subject IS the scope, so waiting on the tree root means the whole tree.
+    /// Waits until every source that can claim into this subject's branch has settled, and reports
+    /// whether they all delivered their initial load and are all still live. The subject IS the
+    /// scope, so waiting on the tree root means the whole tree.
     /// </summary>
     /// <exception cref="InvalidOperationException">No monitor is reachable from the subject's context.</exception>
-    public static Task WaitForSynchronizationAsync(
+    public static Task<SourceSynchronizationResult> WaitForSynchronizationAsync(
         this IInterceptorSubject subject, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(subject);
 
+        // Outside the async helper, so a null subject and an unreachable monitor keep throwing
+        // synchronously rather than surfacing on await.
         var monitors = ResolveMonitorsOrThrow(subject.Context);
-        if (monitors.Length == 1)
+        return monitors.Length == 1
+            ? monitors[0].WaitForSynchronizationAsync(subject, cancellationToken)
+            : WaitForAllMonitorsAsync(monitors, subject, cancellationToken);
+    }
+
+    /// <summary>
+    /// Worst wins across monitors, which is a minimum over the result values.
+    /// </summary>
+    /// <remarks>
+    /// Every wait is created before the first await: awaiting them one at a time would leave the
+    /// later monitors unregistered until the earlier ones completed.
+    /// </remarks>
+    private static async Task<SourceSynchronizationResult> WaitForAllMonitorsAsync(
+        ImmutableArray<SourceMonitor> monitors, IInterceptorSubject subject, CancellationToken cancellationToken)
+    {
+        var waits = new Task<SourceSynchronizationResult>[monitors.Length];
+        for (var index = 0; index < monitors.Length; index++)
         {
-            return monitors[0].WaitForSynchronizationAsync(subject, cancellationToken);
+            waits[index] = monitors[index].WaitForSynchronizationAsync(subject, cancellationToken);
         }
 
-        return Task.WhenAll(monitors.Select(
-            monitor => monitor.WaitForSynchronizationAsync(subject, cancellationToken)));
+        var results = await Task.WhenAll(waits).ConfigureAwait(false);
+
+        var worst = SourceSynchronizationResult.Synchronized;
+        foreach (var result in results)
+        {
+            if (result < worst)
+            {
+                worst = result;
+            }
+        }
+
+        return worst;
     }
 }
