@@ -81,6 +81,33 @@ public static class PropertyChangeSubscriptionExtensions
         return subject.SubscribeToProperty(propertySelector, new DelegateObserver(callback));
     }
 
+    /// <summary>
+    /// Exposes a single property's changes as an observable, so Rx operators compose over a per-property
+    /// subscription. Each subscriber installs its own underlying subscription, and each call returns a
+    /// distinct instance.
+    /// </summary>
+    /// <remarks>
+    /// Delivery keeps the contract of <see cref="Subscribe(PropertyReference, IPropertyChangeObserver)"/>
+    /// exactly: synchronous, on the writing thread, possibly concurrent, and a throwing handler propagates
+    /// back into the setter. It is that channel wearing an <see cref="IObservable{T}"/>, not a safer one.
+    /// The context-level <c>GetPropertyChangeObservable</c> reschedules onto a scheduler by default and is
+    /// therefore not the same thing.
+    /// <para>
+    /// Two hazards when composing. <c>ObserveOn</c> dedicates a private thread per subscription when the
+    /// scheduler advertises <c>ISchedulerLongRunning</c>, which both <c>Scheduler.Default</c> and
+    /// <c>TaskPoolScheduler</c> do, so composing it per property is unaffordable. And an exception reaching
+    /// an <c>ObserveOn</c> sink escapes a scheduler work item, which on the thread pool is unhandled and
+    /// terminates the process. Prefer the scheduler overloads of <c>Subscribe</c>, which have neither.
+    /// </para>
+    /// <para>
+    /// The sequence never completes and never signals OnError, so operators that wait for completion, such
+    /// as <c>ToTask</c> and <c>LastAsync</c>, never return.
+    /// </para>
+    /// </remarks>
+    /// <param name="property">The property to observe.</param>
+    public static IObservable<SubjectPropertyChange> GetSynchronousChangeObservable(this PropertyReference property)
+        => new SynchronousChangeObservable(property);
+
     private static string ResolveDirectPropertyName<TSubject, TValue>(Expression<Func<TSubject, TValue>> propertySelector)
     {
         var body = propertySelector.Body;
