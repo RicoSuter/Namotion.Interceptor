@@ -1,7 +1,7 @@
 namespace Namotion.Interceptor.Connectors.Diagnostics;
 
 /// <summary>
-/// Read-only view over one buffer. All reads are lock-free and none throws.
+/// Read-only view over one buffer. No read takes a lock owned by this library and no read throws.
 /// </summary>
 public sealed class QueueDiagnostics
 {
@@ -17,12 +17,14 @@ public sealed class QueueDiagnostics
 
     /// <summary>
     /// Gets the buffer's current item count, or 0 when no buffer currently exists.
-    /// Approximate: it is read without a lock while producers and consumers are running.
+    /// Approximate: it is read while producers and consumers are running.
     /// </summary>
     /// <remarks>
-    /// Lock-free is not the same as cheap. The change queue's count is a segment walk over a
-    /// <see cref="System.Collections.Concurrent.ConcurrentQueue{T}"/>, so this should be sampled,
-    /// not polled tightly.
+    /// Takes no lock owned by this library, so it cannot participate in a lock-ordering cycle. It is
+    /// not free, though: the change queue's count is a segment walk over a
+    /// <see cref="System.Collections.Concurrent.ConcurrentQueue{T}"/>, which briefly takes that
+    /// queue's own internal lock once the queue spans several segments. Sample this rather than
+    /// polling it tightly.
     /// </remarks>
     public int Depth => _metrics.Depth;
 
