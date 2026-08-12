@@ -35,6 +35,7 @@
 - **No AI attribution** in commit messages or the PR description. No agent names, no `Co-Authored-By` trailers, no "Generated with" footers.
 - **Markdown paragraphs go on one line.** Never hard-wrap at a column.
 - **Comments explain only the non-obvious.** Do not narrate what the code already says.
+- **`QueueMetrics.Register` rejects an overlapping registration** with `InvalidOperationException`: a live registration must be released with `Deregister` before another is made. Decided during Task 1's review, because real callers register with lambdas that allocate a fresh delegate every call, so the type cannot tell "same buffer, new delegate" from "new buffer" and would double count the former. Every call site in Tasks 8 through 11 already pairs the two in a `try`/`finally` or registers exactly once in a constructor, so nothing needs to change; do not introduce a call site that re-registers without deregistering.
 - **Build:** `dotnet build src/Namotion.Interceptor.slnx`
 - **Unit tests:** `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"`
 - **Snapshot loop:** prefix snapshot test runs with `DiffEngine_Disabled=true` so no diff tool launches.
