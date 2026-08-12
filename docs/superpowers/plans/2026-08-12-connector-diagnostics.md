@@ -13,6 +13,7 @@
 ## Global Constraints
 
 - **Nullable enabled, warnings as errors** (`src/Directory.Build.props`). A `volatile` field passed to `Volatile.Read(ref ...)` is CS0420 and therefore a build failure: pick one mechanism per field, never both.
+- **`GenerateDocumentationFile` is on and only CS1591 is suppressed**, so an unresolved `<see cref="..."/>` is CS1574 and fails the build. Never write a cref to a type or member a later task introduces. Use plain text for a forward reference and convert it to a cref in the task that creates the target, if it is worth converting at all.
 - **No `Total` counter may reset except at `MarkStarted`.** A `Total` prefix means monotonic since `ConnectorDiagnostics.StartTime`. Anything that resets otherwise carries no `Total` (this is why `ConsecutiveFailures` keeps its name).
 - **No diagnostics getter may throw and none may take a lock.** `SourceMonitor` reads source members while holding its own lock and `StateChanged` fires inside the source's transition lock; a lock-taking getter closes an ABBA cycle. Documented on `ISubjectSource`.
 - **Test naming:** `When<Condition>_Then<ExpectedBehavior>`, with explicit `// Arrange`, `// Act`, `// Assert` comments (`// Act & Assert` for exception tests).
@@ -350,16 +351,14 @@ Create `src/Namotion.Interceptor.Connectors/Diagnostics/IResettableMetrics.cs`:
 namespace Namotion.Interceptor.Connectors.Diagnostics;
 
 /// <summary>
-/// Implemented by metrics objects that a connector owns outside its <see cref="ConnectorMetrics"/>
-/// and that must still take part in the counter reset performed by
-/// <see cref="ConnectorMetrics.MarkStarted"/>.
+/// Implemented by metrics objects that a connector owns outside its <c>ConnectorMetrics</c> and that
+/// must still take part in the counter reset performed by <c>ConnectorMetrics.MarkStarted</c>.
 /// </summary>
 /// <remarks>
 /// Metrics are hoisted out of short-lived components so their totals survive a reconnect. That is
 /// what makes the counters honest, and it is also why they cannot be reached by resetting
-/// <see cref="ConnectorMetrics"/> alone. Register them with
-/// <see cref="ConnectorMetrics.RegisterResettable"/> so the epoch stays consistent across every
-/// <c>Total</c> counter a connector reports.
+/// <c>ConnectorMetrics</c> alone. Register them with <c>ConnectorMetrics.RegisterResettable</c> so
+/// the epoch stays consistent across every <c>Total</c> counter a connector reports.
 /// </remarks>
 public interface IResettableMetrics
 {
@@ -519,9 +518,9 @@ public sealed class QueueDiagnostics
     public int? Capacity => _metrics.Capacity;
 
     /// <summary>
-    /// Gets the number of items this buffer has thrown away since
-    /// <see cref="ConnectorDiagnostics.StartTime"/>. Monotonic within an epoch and never rebased by
-    /// the buffer being recreated.
+    /// Gets the number of items this buffer has thrown away since the connector's
+    /// <c>ConnectorDiagnostics.StartTime</c>. Monotonic within an epoch and never rebased by the
+    /// buffer being recreated.
     /// </summary>
     public long TotalDropped => _metrics.TotalDropped;
 }
