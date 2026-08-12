@@ -28,12 +28,21 @@ builder.Services.AddHostedService<Worker>();
 ```csharp
 using Namotion.Interceptor.Connectors.Monitoring;
 
-internal sealed class Worker(Root root) : BackgroundService
+internal sealed class Worker(Root root, ILogger<Worker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await root.WaitForSynchronizationAsync(stoppingToken);
-        // every source in the tree has finished its initial load
+        switch (await root.WaitForSynchronizationAsync(stoppingToken))
+        {
+            case SourceSynchronizationResult.Synchronized:
+            case SourceSynchronizationResult.Stale:
+                // every source delivered its initial load, so the values are real
+                break;
+
+            case SourceSynchronizationResult.Incomplete:
+                logger.LogWarning("A source never delivered: part of the tree may hold defaults.");
+                break;
+        }
     }
 }
 ```
@@ -43,12 +52,31 @@ internal sealed class Worker(Root root) : BackgroundService
 `WaitForSynchronizationAsync` is an extension on `IInterceptorSubject`, not on the context: the subject you call it on is the wait's anchor, and only sources in scope of that anchor are waited on. Change the anchor from the tree root to a subtree to wait on only that branch:
 
 ```csharp
-await root.Kitchen.WaitForSynchronizationAsync(stoppingToken);
+var result = await root.Kitchen.WaitForSynchronizationAsync(stoppingToken);
 ```
 
 A source is in scope for an anchor when its root subject and the anchor lie on the same root-to-leaf path, in either direction: the source's root is an ancestor of (or is) the anchor, so it may claim into the awaited branch, or the source's root sits inside the anchor's own subtree. A source on a sibling branch is in neither set, so a source that never connects, or fails, on an unrelated branch never blocks a wait scoped to a branch it cannot claim into.
 
 Given that scope, the rule is short: once registration is complete, a wait completes when no in-scope source is `Synchronizing`. `Synchronized` and `Stopped` both count as settled, so a scope matching no source at all, or one where every source has stopped, completes rather than blocks.
+
+## What the Result Means
+
+Every in-scope source is `Synchronized` or `Stopped` when a wait completes, which makes these four cases total:
+
+| in-scope sources when the wait completes | result | meaning |
+|---|---|---|
+| all currently `Synchronized` | `Synchronized` | delivered and still live |
+| none (empty scope) | `Synchronized` | nothing to wait for |
+| all synchronized at least once, at least one now `Stopped` | `Stale` | delivered, values may be out of date |
+| at least one `Stopped` that never synchronized | `Incomplete` | never received data, may still hold CLR defaults |
+
+Worst wins: one `Incomplete` source makes the whole branch `Incomplete`. `Incomplete` is the enum's zero value, so an unassigned field defaults to the most pessimistic answer.
+
+The verdict is per source, not per property: it answers whether every source completed its initial load, not whether every property holds a value from the external system. A load that resolved only some of its nodes still reports `Synchronized`.
+
+`Incomplete` is not "not yet". `Stopped` is terminal, so awaiting again returns it immediately; handle it in a switch, not a retry loop. Only taking the dead source out of scope changes the verdict, by disposing or unregistering it. Adding a replacement alongside it does not, because worst wins.
+
+Host shutdown moves a branch through all three answers, so a consumer that runs during shutdown must treat `Stale` as a success and cannot read `Synchronized` as proof of anything. Hooked on `ApplicationStopping` it still sees `Synchronized`, since that fires before hosted services stop; after they stop it sees `Stale`; and once the container disposes them they unregister, so the scope empties and it reads `Synchronized` again.
 
 Two things about that scoping matter before you rely on a wait.
 
@@ -56,7 +84,11 @@ No wait can complete before source registration is complete, whatever its scope:
 
 A pending wait is not frozen to the sources that existed when registration completed. It is re-evaluated on every registration, unregistration and state change, so a source registering later can block it. Only a wait that has already completed is frozen, since a completed task cannot be un-completed.
 
-An empty scope is the expected answer for a branch with no external source, such as configuration or computed state. It is also what you get if you anchored on the wrong branch, or if the source was never created. The library cannot tell those apart, so treat a completed wait as "nothing here is still loading" rather than as proof the branch is live.
+An empty scope is the expected answer for a branch with no external source, such as configuration or computed state. It is also what you get from a wrong anchor, a source that was never created, one created but never started, and one that stopped and was then disposed, since disposal unregisters. All report `Synchronized`, and the library cannot tell them apart, so treat that result as "nothing here is still loading" rather than as proof the branch is live.
+
+Detaching the awaited branch empties its scope the same way, and there the answer is actively wrong rather than merely uninformative: scope is resolved through the parent graph, so a source rooted inside the branch leaves scope along with it, and a wait pending on that branch completes as `Synchronized` even though that source is still loading and has delivered nothing. Do not detach a subtree while something is waiting on it.
+
+A source that fails terminally sets `Stopped` but is not disposed, so it stays registered and its branch keeps reporting whatever the stop earned. The same applies to a source whose registration itself failed. That is correct while nothing replaced it, and it is not free: the monitor holds every registered source, and through it the subtree under that source's root, until the source is disposed. If you do replace it, dispose the one you are replacing: the monitor cannot distinguish an abandoned source from a dead one, so leaving both registered keeps the branch on the dead one's verdict forever, and keeps both alive.
 
 A subject referenced from two trees participates fully in only the first: the context fallback is added on first attach and left alone afterwards, so claims publish to the first tree's stream and a wait anchored through the second tree sees only the first tree's sources. Avoid sharing a subject across two independently monitored trees.
 

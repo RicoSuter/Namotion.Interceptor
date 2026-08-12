@@ -60,6 +60,7 @@ namespace Namotion.Interceptor.Connectors
     public interface ISubjectSource : Namotion.Interceptor.Connectors.ISubjectConnector
     {
         Namotion.Interceptor.Connectors.Diagnostics.SourceDiagnostics Diagnostics { get; }
+        System.DateTimeOffset? LastSynchronizedAt { get; }
         Namotion.Interceptor.Connectors.Monitoring.SourceState State { get; }
         System.DateTimeOffset StateChangeTime { get; }
         int WriteBatchSize { get; }
@@ -121,6 +122,7 @@ namespace Namotion.Interceptor.Connectors
         protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000, Namotion.Interceptor.Connectors.ThroughputCounter? incomingThroughput = null, Namotion.Interceptor.Connectors.ThroughputCounter? outgoingThroughput = null) { }
         [get: System.Runtime.CompilerServices.PreserveBaseOverrides]
         public new virtual Namotion.Interceptor.Connectors.Diagnostics.SourceDiagnostics Diagnostics { get; }
+        public System.DateTimeOffset? LastSynchronizedAt { get; }
         protected new Namotion.Interceptor.Connectors.Diagnostics.SourceMetrics Metrics { get; }
         public Namotion.Interceptor.Connectors.Monitoring.SourceState State { get; }
         public System.DateTimeOffset StateChangeTime { get; }
@@ -300,7 +302,7 @@ namespace Namotion.Interceptor.Connectors.Monitoring
         public void Register(Namotion.Interceptor.Connectors.ISubjectSource source) { }
         public Namotion.Interceptor.Connectors.Monitoring.SourceSubscription Subscribe(System.Action<Namotion.Interceptor.Connectors.Monitoring.SourceEvent> handler) { }
         public void Unregister(Namotion.Interceptor.Connectors.ISubjectSource source) { }
-        public System.Threading.Tasks.Task WaitForSynchronizationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task<Namotion.Interceptor.Connectors.Monitoring.SourceSynchronizationResult> WaitForSynchronizationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken = default) { }
     }
     public static class SourceMonitoringExtensions
     {
@@ -308,7 +310,7 @@ namespace Namotion.Interceptor.Connectors.Monitoring
         public static System.IDisposable DeferWaitCompletion(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.Connectors.Monitoring.SourceMonitor GetSourceMonitor(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.Connectors.Monitoring.SourceState GetSourceState(this Namotion.Interceptor.PropertyReference property) { }
-        public static System.Threading.Tasks.Task WaitForSynchronizationAsync(this Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken = default) { }
+        public static System.Threading.Tasks.Task<Namotion.Interceptor.Connectors.Monitoring.SourceSynchronizationResult> WaitForSynchronizationAsync(this Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken = default) { }
     }
     public enum SourceState
     {
@@ -321,6 +323,12 @@ namespace Namotion.Interceptor.Connectors.Monitoring
     {
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Connectors.ISubjectSource> Sources { get; }
         public void Dispose() { }
+    }
+    public enum SourceSynchronizationResult
+    {
+        Incomplete = 0,
+        Stale = 1,
+        Synchronized = 2,
     }
 }
 namespace Namotion.Interceptor.Connectors.Paths

@@ -67,7 +67,31 @@ public interface ISubjectSource : ISubjectConnector
     /// <c>Synchronized</c> plus T reads as in sync since T, <c>Synchronizing</c> plus T reads as
     /// stale since T.
     /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="LastSynchronizedAt"/>, which records whether a good period ever
+    /// began rather than when the current one did. Neither can answer the other's question: this one
+    /// cannot say whether the source was ever synchronized, and that one cannot say when
+    /// synchronization was lost.
+    /// </remarks>
     DateTimeOffset StateChangeTime { get; }
+
+    /// <summary>
+    /// Gets when the most recent initial synchronization completed, or <c>null</c> if it never has.
+    /// </summary>
+    /// <remarks>
+    /// Load-bearing, not only diagnostic: branch waits use it to tell a source that stopped having
+    /// delivered from one that never did. An implementation reaching
+    /// <see cref="SourceState.Synchronized"/> must stamp it, never clear it, and make the stamp
+    /// visible before <see cref="State"/> becomes <see cref="SourceState.Stopped"/>, or every branch
+    /// it participates in reports <see cref="SourceSynchronizationResult.Incomplete"/> once it stops.
+    /// Only a stopped source's value is read, so <c>null</c> while synchronized costs nothing.
+    /// <para>
+    /// Because it is stamped only on the transition into <see cref="SourceState.Synchronized"/>, it
+    /// cannot say when synchronization was lost: a source that synchronized a week ago and dropped
+    /// an hour ago reports the week. Use <see cref="StateChangeTime"/> for that.
+    /// </para>
+    /// </remarks>
+    DateTimeOffset? LastSynchronizedAt { get; }
 
     /// <summary>
     /// Gets what this source reports about its transport and its buffers.

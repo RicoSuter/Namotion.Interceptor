@@ -32,11 +32,14 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     private readonly Lock _stateLock = new();
 
-    // The state and its timestamp are swapped as one value. Held in separate fields, a reader can see
-    // the new state beside the previous timestamp and report a stale duration that never happened.
-    private sealed record SourceStateSnapshot(SourceState State, DateTimeOffset ChangeTime);
+    // The state and its two timestamps are swapped as one value. Held in separate fields, a reader can
+    // see the new state beside the previous timestamp and report a stale duration that never happened.
+    // Carrying LastSynchronizedAt here is also what satisfies its interface contract that the stamp is
+    // visible before State becomes Stopped: they are published by the same write.
+    private sealed record SourceStateSnapshot(
+        SourceState State, DateTimeOffset ChangeTime, DateTimeOffset? LastSynchronizedAt);
 
-    private SourceStateSnapshot _stateSnapshot = new(SourceState.Synchronizing, DateTimeOffset.UtcNow);
+    private SourceStateSnapshot _stateSnapshot = new(SourceState.Synchronizing, DateTimeOffset.UtcNow, null);
     private int _started;
 
     private ImmutableArray<SourceMonitor> _registeredMonitors = [];
@@ -170,33 +173,44 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
         catch
         {
-            // A half-registered source that never pumps hangs every in-scope wait, which is worse
-            // than not being monitored at all. Unwind and let the failure propagate.
-            ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
-            foreach (var monitor in monitors)
+            // Read before the transition below sets it, so Stopped still means Dispose, whose own
+            // unwind may have found nothing registered yet.
+            if (State == SourceState.Stopped)
             {
-                monitor.Unregister(this);
+                UnwindRegistrations(monitors);
+                throw;
             }
 
+            // This source will never pump. Reporting a stop keeps it in scope as never-synchronized,
+            // so in-scope waits answer Incomplete; unwinding left them on a vacuous Synchronized.
+            // Nothing unregisters it until Dispose, which a graph-attached source may never get.
+            TransitionStateTo(SourceState.Stopped);
             throw;
         }
 
-        // Dispose can interleave with the registration above. Stopped is terminal, so seeing it here
-        // means Dispose already ran: unwind what was just registered. Through the LOCAL array, not
-        // the field, which Dispose has already emptied - re-reading it would strand these
-        // registrations. Unregister no-ops on an unregistered source, so a double unwind is safe.
+        // Dispose can interleave with the registration above, and Stopped is terminal, so seeing it
+        // here means Dispose already ran.
         if (State == SourceState.Stopped)
         {
-            ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
-            foreach (var monitor in monitors)
-            {
-                monitor.Unregister(this);
-            }
-
+            UnwindRegistrations(monitors);
             return Task.CompletedTask;
         }
 
         return base.StartAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Drops the registrations <see cref="StartAsync"/> just made, through its LOCAL array rather
+    /// than the field, which a concurrent <see cref="Dispose"/> may already have emptied: re-reading
+    /// it would strand them. Unregister no-ops on an unregistered source, so a double unwind is safe.
+    /// </summary>
+    private void UnwindRegistrations(ImmutableArray<SourceMonitor> monitors)
+    {
+        ImmutableInterlocked.InterlockedExchange(ref _registeredMonitors, ImmutableArray<SourceMonitor>.Empty);
+        foreach (var monitor in monitors)
+        {
+            monitor.Unregister(this);
+        }
     }
 
     /// <inheritdoc />
@@ -625,6 +639,9 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     public DateTimeOffset StateChangeTime => Volatile.Read(ref _stateSnapshot).ChangeTime;
 
     /// <inheritdoc />
+    public DateTimeOffset? LastSynchronizedAt => Volatile.Read(ref _stateSnapshot).LastSynchronizedAt;
+
+    /// <inheritdoc />
     public event EventHandler<SourceEvent>? StateChanged;
 
     /// <summary>
@@ -668,14 +685,21 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     {
         lock (_stateLock)
         {
-            var oldState = _stateSnapshot.State;
+            var current = _stateSnapshot;
+            var oldState = current.State;
             if (oldState == newState || oldState == SourceState.Stopped)
             {
                 return;
             }
 
             var now = DateTimeOffset.UtcNow;
-            Volatile.Write(ref _stateSnapshot, new SourceStateSnapshot(newState, now));
+
+            // Stamped only on the way into Synchronized and never cleared, so it answers "did a good
+            // period ever begin" for a source that has since stopped. ChangeTime answers the other
+            // question, when the current state began.
+            var lastSynchronizedAt = newState == SourceState.Synchronized ? now : current.LastSynchronizedAt;
+
+            Volatile.Write(ref _stateSnapshot, new SourceStateSnapshot(newState, now, lastSynchronizedAt));
 
             var handlers = StateChanged;
             if (handlers is not null)

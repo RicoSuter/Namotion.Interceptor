@@ -628,6 +628,9 @@ internal sealed class GatedStateRaisingSource : ISubjectSource
 
     public DateTimeOffset StateChangeTime { get; } = DateTimeOffset.UtcNow;
 
+    // Never synchronized, so branch waits treat a stop of this source as Incomplete.
+    public DateTimeOffset? LastSynchronizedAt => null;
+
     public SourceDiagnostics Diagnostics { get; } = new(new SourceMetrics());
 
     // Explicit: the narrower property above does not implicitly implement the connector member.

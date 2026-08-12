@@ -154,7 +154,28 @@ public class SourceStateTests
     }
 
     [Fact]
-    public async Task WhenSynchronizedIsHammeredConcurrentlyWithStopped_ThenSynchronizedIsNeverPublishedAfterStoppedAndStateChangeTimeFreezes()
+    public void WhenSynchronizedThenStopped_ThenLastSynchronizedAtIsNotCleared()
+    {
+        // Arrange
+        // Branch waits tell "stopped having delivered its initial load" from "stopped having never
+        // delivered anything" solely by this timestamp surviving the stop. The assertion in
+        // WhenStopped_ThenNoFurtherTransitionSucceeds compares two post-stop reads, so it would pass
+        // just as happily against an implementation that cleared the field on Stopped.
+        var source = new TestStateSource(new Person());
+        source.ReportSynchronized();
+        var timestampWhileSynchronized = source.LastSynchronizedAt;
+        Assert.NotNull(timestampWhileSynchronized);
+
+        // Act
+        source.ReportStopped();
+
+        // Assert
+        Assert.NotNull(source.LastSynchronizedAt);
+        Assert.Equal(timestampWhileSynchronized, source.LastSynchronizedAt);
+    }
+
+    [Fact]
+    public async Task WhenSynchronizedIsHammeredConcurrentlyWithStopped_ThenSynchronizedIsNeverPublishedAfterStoppedAndBothTimestampsFreeze()
     {
         // Arrange
         // TransitionTo serializes the state change, the StateChangeTime write and the event raise
@@ -172,12 +193,14 @@ public class SourceStateTests
             var source = new TestStateSource(new Person());
             var events = new ConcurrentQueue<SourceEvent>();
             DateTimeOffset? stateChangeTimeWhenStopped = null;
+            DateTimeOffset? lastSynchronizedAtWhenStopped = null;
             source.StateChanged += (_, sourceEvent) =>
             {
                 events.Enqueue(sourceEvent);
                 if (sourceEvent.NewState == SourceState.Stopped)
                 {
                     stateChangeTimeWhenStopped = source.StateChangeTime;
+                    lastSynchronizedAtWhenStopped = source.LastSynchronizedAt;
                 }
             };
 
@@ -210,10 +233,14 @@ public class SourceStateTests
                 Assert.NotEqual(SourceState.Synchronized, ordered[afterStop].NewState);
             }
 
-            // Stopped is terminal, so StateChangeTime observed synchronously inside the handler at
-            // the moment Stopped was published must equal its value after every racing thread has
-            // finished: nothing can still be updating it once Stopped has been raised.
+            // Stopped is terminal, so both timestamps observed synchronously inside the handler at
+            // the moment Stopped was published must equal their values after every racing thread has
+            // finished: nothing can still be updating them once Stopped has been raised. They ride
+            // the same snapshot, so a weakened lock would show up in either.
+            // Not asserted non-null: the stopping thread can win the barrier before the hammer ever
+            // reaches Synchronized, so a null here is a legal outcome of the race.
             Assert.Equal(stateChangeTimeWhenStopped, source.StateChangeTime);
+            Assert.Equal(lastSynchronizedAtWhenStopped, source.LastSynchronizedAt);
         }
     }
 
