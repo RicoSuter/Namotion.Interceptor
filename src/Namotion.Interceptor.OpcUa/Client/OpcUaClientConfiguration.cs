@@ -168,12 +168,17 @@ public class OpcUaClientConfiguration
 
     /// <summary>
     /// Gets or sets whether a write carries the change's own timestamp as the value's SourceTimestamp
-    /// (default: false). A server may refuse any value, status and timestamp combination it does not
-    /// support, which would fail every write against it permanently. Enable this only against a server
-    /// known to accept it, to propagate origin timestamps across a Namotion client and server pair;
-    /// otherwise the server stamps its own receive time.
+    /// (default: true), so the far end records when the change was made rather than when it arrived.
+    /// <para>
+    /// Turn it off only for a server that refuses the combination. Part 4 permits that, answering
+    /// BadWriteNotSupported and performing no write, which is permanent for the session and so costs
+    /// every write to that server. No such server is known here: the reference stack accepts a
+    /// SourceTimestamp on a Value write unconditionally and rejects only a ServerTimestamp, and this
+    /// client has always sent one. Left off, the server stamps its own receive time and the origin
+    /// timestamp is lost, which also makes the two ends disagree about when a value changed.
+    /// </para>
     /// </summary>
-    public bool WriteSourceTimestamp { get; set; }
+    public bool WriteSourceTimestamp { get; set; } = true;
 
     /// <summary>
     /// Gets or sets the default publishing interval for subscriptions in milliseconds (default: 0).

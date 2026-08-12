@@ -161,13 +161,15 @@ public class OutboundWriterTests
     }
 
     [Fact]
-    public async Task WhenWriteSourceTimestampIsNotEnabled_ThenTheWriteCarriesNoSourceTimestamp()
+    public async Task WhenWriteSourceTimestampIsDisabled_ThenTheWriteCarriesNoSourceTimestamp()
     {
-        // Arrange: BadWriteNotSupported says the server does not support writing the combination of
-        // value, status and timestamps provided, and the OPC Foundation's own reference client never
-        // sets one. Against such a server every write would fail permanently.
+        // Arrange: the escape hatch for a server that answers BadWriteNotSupported to the combination
+        // of value, status and timestamps provided. Part 4 permits that and it is permanent for the
+        // session, so it would cost every write to that server.
         var sent = new List<WriteValueCollection>();
-        var (writer, change) = CreateWriter(CaptureAndAnswerGood(sent));
+        var (writer, change) = CreateWriter(
+            CaptureAndAnswerGood(sent),
+            configure: configuration => configuration.WriteSourceTimestamp = false);
 
         // Act
         await writer.WriteChangesAsync(new[] { change }, CancellationToken.None);
@@ -178,14 +180,12 @@ public class OutboundWriterTests
     }
 
     [Fact]
-    public async Task WhenWriteSourceTimestampIsEnabled_ThenTheWriteCarriesTheChangeTimestamp()
+    public async Task WhenWriteSourceTimestampIsLeftAtItsDefault_ThenTheWriteCarriesTheChangeTimestamp()
     {
-        // Arrange: the opt-in exists for a Namotion client and server pair, where the server stores the
-        // timestamp it is given instead of stamping its own receive time.
+        // Arrange: nothing configured, because sending it is the default. The far end then records
+        // when the change was made rather than when it arrived.
         var sent = new List<WriteValueCollection>();
-        var (writer, change) = CreateWriter(
-            CaptureAndAnswerGood(sent),
-            configure: configuration => configuration.WriteSourceTimestamp = true);
+        var (writer, change) = CreateWriter(CaptureAndAnswerGood(sent));
 
         // Act
         await writer.WriteChangesAsync(new[] { change }, CancellationToken.None);

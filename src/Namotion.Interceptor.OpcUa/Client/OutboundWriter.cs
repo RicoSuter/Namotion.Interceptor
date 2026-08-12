@@ -232,9 +232,11 @@ internal sealed class OutboundWriter
                     Value = convertedValue,
                     StatusCode = StatusCodes.Good,
 
-                    // Off unless asked for: a server may refuse a value, status and timestamp
-                    // combination it does not support, which would fail every write against it
-                    // permanently. Left unset, the server stamps its own receive time.
+                    // Sent unless turned off, so the far end records when the change was made rather
+                    // than when it arrived. A server is permitted to refuse the combination, which
+                    // would cost every write to it, but the reference stack accepts it on a Value
+                    // write and rejects only a ServerTimestamp. Left unset, MinValue omits the field
+                    // on the wire and the server stamps its own receive time.
                     SourceTimestamp = _configuration.WriteSourceTimestamp
                         ? change.ChangedTimestamp.UtcDateTime
                         : DateTime.MinValue

@@ -208,11 +208,6 @@ internal sealed class ReadAfterWriteFixture : IAsyncDisposable
                 configuration.ValueConverter = converter;
                 configuration.BufferTime = OutboundFlushPeriod;
                 configuration.ReadAfterWriteBuffer = ReadAfterWriteBuffer;
-
-                // Opted in, against the client default, so a write carries a client timestamp at all.
-                // Without one the SDK stamps the node with its own receive time and the read-back can
-                // never tie with the write, which is the whole scenario this fixture constructs.
-                configuration.WriteSourceTimestamp = true;
             });
 
             await client.StartAsync(
