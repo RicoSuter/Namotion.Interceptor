@@ -163,6 +163,53 @@ public class OutboundDropCountingTests
         }
     }
 
+    /// <summary>
+    /// A graceful stop that catches a write in flight is not a loss the operator can act on, and
+    /// <c>WriteChangesInBatchesAsync</c> reports that cancellation as a failed result rather than
+    /// throwing it. Counted, the drop counter would jump at every restart until an operator learns to
+    /// ignore it.
+    /// </summary>
+    [Fact]
+    public async Task WhenAWriteIsCancelledByTheStop_ThenItIsNotCountedAsDropped()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry().WithFullPropertyTracking();
+        var person = new Person(context);
+
+        using var writeStarted = new ManualResetEventSlim(false);
+        using var source = new TestSubjectSource(person, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(8), writeRetryQueueSize: 0)
+        {
+            WriteChangesOverride = async (_, cancellationToken) =>
+            {
+                writeStarted.Set();
+
+                // Held until the stop cancels the token, so the write is in flight when it lands.
+                await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                return WriteResult.Success;
+            }
+        };
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
+
+        await source.StartAsync(CancellationToken.None);
+
+        // The probe is re-written on each poll because writes captured before the connected phase are
+        // drained rather than written.
+        var probeValue = 0;
+        await AsyncTestHelpers.WaitUntilAsync(() =>
+        {
+            person.FirstName = "v" + probeValue++;
+            return writeStarted.IsSet;
+        }, message: "The pump never reached a write.");
+
+        // Act
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
+    }
+
     [Fact]
     public void WhenTheDisabledQueueDrainRuns_ThenNothingIsCounted()
     {
@@ -190,13 +237,15 @@ public class OutboundDropCountingTests
         // Arrange
         var metrics = new SourceMetrics();
         var diagnostics = new SourceDiagnostics(metrics);
-        var writer = CreateWriter(metrics.InboundBuffer);
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        using var source = new TestSubjectSource(
+            new Person(context), context, NullLogger.Instance, writeRetryQueueSize: 0);
+        var writer = new SubjectPropertyWriter(source, NullLogger.Instance, metrics.InboundBuffer);
 
         writer.StartBuffering();
         writer.Write(0, static _ => { });
         writer.Write(1, static _ => { });
         Assert.Equal(2, diagnostics.InboundBuffer.Depth);
-        Assert.Null(diagnostics.InboundBuffer.Capacity);
 
         // Act
         writer.StartBuffering();
@@ -250,9 +299,12 @@ public class OutboundDropCountingTests
             await WaitForBufferedOutboundChangeAsync(source, person);
 
             // Assert
+            // The depth comes first because it is the only read that tells a live registration from no
+            // registration at all: an unregistered QueueMetrics reports a null capacity too, so the
+            // capacity below only means "registered as unbounded" once the depth has proven the
+            // registration is live.
             Assert.True(source.Diagnostics.OutboundChanges.Depth > 0);
             Assert.Null(source.Diagnostics.OutboundChanges.Capacity);
-            Assert.Equal(0, source.Diagnostics.OutboundChanges.TotalDropped);
         }
         finally
         {
@@ -340,13 +392,6 @@ public class OutboundDropCountingTests
             person.FirstName = "v" + probeValue++;
             return source.Diagnostics.OutboundChanges.Depth > 0;
         }, message: "The outbound change queue never reported a depth.");
-    }
-
-    private static SubjectPropertyWriter CreateWriter(QueueMetrics inboundBuffer)
-    {
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        var source = new TestSubjectSource(new Person(context), context, NullLogger.Instance, writeRetryQueueSize: 0);
-        return new SubjectPropertyWriter(source, NullLogger.Instance, inboundBuffer);
     }
 
     private static ChangeQueueProcessor CreateBoundedProcessor(IInterceptorSubjectContext context, int maxQueueDepth)

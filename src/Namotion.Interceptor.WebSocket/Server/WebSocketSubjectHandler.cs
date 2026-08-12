@@ -37,9 +37,10 @@ public sealed class WebSocketSubjectHandler
     
     public TimeSpan BufferTime => _configuration.BufferTime;
 
-    public int ConnectionCount => Volatile.Read(ref _connectionCount);
+    // Internal, so the number has a single public spelling: WebSocketServerDiagnostics.
+    internal int ConnectionCount => Volatile.Read(ref _connectionCount);
 
-    public long CurrentSequence => Volatile.Read(ref _sequence);
+    internal long CurrentSequence => Volatile.Read(ref _sequence);
 
     public WebSocketSubjectHandler(
         IInterceptorSubject subject,

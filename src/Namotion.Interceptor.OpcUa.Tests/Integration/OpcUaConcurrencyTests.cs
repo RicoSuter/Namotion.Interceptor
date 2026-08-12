@@ -165,7 +165,7 @@ public class OpcUaConcurrencyTests
                     try
                     {
                         _ = server.Server.Diagnostics.ActiveSessionCount;
-                        _ = server.Server.Diagnostics.IsRunning;
+                        _ = server.Server.Diagnostics.IsOperational;
                         _ = client.Source.Diagnostics.IsConnected;
                         _ = client.Source.Diagnostics.MonitoredItemCount;
                     }

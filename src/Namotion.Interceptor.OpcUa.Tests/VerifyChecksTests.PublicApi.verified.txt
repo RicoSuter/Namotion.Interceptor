@@ -374,15 +374,9 @@ namespace Namotion.Interceptor.OpcUa.Server
         protected void LoadNodeSetFromEmbeddedResource<TAssemblyType>(string name, Opc.Ua.NodeStateCollection nodes, Opc.Ua.ISystemContext context) { }
         public virtual void LoadPredefinedNodes(Opc.Ua.NodeStateCollection collection, Opc.Ua.ISystemContext context) { }
     }
-    public class OpcUaServerDiagnostics
+    public sealed class OpcUaServerDiagnostics : Namotion.Interceptor.Connectors.Diagnostics.ConnectorDiagnostics
     {
         public int ActiveSessionCount { get; }
         public int ConsecutiveFailures { get; }
-        public double IncomingChangesPerSecond { get; }
-        public bool IsRunning { get; }
-        public System.Exception? LastError { get; }
-        public double OutgoingChangesPerSecond { get; }
-        public System.DateTimeOffset? StartTime { get; }
-        public System.TimeSpan? Uptime { get; }
     }
 }

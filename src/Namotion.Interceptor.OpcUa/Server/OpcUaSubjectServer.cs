@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -11,7 +11,7 @@ using Opc.Ua.Server;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISubjectConnector, IFaultInjectable
+internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, IFaultInjectable
 {
     // Per-instance key so multiple servers can expose the same property tree without
     // overwriting each other's BaseDataVariableState reference on shared properties.
@@ -33,11 +33,10 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
     private volatile bool _isForceKill;
     private volatile CancellationTokenSource? _forceKillCts;
     private int _consecutiveFailures;
-    private DateTimeOffset? _startTime;
-    private Exception? _lastError;
 
-    internal ThroughputCounter IncomingThroughput { get; } = new();
-    internal ThroughputCounter OutgoingThroughput { get; } = new();
+    internal ThroughputCounter IncomingThroughput { get; }
+
+    internal ThroughputCounter OutgoingThroughput { get; }
 
     // Thread-scoped, not an instance field: a client write on another thread must not be caught by it.
     [ThreadStatic]
@@ -55,7 +54,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
     internal static object? SelfWrittenNodeValue;
 
     /// <inheritdoc />
-    public IInterceptorSubject RootSubject => _subject;
+    public override IInterceptorSubject RootSubject => _subject;
 
     /// <inheritdoc />
     Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
@@ -68,31 +67,16 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc />
-    public OpcUaServerDiagnostics Diagnostics { get; }
+    /// <inheritdoc cref="SubjectConnectorBase.Diagnostics" />
+    public override OpcUaServerDiagnostics Diagnostics { get; }
 
     /// <inheritdoc />
     public StandardServer? CurrentServer => _server;
 
     /// <summary>
-    /// Gets a value indicating whether the server is running.
-    /// </summary>
-    internal bool IsRunning => _server?.CurrentInstance != null;
-
-    /// <summary>
     /// Gets the number of active sessions.
     /// </summary>
     internal int ActiveSessionCount => _server?.CurrentInstance?.SessionManager?.GetSessions()?.Count ?? 0;
-
-    /// <summary>
-    /// Gets the server start time.
-    /// </summary>
-    internal DateTimeOffset? StartTime => _startTime;
-
-    /// <summary>
-    /// Gets the last error.
-    /// </summary>
-    internal Exception? LastError => _lastError;
 
     /// <summary>
     /// Gets the consecutive failure count.
@@ -103,12 +87,29 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
         IInterceptorSubject subject,
         OpcUaServerConfiguration configuration,
         ILogger logger)
+        : this(subject, configuration, logger, new ThroughputCounter(), new ThroughputCounter())
     {
+    }
+
+    // A constructor initializer cannot reference this, so the counters are created here and threaded
+    // through: the same two instances have to reach both base(...) and the properties the write paths
+    // feed.
+    private OpcUaSubjectServer(
+        IInterceptorSubject subject,
+        OpcUaServerConfiguration configuration,
+        ILogger logger,
+        ThroughputCounter incoming,
+        ThroughputCounter outgoing)
+        : base(new ConnectorMetrics(incoming, outgoing))
+    {
+        IncomingThroughput = incoming;
+        OutgoingThroughput = outgoing;
+
         _subject = subject;
         _context = subject.Context;
         _logger = logger;
         _configuration = configuration;
-        Diagnostics = new OpcUaServerDiagnostics(this);
+        Diagnostics = new OpcUaServerDiagnostics(this, Metrics);
     }
 
     /// <inheritdoc />
@@ -207,7 +208,8 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
         return ValueTask.CompletedTask;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    /// <inheritdoc />
+    protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         _context.WithRegistry();
 
@@ -261,18 +263,35 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                     // and not lost in the gap between node creation and processing start.
                     using var changeQueueProcessor = CreateChangeQueueProcessor();
 
-                    await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
-                    await application.StartAsync(server).ConfigureAwait(false);
+                    // Registered after construction and released in the finally below, so the next
+                    // restart can register its own processor: a second Register while one is still live
+                    // throws. The using above still disposes the processor if Register itself throws.
+                    Metrics.OutboundChanges.Register(
+                        () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
+                    try
+                    {
+                        await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
+                        await application.StartAsync(server).ConfigureAwait(false);
 
-                    _startTime = DateTimeOffset.UtcNow;
-                    _consecutiveFailures = 0;
-                    _lastError = null;
+                        _consecutiveFailures = 0;
 
-                    await changeQueueProcessor.ProcessAsync(linkedToken);
+                        // Replaces the former _startTime stamp. StartTime is now the connector's own start
+                        // epoch and must not move on an internal restart, and LastError is deliberately not
+                        // cleared here: clearing it on recovery erases the only evidence of a transient fault.
+                        Metrics.MarkOperational();
+
+                        await changeQueueProcessor.ProcessAsync(linkedToken);
+                    }
+                    finally
+                    {
+                        // Runs before the using disposes the processor, so no reader can call into a
+                        // disposed one.
+                        Metrics.OutboundChanges.Deregister();
+                    }
                 }
                 finally
                 {
-                    _startTime = null;
+                    Metrics.MarkNotOperational();
                     var serverToClean = _server;
                     _server = null;
                     serverToClean?.ClearPropertyData();
@@ -285,13 +304,19 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
             }
             catch (OperationCanceledException) when (_isForceKill)
             {
-                // Force-kill: CTS was cancelled by KillAsync
+                // Force-kill: CTS was cancelled by KillAsync. Deliberately not reported through
+                // ReportError: it is an injected fault the server recovers from by restarting, and
+                // catching it here is also what keeps it from reaching the base class, which would
+                // record a cancellation the stopping token did not cause as a genuine fault.
                 _logger.LogWarning("OPC UA server force-killed. Restarting...");
             }
             catch (Exception ex)
             {
                 _consecutiveFailures++;
-                _lastError = ex;
+
+                // The base class only sees exceptions that leave RunAsync, and this loop swallows every
+                // per-attempt failure. Without this, a server that can never start reports no error.
+                Metrics.ReportError(ex);
                 _logger.LogError(ex, "Failed to start OPC UA server (attempt {Attempt}).", _consecutiveFailures);
 
                 // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s, 30s (capped) + 0-2s random jitter

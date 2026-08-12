@@ -5,12 +5,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Packets;
 using MQTTnet.Server;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -22,7 +22,7 @@ namespace Namotion.Interceptor.Mqtt.Server;
 /// <summary>
 /// Background service that hosts an MQTT broker and publishes property changes.
 /// </summary>
-public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInjectable, IAsyncDisposable
+public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncDisposable
 {
     // NOTE: We cannot pool UserProperties here because InjectApplicationMessages queues messages
     // asynchronously. The server may still be serializing packets after this method returns,
@@ -35,7 +35,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
     private readonly ILogger _logger;
 
     /// <inheritdoc />
-    public IInterceptorSubject RootSubject => _subject;
+    public override IInterceptorSubject RootSubject => _subject;
 
     // Per-instance sentinel source used for values received from MQTT clients.
     // Using a different source than `this` ensures the server's ChangeQueueProcessor
@@ -62,26 +62,29 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
     private volatile bool _isForceKill;
     private volatile CancellationTokenSource? _forceKillCts;
 
-    /// <summary>
-    /// Gets whether the MQTT server is listening.
-    /// </summary>
-    public bool IsListening => Volatile.Read(ref _isListening) == 1;
+    /// <inheritdoc cref="SubjectConnectorBase.Diagnostics" />
+    public override MqttServerDiagnostics Diagnostics { get; }
 
     /// <summary>
-    /// Gets the number of connected clients.
+    /// Gets the number of clients currently connected to the broker.
     /// </summary>
-    public int NumberOfClients => Volatile.Read(ref _numberOfClients);
+    internal int ConnectedClientCount => Volatile.Read(ref _numberOfClients);
+
+    private bool IsListening => Volatile.Read(ref _isListening) == 1;
 
     public MqttSubjectServer(
         IInterceptorSubject subject,
         MqttServerConfiguration configuration,
         ILogger<MqttSubjectServer> logger)
+        : base(new ConnectorMetrics())
     {
         _subject = subject ?? throw new ArgumentNullException(nameof(subject));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _context = subject.Context;
         _serverClientId = _configuration.ClientId;
+
+        Diagnostics = new MqttServerDiagnostics(this, Metrics);
 
         configuration.Validate();
     }
@@ -143,7 +146,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
     }
 
     /// <inheritdoc />
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         _lifecycleInterceptor = _context.TryGetLifecycleInterceptor();
         if (_lifecycleInterceptor is not null)
@@ -180,6 +183,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
             {
                 await _mqttServer.StartAsync().ConfigureAwait(false);
                 Volatile.Write(ref _isListening, 1);
+                Metrics.MarkOperational();
 
                 _logger.LogInformation("MQTT server started on port {Port}.", _configuration.BrokerPort);
 
@@ -187,12 +191,27 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
                 {
                     using var changeQueueProcessor = CreateChangeQueueProcessor();
 
-                    await changeQueueProcessor.ProcessAsync(linkedToken).ConfigureAwait(false);
+                    // Registered after construction and released in the finally below, so the next
+                    // restart can register its own processor: a second Register while one is still live
+                    // throws. The using above still disposes the processor if Register itself throws.
+                    Metrics.OutboundChanges.Register(
+                        () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
+                    try
+                    {
+                        await changeQueueProcessor.ProcessAsync(linkedToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        // Runs before the using disposes the processor, so no reader can call into a
+                        // disposed one.
+                        Metrics.OutboundChanges.Deregister();
+                    }
                 }
                 finally
                 {
                     await _mqttServer.StopAsync().ConfigureAwait(false);
                     Volatile.Write(ref _isListening, 0);
+                    Metrics.MarkNotOperational();
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -201,17 +220,27 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
             }
             catch (OperationCanceledException) when (_isForceKill)
             {
+                // Deliberately not reported through ReportError: it is an injected fault the broker
+                // recovers from by restarting, and catching it here is also what keeps it from reaching
+                // the base class, which would record a cancellation the stopping token did not cause as
+                // a genuine fault.
                 _logger.LogWarning("MQTT server force-killed. Restarting...");
             }
             catch (Exception ex)
             {
+                // Reached when the broker fails to start, or when the teardown above throws before its
+                // own liveness write runs.
                 Volatile.Write(ref _isListening, 0);
+                Metrics.MarkNotOperational();
 
                 if (ex is TaskCanceledException)
                 {
                     return;
                 }
 
+                // The base class only sees exceptions that leave RunAsync, and this loop swallows every
+                // per-attempt failure. Without this, a broker that can never bind reports no error.
+                Metrics.ReportError(ex);
                 _logger.LogError(ex, "Error in MQTT server.");
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
             }
@@ -649,7 +678,10 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
         _propertyToTopic.Clear();
         _pathToProperty.Clear();
 
+        // Liveness is not touched here: Dispose below forces it false terminally, which is stronger
+        // than a MarkNotOperational a disposed connector could still recover from.
         Volatile.Write(ref _isListening, 0);
+
         _shutdownCts.Dispose();
         _publishSemaphore.Dispose();
         Dispose();

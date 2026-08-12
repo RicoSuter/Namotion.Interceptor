@@ -37,8 +37,15 @@ public sealed class SubjectPropertyWriter
     /// <param name="logger">The logger.</param>
     /// <param name="inboundBuffer">
     /// Where this writer reports the depth of its buffer and the updates a superseded load throws
-    /// away, or <c>null</c> for a writer whose buffer nothing observes.
+    /// away, or <c>null</c> for a writer whose buffer nothing observes. The instance must have no
+    /// live registration: this constructor registers on it and never deregisters, so it cannot be
+    /// shared with a second writer. A derived source must not pass its own
+    /// <c>SourceMetrics.InboundBuffer</c>, which <see cref="SubjectSourceBase"/> has already
+    /// registered for the writer it owns.
     /// </param>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="inboundBuffer"/> already has a live registration.
+    /// </exception>
     /// <remarks>
     /// Typed to the concrete base rather than <see cref="ISubjectSource"/> because this writer
     /// drives the source's state transitions, which only <see cref="SubjectSourceBase"/> defines. A

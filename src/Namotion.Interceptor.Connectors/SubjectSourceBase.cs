@@ -337,7 +337,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             try
             {
                 var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
-                if (!result.IsFullySuccessful)
+                if (!result.IsFullySuccessful && !IsExpectedShutdown(result.Error, cancellationToken))
                 {
                     Metrics.OutboundRetries.AddDropped(result.FailedChanges.Length);
                     _logger.LogError(result.Error, "Failed to write {Count} changes to source.",
@@ -346,7 +346,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             }
             catch (OperationCanceledException)
             {
-                throw; // Don't swallow cancellation
+                // Unreachable today: WriteChangesInBatchesAsync reports cancellation as a failed result,
+                // which the shutdown filter above excludes from the loss accounting. Kept so a future
+                // write path that throws instead is not counted by the catch-all below.
+                throw;
             }
             catch (Exception e)
             {
@@ -388,6 +391,20 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             WriteRetryQueue.Enqueue(changes);
         }
     }
+
+    /// <summary>
+    /// Whether a failed write is nothing more than the host stopping while it was in flight.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/> reports cancellation as a
+    /// failed <see cref="WriteResult"/> rather than throwing it, so without this filter every graceful
+    /// stop that caught a write in flight would add the whole batch to
+    /// <see cref="Diagnostics.QueueDiagnostics.TotalDropped"/>, and an operator who sees that counter
+    /// jump at every restart learns to ignore it. Matches the decision in
+    /// <see cref="SubjectConnectorBase.ExecuteAsync"/>: an expected shutdown is not a fault.
+    /// </remarks>
+    private static bool IsExpectedShutdown(Exception? error, CancellationToken cancellationToken) =>
+        error is OperationCanceledException && cancellationToken.IsCancellationRequested;
 
     /// <summary>
     /// Parks owned writes into the retry queue at intervals while the initial state loads, so a slow
@@ -514,6 +531,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
         var restored = 0;
         var sent = 0;
+        // Superseded and dropped are counted apart because only the second is added to
+        // OutboundRetries.TotalDropped: reporting them as one number leaves an operator correlating the
+        // log with that counter looking at two figures that disagree.
+        var superseded = 0;
         var dropped = 0;
         var failed = 0;
         List<SubjectPropertyChange>? toSend = null;
@@ -527,8 +548,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                 if (!ChangeDeliveryFilter.IsCurrent(in change, DeliveryRule))
                 {
                     // A later local commit supersedes it, and that commit's change is delivered in its
-                    // place.
-                    dropped++;
+                    // place. Deliberately not counted as dropped: nothing is lost.
+                    superseded++;
                     continue;
                 }
 
@@ -582,11 +603,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
         }
 
-        if (dropped > 0 || failed > 0)
+        if (superseded > 0 || dropped > 0 || failed > 0)
         {
             _logger.LogWarning(
-                "Retry queue reconcile: {Restored} restored over the loaded source value, {Sent} sent, {Dropped} superseded by a later local write, {Failed} failed.",
-                restored, sent, dropped, failed);
+                "Retry queue reconcile: {Restored} restored over the loaded source value, {Sent} sent, {Superseded} superseded by a later local write, {Dropped} dropped because the property has no setter, {Failed} failed.",
+                restored, sent, superseded, dropped, failed);
         }
         else if (restored > 0 || sent > 0)
         {

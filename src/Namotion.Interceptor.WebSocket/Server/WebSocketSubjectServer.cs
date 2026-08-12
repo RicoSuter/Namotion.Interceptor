@@ -4,9 +4,9 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Diagnostics;
 
 namespace Namotion.Interceptor.WebSocket.Server;
 
@@ -16,7 +16,7 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// On Kill, restarts both the HTTP listener and the processing layer (matching real crash behavior).
 /// For embedding in an existing ASP.NET app, use MapWebSocketSubjectHandler extension instead.
 /// </summary>
-public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnector, IFaultInjectable, IAsyncDisposable
+public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncDisposable
 {
     private readonly WebSocketSubjectHandler _handler;
     private readonly WebSocketServerConfiguration _configuration;
@@ -28,22 +28,20 @@ public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnecto
     private volatile CancellationTokenSource? _forceKillCts;
 
     /// <inheritdoc />
-    public IInterceptorSubject RootSubject { get; }
+    public override IInterceptorSubject RootSubject { get; }
 
-    /// <summary>
-    /// Gets the number of currently connected WebSocket clients.
-    /// </summary>
-    public int ConnectionCount => _handler.ConnectionCount;
+    /// <inheritdoc cref="SubjectConnectorBase.Diagnostics" />
+    public override WebSocketServerDiagnostics Diagnostics { get; }
 
-    /// <summary>
-    /// Gets the current broadcast sequence number.
-    /// </summary>
-    public long CurrentSequence => _handler.CurrentSequence;
+    internal int ConnectionCount => _handler.ConnectionCount;
+
+    internal long CurrentSequence => _handler.CurrentSequence;
 
     public WebSocketSubjectServer(
         IInterceptorSubject subject,
         WebSocketServerConfiguration configuration,
         ILogger<WebSocketSubjectServer> logger)
+        : base(new ConnectorMetrics())
     {
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -52,6 +50,7 @@ public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnecto
         configuration.Validate();
 
         RootSubject = subject;
+        Diagnostics = new WebSocketServerDiagnostics(this, Metrics);
         _handler = new WebSocketSubjectHandler(subject, configuration, logger);
         _configuration = configuration;
         _logger = logger;
@@ -77,7 +76,8 @@ public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnecto
         }
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    /// <inheritdoc />
+    protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -94,39 +94,60 @@ public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnecto
 
                 _logger.LogInformation("WebSocket server starting on {Url}{Path}", listenUrl, _configuration.Path);
                 await _app.StartAsync(stoppingToken).ConfigureAwait(false);
+                Metrics.MarkOperational();
 
                 using var changeQueueProcessor = _handler.CreateChangeQueueProcessor(_logger);
 
-                var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);
-                var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedToken);
-
+                // Registered after construction and released in the finally below, so the next restart
+                // can register its own processor: a second Register while one is still live throws. The
+                // using above still disposes the processor if Register itself throws. The embedded
+                // mode's own processor deliberately does not register, so it cannot wire itself into
+                // this server's metrics.
+                Metrics.OutboundChanges.Register(
+                    () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
                 try
                 {
-                    // When either task completes, cancel the other to prevent blocking forever.
-                    await Task.WhenAny(processorTask, heartbeatTask).ConfigureAwait(false);
-                    await cts.CancelAsync().ConfigureAwait(false);
-                    await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
-                {
-                    // Kill or one task completed: linkedToken canceled
-                }
+                    var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);
+                    var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedToken);
 
-                // Both tasks completed — either normally (tasks catch OCE internally and
-                // return) or via caught OCE above. Check why we stopped:
-                if (stoppingToken.IsCancellationRequested)
-                {
-                    break;
-                }
+                    try
+                    {
+                        // When either task completes, cancel the other to prevent blocking forever.
+                        await Task.WhenAny(processorTask, heartbeatTask).ConfigureAwait(false);
+                        await cts.CancelAsync().ConfigureAwait(false);
+                        await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+                    {
+                        // Kill or one task completed: linkedToken canceled
+                    }
 
-                // linkedToken was canceled (Kill) or unexpected completion — restart.
-                if (_isForceKill)
-                {
-                    _logger.LogWarning("WebSocket server force-killed. Restarting...");
+                    // Both tasks completed, either normally (tasks catch OCE internally and
+                    // return) or via caught OCE above. Check why we stopped:
+                    if (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    // linkedToken was canceled (Kill) or completed unexpectedly, so restart.
+                    if (_isForceKill)
+                    {
+                        // Deliberately not reported through ReportError: it is an injected fault the
+                        // server recovers from by restarting, and handling it here is also what keeps it
+                        // from reaching the base class, which would record a cancellation the stopping
+                        // token did not cause as a genuine fault.
+                        _logger.LogWarning("WebSocket server force-killed. Restarting...");
+                    }
+                    else
+                    {
+                        _logger.LogWarning("WebSocket server processing completed unexpectedly. Restarting...");
+                    }
                 }
-                else
+                finally
                 {
-                    _logger.LogWarning("WebSocket server processing completed unexpectedly. Restarting...");
+                    // Runs before the using disposes the processor, so no reader can call into a
+                    // disposed one.
+                    Metrics.OutboundChanges.Deregister();
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -135,10 +156,18 @@ public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnecto
             }
             catch (Exception ex)
             {
+                // The base class only sees exceptions that leave RunAsync, and this loop swallows every
+                // per-attempt failure. Without this, a server whose listener can never bind reports no
+                // error.
+                Metrics.ReportError(ex);
                 _logger.LogError(ex, "WebSocket server processing failed. Restarting...");
             }
             finally
             {
+                // First in the teardown, so a throw further down cannot leave a server that has stopped
+                // accepting connections reporting that it is serving.
+                Metrics.MarkNotOperational();
+
                 await _handler.CloseAllConnectionsAsync().ConfigureAwait(false);
 
                 if (_app is not null)

@@ -34,6 +34,12 @@ public class SourceDiagnostics : ConnectorDiagnostics
     /// When the source is configured without a retry queue this block reports a capacity of 0 and a
     /// depth of 0, while <see cref="QueueDiagnostics.TotalDropped"/> still rises: without a queue,
     /// failed writes are discarded directly and are attributed here.
+    /// <para>
+    /// In that configuration the total is a floor rather than the whole loss. The larger loss path is
+    /// the connect-window drain, which discards every captured write because without a queue there is
+    /// nothing to park them in, and which is deliberately uncounted: it has no ownership filter, so its
+    /// discards cannot be attributed to this source.
+    /// </para>
     /// </remarks>
     public QueueDiagnostics OutboundRetries { get; }
 

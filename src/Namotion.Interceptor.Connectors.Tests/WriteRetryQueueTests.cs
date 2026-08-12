@@ -155,7 +155,9 @@ public class WriteRetryQueueTests
     public void WhenMaxQueueSizeIsZero_ThenWritesAreDropped()
     {
         // Arrange
-        var queue = new WriteRetryQueue(0, NullLogger.Instance, new QueueMetrics());
+        var metrics = new QueueMetrics();
+        var queue = new WriteRetryQueue(0, NullLogger.Instance, metrics);
+        var diagnostics = new QueueDiagnostics(metrics);
 
         // Act
         queue.Enqueue(CreateChanges(5));
@@ -163,6 +165,7 @@ public class WriteRetryQueueTests
         // Assert
         Assert.True(queue.IsEmpty);
         Assert.Equal(0, queue.PendingWriteCount);
+        Assert.Equal(5, diagnostics.TotalDropped);
     }
 
     [Fact]

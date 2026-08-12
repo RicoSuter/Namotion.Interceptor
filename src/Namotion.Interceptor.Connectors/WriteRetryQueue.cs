@@ -60,6 +60,9 @@ internal sealed class WriteRetryQueue : IDisposable
     {
         if (_maxQueueSize is 0)
         {
+            // Counted like every other discard here. Metrics is a required constructor parameter so that
+            // no construction site can drop uncounted, and this path drops the whole batch.
+            _metrics.AddDropped(changes.Length);
             _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes.", changes.Length);
             return;
         }
