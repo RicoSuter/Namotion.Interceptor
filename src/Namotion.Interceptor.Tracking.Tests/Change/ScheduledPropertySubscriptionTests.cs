@@ -9,6 +9,10 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 [Collection(PerPropertySubscriptionCollection.Name)]
 public class ScheduledPropertySubscriptionTests
 {
+    // Generous on purpose: a loaded machine must not fail these, and a real regression fails them by
+    // never reaching the awaited state at all rather than by being slow.
+    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
+
     public ScheduledPropertySubscriptionTests() => PropertyChangeSubscriptions.ResetForTests();
 
     [Fact]
@@ -113,15 +117,23 @@ public class ScheduledPropertySubscriptionTests
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var scheduler = new ControllableScheduler();
+        var deliveries = 0;
 
         using var subscription = new PropertyReference(person, nameof(Person.FirstName))
-            .Subscribe((in SubjectPropertyChange _) => throw new InvalidOperationException("boom"), scheduler);
+            .Subscribe(
+                (in SubjectPropertyChange _) =>
+                {
+                    deliveries++;
+                    throw new InvalidOperationException("boom");
+                },
+                scheduler);
 
         // Act
         person.FirstName = "one";
         scheduler.RunUntilIdle();
 
-        // Assert
+        // Assert: the counter is what stops a drain that never delivers from passing this test.
+        Assert.Equal(1, deliveries);
         Assert.Equal("one", person.FirstName);
     }
 
@@ -134,9 +146,14 @@ public class ScheduledPropertySubscriptionTests
         var property = new PropertyReference(person, nameof(Person.FirstName));
         var scheduler = new ControllableScheduler();
         var unscheduled = new List<string?>();
+        var scheduledDeliveries = 0;
 
         using var scheduled = property.Subscribe(
-            (in SubjectPropertyChange _) => throw new InvalidOperationException("boom"),
+            (in SubjectPropertyChange _) =>
+            {
+                scheduledDeliveries++;
+                throw new InvalidOperationException("boom");
+            },
             scheduler);
         using var plain = property.Subscribe((in SubjectPropertyChange change) => unscheduled.Add(change.GetNewValue<string?>()));
 
@@ -144,7 +161,9 @@ public class ScheduledPropertySubscriptionTests
         person.FirstName = "one";
         scheduler.RunUntilIdle();
 
-        // Assert: the scheduled observer's failure cannot suppress another channel on the same write.
+        // Assert: the counter pins that the throwing observer really ran, so a drain delivering nothing
+        // cannot leave this green, and the failure cannot suppress another channel on the same write.
+        Assert.Equal(1, scheduledDeliveries);
         Assert.Equal(["one"], unscheduled);
     }
 
@@ -194,9 +213,11 @@ public class ScheduledPropertySubscriptionTests
 
         // Act
         parent.Father = null;
+        child.FirstName = "after-detach";
         scheduler.RunUntilIdle();
 
-        // Assert
+        // Assert: both halves at once. The change accepted before the detach still drains, and the write
+        // after it is not accepted, so the test cannot pass with a detach that does nothing.
         Assert.Equal(["one"], received);
     }
 
@@ -230,29 +251,30 @@ public class ScheduledPropertySubscriptionTests
     }
 
     [Fact]
-    public void WhenOneObserverIsSharedAcrossTwoSubscriptions_ThenTheyAreNotSerializedWithEachOther()
+    public void WhenOneObserverIsSharedAcrossTwoSubscriptions_ThenItCanBeInvokedConcurrently()
     {
-        // Arrange: the guarantee is per subscription, not per observer instance. Two subscriptions each
-        // drain independently, so a shared observer is invoked from both.
+        // Arrange: serialization is promised per subscription, not per observer instance, which is exactly
+        // what the docs say, so an observer shared across two subscriptions has to synchronize itself. The
+        // observer proves the promise by holding both deliveries inside OnChange at the same time, and both
+        // subscriptions run on the real thread pool so the concurrency is genuine. The two properties are
+        // different, so the subscriptions are independent of each other.
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
-        var firstScheduler = new ControllableScheduler();
-        var secondScheduler = new ControllableScheduler();
-        var calls = 0;
+        using var observer = new OverlapProbeObserver();
 
-        void Handler(in SubjectPropertyChange _) => calls++;
-
-        using var first = new PropertyReference(person, nameof(Person.FirstName)).Subscribe(Handler, firstScheduler);
-        using var second = new PropertyReference(person, nameof(Person.LastName)).Subscribe(Handler, secondScheduler);
+        using var first = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe(observer, Scheduler.Default);
+        using var second = new PropertyReference(person, nameof(Person.LastName))
+            .Subscribe(observer, Scheduler.Default);
 
         // Act
         person.FirstName = "one";
         person.LastName = "two";
-        firstScheduler.RunUntilIdle();
-        secondScheduler.RunUntilIdle();
 
-        // Assert
-        Assert.Equal(2, calls);
+        // Assert: a lock around delivery, process-wide or per observer, makes the overlap unobservable and
+        // fails here.
+        Assert.True(observer.WaitForAllDeliveries(WaitTimeout), "both deliveries should have completed");
+        Assert.True(observer.OverlapObserved, "the two deliveries never overlapped");
     }
 
     [Fact]
@@ -299,6 +321,52 @@ public class ScheduledPropertySubscriptionTests
             {
                 subscription.Dispose();
             }
+        }
+    }
+
+    /// <summary>
+    /// One instance shared by two subscriptions. Each delivery announces itself and then waits for the
+    /// other one, so <see cref="OverlapObserved"/> is true only if both were inside
+    /// <see cref="OnChange"/> at the same moment. Any lock serializing delivery makes that wait time out.
+    /// </summary>
+    private sealed class OverlapProbeObserver : IPropertyChangeObserver, IDisposable
+    {
+        private const int ExpectedDeliveries = 2;
+
+        private readonly ManualResetEventSlim _bothArrived = new();
+        private readonly CountdownEvent _allCompleted = new(ExpectedDeliveries);
+
+        private int _inFlight;
+        private int _overlapObserved;
+
+        public bool OverlapObserved => Volatile.Read(ref _overlapObserved) == 1;
+
+        public void OnChange(in SubjectPropertyChange change)
+        {
+            if (Interlocked.Increment(ref _inFlight) == ExpectedDeliveries)
+            {
+                // Reaching the expected count means the earlier delivery has not left OnChange yet, since
+                // it decrements only below.
+                Volatile.Write(ref _overlapObserved, 1);
+                _bothArrived.Set();
+            }
+            else if (!_bothArrived.Wait(WaitTimeout))
+            {
+                // Serialized delivery lands here. Setting the gate keeps the next arrival from paying the
+                // timeout a second time, so the failure is reported once rather than compounding.
+                _bothArrived.Set();
+            }
+
+            Interlocked.Decrement(ref _inFlight);
+            _allCompleted.Signal();
+        }
+
+        public bool WaitForAllDeliveries(TimeSpan timeout) => _allCompleted.Wait(timeout);
+
+        public void Dispose()
+        {
+            _bothArrived.Dispose();
+            _allCompleted.Dispose();
         }
     }
 }
