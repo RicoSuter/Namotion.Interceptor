@@ -204,7 +204,6 @@ namespace Namotion.Interceptor.Connectors.Diagnostics
         public ThroughputDiagnostics(Namotion.Interceptor.Connectors.ThroughputCounter? incoming, Namotion.Interceptor.Connectors.ThroughputCounter? outgoing) { }
         public double? IncomingPerSecond { get; }
         public double? OutgoingPerSecond { get; }
-        public static Namotion.Interceptor.Connectors.Diagnostics.ThroughputDiagnostics NotInstrumented { get; }
     }
 }
 namespace Namotion.Interceptor.Connectors.Mapping

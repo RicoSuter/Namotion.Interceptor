@@ -45,8 +45,8 @@ public class ConnectorMetrics
     public QueueMetrics OutboundChanges { get; } = new();
 
     /// <summary>
-    /// Opens a new counter epoch: stamps a fresh start time and resets every <c>Total</c> counter,
-    /// including those of registered hoisted metrics.
+    /// Opens a new counter epoch: stamps a fresh start time, clears the last error and resets every
+    /// <c>Total</c> counter, including those of registered hoisted metrics.
     /// </summary>
     /// <remarks>
     /// Deliberately not idempotent. Called once per <c>ExecuteAsync</c> entry, so a host stop and
@@ -55,6 +55,7 @@ public class ConnectorMetrics
     public void MarkStarted()
     {
         Interlocked.Exchange(ref _startTicks, DateTimeOffset.UtcNow.UtcTicks);
+        Volatile.Write(ref _lastError, null);
         ResetTotals();
 
         foreach (var resettable in _resettables)
@@ -66,6 +67,13 @@ public class ConnectorMetrics
     /// <summary>
     /// Enrolls metrics the connector owns outside this object into the <see cref="MarkStarted"/> reset.
     /// </summary>
+    /// <remarks>
+    /// Register before the connector starts, and never once per reconnect. There is no deregistration
+    /// counterpart, so a per-reconnect registration would grow the list without bound and reset the
+    /// same instance once per registration. A resettable enrolled after <see cref="MarkStarted"/> also
+    /// carries its counts from before the epoch into it, which breaks the rule that a <c>Total</c>
+    /// counts only since the connector's start time.
+    /// </remarks>
     public void RegisterResettable(IResettableMetrics metrics)
     {
         ArgumentNullException.ThrowIfNull(metrics);
@@ -148,13 +156,18 @@ public class ConnectorMetrics
                 return;
             }
 
-            // The flag and its timestamp are swapped as one value. Held in separate fields, a reader
-            // can see the new flag beside the previous timestamp and report "operational since the
-            // moment it went down". The timestamp moves only when the flag does, so latching the
-            // terminal bit on a connector that was never operational does not invent a transition.
+            // The flag and its timestamp are swapped as one value, so every read of the record is
+            // internally consistent and the latch stays implementable without a lock. The timestamp
+            // moves only when the flag does, so latching the terminal bit on a connector that was
+            // never operational does not invent a transition.
+            //
+            // ticks is sampled before the loop, so a thread preempted between that sample and its
+            // successful exchange would otherwise stamp a moment older than a transition another
+            // thread already recorded, and the timestamp would move backwards. Clamping to the
+            // snapshot being replaced keeps it monotonic.
             var updated = current.IsOperational == isOperational
                 ? current with { IsStopped = stopped }
-                : new Liveness(isOperational, ticks, stopped);
+                : new Liveness(isOperational, Math.Max(ticks, current.ChangeTicks), stopped);
 
             // Reference equality, not Liveness's record-generated value equality:
             // Interlocked.CompareExchange compares by reference, so a genuinely failed exchange can

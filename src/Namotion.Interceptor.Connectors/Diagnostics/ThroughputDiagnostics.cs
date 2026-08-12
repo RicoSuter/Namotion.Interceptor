@@ -29,11 +29,6 @@ public sealed class ThroughputDiagnostics
     }
 
     /// <summary>
-    /// Gets a view that measures neither direction.
-    /// </summary>
-    public static ThroughputDiagnostics NotInstrumented { get; } = new(null, null);
-
-    /// <summary>
     /// Gets the average changes per second flowing into the subject tree, or <c>null</c> if this
     /// connector does not measure it.
     /// </summary>

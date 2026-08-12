@@ -53,6 +53,25 @@ public class ConnectorMetricsTests
     }
 
     [Fact]
+    public void WhenMarkedNotOperational_ThenTheTimestampMovesOnTheDownTransition()
+    {
+        // Arrange
+        var metrics = new ConnectorMetrics();
+        var diagnostics = new ConnectorDiagnostics(metrics);
+        metrics.MarkOperational();
+        var whenUp = diagnostics.OperationalChangeTime;
+
+        // Act
+        WaitForClockTick();
+        metrics.MarkNotOperational();
+
+        // Assert
+        Assert.False(diagnostics.IsOperational);
+        Assert.NotNull(whenUp);
+        Assert.True(diagnostics.OperationalChangeTime > whenUp);
+    }
+
+    [Fact]
     public void WhenStopped_ThenLaterMarkOperationalIsIgnored()
     {
         // Arrange
@@ -66,6 +85,25 @@ public class ConnectorMetricsTests
 
         // Assert
         Assert.False(diagnostics.IsOperational);
+    }
+
+    [Fact]
+    public void WhenStoppedTwice_ThenTheSecondCallLeavesStateAndTimestampUnchanged()
+    {
+        // Arrange
+        var metrics = new ConnectorMetrics();
+        var diagnostics = new ConnectorDiagnostics(metrics);
+        metrics.MarkOperational();
+        metrics.MarkStopped();
+        var afterFirstStop = diagnostics.OperationalChangeTime;
+
+        // Act
+        WaitForClockTick();
+        metrics.MarkStopped();
+
+        // Assert
+        Assert.False(diagnostics.IsOperational);
+        Assert.Equal(afterFirstStop, diagnostics.OperationalChangeTime);
     }
 
     [Fact]
@@ -97,6 +135,24 @@ public class ConnectorMetricsTests
 
         // Assert
         Assert.Same(error, diagnostics.LastError);
+    }
+
+    [Fact]
+    public void WhenRestarted_ThenLastErrorIsClearedThoughRecoveryAloneDoesNotClearIt()
+    {
+        // Arrange
+        var metrics = new ConnectorMetrics();
+        var diagnostics = new ConnectorDiagnostics(metrics);
+        metrics.ReportError(new InvalidOperationException("boom"));
+
+        // Act
+        metrics.MarkOperational();
+        var afterRecovery = diagnostics.LastError;
+        metrics.MarkStarted();
+
+        // Assert
+        Assert.NotNull(afterRecovery);
+        Assert.Null(diagnostics.LastError);
     }
 
     [Fact]
@@ -202,44 +258,64 @@ public class ConnectorMetricsTests
     }
 
     [Fact]
-    public async Task WhenLivenessIsFlippedConcurrently_ThenTheFlagAndTimestampAreNeverObservedTorn()
+    public void WhenNullIsRegisteredOrReported_ThenTheGuardNamesTheParameter()
+    {
+        // Arrange
+        var metrics = new SourceMetrics();
+
+        // Act & Assert
+        Assert.Equal("metrics", Assert.Throws<ArgumentNullException>(() => metrics.RegisterResettable(null!)).ParamName);
+        Assert.Equal("error", Assert.Throws<ArgumentNullException>(() => metrics.ReportError(null!)).ParamName);
+        Assert.Equal("count", Assert.Throws<ArgumentNullException>(() => metrics.RegisterClaimedProperties(null!)).ParamName);
+    }
+
+    [Fact]
+    public async Task WhenLivenessIsFlippedConcurrently_ThenTheChangeTimestampNeverMovesBackwards()
     {
         // Arrange
         var metrics = new ConnectorMetrics();
         var diagnostics = new ConnectorDiagnostics(metrics);
         var stop = false;
-        var torn = false;
+        var movedBackwards = false;
         metrics.MarkOperational();
-        var beforeAll = DateTimeOffset.UtcNow.AddSeconds(-1);
 
         // Act
-        var reader = Task.Run(() =>
+        // Both threads flip the liveness: a stale timestamp can only be stamped by a writer that lost
+        // the race to another writer, so a reader beside a single writer would never observe one.
+        var flipper = Task.Run(() =>
         {
             while (!Volatile.Read(ref stop))
             {
-                var operational = diagnostics.IsOperational;
-                var changeTime = diagnostics.OperationalChangeTime;
-
-                // Both members come from one snapshot, so a true flag can never carry a null or
-                // pre-test timestamp.
-                if (operational && (changeTime is null || changeTime < beforeAll))
-                {
-                    torn = true;
-                }
+                metrics.MarkNotOperational();
+                metrics.MarkOperational();
             }
         });
 
-        for (var i = 0; i < 20_000; i++)
+        var previous = DateTimeOffset.MinValue;
+        for (var i = 0; i < 100_000; i++)
         {
             metrics.MarkNotOperational();
             metrics.MarkOperational();
+
+            // What the record guarantees is that each individual read is internally consistent and
+            // that the timestamp only ever moves forward. It does not make IsOperational and
+            // OperationalChangeTime one atomic pair: they are two separate reads of two separate
+            // snapshots, so a reader that needs a coherent flag-and-timestamp pair cannot get it by
+            // reading both properties.
+            var changeTime = diagnostics.OperationalChangeTime;
+            if (changeTime < previous)
+            {
+                movedBackwards = true;
+            }
+
+            previous = changeTime ?? previous;
         }
 
         Volatile.Write(ref stop, true);
-        await reader;
+        await flipper;
 
         // Assert
-        Assert.False(torn);
+        Assert.False(movedBackwards);
     }
 
     // Spins until the wall clock reports a new tick, so a second MarkStarted cannot land on the same
