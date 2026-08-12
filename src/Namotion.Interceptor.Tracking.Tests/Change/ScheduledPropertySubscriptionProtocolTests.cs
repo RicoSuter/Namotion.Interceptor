@@ -137,8 +137,7 @@ public class ScheduledPropertySubscriptionProtocolTests : IDisposable
     [Fact]
     public void WhenTheObserverThrows_ThenTheCounterStillSettlesAndDeliveryContinues()
     {
-        // Arrange: the settle is in a finally and counts dequeues, so an escape from Deliver cannot
-        // pin the counter. This is the defect the design convicts ObserveOn of.
+        // Arrange: an observer exception is caught, routed to onError and does not stop later deliveries.
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var scheduler = new ControllableScheduler();

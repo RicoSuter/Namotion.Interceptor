@@ -57,7 +57,9 @@ public sealed class ScheduledPropertySubscription : IDisposable
     /// Changes accepted but not yet dequeued, excluding one currently being delivered. Exact only when read
     /// from a quiescent state, for the same reason <see cref="PropertyChangeQueueSubscription.Count"/> is.
     /// The queue is unbounded, so this is how a consumer on a hot property observes a growing backlog
-    /// instead of discovering it through memory pressure.
+    /// instead of discovering it through memory pressure. A writer already past its state check can still
+    /// enqueue after <see cref="Dispose"/> cleared the queue, and such a change is never dequeued, so this
+    /// is not guaranteed to reach zero once the subscription is disposed.
     /// </summary>
     public int PendingCount => _queue.Count;
 
@@ -73,9 +75,14 @@ public sealed class ScheduledPropertySubscription : IDisposable
     {
         var subscription = new ScheduledPropertySubscription(observer, scheduler, onError);
 
-        // Installs the upstream and can start delivering before the assignment below.
+        // Installs the upstream and can start delivering before the publication below.
         var upstream = property.Subscribe(new Forwarder(subscription));
-        Volatile.Write(ref subscription._upstream, upstream);
+
+        // Creator-side Dekker half: an interlocked publication, not a release store, because only an RMW
+        // orders this store against the state load below. It pairs with TransitionOutOfLive's
+        // CAS-then-Exchange, and without the StoreLoad ordering both halves can miss each other and strand
+        // the upstream forever. Mirrors the barriers in PropertyChangeSubscription.Create.
+        Interlocked.Exchange(ref subscription._upstream, upstream);
 
         // A change arriving during Subscribe can fault the subscription through a throwing scheduler, and
         // that transition saw a null upstream. Releasing here is what stops it leaking.
@@ -112,8 +119,19 @@ public sealed class ScheduledPropertySubscription : IDisposable
             // A count hint only. Item visibility comes from the queue, and the settling Add below is what
             // makes a stale read safe.
             var pending = Volatile.Read(ref _wip);
-            while (processed < pending && processed < MaxBatch)
+            while (processed < MaxBatch)
             {
+                if (processed >= pending)
+                {
+                    // Work accepted while this batch ran would otherwise wait for a whole new work item
+                    // with the budget untouched, so the snapshot is refreshed before giving up.
+                    pending = Volatile.Read(ref _wip);
+                    if (processed >= pending)
+                    {
+                        break;
+                    }
+                }
+
                 if (Volatile.Read(ref _state) != Live)
                 {
                     return;
@@ -235,6 +253,13 @@ public sealed class ScheduledPropertySubscription : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Stops delivery, releases the upstream subscription and drops the queued changes. A change enqueued
+    /// by a writer that had already passed its state check can land in the queue after it was cleared, and
+    /// nothing dequeues it afterwards, so <see cref="PendingCount"/> is not guaranteed to reach zero and
+    /// such a change keeps pinning its subject. The number of them is bounded by the writers running
+    /// concurrently with the disposal.
+    /// </summary>
     public void Dispose() => TransitionOutOfLive(Disposed);
 
     private sealed class Forwarder(ScheduledPropertySubscription owner) : IPropertyChangeObserver
