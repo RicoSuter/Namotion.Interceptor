@@ -4154,7 +4154,7 @@ Shipping `MqttServerDiagnostics` and `WebSocketServerDiagnostics` undocumented w
 - Modify: `docs/connectors-opcua.md:48`, `:76`
 - Modify: `docs/connectors-mqtt.md` (new diagnostics section)
 - Modify: `docs/connectors-websocket.md` (new diagnostics section)
-- Modify: `src/HomeBlaze/HomeBlaze/Data/Docs/architecture/design/observability.md:57-58`
+- Modify: `src/HomeBlaze/HomeBlaze/Data/Docs/architecture/design/observability.md:57-58`, whose line 58 still lists `OpcUaServerDiagnostics: IsRunning, LastError, ConsecutiveFailures`. Nothing earlier in the plan touches it, so it is stale unless this task catches it.
 
 - [ ] **Step 1: Update the shared connector docs**
 
