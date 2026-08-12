@@ -80,6 +80,7 @@ namespace Namotion.Interceptor.Connectors
     public class SourceOwnershipManager : System.IDisposable
     {
         public SourceOwnershipManager(Namotion.Interceptor.Connectors.ISubjectSource source, System.Action<Namotion.Interceptor.PropertyReference>? onReleasing = null, System.Action<Namotion.Interceptor.IInterceptorSubject>? onSubjectDetaching = null) { }
+        public int Count { get; }
         public System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.PropertyReference> Properties { get; }
         public bool ClaimSource(Namotion.Interceptor.PropertyReference property) { }
         public void Dispose() { }
@@ -109,6 +110,7 @@ namespace Namotion.Interceptor.Connectors
     public sealed class SubjectPropertyWriter
     {
         public SubjectPropertyWriter(Namotion.Interceptor.Connectors.SubjectSourceBase source, Microsoft.Extensions.Logging.ILogger logger) { }
+        public int BufferedUpdateCount { get; }
         public System.Threading.Tasks.Task LoadInitialStateAndResumeAsync(System.Threading.CancellationToken cancellationToken) { }
         public void StartBuffering() { }
         public void Write<TState>(TState state, System.Action<TState> update) { }

@@ -26,6 +26,7 @@ public sealed class SubjectPropertyWriter
     // StartBuffering happened in between, this call's snapshot is stale and must not be applied,
     // replayed, or certified as Synchronized - see LoadInitialStateAndResumeAsync.
     private int _generation;
+    private int _bufferedUpdateCount;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubjectPropertyWriter"/> class.
@@ -44,6 +45,17 @@ public sealed class SubjectPropertyWriter
     }
 
     /// <summary>
+    /// Gets how many inbound updates are currently buffered while the initial state loads.
+    /// </summary>
+    /// <remarks>
+    /// Maintained under the writer's own lock, which every mutation of the buffer already holds, and
+    /// read without taking it. A lock-taking getter would close an ABBA cycle:
+    /// <see cref="StartBuffering"/> holds this lock while transitioning the source's state, which
+    /// reaches registered monitors synchronously.
+    /// </remarks>
+    public int BufferedUpdateCount => Volatile.Read(ref _bufferedUpdateCount);
+
+    /// <summary>
     /// Starts buffering updates instead of applying them directly.
     /// Buffered updates will be replayed when <see cref="LoadInitialStateAndResumeAsync"/> is called.
     /// This method should be called before the source starts listening for changes.
@@ -53,6 +65,7 @@ public sealed class SubjectPropertyWriter
         lock (_lock)
         {
             _updates = [];
+            Volatile.Write(ref _bufferedUpdateCount, 0);
             _generation++;
 
             // Under _lock, paired with the generation change that governs it, so the transition
@@ -134,6 +147,7 @@ public sealed class SubjectPropertyWriter
 
                 // Must be after replay: Write() reads _updates without lock on the fast path.
                 _updates = null;
+                Volatile.Write(ref _bufferedUpdateCount, 0);
             }
 
             // Reported while still holding _lock, atomically with the generation check above, so a
@@ -165,6 +179,7 @@ public sealed class SubjectPropertyWriter
                 {
                     // Still initializing, buffer the update (cold path, allocations acceptable)
                     AddBeforeInitializationUpdate(updates, state, update);
+                    Volatile.Write(ref _bufferedUpdateCount, updates.Count);
                     return;
                 }
             }
