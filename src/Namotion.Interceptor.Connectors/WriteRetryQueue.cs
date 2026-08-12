@@ -219,7 +219,6 @@ internal sealed class WriteRetryQueue : IDisposable
     /// </summary>
     public void RetryRefusedWrites()
     {
-        int droppedCount;
         lock (_lock)
         {
             // Before the empty check, not after: a write issued over the replaced connection and still in
@@ -231,21 +230,15 @@ internal sealed class WriteRetryQueue : IDisposable
                 return;
             }
 
+            // Deliberately not trimmed here, unlike every other path that grows the queue. Released
+            // writes go in at the head, which is the end a trim takes from, so trimming would discard
+            // precisely the writes this call exists to deliver, on the reconnect that would have taken
+            // them. It is not needed for the bound either: ReleaseRefusedWrites empties the held set in
+            // the same breath, so the overshoot is a one-shot transfer of what was held rather than
+            // growth, and the next enqueue or flush brings the queue back inside the bound.
             ReleaseRefusedWrites();
-
-            // Released refusals go to the head, so a queue already at capacity drops them first. That is
-            // the ring buffer's own rule rather than an exception to it: they are the oldest writes here,
-            // and holding them past the bound would be the one path that grows the queue without limit.
-            droppedCount = _pendingWrites.Count - _maxQueueSize;
-            if (droppedCount > 0)
-            {
-                _pendingWrites.RemoveRange(0, droppedCount);
-            }
-
             Volatile.Write(ref _count, _pendingWrites.Count);
         }
-
-        _metrics.AddDropped(droppedCount);
     }
 
     /// <summary>

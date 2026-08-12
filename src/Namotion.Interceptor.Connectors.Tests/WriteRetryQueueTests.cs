@@ -810,9 +810,13 @@ public class WriteRetryQueueTests
         // Act
         var flushed = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
 
-        // Assert
+        // Assert - which two survive is the point, not just how many: the ring buffer drops the oldest,
+        // so the requeued batch loses to the changes that arrived while it was in flight.
         Assert.False(flushed);
         Assert.Equal(2, queue.PendingWriteCount);
+        Assert.Equal(
+            new[] { "Later1", "Later2" },
+            queue.DrainForLocalReapply().Select(change => change.Property.Name).ToArray());
     }
 
     [Fact]
@@ -836,7 +840,7 @@ public class WriteRetryQueueTests
     }
 
     [Fact]
-    public async Task WhenReleasedRefusalsOverflowTheQueue_ThenTheOldestAreDropped()
+    public async Task WhenReleasedRefusalsOverflowTheQueue_ThenTheyAreStillDelivered()
     {
         // Arrange
         var queue = new WriteRetryQueue(2, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
@@ -851,9 +855,11 @@ public class WriteRetryQueueTests
         // Act
         queue.RetryRefusedWrites();
 
-        // Assert - once released they are ordinary pending writes, and the bound applies again from there
+        // Assert - release goes in at the head, which is the end a trim takes from, so trimming here
+        // would discard precisely the writes the reconnect was about to deliver. The overshoot is a
+        // one-shot transfer of what was held, and the next enqueue or flush brings the queue back down.
         Assert.Equal(0, queue.RefusedWriteCount);
-        Assert.Equal(2, queue.PendingWriteCount);
+        Assert.Equal(5, queue.PendingWriteCount);
     }
 
     private static PropertyReference CreateProperty(string name)
