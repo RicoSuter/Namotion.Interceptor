@@ -210,7 +210,8 @@ public static class PropertyChangeSubscriptionExtensions
         Action<Exception>? onError = null)
         where TSubject : IInterceptorSubject
     {
-        // Wrapping first would bypass the callback null guard and fail on a writer thread at dispatch time.
+        // Wrapping first would bypass the observer null guard, since a wrapped null callback is a non-null
+        // observer, and the failure would surface on a writer thread at dispatch time instead.
         ArgumentNullException.ThrowIfNull(callback);
         return subject.SubscribeToProperty(propertySelector, new DelegateObserver(callback), scheduler, onError);
     }

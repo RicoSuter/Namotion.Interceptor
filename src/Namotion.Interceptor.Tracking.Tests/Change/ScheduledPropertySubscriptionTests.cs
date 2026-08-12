@@ -80,11 +80,15 @@ public class ScheduledPropertySubscriptionTests
         var person = new Person(context);
         var property = new PropertyReference(person, nameof(Person.FirstName));
 
-        // Act & Assert: both spellings are reference-equal to the singletons.
+        // Act & Assert: both spellings are reference-equal to the singletons. The typed overloads are
+        // asserted too, because they reject only by delegating, and a refactor reaching for the internal
+        // Create would drop that delegation without failing any other test.
         Assert.Throws<ArgumentException>(() => property.Subscribe((in SubjectPropertyChange _) => { }, ImmediateScheduler.Instance));
         Assert.Throws<ArgumentException>(() => property.Subscribe((in SubjectPropertyChange _) => { }, Scheduler.Immediate));
         Assert.Throws<ArgumentException>(() => property.Subscribe((in SubjectPropertyChange _) => { }, CurrentThreadScheduler.Instance));
         Assert.Throws<ArgumentException>(() => property.Subscribe((in SubjectPropertyChange _) => { }, Scheduler.CurrentThread));
+        Assert.Throws<ArgumentException>(() => person.SubscribeToProperty(x => x.FirstName, (in SubjectPropertyChange _) => { }, ImmediateScheduler.Instance));
+        Assert.Throws<ArgumentException>(() => person.SubscribeToProperty(x => x.FirstName, (in SubjectPropertyChange _) => { }, CurrentThreadScheduler.Instance));
         Assert.Equal(0, PropertyChangeSubscriptions.ReadSubscriptionCount());
     }
 
