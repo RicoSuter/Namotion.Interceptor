@@ -14,25 +14,25 @@ namespace Namotion.Interceptor.Tracking;
 /// Holds are counted. Taking one never un-completes a signal that has already fired.
 /// </para>
 /// <para>
-/// Both halves of an implementation can run under the lifecycle lock. Namotion.Interceptor.Hosting calls
-/// <see cref="DeferCompletion"/> synchronously from a lifecycle event, which fires inside
-/// <see cref="Lifecycle.LifecycleInterceptor"/>'s attach lock during a property write, and it disposes
-/// the returned hold from that same place when the start it was taken for is refused. An implementation
-/// must therefore not block in either method on anything that can be waiting for the lifecycle lock, and
-/// a lock it takes in either method is safe only when that lock is never held while waiting on anything
-/// that needs the lifecycle lock. Break either rule and a cycle closes that nothing resolves: a caller
-/// holds the implementation's lock and waits for a hosted service transition, that transition writes a
-/// subject typed property and so needs the lifecycle lock, and the thread holding the lifecycle lock is
-/// inside <see cref="DeferCompletion"/> waiting for the implementation's lock. The lifecycle lock is held
-/// throughout, so every structural property write in the graph queues behind it rather than only the
-/// caller.
+/// <b>The constraint on an implementation.</b> Both halves can run under the lifecycle lock:
+/// Namotion.Interceptor.Hosting calls <see cref="DeferCompletion"/> synchronously from a lifecycle
+/// event, which fires inside <see cref="Lifecycle.LifecycleInterceptor"/>'s attach lock during a
+/// property write, and it disposes the returned hold from that same place when the start it was taken
+/// for is refused. So do not block, in either method, on anything that can be waiting for a hosted
+/// service transition, and take a lock of your own only where its order against the lifecycle lock is
+/// already fixed, which means nothing held under that lock ever waits on anything that needs the
+/// lifecycle lock. A lock that a thread inside the lifecycle lock can wait for is allowed under exactly
+/// that condition and forbidden without it, because without it the two can be acquired in either order
+/// and a cycle closes that nothing resolves. That cycle is set out in
+/// docs/design/hosting-service-ownership.md, section "A deferrer that takes a lock of its own", and its
+/// blast radius is every structural property write in the graph rather than only the caller, because the
+/// lifecycle lock is held throughout.
 /// </para>
 /// <para>
 /// Taking a lock at all is avoidable on the take path: an interlocked increment returning a counted
 /// handle is enough, which is what SourceMonitor in Namotion.Interceptor.Connectors does. Its release
-/// path does take a lock, and that is allowed under the rule above, because the same order is already
-/// fixed elsewhere in that type: its own lifecycle handler reaches that lock from inside the lifecycle
-/// lock, never the reverse.
+/// path does take a lock, and that is allowed under the rule above because the same order is already
+/// fixed elsewhere in that type.
 /// </para>
 /// </remarks>
 public interface IStartupCompletionDeferrer
