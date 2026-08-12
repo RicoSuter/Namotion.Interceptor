@@ -10,8 +10,10 @@ namespace Namotion.Interceptor.OpcUa.Server;
 /// anything outside the write can apply it to the subject, so the apply happens here, inside the write:
 /// the node ends every write holding what the model holds rather than what the client sent, and the
 /// client is answered Bad only when the model threw the write back. A write the model adjusted and one a
-/// hook cancelled are the same observation from here, so both are answered Good. The client visible
-/// contract is documented in docs/connectors-opcua-server.md.
+/// hook cancelled are the same observation from here, so both are answered Good. The one exception to
+/// the node holding what the model holds is a model value this server cannot read or represent, where it
+/// keeps the last value it could serve and says so with an Uncertain status. The client visible contract
+/// is documented in docs/connectors-opcua-server.md.
 /// </summary>
 internal sealed class SubjectVariableState : BaseDataVariableState
 {

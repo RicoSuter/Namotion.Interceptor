@@ -255,7 +255,7 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 ## Writes
 
-A client write is applied to the subject inside the write request, and the node is then reconciled with the value the subject ends up holding. A read-back therefore returns the server's value, which is not necessarily the value that was written: a model that clamps or rounds reports its own value. This is deliberate.
+A client write is applied to the subject inside the write request, and the node is then reconciled with the value the subject ends up holding, with the one exception described at the end of this section. A read-back therefore returns the server's value, which is not necessarily the value that was written: a model that clamps or rounds reports its own value. This is deliberate.
 
 | Answer | When |
 |--------|------|
@@ -265,7 +265,12 @@ A client write is applied to the subject inside the write request, and the node 
 
 A node whose value the server cannot represent, for example when an outbound value converter throws, keeps the last value it could represent and reports `UncertainLastUsableValue`. It returns to `Good` as soon as the property changes to a value the server can represent.
 
-The inbound path enters the same state for a second reason: reading the model's value after a write runs the read chain, which is as extensible as the write chain, so a read interceptor can throw where the converter would not. The write itself already committed in that case, so the client is answered `Good` while the node keeps the older value at `UncertainLastUsableValue`. Model and node stay apart until that property changes again from another origin, because the change the write produced is this server's own and is dropped as its echo. The Uncertain status is the signal to a client that what it is reading is not current.
+The inbound path enters the same state for a second reason: reading the model's value after a write runs the read chain, which is as extensible as the write chain, so a read interceptor can throw where the converter would not. The write itself already committed in that case, so the client is answered `Good` while the node keeps the older value at `UncertainLastUsableValue`. The Uncertain status is the signal to a client that what it is reading is not current.
+
+How long the two stay apart depends on what the model did with the value:
+
+- **Stored as sent.** The change the write produced carries this server as its origin and is dropped as its echo, so nothing corrects the node. It stays behind until that property changes from another origin, or until the next client write to the same node, which re-runs the reconciliation whatever the model then answers.
+- **Adjusted by a hook or an inbound converter.** The stored value differs from the one this server applied, so the change is published as a local one instead, which is not an echo. It reaches the outbound path and sets the node to the model's value at `Good` on the next flush.
 
 ## Diagnostics
 

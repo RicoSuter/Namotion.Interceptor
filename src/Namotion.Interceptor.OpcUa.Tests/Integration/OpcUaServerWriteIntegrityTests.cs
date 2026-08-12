@@ -182,6 +182,31 @@ public class OpcUaServerWriteIntegrityTests
     }
 
     [Fact]
+    public async Task WhenTheModelAdjustsTheWriteAndTheReadThrows_ThenTheOutboundChangeCorrectsTheNode()
+    {
+        // Arrange: the other half of the case above, and the reason the divergence is not universal.
+        // Here the model does not store what the client sent, so what it publishes is a local change
+        // rather than this server's own echo. It is not dropped, and the outbound path repairs the node.
+        var readInterceptor = new ThrowOnReadInterceptor(nameof(WriteIntegrityChild.AdjustedValue));
+        await using var fixture = await WriteIntegrityFixture.StartAsync(_output, readInterceptor: readInterceptor);
+
+        var node = fixture.Node(nameof(WriteIntegrityChild.AdjustedValue));
+
+        // Act
+        readInterceptor.IsArmed = true;
+        var statusCode = await fixture.Session.WriteAsync(node.NodeId, WriteIntegrityChild.AdjustedMaximum + 50d);
+        readInterceptor.IsArmed = false;
+
+        // Assert
+        Assert.True(StatusCode.IsGood(statusCode));
+        Assert.Equal(WriteIntegrityChild.AdjustedMaximum, fixture.Child.AdjustedValue);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Equals(node.Value, WriteIntegrityChild.AdjustedMaximum) &&
+                  node.StatusCode == (StatusCode)StatusCodes.Good,
+            message: "the local change the adjustment published should reach the node and clear the Uncertain status");
+    }
+
+    [Fact]
     public async Task WhenTheInboundConverterThrows_ThenTheRestOfTheWriteRequestStillCompletes()
     {
         // Arrange: the converter refuses one value, which is what a scaling or enum mapping converter does
