@@ -93,7 +93,7 @@ public class OpcUaStallDetectionTests
                 message: "Client should detect disconnection");
             logger.Log("Client detected disconnection");
 
-            // Wait for reconnection to start — use Reconnects.TotalAttempts instead of IsReconnecting
+            // Wait for reconnection to start, using Reconnects.TotalAttempts instead of IsReconnecting
             // because IsReconnecting is only true for the brief duration of each failed manual
             // reconnection attempt (~10-50ms when server is down). The 100ms polling interval
             // can miss it entirely, causing flaky test timeouts on CI.

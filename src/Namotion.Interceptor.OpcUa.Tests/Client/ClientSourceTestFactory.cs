@@ -18,7 +18,10 @@ internal static class ClientSourceTestFactory
     /// pump fail its configuration guard on the first attempt. That is the only way to reach
     /// <c>ConnectorMetrics.MarkStarted</c> without a server.
     /// </param>
-    internal static OpcUaSubjectClientSource CreateClientSource(bool withPropertyTracking = true)
+    /// <param name="configuration">The client configuration, or <c>null</c> for the default one.</param>
+    internal static OpcUaSubjectClientSource CreateClientSource(
+        bool withPropertyTracking = true,
+        OpcUaClientConfiguration? configuration = null)
     {
         var context = InterceptorSubjectContext
             .Create()
@@ -31,13 +34,17 @@ internal static class ClientSourceTestFactory
         }
 
         var root = new TestRoot(context);
-        return new OpcUaSubjectClientSource(root, CreateConfiguration(), NullLogger.Instance);
+        return new OpcUaSubjectClientSource(root, configuration ?? CreateConfiguration(), NullLogger.Instance);
     }
 
-    internal static OpcUaClientConfiguration CreateConfiguration() => new()
+    internal static OpcUaClientConfiguration CreateConfiguration(
+        string serverUrl = "opc.tcp://localhost:4840",
+        string certificateStoreBasePath = "pki") => new()
     {
-        // Never dialled: nothing in these tests starts a connect attempt that gets as far as the wire.
-        ServerUrl = "opc.tcp://localhost:4840",
+        // Not dialled by default: most of these tests never start a connect attempt that gets as far
+        // as the wire. The ones that do pass a port nothing is listening on.
+        ServerUrl = serverUrl,
+        CertificateStoreBasePath = certificateStoreBasePath,
         TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
         ValueConverter = new OpcUaValueConverter(),
         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance)

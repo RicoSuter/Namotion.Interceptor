@@ -1,4 +1,6 @@
 using System;
+using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -115,9 +117,34 @@ public class WebSocketServerLivenessTests
         }
     }
 
-    // A listener that can never bind is deliberately not covered here: the WebSocket loop retries
-    // without a backoff delay, so such a test spins on building and tearing down a Kestrel host and
-    // does not terminate. See the report for that pre-existing defect.
+    [Fact]
+    public async Task WhenTheListenerCannotBind_ThenTheFailureIsReported()
+    {
+        // Arrange: the port is already taken, so the server fails inside the loop, which swallows the
+        // exception rather than letting the base class see it. Only safe to run now that the loop
+        // backs off between restarts; without that it spins on rebuilding and rebinding Kestrel.
+        using var occupied = new TcpListener(IPAddress.Loopback, 0);
+        occupied.Start();
+        var occupiedPort = ((IPEndPoint)occupied.LocalEndpoint).Port;
+
+        await using var server = CreateServer(occupiedPort);
+
+        await server.StartAsync(CancellationToken.None);
+        try
+        {
+            // Act
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Diagnostics.LastError is not null,
+                message: "A server that cannot bind should report the failure.");
+
+            // Assert
+            Assert.False(server.Diagnostics.IsOperational);
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+        }
+    }
 
     private static WebSocketSubjectServer CreateServer(int port, TimeSpan? bufferTime = null)
     {

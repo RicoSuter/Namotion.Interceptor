@@ -31,6 +31,17 @@ public class OpcUaReconnectionTests
         config.ReconnectInterval = TimeSpan.FromSeconds(2); // Try reconnecting frequently
     };
 
+    // Config that isolates the SDK reconnect path. The health check loop is the only other place that
+    // raises liveness, and it ticks once when the client starts and then once per interval, so an
+    // interval far longer than the whole test leaves the reconnect completion as the only candidate.
+    private static readonly Action<OpcUaClientConfiguration> HealthCheckSuppressedConfig = config =>
+    {
+        config.SessionTimeout = TimeSpan.FromSeconds(30);
+        config.KeepAliveInterval = TimeSpan.FromSeconds(1);
+        config.ReconnectInterval = TimeSpan.FromSeconds(2);
+        config.SubscriptionHealthCheckInterval = TimeSpan.FromMinutes(5);
+    };
+
     public OpcUaReconnectionTests(ITestOutputHelper output)
     {
         _output = output;
@@ -96,6 +107,12 @@ public class OpcUaReconnectionTests
             client.Source.CurrentSessionChanged += OnSessionChanged;
             try
             {
+                // LastError is sticky for the whole epoch and is cleared only when the connector
+                // starts, so a connect attempt that failed once and succeeded on retry leaves it
+                // populated. Captured as a baseline rather than asserted null, so what follows can
+                // claim what it actually means: nothing failed after the connection was established.
+                var errorAfterConnecting = client.Source!.Diagnostics.LastError;
+
                 // Verify initial sync
                 server.Root.Name = "Initial";
                 await AsyncTestHelpers.WaitUntilAsync(
@@ -104,7 +121,7 @@ public class OpcUaReconnectionTests
                     message: "Initial sync should complete");
                 logger.Log("Initial sync verified");
 
-                Assert.Null(client.Source!.Diagnostics.LastError);
+                Assert.Same(errorAfterConnecting, client.Source!.Diagnostics.LastError);
 
                 var initialAttempts = client.Source!.Diagnostics.Reconnects.TotalAttempts;
 
@@ -142,12 +159,14 @@ public class OpcUaReconnectionTests
                     $"Should have at least 1 successful reconnection, had {successfulReconnections}");
 
                 // After a healthy reconnect the connector is connected again with a live session.
-                // Waited for rather than asserted outright: liveness is edge-driven, and after the
-                // SDK's own auto-reconnect the edge is raised by the next health check rather than
-                // by the subscription notification that let the data above arrive.
+                // Waited for rather than asserted outright: liveness is edge-driven, and which edge
+                // raises it depends on which reconnect path ran. Bounded at four health check
+                // intervals (5s each here): every path raises it either when the reconnect completes
+                // or on the next health check, so a bound that allows many intervals would no longer
+                // tell a working seam from a nearly broken one.
                 await AsyncTestHelpers.WaitUntilAsync(
                     () => client.Source!.Diagnostics.IsOperational,
-                    timeout: TimeSpan.FromSeconds(60),
+                    timeout: TimeSpan.FromSeconds(20),
                     message: "Client should report itself operational again after reconnecting");
                 Assert.NotNull(client.Source.CurrentSession);
 
@@ -229,6 +248,58 @@ public class OpcUaReconnectionTests
             logger.Log($"Client received: {client.Root.Name}");
 
             logger.Log("Test passed");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheSdkTransfersItsSubscriptions_ThenLivenessRisesWithoutWaitingForTheNextHealthCheck()
+    {
+        // A server restart makes the SDK's reconnect handler recreate the session and carry the
+        // subscriptions across, after which notifications flow again. Reporting the connector as down
+        // until the next health check would show an operator "disconnected" while values update.
+
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientAsync(HealthCheckSuppressedConfig);
+
+            Assert.NotNull(client.Source);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Source!.Diagnostics.IsOperational,
+                timeout: TimeSpan.FromSeconds(60),
+                message: "Client should report operational after the initial connect");
+
+            // Act
+            await server.StopAsync();
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => !client.Source!.Diagnostics.IsOperational,
+                timeout: TimeSpan.FromSeconds(60),
+                message: "Client should detect the outage");
+            logger.Log("Client detected disconnection");
+
+            await server.RestartAsync();
+
+            // Assert - the health check loop cannot be what raises this: it ticked once when the client
+            // started and its next tick is five minutes out, long after this test has finished. The
+            // bound is deliberately far below that interval and not merely inside it, so a rise that
+            // arrived late enough to be worthless still fails.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Source!.Diagnostics.IsOperational,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should report operational as soon as the reconnect transferred its subscriptions");
+
+            Assert.True(client.Source!.Diagnostics.Reconnects.TotalSucceeded >= 1,
+                "The rise should follow a completed reconnect rather than an outage that never happened");
         }
         finally
         {

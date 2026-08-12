@@ -1,7 +1,9 @@
+using System.Net;
+using System.Net.Sockets;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Diagnostics;
-using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
+using Namotion.Interceptor.Testing;
 using static Namotion.Interceptor.OpcUa.Tests.Client.ClientSourceTestFactory;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
@@ -12,6 +14,11 @@ namespace Namotion.Interceptor.OpcUa.Tests.Client;
 /// </summary>
 public class OpcUaClientDiagnosticsTests
 {
+    /// <summary>
+    /// A compile-level pin of the member tree plus the defaults a fresh <c>SourceMetrics</c> and a
+    /// null session manager report, not behavioural coverage: nothing here can fail while the members
+    /// exist and none of them throws on a client that has no session.
+    /// </summary>
     [Fact]
     public async Task WhenNeverConnected_ThenEveryGetterAnswersWithoutThrowing()
     {
@@ -79,24 +86,50 @@ public class OpcUaClientDiagnosticsTests
         Assert.True(source.Diagnostics.OperationalChangeTime > upAt);
     }
 
+    /// <summary>
+    /// Runs the real client rather than a metrics instance of its own, so it fails if either of the
+    /// client's own catch blocks stops writing to the shared metrics. A diagnostics view built over a
+    /// second <see cref="SourceMetrics"/> would keep reporting no error at all, which is what this
+    /// reads back.
+    /// </summary>
+    /// <remarks>
+    /// Left in the unit suite rather than tagged Integration: the connect is refused on the first
+    /// loopback packet, so it needs no server, writes nothing to disk, and costs milliseconds.
+    /// </remarks>
     [Fact]
-    public async Task WhenAnErrorIsReportedAndTheClientRecovers_ThenLastErrorSurvives()
+    public async Task WhenTheClientCannotConnectAndLaterRecovers_ThenLastErrorSurvives()
     {
-        // Arrange - through a metrics instance of its own, because the source's own is protected.
-        // What is under test is that the client reads the shared sticky error rather than a
-        // client-owned field it used to clear on every successful (re)connection.
-        await using var source = CreateClientSource();
-        var metrics = new SourceMetrics();
-        var diagnostics = new OpcUaClientDiagnostics(source, metrics);
-        var error = new InvalidOperationException("session failed");
+        // Arrange - a port nothing is listening on, so the connect fails inside the retry loop, which
+        // swallows the exception rather than letting the base class see it.
+        await using var source = CreateClientSource(configuration: CreateConfiguration(
+            serverUrl: $"opc.tcp://localhost:{GetFreeTcpPort()}",
+            certificateStoreBasePath: "pki-client-diagnostics"));
 
         // Act
-        metrics.ReportError(error);
-        metrics.MarkOperational();
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.LastError is not null,
+                timeout: TimeSpan.FromSeconds(60),
+                message: "A client that cannot reach its server should report the failure.");
 
-        // Assert
-        Assert.Same(error, diagnostics.LastError);
-        Assert.True(diagnostics.IsOperational);
+            // The recorded failure is the connect itself, not something the configuration rejected
+            // before the client ever reached the wire.
+            var error = source.Diagnostics.LastError;
+            Assert.Contains("Failed to discover OPC UA endpoints", error!.Message);
+
+            // Sticky: recovering must not erase the only evidence the failure happened.
+            source.NotifySessionHealthy();
+
+            // Assert
+            Assert.Same(error, source.Diagnostics.LastError);
+            Assert.True(source.Diagnostics.IsOperational);
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
     }
 
     [Fact]
@@ -150,6 +183,15 @@ public class OpcUaClientDiagnosticsTests
     /// land on the same value as one stamped before it. A condition rather than a fixed delay,
     /// because the clock's resolution differs per platform and is coarse on Windows.
     /// </summary>
+    private static int GetFreeTcpPort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
+
     private static void WaitForClockTick()
     {
         var start = DateTimeOffset.UtcNow.UtcTicks;

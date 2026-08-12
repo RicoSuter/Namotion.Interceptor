@@ -64,8 +64,12 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             this,
             onSubjectDetaching: CleanupTopicCachesForSubject);
 
+        Metrics.RegisterClaimedProperties(() => _ownership.Count);
+
         configuration.Validate();
     }
+
+    internal SourceOwnershipManager Ownership => _ownership;
 
     private void CleanupTopicCachesForSubject(IInterceptorSubject subject)
     {
@@ -111,6 +115,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             client.DisconnectedAsync += OnDisconnectedAsync;
 
             await client.ConnectAsync(GetClientOptions(), cancellationToken).ConfigureAwait(false);
+            Metrics.MarkOperational();
             _logger.LogInformation("Connected to MQTT broker successfully.");
 
             await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
@@ -177,6 +182,11 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
     private async ValueTask DisposeMqttConnectionAsync(IMqttClient? client, MqttConnectionMonitor? connectionMonitor)
     {
+        // The single teardown seam for a connected client, reached both from the failed-startup catch
+        // above and from the listen lifetime. The disconnect below cannot report it: the event handler
+        // is detached first, so OnDisconnectedAsync never runs for a teardown.
+        Metrics.MarkNotOperational();
+
         if (connectionMonitor is not null)
         {
             try { await connectionMonitor.DisposeAsync().ConfigureAwait(false); }
@@ -530,6 +540,11 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
     private Task OnDisconnectedAsync(MqttClientDisconnectedEventArgs e)
     {
+        // Before the disposal guard below: disposal sets the flag first and only latches the terminal
+        // liveness state at the end, so returning early here would leave the window in between
+        // reporting a disconnected client as serving.
+        Metrics.MarkNotOperational();
+
         if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
         {
             return Task.CompletedTask;
@@ -548,6 +563,11 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         {
             await _propertyWriter.LoadInitialStateAndResumeAsync(cancellationToken).ConfigureAwait(false);
         }
+
+        // Last, because the connection monitor treats a throw from anywhere above as a failed
+        // reconnect and tries again: a client that has reconnected but could not resubscribe is not
+        // serving anything.
+        Metrics.MarkOperational();
     }
 
     /// <inheritdoc />

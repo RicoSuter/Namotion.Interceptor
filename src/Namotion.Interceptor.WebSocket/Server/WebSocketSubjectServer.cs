@@ -18,6 +18,10 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// </summary>
 public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncDisposable
 {
+    // Matches the MQTT broker's restart delay. Without it a listener that cannot bind, or a processing
+    // layer that ends on its own, rebuilds and rebinds Kestrel in a tight loop.
+    private static readonly TimeSpan RestartBackoff = TimeSpan.FromSeconds(5);
+
     private readonly WebSocketSubjectHandler _handler;
     private readonly WebSocketServerConfiguration _configuration;
     private readonly ILogger _logger;
@@ -85,6 +89,11 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
             _forceKillCts = cts;
             var linkedToken = cts.Token;
 
+            // Decided inside the try below, because _isForceKill is cleared in the finally. A
+            // force-kill restarts at once, matching the MQTT and OPC UA servers: it is an injected
+            // fault the caller is waiting on, not a failure to back off from.
+            var restartBackoff = TimeSpan.Zero;
+
             try
             {
                 // Build a new WebApplication each iteration because IHost doesn't support
@@ -114,7 +123,7 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                     // servers narrow theirs, because cts.CancelAsync makes a cancellation the normal
                     // exit path here. The exception is kept instead and judged below, where an
                     // unexpected completion is actually identified.
-                    Exception? unexpectedCompletion = null;
+                    OperationCanceledException? completionCancellation = null;
                     try
                     {
                         // When either task completes, cancel the other to prevent blocking forever.
@@ -125,7 +134,7 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                     catch (OperationCanceledException exception) when (!stoppingToken.IsCancellationRequested)
                     {
                         // Kill or one task completed: linkedToken canceled
-                        unexpectedCompletion = exception;
+                        completionCancellation = exception;
                     }
 
                     // Both tasks completed, either normally (tasks catch OCE internally and
@@ -149,13 +158,18 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                         // Neither the host stopping nor an injected fault, so the processing layer ended
                         // on its own. The loop restarts instead of leaving RunAsync, so the base class
                         // never sees it and without this the server would restart with nothing
-                        // explaining why. Both tasks can also have completed without throwing, which is
-                        // why there is a substitute for the reported exception.
-                        var error = unexpectedCompletion ?? new InvalidOperationException(
-                            "WebSocket server processing completed unexpectedly.");
+                        // explaining why.
+                        //
+                        // The captured cancellation is almost always the one cts.CancelAsync above
+                        // produced to stop the sibling task, so reporting it in its own right would put
+                        // "A task was canceled" on the diagnostics surface in place of the reason. It is
+                        // kept as the cause instead.
+                        var error = new InvalidOperationException(
+                            "WebSocket server processing completed unexpectedly.", completionCancellation);
 
                         Metrics.ReportError(error);
                         _logger.LogWarning(error, "WebSocket server processing completed unexpectedly. Restarting...");
+                        restartBackoff = RestartBackoff;
                     }
                 }
                 finally
@@ -176,6 +190,7 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                 // error.
                 Metrics.ReportError(ex);
                 _logger.LogError(ex, "WebSocket server processing failed. Restarting...");
+                restartBackoff = RestartBackoff;
             }
             finally
             {
@@ -206,6 +221,12 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
 
                 _isForceKill = false;
                 cts.Dispose();
+            }
+
+            // After the teardown above, so the port is free rather than held for the whole delay.
+            if (restartBackoff > TimeSpan.Zero)
+            {
+                await Task.Delay(restartBackoff, stoppingToken).ConfigureAwait(false);
             }
         }
     }

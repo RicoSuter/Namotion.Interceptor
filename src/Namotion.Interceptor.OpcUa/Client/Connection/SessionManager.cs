@@ -387,6 +387,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 }
 
                 var oldSession = Volatile.Read(ref _session);
+                var transferSucceeded = false;
 
                 if (!ReferenceEquals(oldSession, reconnectedSession))
                 {
@@ -419,6 +420,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         Interlocked.Exchange(ref _needsFullStateSync, 1);
 
                         _source.ReconnectionMetrics.RecordSuccess();
+                        transferSucceeded = true;
 
                         _logger.LogInformation(
                             "OPC UA session reconnected: Transferred {Count} subscriptions. Full state sync pending.",
@@ -456,6 +458,18 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 }
 
                 Interlocked.Exchange(ref _isReconnecting, 0);
+
+                // Subscription notifications resume the moment the transfer succeeds, so liveness has
+                // to rise here. The only other rise on this path is the health check loop's, which runs
+                // at most once per SubscriptionHealthCheckInterval and only after a full state sync, so
+                // without this the connector reports itself down for seconds while values update.
+                // After the reconnecting flag was cleared above, so no reader sees the connector
+                // reported as operational and reconnecting at once, and through IsConnected rather than
+                // the branch's own knowledge, because the session can have dropped again since.
+                if (transferSucceeded && IsConnected)
+                {
+                    _source.NotifySessionHealthy();
+                }
             }
         }
         finally

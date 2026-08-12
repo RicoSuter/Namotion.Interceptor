@@ -70,6 +70,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         _processors = configuration.Processors;
         _ownership = new SourceOwnershipManager(this);
 
+        Metrics.RegisterClaimedProperties(() => _ownership.Count);
+
         if (configuration.CircuitBreakerFailureThreshold > 0)
         {
             _circuitBreaker = new CircuitBreaker(
@@ -79,6 +81,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
         configuration.Validate();
     }
+
+    internal SourceOwnershipManager Ownership => _ownership;
 
     /// <inheritdoc />
     protected override async Task<IAsyncDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
@@ -262,6 +266,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             _initialState = welcome.State;
             _sequenceTracker.InitializeFromWelcome(welcome.Sequence);
 
+            Metrics.MarkOperational();
             _logger.LogInformation("Connected to WebSocket server (sequence: {Sequence})", welcome.Sequence);
 
             // Start receive loop (signals _receiveLoopCompleted when done)
@@ -272,6 +277,11 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         {
             if (!receiveLoopStarted)
             {
+                // The receive loop's own exit is what normally drops liveness, so a connection torn
+                // down before it ever ran has to drop it here. A no-op when the handshake never got
+                // as far as raising it.
+                Metrics.MarkNotOperational();
+
                 // Dispose the socket to avoid holding resources during backoff delay
                 _webSocket?.Dispose();
                 _webSocket = null;
@@ -516,6 +526,11 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
         finally
         {
+            // Every way out of the loop above lands here: a close frame, a sequence or heartbeat gap,
+            // a socket error, a receive timeout, too many consecutive errors, cancellation from
+            // teardown or force-kill, and a socket that is no longer open.
+            Metrics.MarkNotOperational();
+
             ArrayPool<byte>.Shared.Return(buffer);
             timeoutCts.Dispose();
             linkedCts?.Dispose();
