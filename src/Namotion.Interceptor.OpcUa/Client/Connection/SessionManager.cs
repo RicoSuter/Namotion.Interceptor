@@ -94,6 +94,34 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     public bool IsReconnecting => Volatile.Read(ref _isReconnecting) == 1;
 
     /// <summary>
+    /// Reports the source's liveness from the current session state: raised when the session is
+    /// connected and not reconnecting, dropped otherwise.
+    /// </summary>
+    /// <remarks>
+    /// The read and the report are one step under <c>_reconnectingLock</c>, which
+    /// <see cref="OnKeepAlive"/> also takes. Without that, a caller can read a connected session, be
+    /// preempted while OnKeepAlive drops liveness and sets the reconnecting flag, and then raise
+    /// liveness from its stale read, leaving the client reporting itself as reconnecting and
+    /// operational at once until the reconnection resolves. Nothing reached from inside the lock
+    /// takes another lock, and no diagnostics getter takes this one, so a reader can never block on
+    /// it.
+    /// </remarks>
+    internal void ReportLivenessFromSessionState()
+    {
+        lock (_reconnectingLock)
+        {
+            if (IsConnected)
+            {
+                _source.NotifySessionHealthy();
+            }
+            else
+            {
+                _source.NotifySessionNotHealthy();
+            }
+        }
+    }
+
+    /// <summary>
     /// Gets whether there are sessions waiting for async disposal by the health check loop.
     /// </summary>
     public bool HasSessionsToDispose => !_sessionsToDispose.IsEmpty;

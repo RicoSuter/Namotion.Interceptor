@@ -73,6 +73,13 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     /// </summary>
     internal void NotifySessionHealthy() => Metrics.MarkOperational();
 
+    /// <summary>
+    /// Drops liveness alone, for the paths that observe a session which is no longer usable but must
+    /// not report a connection loss: the state transition and the writer generation bump that
+    /// <see cref="NotifyConnectionLost"/> also performs have either already happened or do not apply.
+    /// </summary>
+    internal void NotifySessionNotHealthy() => Metrics.MarkNotOperational();
+
     /// <inheritdoc />
     public override int WriteBatchSize => _writer?.WriteBatchSize ?? 0;
 
@@ -207,6 +214,13 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 RunHealthCheckLoopAsync,
                 async () =>
                 {
+                    // The lifetime is disposed on every way out of this attempt, including a failure
+                    // that happens after this method returned (the initial load, the retry queue
+                    // reconcile or the change processor). The retry loop records that failure but
+                    // touches no liveness, so without this the client keeps reporting itself as
+                    // serving for the whole retry delay with its session already gone.
+                    Metrics.MarkNotOperational();
+
                     try { await sessionManagerForLifetime.DisposeAsync().ConfigureAwait(false); }
                     catch (Exception ex) { _logger.LogWarning(ex, "OPC UA session manager threw during listen-lifetime disposal."); }
                 });
@@ -410,6 +424,13 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
         await sessionManager.PerformFullStateSyncIfNeededAsync(cancellationToken).ConfigureAwait(false);
 
+        // Re-read rather than inherited from the caller's snapshot: the full state sync above clears
+        // the session when it fails, and the rise it left standing after an SDK transfer would then
+        // report a client with no session as serving. Ahead of the two network-touching steps below
+        // rather than after them, so a throw in either cannot skip this tick's liveness report and
+        // leave a client that is genuinely serving subscription data reporting itself as down.
+        sessionManager.ReportLivenessFromSessionState();
+
         if (sessionManager.SubscriptionManager.HasStoppedPublishing)
         {
             _logger.LogWarning(
@@ -424,13 +445,6 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
         await sessionManager.SubscriptionManager
             .EscalatePersistentlyFailedItemsAsync(cancellationToken).ConfigureAwait(false);
-
-        // Re-read rather than inherited from the caller's snapshot: the full state sync above clears
-        // the session when it fails, and reporting that as healthy would stand until the next check.
-        if (sessionManager.IsConnected)
-        {
-            NotifySessionHealthy();
-        }
 
         return false;
     }
@@ -589,8 +603,9 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
         // After the finally cleared the reconnecting flag, so no reader sees the connector reported as
         // operational and reconnecting at once. Reached only when the reconnection succeeded: both
-        // catch clauses above rethrow.
-        NotifySessionHealthy();
+        // catch clauses above rethrow. Through the guarded report rather than a bare rise, because a
+        // keep-alive can already have failed on the new session by now.
+        sessionManager.ReportLivenessFromSessionState();
     }
 
     private async Task<ReferenceDescription?> TryGetRootNodeAsync(Session session, CancellationToken cancellationToken)
@@ -688,7 +703,12 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             }
             else
             {
-                // No manual reconnection in progress — clear session directly.
+                // No manual reconnection in progress, so clear the session directly. Liveness is
+                // dropped here rather than left to the next health check, a whole
+                // SubscriptionHealthCheckInterval away: the session is about to be gone, so the
+                // client is no longer serving.
+                Metrics.MarkNotOperational();
+
                 await sessionManager.ClearSessionAsync(CancellationToken.None).ConfigureAwait(false);
 
                 // If ReconnectSessionAsync started between our _reconnectCts check and ClearSessionAsync,

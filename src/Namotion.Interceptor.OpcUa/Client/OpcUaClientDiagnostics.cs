@@ -6,11 +6,18 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// What the OPC UA client reports about its session, on top of the shared source diagnostics.
 /// </summary>
 /// <remarks>
-/// <see cref="ConnectorDiagnostics.IsOperational"/> means the session is usable and no reconnection
-/// is in progress. True does not mean the model is in sync: while the initial load runs the source state is
+/// <see cref="ConnectorDiagnostics.IsOperational"/> means the client has a live session and has
+/// finished setting up its subscriptions. It stays false for the whole address space browse and
+/// subscription creation, which on a large server takes minutes, and rises on the first health check
+/// tick once those have completed. It drops again whenever the session is lost, killed or torn down,
+/// and whenever a connect attempt ends.
+/// <para>
+/// True does not mean the model is in sync: the initial value read runs after the rise, and while it
+/// runs the source state is
 /// <see cref="Namotion.Interceptor.Connectors.Monitoring.SourceState.Synchronizing"/>. Read the two
 /// together to tell a network outage from a connected client still loading. See
 /// docs/connectors-monitoring.md.
+/// </para>
 /// </remarks>
 public sealed class OpcUaClientDiagnostics : SourceDiagnostics
 {

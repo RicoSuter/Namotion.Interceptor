@@ -649,7 +649,9 @@ When a batch write to the OPC UA server partially fails, the client throws an `O
 
 `OpcUaClientDiagnostics` derives from `SourceDiagnostics`, whose members, buffer semantics and read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to this client.
 
-**`IsOperational` here means the session is usable and no reconnection is in progress.** It is not a claim that the model is in sync: while the initial load runs, `IsOperational` is already true and `ISubjectSource.State` is still `Synchronizing`, which is how a dropped network is told apart from a connected client that is still loading. See [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
+**`IsOperational` here means the client has a live session and has finished setting up its subscriptions.** It stays false for the whole address space browse and subscription creation, which on a large server takes minutes, and rises on the first health check tick once those have completed. It drops whenever the session is lost, killed or torn down, and whenever a connect attempt ends, so a client sitting in its retry delay never reports itself as serving.
+
+It is not a claim that the model is in sync: the initial value read runs after `IsOperational` has risen, so during that read `IsOperational` is true while `ISubjectSource.State` is still `Synchronizing`, which is how a dropped network is told apart from a connected client that is still loading. See [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
 
 This client measures both throughput directions, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are never `null` here.
 
