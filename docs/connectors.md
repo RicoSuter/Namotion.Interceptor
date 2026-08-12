@@ -276,6 +276,8 @@ public interface ISubjectSource : ISubjectConnector
 
 Direct interface implementation without the base class is supported for advanced scenarios, but the implementer is then responsible for its own listening loop, buffering, and outbound dispatch, as well as the four synchronization-state members. See the XML docs on `ISubjectSource` for their exact contract, including the lock-free requirement on `State`/`LastSynchronizedAt`/`RootSubject` and the obligation to register with every reachable `SourceMonitor`.
 
+`LastSynchronizedAt` is load-bearing rather than diagnostic: branch waits use it to tell a source that stopped having delivered from one that stopped having never delivered. An implementation that reaches `Synchronized` must stamp it and never clear it, or every branch it participates in reports `Incomplete` once it stops. See [Source Monitoring](connectors-monitoring.md).
+
 #### Custom Source Example
 
 Derive from `SubjectSourceBase` and override the three hooks. The base owns the pump lifecycle (buffer, listen, load initial state, run change queue, retry on failure) and satisfies `ISubjectSource` directly through its public abstract members.

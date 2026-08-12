@@ -281,14 +281,24 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     private readonly Stack<IInterceptorSubject> _scopePendingScratch = new();
 
 
+    // Indexed by (int)SourceSynchronizationResult. Task.FromResult caches only the default value of
+    // an enum, so Stale and Synchronized would allocate on every already-satisfied call without this.
+    private static readonly Task<SourceSynchronizationResult>[] CompletedResults =
+    [
+        Task.FromResult(SourceSynchronizationResult.Incomplete),
+        Task.FromResult(SourceSynchronizationResult.Stale),
+        Task.FromResult(SourceSynchronizationResult.Synchronized)
+    ];
+
     /// <summary>
-    /// Completes when the branch containing <paramref name="subject"/> is synchronized: registration
-    /// is complete, and no in-scope source is Synchronizing. An empty in-scope set is vacuously
+    /// Completes when the branch containing <paramref name="subject"/> has settled: registration is
+    /// complete, and no in-scope source is Synchronizing. An empty in-scope set is vacuously
     /// satisfied once registration is complete (see IsBranchSynchronized); before that, it blocks,
     /// since an empty scope is still ambiguous between "no source yet" and "no source ever" at that
-    /// point.
+    /// point. The result says whether every in-scope source delivered its initial load, and whether
+    /// they are all still live.
     /// </summary>
-    public Task WaitForSynchronizationAsync(
+    public Task<SourceSynchronizationResult> WaitForSynchronizationAsync(
         IInterceptorSubject subject, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(subject);
@@ -299,9 +309,9 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
             // Checked first with no PendingWait allocated: the common case for an application
             // re-awaiting per operation is already satisfied. Only the unsatisfied path below
             // allocates a PendingWait and its TaskCompletionSource.
-            if (IsBranchSynchronized(subject))
+            if (IsBranchSynchronized(subject, out var result))
             {
-                return Task.CompletedTask;
+                return CompletedResults[(int)result];
             }
 
             wait = new PendingWait(subject);
@@ -319,14 +329,30 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
 
     /// <summary>
     /// Whether a wait anchored on <paramref name="anchor"/> may complete: registration is complete,
-    /// and no source in scope of the anchor is still Synchronizing.
+    /// and no source in scope of the anchor is still Synchronizing. When it may, <paramref name="result"/>
+    /// carries the verdict; when it may not, <paramref name="result"/> is meaningless and callers
+    /// must ignore it, since a downgrade can already have been applied before the early return.
     /// </summary>
-    private bool IsBranchSynchronized(IInterceptorSubject anchor)
+    /// <remarks>
+    /// State and LastSynchronizedAt are read lock-free per source, so the verdict is a walk-consistent
+    /// snapshot rather than an atomic instant: a source visited early can stop before the walk ends,
+    /// leaving the result one grade better than the truth. That is indistinguishable from completing
+    /// an instant earlier. It cannot err the other way for a SubjectSourceBase, whose Stopped can
+    /// never carry a stale null timestamp, since that transition takes the state lock after the one
+    /// that stamped the ticks.
+    /// </remarks>
+    private bool IsBranchSynchronized(IInterceptorSubject anchor, out SourceSynchronizationResult result)
     {
+        // Assigned once, on the true path only, so every false path leaves the most pessimistic
+        // answer for a caller that ignores the contract above.
+        result = SourceSynchronizationResult.Incomplete;
+
         if (!IsRegistrationComplete)
         {
             return false;
         }
+
+        var verdict = SourceSynchronizationResult.Synchronized;
 
         foreach (var source in _sources[0])
         {
@@ -336,13 +362,33 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
             }
 
             var state = source.State;
-            // Reads as "this source has not settled yet". Only Synchronized and Stopped let a wait
-            // through, so the pair of inequalities is exactly "the source is still Synchronizing".
-            if (state != SourceState.Stopped && state != SourceState.Synchronized)
+
+            // Returns before any timestamp is read, which is what keeps an implementation that
+            // reports Synchronized without stamping one from being read as a failure. It also hides
+            // TransitionStateTo's window between publishing Synchronized and stamping the ticks.
+            if (state == SourceState.Synchronized)
+            {
+                continue;
+            }
+
+            // Not settled, so block rather than answer. The only early return: after a downgrade the
+            // walk must go on, because a later source may still be loading.
+            if (state != SourceState.Stopped)
             {
                 return false;
             }
+
+            var downgrade = source.LastSynchronizedAt is not null
+                ? SourceSynchronizationResult.Stale
+                : SourceSynchronizationResult.Incomplete;
+
+            if (downgrade < verdict)
+            {
+                verdict = downgrade;
+            }
         }
+
+        result = verdict;
 
         // An empty scope, and a scope whose sources have all Stopped, both complete rather than
         // block. Once the application has declared registration complete it has asserted its sources
@@ -390,9 +436,9 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
             {
                 try
                 {
-                    if (IsBranchSynchronized(wait.Anchor))
+                    if (IsBranchSynchronized(wait.Anchor, out var result))
                     {
-                        wait.Complete();
+                        wait.Complete(result);
                     }
                 }
                 catch (Exception exception)
@@ -407,17 +453,23 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
 
     private sealed class PendingWait(IInterceptorSubject anchor)
     {
-        private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<SourceSynchronizationResult> _completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public IInterceptorSubject Anchor { get; } = anchor;
 
-        public void Complete() => _completion.TrySetResult();
+        /// <summary>
+        /// First verdict wins. A completed wait leaves _waits asynchronously, so a later pass can
+        /// reach it and offer a different verdict; TrySetResult drops it.
+        /// </summary>
+        public void Complete(SourceSynchronizationResult result) => _completion.TrySetResult(result);
 
-        public async Task AwaitAsync(CancellationToken cancellationToken, Action onFinished)
+        public async Task<SourceSynchronizationResult> AwaitAsync(
+            CancellationToken cancellationToken, Action onFinished)
         {
             try
             {
-                await _completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                return await _completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
             finally
             {

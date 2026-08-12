@@ -106,6 +106,27 @@ public class SourceStateTests
     }
 
     [Fact]
+    public void WhenSynchronizedThenStopped_ThenLastSynchronizedAtIsNotCleared()
+    {
+        // Arrange
+        // Branch waits tell "stopped having delivered its initial load" from "stopped having never
+        // delivered anything" solely by this timestamp surviving the stop. The assertion in
+        // WhenStopped_ThenNoFurtherTransitionSucceeds compares two post-stop reads, so it would pass
+        // just as happily against an implementation that cleared the field on Stopped.
+        var source = new TestStateSource(new Person());
+        source.ReportSynchronized();
+        var timestampWhileSynchronized = source.LastSynchronizedAt;
+        Assert.NotNull(timestampWhileSynchronized);
+
+        // Act
+        source.ReportStopped();
+
+        // Assert
+        Assert.NotNull(source.LastSynchronizedAt);
+        Assert.Equal(timestampWhileSynchronized, source.LastSynchronizedAt);
+    }
+
+    [Fact]
     public async Task WhenSynchronizedIsHammeredConcurrentlyWithStopped_ThenSynchronizedIsNeverPublishedAfterStoppedAndLastSynchronizedAtFreezes()
     {
         // Arrange
