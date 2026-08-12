@@ -50,6 +50,10 @@ internal sealed class GatedValueConverter : OpcUaValueConverter, IDisposable
     private readonly ManualResetEventSlim _released = new(true);
     private volatile string? _gatedValue;
 
+    private readonly ManualResetEventSlim _inboundReached = new(false);
+    private readonly ManualResetEventSlim _inboundReleased = new(true);
+    private volatile string? _gatedInboundValue;
+
     public void GateWritesOf(string value)
     {
         _reached.Reset();
@@ -65,6 +69,26 @@ internal sealed class GatedValueConverter : OpcUaValueConverter, IDisposable
         _released.Set();
     }
 
+    /// <summary>
+    /// Holds an inbound value inside the conversion a read-back runs before it applies. That is the
+    /// window between the guards ranking the read-back against local state and the apply itself, so a
+    /// test can commit a local write neither guard could have seen.
+    /// </summary>
+    public void GateInboundOf(string value)
+    {
+        _inboundReached.Reset();
+        _inboundReleased.Reset();
+        _gatedInboundValue = value;
+    }
+
+    public void WaitUntilInboundGated() => _inboundReached.Wait(TimeSpan.FromSeconds(30));
+
+    public void ReleaseInbound()
+    {
+        _gatedInboundValue = null;
+        _inboundReleased.Set();
+    }
+
     public override object? ConvertToNodeValue(object? propertyValue, RegisteredSubjectProperty property)
     {
         if (_gatedValue is { } gated && Equals(propertyValue, gated))
@@ -76,11 +100,25 @@ internal sealed class GatedValueConverter : OpcUaValueConverter, IDisposable
         return base.ConvertToNodeValue(propertyValue, property);
     }
 
+    public override object? ConvertToPropertyValue(object? nodeValue, RegisteredSubjectProperty property)
+    {
+        if (_gatedInboundValue is { } gated && Equals(nodeValue, gated))
+        {
+            _inboundReached.Set();
+            _inboundReleased.Wait(TimeSpan.FromSeconds(30));
+        }
+
+        return base.ConvertToPropertyValue(nodeValue, property);
+    }
+
     public void Dispose()
     {
         Release();
+        ReleaseInbound();
         _reached.Dispose();
         _released.Dispose();
+        _inboundReached.Dispose();
+        _inboundReleased.Dispose();
     }
 }
 
@@ -261,6 +299,12 @@ internal sealed class ReadAfterWriteFixture : IAsyncDisposable
     public void WaitUntilOutboundWriteIsGated() => _converter.WaitUntilGated();
 
     public void ReleaseOutboundWrite() => _converter.Release();
+
+    public void GateInboundValueOf(string value) => _converter.GateInboundOf(value);
+
+    public void WaitUntilInboundValueIsGated() => _converter.WaitUntilInboundGated();
+
+    public void ReleaseInboundValue() => _converter.ReleaseInbound();
 
     /// <summary>How many read-backs have been scheduled, which only successful writes may add to.</summary>
     public long ScheduledReadBackCount => Metrics.Scheduled;

@@ -56,6 +56,28 @@ public class OpcUaReadAfterWriteTests
     }
 
     [Fact]
+    public async Task WhenALocalWriteCommitsWhileTheReadBackConverts_ThenItStillSurvives()
+    {
+        // Arrange
+        await using var fixture = await ReadAfterWriteFixture.StartAsync(_output);
+        fixture.ClientChild.Trigger = "first";
+        await fixture.WaitForScheduledReadBackAsync();
+
+        // Act: both guards ranking a read-back against local state run before the value is converted and
+        // neither is evaluated again, so a write committing inside the conversion is one that no guard
+        // could have seen. Applying over it would revert it with no notification left to correct the
+        // model, because the node itself never changed.
+        fixture.GateInboundValueOf(ReadAfterWriteFixture.ServerValue);
+        fixture.WaitUntilInboundValueIsGated();
+        fixture.ClientChild.Trigger = "newer";
+        fixture.ReleaseInboundValue();
+
+        // Assert
+        await fixture.WaitForSkippedReadBackAsync();
+        Assert.Equal("newer", fixture.ClientChild.Trigger);
+    }
+
+    [Fact]
     public async Task WhenASourceValueCommitsAfterTheWrite_ThenItSurvives()
     {
         // Arrange
