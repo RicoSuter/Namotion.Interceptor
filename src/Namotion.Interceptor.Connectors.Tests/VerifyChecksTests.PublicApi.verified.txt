@@ -221,7 +221,7 @@ namespace Namotion.Interceptor.Connectors.Monitoring
         public void Register(Namotion.Interceptor.Connectors.ISubjectSource source) { }
         public Namotion.Interceptor.Connectors.Monitoring.SourceSubscription Subscribe(System.Action<Namotion.Interceptor.Connectors.Monitoring.SourceEvent> handler) { }
         public void Unregister(Namotion.Interceptor.Connectors.ISubjectSource source) { }
-        public System.Threading.Tasks.Task WaitForSynchronizationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken = default) { }
+        public System.Threading.Tasks.Task<Namotion.Interceptor.Connectors.Monitoring.SourceSynchronizationResult> WaitForSynchronizationAsync(Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken = default) { }
     }
     public static class SourceMonitoringExtensions
     {
@@ -229,7 +229,7 @@ namespace Namotion.Interceptor.Connectors.Monitoring
         public static System.IDisposable DeferWaitCompletion(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.Connectors.Monitoring.SourceMonitor GetSourceMonitor(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.Connectors.Monitoring.SourceState GetSourceState(this Namotion.Interceptor.PropertyReference property) { }
-        public static System.Threading.Tasks.Task WaitForSynchronizationAsync(this Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken = default) { }
+        public static System.Threading.Tasks.Task<Namotion.Interceptor.Connectors.Monitoring.SourceSynchronizationResult> WaitForSynchronizationAsync(this Namotion.Interceptor.IInterceptorSubject subject, System.Threading.CancellationToken cancellationToken = default) { }
     }
     public enum SourceState
     {
@@ -242,6 +242,12 @@ namespace Namotion.Interceptor.Connectors.Monitoring
     {
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Connectors.ISubjectSource> Sources { get; }
         public void Dispose() { }
+    }
+    public enum SourceSynchronizationResult
+    {
+        Incomplete = 0,
+        Stale = 1,
+        Synchronized = 2,
     }
 }
 namespace Namotion.Interceptor.Connectors.Paths
