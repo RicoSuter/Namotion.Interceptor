@@ -40,6 +40,14 @@
 - **Unit tests:** `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"`
 - **Snapshot loop:** prefix snapshot test runs with `DiffEngine_Disabled=true` so no diff tool launches.
 
+## Forced by a merge from master, after Task 15
+
+**`StateChangeTime` is additive; `LastSynchronizedAt` stays.** Master's #449 made `ISubjectSource.LastSynchronizedAt` load-bearing rather than merely diagnostic: `SourceMonitor.IsBranchSynchronized` reads it to tell a source that stopped having delivered its initial load (`SourceSynchronizationResult.Stale`) from one that stopped having never delivered (`Incomplete`). Task 7 had deleted it on the grounds that it cannot say when synchronization was lost, which is true but is a different question from the one #449 asks.
+
+Both members are therefore kept, because neither can answer the other's question. `LastSynchronizedAt` is stamped only on the way into `Synchronized` and never cleared, so it reports whether a good period ever began. `StateChangeTime` moves on every transition, so it reports when the current state began, which is what says how long a stale source has been stale. Both ride the same immutable snapshot in `SubjectSourceBase`, which is what satisfies #449's requirement that the `LastSynchronizedAt` stamp is visible before `State` becomes `Stopped`.
+
+This changes Task 7's stated trade. Nothing is given up after all: the member tree below gains `LastSynchronizedAt` beside `StateChangeTime`, and the "nothing now reports when a currently stale source was last in sync" caveat no longer applies. Task 17's documentation must describe both and say which question each answers.
+
 ## Deviations from the spec, decided here
 
 The spec is revision 10 and its line citations were verified when it was written. Four things changed or were left open. Each is resolved below and the reasoning is repeated in the task that implements it.
