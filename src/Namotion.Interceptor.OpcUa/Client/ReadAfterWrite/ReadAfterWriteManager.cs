@@ -383,8 +383,9 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 // Both revisions are taken before either is used, the one counting source commits first.
                 // A local commit landing between the two reads then only ever raises localRevision, which
                 // skips below, instead of raising lastCommitRevision alone and passing a local commit off
-                // as a source one. The window left, between these reads and the write timestamp, cannot be
-                // closed here: the two live in separate slots and no lookup returns them together.
+                // as a source one. A commit landing after both reads is caught by re-reading localRevision
+                // just before the apply, because neither guard below is evaluated again once passed. What
+                // stays open is the apply itself, which no lookup here can close.
                 reference.TryGetWriteState(true, out var lastCommitRevision, out _);
                 reference.TryGetWriteState(false, out var localRevision, out _);
 
@@ -419,6 +420,18 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 try
                 {
                     var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
+
+                    // Read again as late as the apply allows. Both guards above ran before the conversion,
+                    // and a local commit since then is newer than anything this read-back can carry, so
+                    // applying it would revert that write and leave the model behind the server with no
+                    // notification to correct it: the node never changed, so none is coming.
+                    reference.TryGetWriteState(false, out var localRevisionBeforeApply, out _);
+                    if (localRevisionBeforeApply != localRevision)
+                    {
+                        skippedCount++;
+                        continue;
+                    }
+
                     property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
                     successCount++;
                 }
