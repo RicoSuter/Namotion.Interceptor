@@ -62,7 +62,7 @@ public class ConnectorMetricsTests
         var whenUp = diagnostics.OperationalChangeTime;
 
         // Act
-        WaitForClockTick();
+        ClockTestHelpers.WaitForClockTick();
         metrics.MarkNotOperational();
 
         // Assert
@@ -115,7 +115,7 @@ public class ConnectorMetricsTests
         var afterFirstStop = diagnostics.OperationalChangeTime;
 
         // Act
-        WaitForClockTick();
+        ClockTestHelpers.WaitForClockTick();
         metrics.MarkStopped();
 
         // Assert
@@ -188,7 +188,7 @@ public class ConnectorMetricsTests
         metrics.InboundBuffer.AddDropped(5);
 
         // Act
-        WaitForClockTick();
+        ClockTestHelpers.WaitForClockTick();
         metrics.MarkStarted();
 
         // Assert
@@ -334,20 +334,6 @@ public class ConnectorMetricsTests
 
         // Assert
         Assert.False(movedBackwards);
-    }
-
-    // Spins until the wall clock reports a new tick, so a second MarkStarted cannot land on the same
-    // timestamp as the first. A condition rather than a fixed delay, because the clock's resolution
-    // differs per platform.
-    private static void WaitForClockTick()
-    {
-        var start = DateTimeOffset.UtcNow.UtcTicks;
-
-        SpinWait spin = default;
-        while (DateTimeOffset.UtcNow.UtcTicks == start)
-        {
-            spin.SpinOnce();
-        }
     }
 
     private sealed class CountingResettable : IResettableMetrics

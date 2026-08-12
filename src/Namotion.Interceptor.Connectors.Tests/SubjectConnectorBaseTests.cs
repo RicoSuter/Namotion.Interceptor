@@ -27,14 +27,36 @@ public class SubjectConnectorBaseTests
         var error = new InvalidOperationException("run failed");
         using var connector = new TestConnector { Fault = error };
         await ((IHostedService)connector).StartAsync(CancellationToken.None);
+        connector.MarkOperational();
+        Assert.True(connector.Diagnostics.IsOperational);
 
         // Act
         connector.Release();
-        await AsyncTestHelpers.WaitUntilAsync(() => connector.Diagnostics.LastError is not null);
+
+        // Awaiting the execute task rather than polling: ExecuteAsync's finally has run by the time
+        // that task completes, so the liveness this asserts on is already settled.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => connector.ExecuteTask!);
 
         // Assert
         Assert.Same(error, connector.Diagnostics.LastError);
         Assert.False(connector.Diagnostics.IsOperational);
+    }
+
+    [Fact]
+    public async Task WhenStoppedWhileBackingOffFromAFault_ThenTheFaultIsStillTheReportedError()
+    {
+        // Arrange
+        var error = new InvalidOperationException("connect failed");
+        using var connector = new TestConnector { FaultBeforeBackoff = error };
+        await ((IHostedService)connector).StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => connector.Diagnostics.LastError is not null);
+
+        // Act
+        await ((IHostedService)connector).StopAsync(CancellationToken.None);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => connector.ExecuteTask!);
+
+        // Assert
+        Assert.Same(error, connector.Diagnostics.LastError);
     }
 
     [Fact]
@@ -83,7 +105,7 @@ public class SubjectConnectorBaseTests
         await ((IHostedService)connector).StopAsync(CancellationToken.None);
 
         // Act
-        WaitForClockTick();
+        ClockTestHelpers.WaitForClockTick();
         connector.Reopen();
         await ((IHostedService)connector).StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => connector.Diagnostics.StartTime != firstStart);
@@ -113,20 +135,6 @@ public class SubjectConnectorBaseTests
         Assert.True(connector.Diagnostics.IsOperational);
     }
 
-    // Spins until the wall clock reports a new tick, so the second run's start time cannot land on the
-    // same timestamp as the first. A start and stop cycle can complete well inside one tick of the
-    // system clock, whose resolution differs per platform and is coarse on Windows.
-    private static void WaitForClockTick()
-    {
-        var start = DateTimeOffset.UtcNow.UtcTicks;
-
-        SpinWait spin = default;
-        while (DateTimeOffset.UtcNow.UtcTicks == start)
-        {
-            spin.SpinOnce();
-        }
-    }
-
     private sealed class TestConnector : SubjectConnectorBase
     {
         private readonly ConnectorMetrics _metrics;
@@ -146,6 +154,8 @@ public class SubjectConnectorBaseTests
 
         public Exception? Fault { get; init; }
 
+        public Exception? FaultBeforeBackoff { get; init; }
+
         public override IInterceptorSubject RootSubject => throw new NotSupportedException();
 
         public override ConnectorDiagnostics Diagnostics { get; }
@@ -160,6 +170,16 @@ public class SubjectConnectorBaseTests
 
         protected override async Task RunAsync(CancellationToken stoppingToken)
         {
+            if (FaultBeforeBackoff is not null)
+            {
+                // Mirrors a connector that records its own connect failure and then backs off inside
+                // its own catch block. The backoff never elapses, so the only way out is the stopping
+                // token, which throws the cancellation out of RunAsync past the clause that would
+                // otherwise have swallowed it.
+                _metrics.ReportError(FaultBeforeBackoff);
+                await Task.Delay(Timeout.Infinite, stoppingToken);
+            }
+
             await using (stoppingToken.Register(() => _gate.TrySetResult()))
             {
                 await _gate.Task;

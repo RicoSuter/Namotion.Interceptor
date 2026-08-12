@@ -55,8 +55,19 @@ public abstract class SubjectConnectorBase : BackgroundService, ISubjectConnecto
         {
             await RunAsync(stoppingToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // An expected shutdown is not a fault, and recording it would overwrite the genuine error
+            // that made the connector fail, which stays sticky until the next MarkStarted. Connectors
+            // back off with a delay on the stopping token from inside their own catch blocks, so a
+            // stop landing during a backoff throws the cancellation out of RunAsync rather than out of
+            // the sibling clause that would have swallowed it.
+            throw;
+        }
         catch (Exception exception)
         {
+            // A cancellation the stopping token did not cause lands here and is recorded, because it
+            // is a genuine fault rather than a shutdown.
             Metrics.ReportError(exception);
             throw;
         }
