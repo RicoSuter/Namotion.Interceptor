@@ -3,6 +3,8 @@ using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Connection;
+using Namotion.Interceptor.OpcUa.Client.Polling;
+using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -34,7 +36,6 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     private volatile bool _isStarted;
     private long _reconnectStartedTimestamp; // 0 = not reconnecting, otherwise Stopwatch timestamp when reconnection started (for stall detection)
-    private Exception? _lastError;
 
     internal string OpcUaNodeIdKey { get; } = "OpcUaNodeId:" + Guid.NewGuid();
 
@@ -42,30 +43,41 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     internal SourceOwnershipManager Ownership => _ownership;
 
     internal ReconnectionMetrics ReconnectionMetrics { get; } = new();
-    internal ThroughputCounter IncomingThroughput { get; } = new();
-    internal ThroughputCounter OutgoingThroughput { get; } = new();
-    internal Exception? LastError => Volatile.Read(ref _lastError);
 
-    internal void ClearLastError() => Volatile.Write(ref _lastError, null);
+    // Owned here rather than by SessionManager, which is rebuilt on every connect attempt including
+    // failed ones. Without this the Total counters they feed would sit near zero during a reconnect
+    // storm, which is exactly when they matter.
+    internal PollingMetrics PollingMetrics { get; } = new();
+
+    internal ReadAfterWriteMetrics ReadAfterWriteMetrics { get; } = new();
+
+    internal ThroughputCounter IncomingThroughput { get; }
+    internal ThroughputCounter OutgoingThroughput { get; }
 
     /// <summary>
     /// Forwards to the protected ReportConnectionLost transition seam for SessionManager, which
     /// holds this concrete source type but is not part of its inheritance hierarchy and so cannot
-    /// call the protected member directly.
+    /// call the protected member directly. Also drops liveness, because a lost connection is the
+    /// connector no longer serving.
     /// </summary>
-    internal void NotifyConnectionLost() => ReportConnectionLost();
+    internal void NotifyConnectionLost()
+    {
+        Metrics.MarkNotOperational();
+        ReportConnectionLost();
+    }
+
+    /// <summary>
+    /// Forwards a healthy-session report from <c>SessionManager</c> and the health check loop, which
+    /// live outside this class's inheritance hierarchy and so cannot reach the protected metrics
+    /// directly. Same pattern as <see cref="NotifyConnectionLost"/>.
+    /// </summary>
+    internal void NotifySessionHealthy() => Metrics.MarkOperational();
 
     /// <inheritdoc />
     public override int WriteBatchSize => _writer?.WriteBatchSize ?? 0;
 
-    /// <inheritdoc />
-    /// <remarks>
-    /// Hides the source-level diagnostics of the base class: this is the protocol-specific view and
-    /// the two are not related by inheritance. Callers holding a base-typed reference still get the
-    /// source-level one. Temporary: the unrelated hierarchy is a stopgap until this type derives from
-    /// the source-level view, at which point the two become one object and the hiding goes away.
-    /// </remarks>
-    public new OpcUaClientDiagnostics Diagnostics { get; }
+    /// <inheritdoc cref="SubjectSourceBase.Diagnostics" />
+    public override OpcUaClientDiagnostics Diagnostics { get; }
 
     /// <inheritdoc />
     public ISession? CurrentSession => _sessionManager?.CurrentSession;
@@ -74,13 +86,30 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     public event EventHandler<OpcUaCurrentSessionChangedEventArgs>? CurrentSessionChanged;
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
-        : base(subject.Context, logger, configuration.BufferTime, configuration.RetryTime, configuration.WriteRetryQueueSize)
+        : this(subject, configuration, logger, new ThroughputCounter(), new ThroughputCounter())
+    {
+    }
+
+    // A constructor initializer cannot reference this, so the counters are created here and threaded
+    // through: the same two instances have to reach both base(...) and the properties the read and
+    // write paths feed.
+    private OpcUaSubjectClientSource(
+        IInterceptorSubject subject,
+        OpcUaClientConfiguration configuration,
+        ILogger logger,
+        ThroughputCounter incoming,
+        ThroughputCounter outgoing)
+        : base(subject.Context, logger, configuration.BufferTime, configuration.RetryTime,
+            configuration.WriteRetryQueueSize, incoming, outgoing)
     {
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(logger);
 
         configuration.Validate();
+
+        IncomingThroughput = incoming;
+        OutgoingThroughput = outgoing;
 
         _subject = subject;
         _logger = logger;
@@ -103,7 +132,12 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         _subjectLoader = new OpcUaSubjectLoader(subject, configuration, _ownership, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
 
-        Diagnostics = new OpcUaClientDiagnostics(this);
+        Metrics.RegisterClaimedProperties(() => _ownership.Count);
+        Metrics.RegisterResettable(ReconnectionMetrics);
+        Metrics.RegisterResettable(PollingMetrics);
+        Metrics.RegisterResettable(ReadAfterWriteMetrics);
+
+        Diagnostics = new OpcUaClientDiagnostics(this, Metrics);
     }
 
     private void OnSubjectDetaching(IInterceptorSubject subject)
@@ -118,10 +152,16 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     {
         Reset();
 
+        // A connect attempt is by definition not yet serving. Without this a previous attempt that
+        // reached the health loop before its initial load failed would keep reporting as operational
+        // for the whole retry delay.
+        Metrics.MarkNotOperational();
+
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
 
-        _sessionManager = new SessionManager(this, propertyWriter, _configuration, _logger);
+        _sessionManager = new SessionManager(
+            this, propertyWriter, _configuration, PollingMetrics, ReadAfterWriteMetrics, _logger);
         _writer = new OutboundWriter(_sessionManager, _configuration, OpcUaNodeIdKey, OutgoingThroughput, _logger);
 
         try
@@ -159,7 +199,6 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             }
 
             _isStarted = true;
-            Volatile.Write(ref _lastError, null);
 
             var sessionManagerForLifetime = _sessionManager;
             return BackgroundTaskLifetime.Start(
@@ -179,7 +218,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         }
         catch (Exception ex)
         {
-            Volatile.Write(ref _lastError, ex);
+            Metrics.ReportError(ex);
             await CleanupSessionManagerAsync().ConfigureAwait(false);
             throw;
         }
@@ -385,6 +424,13 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         await sessionManager.SubscriptionManager
             .EscalatePersistentlyFailedItemsAsync(cancellationToken).ConfigureAwait(false);
 
+        // Re-read rather than inherited from the caller's snapshot: the full state sync above clears
+        // the session when it fails, and reporting that as healthy would stand until the next check.
+        if (sessionManager.IsConnected)
+        {
+            NotifySessionHealthy();
+        }
+
         return false;
     }
 
@@ -461,7 +507,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         // which nullifies the session while we're still setting up subscriptions and loading state.
         // Report at detection, matching OnKeepAlive (see ReportConnectionLost remarks for why not
         // StartBuffering here).
-        ReportConnectionLost();
+        NotifyConnectionLost();
 
         sessionManager.SetReconnecting(true);
 
@@ -508,7 +554,6 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             await propertyWriter.LoadInitialStateAndResumeAsync(token).ConfigureAwait(false);
 
             ReconnectionMetrics.RecordSuccess();
-            Volatile.Write(ref _lastError, null);
             _logger.LogInformation("Session restart complete (id={SessionId}).", session.SessionId);
         }
         catch (OperationCanceledException) when (reconnectCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
@@ -524,7 +569,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         catch (Exception ex)
         {
             ReconnectionMetrics.RecordFailure();
-            Volatile.Write(ref _lastError, ex);
+            Metrics.ReportError(ex);
             _logger.LogError(ex, "Failed to restart session. Will retry on next health check.");
 
             // Clear the session so health check can trigger a new reconnection attempt
@@ -540,6 +585,11 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             sessionManager.SetReconnecting(false);
             _reconnectCts = null;
         }
+
+        // After the finally cleared the reconnecting flag, so no reader sees the connector reported as
+        // operational and reconnecting at once. Reached only when the reconnection succeeded: both
+        // catch clauses above rethrow.
+        NotifySessionHealthy();
     }
 
     private async Task<ReferenceDescription?> TryGetRootNodeAsync(Session session, CancellationToken cancellationToken)

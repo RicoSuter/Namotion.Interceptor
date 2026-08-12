@@ -106,14 +106,14 @@ public class OpcUaReconnectionTests
 
                 Assert.Null(client.Source!.Diagnostics.LastError);
 
-                var initialAttempts = client.Source!.Diagnostics.TotalReconnectionAttempts;
+                var initialAttempts = client.Source!.Diagnostics.Reconnects.TotalAttempts;
 
                 // Stop server and wait for client to detect disconnection
                 logger.Log("Stopping server...");
                 await server.StopAsync();
 
                 await AsyncTestHelpers.WaitUntilAsync(
-                    () => !client.Source!.Diagnostics.IsConnected,
+                    () => !client.Source!.Diagnostics.IsOperational,
                     timeout: TimeSpan.FromSeconds(90),
                     message: "Client should detect disconnection");
                 logger.Log("Client detected disconnection");
@@ -130,8 +130,8 @@ public class OpcUaReconnectionTests
                 logger.Log($"Client received: {client.Root.Name}");
 
                 // Verify metrics
-                var finalAttempts = client.Source!.Diagnostics.TotalReconnectionAttempts;
-                var successfulReconnections = client.Source!.Diagnostics.SuccessfulReconnections;
+                var finalAttempts = client.Source!.Diagnostics.Reconnects.TotalAttempts;
+                var successfulReconnections = client.Source!.Diagnostics.Reconnects.TotalSucceeded;
 
                 logger.Log($"Reconnection attempts: {initialAttempts} -> {finalAttempts}");
                 logger.Log($"Successful reconnections: {successfulReconnections}");
@@ -142,7 +142,13 @@ public class OpcUaReconnectionTests
                     $"Should have at least 1 successful reconnection, had {successfulReconnections}");
 
                 // After a healthy reconnect the connector is connected again with a live session.
-                Assert.True(client.Source!.Diagnostics.IsConnected);
+                // Waited for rather than asserted outright: liveness is edge-driven, and after the
+                // SDK's own auto-reconnect the edge is raised by the next health check rather than
+                // by the subscription notification that let the data above arrive.
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => client.Source!.Diagnostics.IsOperational,
+                    timeout: TimeSpan.FromSeconds(60),
+                    message: "Client should report itself operational again after reconnecting");
                 Assert.NotNull(client.Source.CurrentSession);
 
                 // Session swap visible to consumers. The reconnect cycle takes one of two paths
@@ -162,10 +168,10 @@ public class OpcUaReconnectionTests
                 // Reconnection counter invariant: once all in-flight attempts have resolved,
                 // Total == Successful + Failed + Abandoned. We are connected with a live session
                 // here, so no attempt is in flight. Capture once to avoid torn reads across counters.
-                var total = client.Source!.Diagnostics.TotalReconnectionAttempts;
-                var success = client.Source!.Diagnostics.SuccessfulReconnections;
-                var failed = client.Source!.Diagnostics.FailedReconnections;
-                var abandoned = client.Source!.Diagnostics.AbandonedReconnections;
+                var total = client.Source!.Diagnostics.Reconnects.TotalAttempts;
+                var success = client.Source!.Diagnostics.Reconnects.TotalSucceeded;
+                var failed = client.Source!.Diagnostics.Reconnects.TotalFailed;
+                var abandoned = client.Source!.Diagnostics.Reconnects.TotalAbandoned;
                 Assert.Equal(total, success + failed + abandoned);
 
                 logger.Log("Test passed");
@@ -293,7 +299,7 @@ public class OpcUaReconnectionTests
             logger.Log("Stopping server...");
             await server.StopAsync();
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !client.Source!.Diagnostics.IsConnected,
+                () => !client.Source!.Diagnostics.IsOperational,
                 timeout: TimeSpan.FromSeconds(90),
                 message: "Client should detect disconnection");
             logger.Log("Client detected disconnection");

@@ -130,7 +130,15 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// </summary>
     internal ReadAfterWriteManager? ReadAfterWriteManager { get; private set; }
 
-    public SessionManager(OpcUaSubjectClientSource source, SubjectPropertyWriter propertyWriter, OpcUaClientConfiguration configuration, ILogger logger)
+    // The two metrics objects belong to the source, which outlives this manager: it is rebuilt on
+    // every connect attempt, and counters created here would rebase with it.
+    public SessionManager(
+        OpcUaSubjectClientSource source,
+        SubjectPropertyWriter propertyWriter,
+        OpcUaClientConfiguration configuration,
+        PollingMetrics pollingMetrics,
+        ReadAfterWriteMetrics readAfterWriteMetrics,
+        ILogger logger)
     {
         _source = source;
         _propertyWriter = propertyWriter;
@@ -142,7 +150,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         {
             PollingManager = new PollingManager(
                 source, sessionManager: this,
-                propertyWriter, _configuration, _logger);
+                propertyWriter, _configuration, pollingMetrics, _logger);
 
             PollingManager.Start();
         }
@@ -153,6 +161,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 sessionProvider: () => CurrentSession,
                 source,
                 configuration,
+                readAfterWriteMetrics,
                 logger);
         }
 
@@ -410,7 +419,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         Interlocked.Exchange(ref _needsFullStateSync, 1);
 
                         _source.ReconnectionMetrics.RecordSuccess();
-                        _source.ClearLastError();
 
                         _logger.LogInformation(
                             "OPC UA session reconnected: Transferred {Count} subscriptions. Full state sync pending.",

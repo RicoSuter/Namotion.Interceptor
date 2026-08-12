@@ -37,7 +37,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     private int _disposed;
     private int _isProcessing; // 0 = not processing, 1 = processing (for timer callback serialization)
 
-    internal ReadAfterWriteMetrics Metrics { get; } = new();
+    internal ReadAfterWriteMetrics Metrics { get; }
 
     internal int PendingReadCount
     {
@@ -56,17 +56,22 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     /// <param name="sessionProvider">Function to get current session.</param>
     /// <param name="source">The subject source for applying read values.</param>
     /// <param name="configuration">OPC UA client configuration.</param>
+    /// <param name="metrics">The counters to report into, owned by the client source so they survive this manager.</param>
     /// <param name="logger">Logger instance.</param>
     public ReadAfterWriteManager(
         Func<ISession?> sessionProvider,
         ISubjectSource source,
         OpcUaClientConfiguration configuration,
+        ReadAfterWriteMetrics metrics,
         ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(metrics);
+
         _sessionProvider = sessionProvider;
         _source = source;
         _configuration = configuration;
         _logger = logger;
+        Metrics = metrics;
         _circuitBreaker = new CircuitBreaker(
             configuration.PollingCircuitBreakerThreshold,
             configuration.PollingCircuitBreakerCooldown);

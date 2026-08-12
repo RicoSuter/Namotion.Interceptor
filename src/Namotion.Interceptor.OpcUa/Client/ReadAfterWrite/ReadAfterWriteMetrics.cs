@@ -1,9 +1,16 @@
+using Namotion.Interceptor.Connectors.Diagnostics;
+
 namespace Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 
 /// <summary>
 /// Thread-safe metrics for read-after-write operations.
 /// </summary>
-internal sealed class ReadAfterWriteMetrics
+/// <remarks>
+/// Owned by the client source rather than by <c>ReadAfterWriteManager</c>, which is rebuilt on every
+/// connect attempt including failed ones. Held there, these totals would sit near zero during a
+/// reconnect storm, which is exactly when they matter.
+/// </remarks>
+internal sealed class ReadAfterWriteMetrics : IResettableMetrics
 {
     private long _scheduled;
     private long _executed;
@@ -59,5 +66,14 @@ internal sealed class ReadAfterWriteMetrics
         {
             Interlocked.Add(ref _executed, count);
         }
+    }
+
+    /// <inheritdoc />
+    public void Reset()
+    {
+        Interlocked.Exchange(ref _scheduled, 0);
+        Interlocked.Exchange(ref _executed, 0);
+        Interlocked.Exchange(ref _coalesced, 0);
+        Interlocked.Exchange(ref _failed, 0);
     }
 }

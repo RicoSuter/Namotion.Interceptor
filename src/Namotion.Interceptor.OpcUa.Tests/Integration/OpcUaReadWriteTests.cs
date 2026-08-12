@@ -71,10 +71,10 @@ public class OpcUaReadWriteTests : SharedServerTestBase
             message: "Server should receive client's number update");
 
         // Verify throughput diagnostics after bidirectional writes
-        Assert.True(diagnostics.IncomingChangesPerSecond > 0.0,
-            $"IncomingChangesPerSecond should be positive after receiving updates, was {diagnostics.IncomingChangesPerSecond}");
-        Assert.True(diagnostics.OutgoingChangesPerSecond > 0.0,
-            $"OutgoingChangesPerSecond should be positive after writing changes, was {diagnostics.OutgoingChangesPerSecond}");
+        Assert.True(diagnostics.Throughput.IncomingPerSecond > 0.0,
+            $"Throughput.IncomingPerSecond should be positive after receiving updates, was {diagnostics.Throughput.IncomingPerSecond}");
+        Assert.True(diagnostics.Throughput.OutgoingPerSecond > 0.0,
+            $"Throughput.OutgoingPerSecond should be positive after writing changes, was {diagnostics.Throughput.OutgoingPerSecond}");
     }
 
     [Fact]

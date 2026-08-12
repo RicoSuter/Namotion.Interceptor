@@ -38,6 +38,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
             sessionProvider: () => null,
             source: null!, // Not used in these unit tests
             configuration,
+            new ReadAfterWriteMetrics(),
             NullLogger.Instance);
     }
 

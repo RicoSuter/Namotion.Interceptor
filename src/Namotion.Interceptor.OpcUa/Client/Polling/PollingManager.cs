@@ -23,7 +23,7 @@ internal sealed class PollingManager : IAsyncDisposable
     private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly CircuitBreaker _circuitBreaker;
-    private readonly PollingMetrics _metrics = new();
+    private readonly PollingMetrics _metrics;
 
     private readonly ConcurrentDictionary<string, PollingItem> _pollingItems = new();
     private readonly PeriodicTimer _timer;
@@ -38,17 +38,20 @@ internal sealed class PollingManager : IAsyncDisposable
         SessionManager sessionManager,
         SubjectPropertyWriter propertyWriter,
         OpcUaClientConfiguration configuration,
+        PollingMetrics metrics,
         ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(sessionManager);
         ArgumentNullException.ThrowIfNull(propertyWriter);
+        ArgumentNullException.ThrowIfNull(metrics);
 
         _source = source;
         _logger = logger;
         _sessionManager = sessionManager;
         _propertyWriter = propertyWriter;
         _configuration = configuration;
+        _metrics = metrics;
 
         _circuitBreaker = new CircuitBreaker(configuration.PollingCircuitBreakerThreshold, configuration.PollingCircuitBreakerCooldown);
         _timer = new PeriodicTimer(configuration.PollingInterval);
@@ -82,7 +85,7 @@ internal sealed class PollingManager : IAsyncDisposable
     /// <summary>
     /// Gets the total number of times the circuit breaker has tripped due to persistent failures.
     /// </summary>
-    public long CircuitBreakerTrips => _circuitBreaker.TripCount;
+    public long CircuitBreakerTrips => _metrics.CircuitBreakerTrips;
 
     /// <summary>
     /// Gets whether the circuit breaker is currently open (polling suspended due to persistent failures).
@@ -289,6 +292,7 @@ internal sealed class PollingManager : IAsyncDisposable
             }
             else if (_circuitBreaker.RecordFailure())
             {
+                _metrics.RecordCircuitBreakerTrip();
                 _logger.LogError("Circuit breaker opened after consecutive failures. Polling suspended temporarily.");
             }
 
@@ -441,7 +445,7 @@ internal sealed class PollingManager : IAsyncDisposable
             return;
 
         _logger.LogDebug("Disposing OPC UA polling manager (Total reads: {TotalReads}, Failed: {FailedReads}, Value changes: {ValueChanges}, Slow polls: {SlowPolls}, Circuit breaker trips: {Trips})",
-            _metrics.TotalReads, _metrics.FailedReads, _metrics.ValueChanges, _metrics.SlowPolls, _circuitBreaker.TripCount);
+            _metrics.TotalReads, _metrics.FailedReads, _metrics.ValueChanges, _metrics.SlowPolls, _metrics.CircuitBreakerTrips);
 
         // Cancel work and stop timer
         await _cts.CancelAsync();
