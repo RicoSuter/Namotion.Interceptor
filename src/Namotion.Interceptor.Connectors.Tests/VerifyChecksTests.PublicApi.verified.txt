@@ -48,6 +48,7 @@ namespace Namotion.Interceptor.Connectors
     }
     public interface ISubjectConnector
     {
+        Namotion.Interceptor.Connectors.Diagnostics.ConnectorDiagnostics Diagnostics { get; }
         Namotion.Interceptor.IInterceptorSubject RootSubject { get; }
     }
     public interface ISubjectFactory
@@ -58,6 +59,7 @@ namespace Namotion.Interceptor.Connectors
     }
     public interface ISubjectSource : Namotion.Interceptor.Connectors.ISubjectConnector
     {
+        Namotion.Interceptor.Connectors.Diagnostics.SourceDiagnostics Diagnostics { get; }
         Namotion.Interceptor.Connectors.Monitoring.SourceState State { get; }
         System.DateTimeOffset StateChangeTime { get; }
         int WriteBatchSize { get; }

@@ -69,22 +69,30 @@ public class OpcUaServerLivenessTests
             certificateStoreBasePath: port.CertificateStoreBasePath);
 
         var serverService = server.Server!;
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => serverService.Diagnostics.IsOperational,
-            message: "The server should report operational once it has started serving.");
 
-        var firstOperationalTime = serverService.Diagnostics.OperationalChangeTime;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => serverService.Diagnostics.IsOperational,
+                message: "The server should report operational once it has started serving.");
 
-        // Act
-        await ((IFaultInjectable)serverService).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
+            var firstOperationalTime = serverService.Diagnostics.OperationalChangeTime;
 
-        // Assert
-        // The timestamp only moves when the flag does, so this also pins that the server reported
-        // itself down between the two runs rather than staying up across the restart.
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => serverService.Diagnostics.IsOperational &&
-                  serverService.Diagnostics.OperationalChangeTime != firstOperationalTime,
-            message: "The server should report operational again after restarting.");
+            // Act
+            await ((IFaultInjectable)serverService).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
+
+            // Assert
+            // The timestamp only moves when the flag does, so this also pins that the server reported
+            // itself down between the two runs rather than staying up across the restart.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => serverService.Diagnostics.IsOperational &&
+                      serverService.Diagnostics.OperationalChangeTime != firstOperationalTime,
+                message: "The server should report operational again after restarting.");
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
     }
 
     [Fact]
@@ -103,23 +111,31 @@ public class OpcUaServerLivenessTests
             bufferTime: TimeSpan.FromMinutes(5));
 
         var serverService = server.Server!;
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => serverService.Diagnostics.IsOperational,
-            message: "The server should report operational once it has started serving.");
 
-        // Act
-        // Re-written on each poll because the processor only captures changes once it is running.
-        var probeValue = 0;
-        await AsyncTestHelpers.WaitUntilAsync(
-            () =>
-            {
-                server.Root!.Value = "v" + probeValue++;
-                return serverService.Diagnostics.OutboundChanges.Depth > 0;
-            },
-            message: "The outbound change queue never reported a depth, so it was never registered.");
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => serverService.Diagnostics.IsOperational,
+                message: "The server should report operational once it has started serving.");
 
-        // Assert
-        Assert.Null(serverService.Diagnostics.OutboundChanges.Capacity);
+            // Act
+            // Re-written on each poll because the processor only captures changes once it is running.
+            var probeValue = 0;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    server.Root!.Value = "v" + probeValue++;
+                    return serverService.Diagnostics.OutboundChanges.Depth > 0;
+                },
+                message: "The outbound change queue never reported a depth, so it was never registered.");
+
+            // Assert
+            Assert.Null(serverService.Diagnostics.OutboundChanges.Capacity);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
     }
 }
 

@@ -28,6 +28,26 @@ public class SubjectSourceDiagnosticsTests
     }
 
     [Fact]
+    public void WhenReadThroughEitherInterface_ThenItIsTheSourcesOwnDiagnostics()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
+        var subject = new Person(context);
+        using var source = new TestSubjectSource(subject, context, NullLogger.Instance);
+
+        // Act
+        var throughSource = ((ISubjectSource)source).Diagnostics;
+        var throughConnector = ((ISubjectConnector)source).Diagnostics;
+
+        // Assert
+        // ISubjectSource narrows the member to SourceDiagnostics, so the two interfaces are separate
+        // slots that both have to land on the source's single view. A source wired up with a second
+        // diagnostics object would report empty buffers through one of them.
+        Assert.Same(source.Diagnostics, throughSource);
+        Assert.Same(source.Diagnostics, throughConnector);
+    }
+
+    [Fact]
     public async Task WhenStarted_ThenTheCounterEpochIsStamped()
     {
         // Arrange

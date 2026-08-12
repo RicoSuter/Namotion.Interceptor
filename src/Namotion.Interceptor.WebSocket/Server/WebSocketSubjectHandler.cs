@@ -37,10 +37,27 @@ public sealed class WebSocketSubjectHandler
     
     public TimeSpan BufferTime => _configuration.BufferTime;
 
-    // Internal, so the number has a single public spelling: WebSocketServerDiagnostics.
-    internal int ConnectionCount => Volatile.Read(ref _connectionCount);
+    /// <summary>
+    /// Gets the number of currently connected WebSocket clients.
+    /// </summary>
+    /// <remarks>
+    /// For embedded mode, where the handler is resolved from the container and there is no server to
+    /// ask. With the standalone server, read
+    /// <see cref="WebSocketServerDiagnostics.ConnectionCount"/> instead, which reports this number
+    /// alongside the rest of that server's diagnostics.
+    /// </remarks>
+    public int ConnectionCount => Volatile.Read(ref _connectionCount);
 
-    internal long CurrentSequence => Volatile.Read(ref _sequence);
+    /// <summary>
+    /// Gets the sequence number most recently assigned to an outgoing message.
+    /// </summary>
+    /// <remarks>
+    /// For embedded mode, where the handler is resolved from the container and there is no server to
+    /// ask. With the standalone server, read
+    /// <see cref="WebSocketServerDiagnostics.CurrentSequence"/> instead, which reports this number
+    /// alongside the rest of that server's diagnostics.
+    /// </remarks>
+    public long CurrentSequence => Volatile.Read(ref _sequence);
 
     public WebSocketSubjectHandler(
         IInterceptorSubject subject,

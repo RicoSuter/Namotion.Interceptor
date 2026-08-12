@@ -135,6 +135,22 @@ public class SubjectConnectorBaseTests
         Assert.True(connector.Diagnostics.IsOperational);
     }
 
+    [Fact]
+    public void WhenReadThroughTheConnectorInterface_ThenItIsTheConnectorsOwnDiagnostics()
+    {
+        // Arrange
+        using var connector = new TestConnector();
+
+        // Act
+        var throughInterface = ((ISubjectConnector)connector).Diagnostics;
+
+        // Assert
+        // The base declares the member as ConnectorDiagnostics and derived connectors narrow it with a
+        // covariant override, so the interface has to land on that same override rather than on a
+        // second diagnostics view reading metrics nobody writes to.
+        Assert.Same(connector.Diagnostics, throughInterface);
+    }
+
     private sealed class TestConnector : SubjectConnectorBase
     {
         private readonly ConnectorMetrics _metrics;

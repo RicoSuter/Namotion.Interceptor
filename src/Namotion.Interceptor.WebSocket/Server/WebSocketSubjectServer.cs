@@ -110,6 +110,11 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                     var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);
                     var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedToken);
 
+                    // The filter below cannot be narrowed to the force-kill the way the OPC UA and MQTT
+                    // servers narrow theirs, because cts.CancelAsync makes a cancellation the normal
+                    // exit path here. The exception is kept instead and judged below, where an
+                    // unexpected completion is actually identified.
+                    Exception? unexpectedCompletion = null;
                     try
                     {
                         // When either task completes, cancel the other to prevent blocking forever.
@@ -117,9 +122,10 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                         await cts.CancelAsync().ConfigureAwait(false);
                         await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+                    catch (OperationCanceledException exception) when (!stoppingToken.IsCancellationRequested)
                     {
                         // Kill or one task completed: linkedToken canceled
+                        unexpectedCompletion = exception;
                     }
 
                     // Both tasks completed, either normally (tasks catch OCE internally and
@@ -140,7 +146,16 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                     }
                     else
                     {
-                        _logger.LogWarning("WebSocket server processing completed unexpectedly. Restarting...");
+                        // Neither the host stopping nor an injected fault, so the processing layer ended
+                        // on its own. The loop restarts instead of leaving RunAsync, so the base class
+                        // never sees it and without this the server would restart with nothing
+                        // explaining why. Both tasks can also have completed without throwing, which is
+                        // why there is a substitute for the reported exception.
+                        var error = unexpectedCompletion ?? new InvalidOperationException(
+                            "WebSocket server processing completed unexpectedly.");
+
+                        Metrics.ReportError(error);
+                        _logger.LogWarning(error, "WebSocket server processing completed unexpectedly. Restarting...");
                     }
                 }
                 finally
@@ -182,7 +197,7 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                     }
                     catch (OperationCanceledException)
                     {
-                        // Shutdown timed out — DisposeAsync will force-release the port
+                        // Shutdown timed out, so DisposeAsync will force-release the port.
                     }
 
                     await _app.DisposeAsync().ConfigureAwait(false);

@@ -531,7 +531,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
         var restored = 0;
         var sent = 0;
-        // Superseded and dropped are counted apart because only the second is added to
+        // Superseded is counted apart from dropped and failed because only those two are added to
         // OutboundRetries.TotalDropped: reporting them as one number leaves an operator correlating the
         // log with that counter looking at two figures that disagree.
         var superseded = 0;

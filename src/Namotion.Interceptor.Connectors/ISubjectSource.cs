@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -67,6 +68,11 @@ public interface ISubjectSource : ISubjectConnector
     /// stale since T.
     /// </summary>
     DateTimeOffset StateChangeTime { get; }
+
+    /// <summary>
+    /// Gets what this source reports about its transport and its buffers.
+    /// </summary>
+    new SourceDiagnostics Diagnostics { get; }
 
     /// <summary>
     /// Raised when <see cref="State"/> changes.

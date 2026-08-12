@@ -216,6 +216,10 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
+                // Defensive, like the clause below: reached with liveness still true when the teardown
+                // above threw before its own write ran. _isListening is deliberately left alone, so a
+                // broker whose stop failed is stopped again from DisposeAsync.
+                Metrics.MarkNotOperational();
                 return;
             }
             catch (OperationCanceledException) when (_isForceKill)
@@ -223,7 +227,10 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                 // Deliberately not reported through ReportError: it is an injected fault the broker
                 // recovers from by restarting, and catching it here is also what keeps it from reaching
                 // the base class, which would record a cancellation the stopping token did not cause as
-                // a genuine fault.
+                // a genuine fault. Liveness is forced false because the loop continues from here: a
+                // teardown that threw before its own write would otherwise leave the broker reporting
+                // that it is serving across the whole restart window.
+                Metrics.MarkNotOperational();
                 _logger.LogWarning("MQTT server force-killed. Restarting...");
             }
             catch (Exception ex)
@@ -233,15 +240,19 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                 Volatile.Write(ref _isListening, 0);
                 Metrics.MarkNotOperational();
 
+                // The base class only sees exceptions that leave RunAsync, and this loop swallows every
+                // per-attempt failure. Without this, a broker that can never bind reports no error.
+                // Recorded before the cancellation check below, because a cancellation neither the
+                // stopping token nor a force-kill caused is a genuine fault, and leaving the pump on it
+                // with no error recorded is a broker that stops serving with nothing explaining why.
+                Metrics.ReportError(ex);
+                _logger.LogError(ex, "Error in MQTT server.");
+
                 if (ex is TaskCanceledException)
                 {
                     return;
                 }
 
-                // The base class only sees exceptions that leave RunAsync, and this loop swallows every
-                // per-attempt failure. Without this, a broker that can never bind reports no error.
-                Metrics.ReportError(ex);
-                _logger.LogError(ex, "Error in MQTT server.");
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
             }
             finally

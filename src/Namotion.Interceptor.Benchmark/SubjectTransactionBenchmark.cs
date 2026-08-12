@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
@@ -131,6 +132,11 @@ public class SubjectTransactionBenchmark
         public SourceState State => SourceState.Synchronizing;
 
         public DateTimeOffset StateChangeTime { get; } = DateTimeOffset.UtcNow;
+
+        public SourceDiagnostics Diagnostics { get; } = new(new SourceMetrics());
+
+        // Explicit: the narrower property above does not implicitly implement the connector member.
+        ConnectorDiagnostics ISubjectConnector.Diagnostics => Diagnostics;
 
         public event EventHandler<SourceEvent>? StateChanged
         {

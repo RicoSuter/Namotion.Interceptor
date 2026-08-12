@@ -15,6 +15,11 @@ namespace Namotion.Interceptor.OpcUa.Tests.Server;
 /// </summary>
 public class OpcUaServerDiagnosticsTests
 {
+    /// <summary>
+    /// A compile-level pin of the member tree rather than behavioural coverage: every value asserted
+    /// here is what a fresh <c>ConnectorMetrics</c> reports, so this fails only if a member moves or
+    /// changes type. The transitions are covered by <see cref="Integration.OpcUaServerLivenessTests"/>.
+    /// </summary>
     [Fact]
     public void WhenNeverStarted_ThenTheServerReportsNotOperational()
     {
@@ -70,7 +75,13 @@ public class OpcUaServerDiagnosticsTests
     /// QueueMetrics that permits one live registration at a time, so a missing release would make the
     /// second attempt fail on the registration rather than on the transport. Read back through
     /// <c>LastError</c>, which is the only place that distinguishes the two.
+    /// <para>
+    /// Tagged as an integration test because it drives the server's real exponential backoff and its
+    /// certificate store path, so it costs seconds of wall clock and its duration depends on the
+    /// backoff jitter.
+    /// </para>
     /// </summary>
+    [Trait("Category", "Integration")]
     [Fact]
     public async Task WhenAStartAttemptFails_ThenTheNextAttemptCanRegisterItsOwnChangeQueue()
     {

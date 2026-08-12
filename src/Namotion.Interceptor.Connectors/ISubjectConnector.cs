@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Connectors.Diagnostics;
+
 namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
@@ -10,4 +12,13 @@ public interface ISubjectConnector
     /// Gets the root subject being connected to an external system.
     /// </summary>
     IInterceptorSubject RootSubject { get; }
+
+    /// <summary>
+    /// Gets what this connector reports about the transport it drives.
+    /// </summary>
+    /// <remarks>
+    /// Answers "what is the transport doing". Whether the model can be trusted is a separate question
+    /// answered by <see cref="ISubjectSource.State"/>.
+    /// </remarks>
+    ConnectorDiagnostics Diagnostics { get; }
 }

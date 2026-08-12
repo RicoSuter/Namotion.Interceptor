@@ -1,4 +1,5 @@
 using Moq;
+using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -507,6 +508,11 @@ public class SubjectSourceExtensionsTests
         public SourceState State => SourceState.Synchronizing;
 
         public DateTimeOffset StateChangeTime { get; } = DateTimeOffset.UtcNow;
+
+        public SourceDiagnostics Diagnostics { get; } = new(new SourceMetrics());
+
+        // Explicit: the narrower property above does not implicitly implement the connector member.
+        ConnectorDiagnostics ISubjectConnector.Diagnostics => Diagnostics;
 
         public event EventHandler<SourceEvent>? StateChanged
         {
