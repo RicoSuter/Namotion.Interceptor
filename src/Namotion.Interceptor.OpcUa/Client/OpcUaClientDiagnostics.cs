@@ -7,8 +7,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// </summary>
 /// <remarks>
 /// <see cref="ConnectorDiagnostics.IsOperational"/> means the session is usable and no reconnection
-/// is in progress. It replaces the former <c>IsConnected</c> and carries the same meaning. True does
-/// not mean the model is in sync: while the initial load runs the source state is
+/// is in progress. True does not mean the model is in sync: while the initial load runs the source state is
 /// <see cref="Namotion.Interceptor.Connectors.Monitoring.SourceState.Synchronizing"/>. Read the two
 /// together to tell a network outage from a connected client still loading. See
 /// docs/connectors-monitoring.md.

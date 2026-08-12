@@ -275,9 +275,10 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
 
                         _consecutiveFailures = 0;
 
-                        // Replaces the former _startTime stamp. StartTime is now the connector's own start
-                        // epoch and must not move on an internal restart, and LastError is deliberately not
-                        // cleared here: clearing it on recovery erases the only evidence of a transient fault.
+                        // StartTime is the connector's own start epoch and must not move on an internal
+                        // restart, so the serving window is reported through liveness instead. LastError is
+                        // deliberately not cleared here: clearing it on recovery would erase the only
+                        // evidence of a transient fault.
                         Metrics.MarkOperational();
 
                         await changeQueueProcessor.ProcessAsync(linkedToken);

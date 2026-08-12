@@ -7,10 +7,9 @@ namespace Namotion.Interceptor.OpcUa.Server;
 /// </summary>
 /// <remarks>
 /// <see cref="ConnectorDiagnostics.IsOperational"/> means the server has started and is accepting
-/// client connections. It replaces the former <c>IsRunning</c>, and
-/// <see cref="ConnectorDiagnostics.OperationalChangeTime"/> replaces the former <c>StartTime</c> and
-/// <c>Uptime</c>: it moves on every internal restart, where
-/// <see cref="ConnectorDiagnostics.StartTime"/> does not.
+/// client connections. Pair it with <see cref="ConnectorDiagnostics.OperationalChangeTime"/> to read
+/// how long the current run has been serving: that timestamp moves on every internal restart, where
+/// <see cref="ConnectorDiagnostics.StartTime"/> marks the hosted service's own start and does not.
 /// </remarks>
 public sealed class OpcUaServerDiagnostics : ConnectorDiagnostics
 {

@@ -428,21 +428,15 @@ Tiered error handling preserves connections when possible:
 
 ## Diagnostics
 
-Both WebSocket connectors report through the shared model described in [Connector Diagnostics](connectors.md#connector-diagnostics). Every read is thread-safe, takes no lock owned by this library, and cannot throw.
+Both WebSocket connectors report through the shared model: the member tree, the three buffers, `LastError` stickiness and the read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to WebSocket.
 
 **`IsOperational` for the standalone server means the listener is accepting connections.** It is set once Kestrel has started and drops first in the teardown, so a server that has stopped accepting connections never reports that it is still serving. It also drops and rises again on every internal restart, where the inherited `StartTime` marks the current run of the hosted service and does not move.
 
 **`IsOperational` for the client means the handshake completed and the receive loop is running.** It is set after the server's Welcome message has been accepted, so a socket that connected but failed version negotiation never counts as operational, and it drops on every way out of the receive loop: a close frame, a sequence or heartbeat gap, a socket error, a receive timeout, or teardown.
 
-Neither connector measures throughput, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are both `null` rather than `0.0`. Adding the counters is a follow-up; `null` means "not measured" and is deliberately distinct from a measured rate of zero.
+Neither connector measures throughput, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are both `null` rather than `0.0`.
 
-The client is an `ISubjectSource`, so its diagnostics are a `SourceDiagnostics` with all three buffers and no WebSocket specific additions. The three answer different questions:
-
-- `OutboundChanges` growing means changes are produced faster than they flush.
-- `OutboundRetries` growing means the far end is rejecting writes.
-- `InboundBuffer` growing means an initial load is still in progress.
-
-`OutboundRetries.Capacity` echoes `WriteRetryQueueSize`, and is `0` when the queue is disabled. In that configuration read `TotalDropped` as a floor rather than the whole loss: it counts writes discarded because there is no queue to park them in, but not the connect-window drain, which has no ownership filter and so cannot attribute its discards to one source. See [Known Limitations](connectors.md#known-limitations).
+The client's diagnostics are a plain `SourceDiagnostics` with no WebSocket specific additions. `OutboundRetries.Capacity` echoes `WriteRetryQueueSize`, and is `0` when the queue is disabled; in that configuration read `TotalDropped` as a floor rather than the whole loss (see [Known Limitations](connectors.md#known-limitations)).
 
 The standalone server's diagnostics are a `WebSocketServerDiagnostics`, which adds two members:
 
@@ -451,11 +445,9 @@ The standalone server's diagnostics are a `WebSocketServerDiagnostics`, which ad
 | `ConnectionCount` | Clients currently connected. |
 | `CurrentSequence` | The sequence number most recently assigned to an outgoing message. A monotonic position in the message stream rather than a count of events, which is why it carries no `Total` prefix. See [Sequence Numbers and Gap Detection](#sequence-numbers-and-gap-detection). |
 
-A server has no inbound buffer or retry queue, so only `OutboundChanges` applies there. It is registered while the change queue processor is running and reports a `null` capacity, meaning unbounded.
+A server has no inbound buffer or retry queue, so only `OutboundChanges` applies there. It is registered while the change queue processor is running and its capacity is `null`, because that queue is unbounded.
 
-**Embedded mode has no connector diagnostics.** `WebSocketSubjectHandler` is not an `ISubjectConnector`, and the change processor it runs deliberately does not register into any server's metrics, so an embedded handler cannot wire itself into a standalone server's numbers. The handler exposes the same two transport numbers directly as `ConnectionCount` and `CurrentSequence`; resolve it with `serviceProvider.GetRequiredKeyedService<WebSocketSubjectHandler>("/ws")`, keyed by the path you registered. Promoting the embedded processor to a connector of its own is a follow-up.
-
-`LastError` on either connector is sticky: it survives recovery and is cleared only by a restart, so use `IsOperational` for the current answer.
+**Embedded mode has no connector diagnostics.** `WebSocketSubjectHandler` is not an `ISubjectConnector`, and the change processor it runs deliberately does not register into any server's metrics, so an embedded handler cannot wire itself into a standalone server's numbers. The handler exposes the same two transport numbers directly as `ConnectionCount` and `CurrentSequence`; resolve it with `serviceProvider.GetRequiredKeyedService<WebSocketSubjectHandler>("/ws")`, keyed by the path you registered.
 
 Both connector types are public but are registered under a private key, so pick them out of the registered hosted services with `serviceProvider.GetServices<IHostedService>().OfType<WebSocketSubjectServer>()` or `OfType<WebSocketSubjectClientSource>()`, or hold the instance if you constructed it yourself. The client is also reachable as an `ISubjectSource` through the source monitor's `SourceSubscription.Sources`, or through `property.TryGetSource(out var source)` on a property it owns.
 
@@ -484,7 +476,7 @@ The protocol is designed for future enhancements:
 - **Subscriptions**: Message types 7-8 reserved for subscribing to specific subjects/properties
 - **Message compression**: Per-message or per-frame compression to reduce bandwidth
 - **Authentication/authorization hooks**: Token-based auth during handshake or per-message access control
-- **Throughput counters**: Message throughput tracking, the one part of [Diagnostics](#diagnostics) neither WebSocket connector measures today
+- **Throughput counters**: Message throughput tracking
 
 ## Performance
 

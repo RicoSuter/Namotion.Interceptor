@@ -254,20 +254,20 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 ## Diagnostics
 
-`IOpcUaSubjectServer.Diagnostics` exposes a live facade of type `OpcUaServerDiagnostics`. Resolve it once and poll (see [Resolving the Server](#resolving-the-server)). Every read is thread-safe, takes no lock owned by this library, and cannot throw.
+`IOpcUaSubjectServer.Diagnostics` exposes a live facade of type `OpcUaServerDiagnostics`. Resolve it once and poll (see [Resolving the Server](#resolving-the-server)).
 
-`OpcUaServerDiagnostics` derives from `ConnectorDiagnostics`, so it carries the shared members every connector reports (`IsOperational`, `OperationalChangeTime`, `LastError`, `StartTime`, `Throughput`, `OutboundChanges`) plus the two below. See [Connector Diagnostics](connectors.md#connector-diagnostics) for the shared tree, the `Total` naming convention, and the read consistency rules.
+`OpcUaServerDiagnostics` derives from `ConnectorDiagnostics`, whose members, buffer semantics and read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to this server.
 
-**`IsOperational` for this server means it has started and is accepting client connections.** It replaces the former `IsRunning`. `OperationalChangeTime` replaces the former `StartTime` and `Uptime` pair: it moves on every internal restart, where the inherited `StartTime` marks the current run of the hosted service and does not.
+**`IsOperational` here means the server has started and is accepting client connections.** The server restarts itself internally on failure, and the two timestamps split along that line: `OperationalChangeTime` moves on every internal restart, while the inherited `StartTime` marks the current run of the hosted service and does not.
 
-This server measures both throughput directions, so `Throughput.IncomingPerSecond` (client writes to the server, 60-second sliding window) and `Throughput.OutgoingPerSecond` (subject changes pushed to OPC UA nodes, same window) are never `null` here. `OutboundChanges` is the change queue feeding the address space: `Depth` growing means changes are produced faster than they flush, and `Capacity` is `null` because that queue is unbounded.
+This server measures both throughput directions, so `Throughput.IncomingPerSecond` (client writes to the server) and `Throughput.OutgoingPerSecond` (subject changes pushed to OPC UA nodes) are never `null` here. `OutboundChanges` is the change queue feeding the address space, and its `Capacity` is `null` because that queue is unbounded.
 
 | Member | Meaning |
 |---|---|
 | `ActiveSessionCount` | Currently active client sessions. |
 | `ConsecutiveFailures` | Consecutive startup failures. A gauge that resets on a successful start, which is why it carries no `Total` prefix. See [Resilience](#resilience). |
 
-`LastError` is sticky: it survives recovery and is cleared only by a restart of the hosted service, not by the server's own internal restart. A non-null value therefore means "a start or a change flush failed at some point during this run", and `IsOperational` is what says whether the server is serving now.
+`LastError` is cleared by a restart of the hosted service, not by the server's own internal restart, so a non-null value means "a start or a change flush failed at some point during this run of the hosted service".
 
 ## Direct Server Access
 

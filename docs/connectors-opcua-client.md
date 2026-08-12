@@ -645,11 +645,11 @@ When a batch write to the OPC UA server partially fails, the client throws an `O
 
 ## Diagnostics
 
-`IOpcUaSubjectClientSource.Diagnostics` exposes a live facade of type `OpcUaClientDiagnostics`. Resolve it once and poll (see [Resolving the Client Source](#resolving-the-client-source)). Every read is thread-safe, takes no lock owned by this library, and cannot throw.
+`IOpcUaSubjectClientSource.Diagnostics` exposes a live facade of type `OpcUaClientDiagnostics`. Resolve it once and poll (see [Resolving the Client Source](#resolving-the-client-source)).
 
-`OpcUaClientDiagnostics` derives from `SourceDiagnostics`, so it carries the shared members every connector reports (`IsOperational`, `OperationalChangeTime`, `LastError`, `StartTime`, `Throughput`, `OutboundChanges`, `ClaimedPropertyCount`, `OutboundRetries`, `InboundBuffer`) plus the OPC UA specific ones below. See [Connector Diagnostics](connectors.md#connector-diagnostics) for the shared tree, the `Total` naming convention, and the read consistency rules.
+`OpcUaClientDiagnostics` derives from `SourceDiagnostics`, whose members, buffer semantics and read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to this client.
 
-**`IsOperational` for this client means the session is usable and no reconnection is in progress.** It replaces the former `IsConnected` and carries the same meaning by construction. It is not a claim that the model is in sync: while the initial load runs, `IsOperational` is already true and `ISubjectSource.State` is still `Synchronizing`. Read the two together to tell a dropped network from a connected client that is still loading: the first is `IsOperational` false, the second is `IsOperational` true with a state of `Synchronizing`. See [Source Monitoring](connectors-monitoring.md).
+**`IsOperational` here means the session is usable and no reconnection is in progress.** It is not a claim that the model is in sync: while the initial load runs, `IsOperational` is already true and `ISubjectSource.State` is still `Synchronizing`, which is how a dropped network is told apart from a connected client that is still loading. See [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
 
 This client measures both throughput directions, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are never `null` here.
 

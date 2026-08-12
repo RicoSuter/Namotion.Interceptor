@@ -205,7 +205,7 @@ Reading `State` and `StateChangeTime` in sequence is two separate snapshots. Eac
 
 `ISubjectConnector.Diagnostics` answers "what is the transport doing", in both directions, and gates nothing. It is where liveness, throughput, the outbound backlog and the last error live. See [Connector Diagnostics](connectors.md#connector-diagnostics) for the full member tree.
 
-The outbound backlog is the clearest case of the split: `Diagnostics.OutboundRetries.Depth`, which replaced the former `ISubjectSource.PendingWriteCount`, can be non-zero during entirely normal synchronized operation, because a queued write says nothing about whether the model mirrors the external system.
+The outbound backlog is the clearest case of the split: `Diagnostics.OutboundRetries.Depth` can be non-zero during entirely normal synchronized operation, because a queued write says nothing about whether the model mirrors the external system.
 
 Read the two together to tell a network outage from a connected source that is still loading: the first is `IsOperational` false, the second is `IsOperational` true with a state of `Synchronizing`.
 
