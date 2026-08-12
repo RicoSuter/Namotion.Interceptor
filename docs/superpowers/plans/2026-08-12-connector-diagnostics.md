@@ -17,6 +17,18 @@
 - **No diagnostics getter may throw and none may take a lock.** `SourceMonitor` reads source members while holding its own lock and `StateChanged` fires inside the source's transition lock; a lock-taking getter closes an ABBA cycle. Documented on `ISubjectSource`.
 - **Test naming:** `When<Condition>_Then<ExpectedBehavior>`, with explicit `// Arrange`, `// Act`, `// Assert` comments (`// Act & Assert` for exception tests).
 - **No hardcoded waits** in tests. Use `AsyncTestHelpers.WaitUntilAsync(() => condition)` or `ManualResetEventSlim`/`CountdownEvent`.
+- **Several tests need the wall clock to advance** before asserting that a timestamp moved, because two `DateTimeOffset.UtcNow` reads inside one method can return identical ticks. Spin until it does rather than sleeping a fixed amount, which would be a hardcoded wait: too short on a coarse timer, wasteful otherwise. Add this private helper to each test class that needs it (`Task 2`, `Task 7`, `Task 14`), rather than sharing it across assemblies:
+
+```csharp
+    private static void WaitForClockTick()
+    {
+        var tick = DateTimeOffset.UtcNow.UtcTicks;
+        while (DateTimeOffset.UtcNow.UtcTicks == tick)
+        {
+            Thread.SpinWait(1);
+        }
+    }
+```
 - **No em dashes** in any documentation, XML doc comment, or commit message. Restructure into plain sentences.
 - **No AI attribution** in commit messages or the PR description. No agent names, no `Co-Authored-By` trailers, no "Generated with" footers.
 - **Markdown paragraphs go on one line.** Never hard-wrap at a column.
@@ -694,7 +706,7 @@ public class ConnectorMetricsTests
         metrics.InboundBuffer.AddDropped(5);
 
         // Act
-        Thread.Sleep(1);
+        WaitForClockTick();
         metrics.MarkStarted();
 
         // Assert
@@ -2021,7 +2033,7 @@ In `src/Namotion.Interceptor.Connectors.Tests/SourceStateTests.cs`, replace the 
         var synchronizedAt = source.StateChangeTime;
 
         // Act
-        Thread.Sleep(1);
+        WaitForClockTick();
         source.TransitionStateTo(SourceState.Synchronizing);
 
         // Assert
@@ -2038,7 +2050,7 @@ In `src/Namotion.Interceptor.Connectors.Tests/SourceStateTests.cs`, replace the 
         var first = source.StateChangeTime;
 
         // Act
-        Thread.Sleep(1);
+        WaitForClockTick();
         source.TransitionStateTo(SourceState.Synchronized);
 
         // Assert
@@ -2329,13 +2341,42 @@ public class OutboundDropCountingTests
     }
 
     [Fact]
-    public async Task WhenTheProcessorIsRecreated_ThenOutboundChangesReportsDepthAgain()
+    public async Task WhenTheProcessorIsRecreated_ThenTheAccumulatedDropCountSurvives()
+    {
+        // Arrange: a bounded processor registered against the metrics, dropping into it, then handed
+        // over. The in-repo connectors all pass maxQueueDepth: null, so this drives QueueMetrics and
+        // ChangeQueueProcessor directly rather than through a source.
+        var metrics = new SourceMetrics();
+        var diagnostics = new SourceDiagnostics(metrics);
+        var first = CreateBoundedProcessor(maxQueueDepth: 1);
+        metrics.OutboundChanges.Register(() => first.QueueDepth, () => first.DropCount, capacity: 1);
+        await OverflowAsync(first, changeCount: 4);
+        var afterFirst = diagnostics.OutboundChanges.TotalDropped;
+
+        // Act
+        metrics.OutboundChanges.Deregister();
+        first.Dispose();
+        var second = CreateBoundedProcessor(maxQueueDepth: 1);
+        metrics.OutboundChanges.Register(() => second.QueueDepth, () => second.DropCount, capacity: 1);
+        await OverflowAsync(second, changeCount: 4);
+
+        // Assert
+        Assert.True(afterFirst > 0);
+        Assert.Equal(afterFirst * 2, diagnostics.OutboundChanges.TotalDropped);
+        second.Dispose();
+    }
+
+    [Fact]
+    public async Task WhenASourceIsRunning_ThenItsOutboundChangeQueueIsRegisteredAsUnbounded()
     {
         // Arrange
         var source = CreateStartedSource(writeRetryQueueSize: 1000, failWrites: false);
-        await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.OutboundChanges.Capacity is null);
 
-        // Act & Assert: unbounded queue registered, depth readable, no drops possible.
+        // Act
+        await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.OutboundChanges.Capacity is null
+            && source.Diagnostics.StartTime is not null);
+
+        // Assert
         Assert.Null(source.Diagnostics.OutboundChanges.Capacity);
         Assert.Equal(0, source.Diagnostics.OutboundChanges.TotalDropped);
     }
@@ -2525,7 +2566,7 @@ Leave `DrainOwnedWritesToRetryQueue`'s `WriteRetryQueue is null` branch (`:345-3
 
 Run: `dotnet test src/Namotion.Interceptor.Connectors.Tests --filter "FullyQualifiedName~OutboundDropCountingTests"`
 
-Expected: PASS, 7 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 7: Verify each counter is load-bearing**
 
@@ -3555,7 +3596,7 @@ public class OpcUaClientDiagnosticsTests
         var upAt = source.Diagnostics.OperationalChangeTime;
 
         // Act
-        Thread.Sleep(1);
+        WaitForClockTick();
         source.NotifyConnectionLost();
 
         // Assert
