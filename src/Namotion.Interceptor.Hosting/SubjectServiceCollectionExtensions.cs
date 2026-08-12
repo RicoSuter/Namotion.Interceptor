@@ -1,4 +1,3 @@
-using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -57,6 +56,8 @@ public static class SubjectServiceCollectionExtensions
         Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
         where T : class, IInterceptorSubject
     {
+        var contextFactory = TryCreateContextFactory<T>();
+
         services.TryAddSingleton<T>(serviceProvider =>
         {
             var context = contextResolver is not null
@@ -67,9 +68,14 @@ public static class SubjectServiceCollectionExtensions
             // can consume the extra argument. It confers no attachment advantage: the generated
             // constructor is "C(IInterceptorSubjectContext context) : this()", so the attach happens
             // after the parameterless constructor body either way.
-            if (context is not null && HasContextConstructor<T>())
+            //
+            // The decision is the factory itself rather than a reflection query, so the code that
+            // decides a context taking constructor is usable is the code that then uses it. A
+            // reflection query answers the looser question of whether any constructor mentions the
+            // type, which can be true of one ActivatorUtilities cannot call.
+            if (context is not null && contextFactory is not null)
             {
-                var attachedInstance = ActivatorUtilities.CreateInstance<T>(serviceProvider, context);
+                var attachedInstance = (T)contextFactory(serviceProvider, [context]);
 
                 // Ordered ahead of the attach below, which is the only ordering this factory controls.
                 // For the generated constructor the subject is already attached and this changes
@@ -105,10 +111,21 @@ public static class SubjectServiceCollectionExtensions
         return services;
     }
 
-    private static bool HasContextConstructor<T>()
+    /// <summary>
+    /// The factory for a constructor that takes the context, or null when the type has none that
+    /// <see cref="ActivatorUtilities"/> can call with one. There is no Try form of
+    /// <see cref="ActivatorUtilities.CreateFactory(Type, Type[])"/>, so the probe is a catch, but it
+    /// runs once per registration and it caches the constructor selection.
+    /// </summary>
+    private static ObjectFactory? TryCreateContextFactory<T>()
     {
-        return typeof(T).GetConstructors(BindingFlags.Public | BindingFlags.Instance)
-            .Any(constructor => constructor.GetParameters()
-                .Any(parameter => parameter.ParameterType == typeof(IInterceptorSubjectContext)));
+        try
+        {
+            return ActivatorUtilities.CreateFactory(typeof(T), [typeof(IInterceptorSubjectContext)]);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 }

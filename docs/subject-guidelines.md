@@ -473,7 +473,7 @@ public partial class ShellyDevice
 
 When creating a subject library that extends `BackgroundService`, provide a DI extension method using `AddSubject<T>` from `Namotion.Interceptor.Hosting`.
 
-`AddSubject<T>` registers the subject as a singleton, constructs it at host start and attaches it to the context. When that context has hosting enabled, the handler on it starts the subject because the subject entered the graph, and host startup waits for that start. When the resolved context has no hosting handler, `AddSubject<T>` starts an `IHostedService` subject itself and stops that same instance at host shutdown, so the subject runs either way. Do not register the same subject with `AddHostedService<T>` as well, because that is a second owner and a second start.
+`AddSubject<T>` registers the subject as a singleton, constructs it at host start and attaches it to the context. One instance per type: the registration is a singleton keyed on `T`, so `AddShellyDevice()` twice yields one `ShellyDevice`, and the second call's `configure` and `contextResolver` are dropped. That is unchanged from `AddHostedSubject<T>`, which behaved the same way. To run several instances of one type, construct them yourself and attach them to the object graph rather than registering them, which is what an application managing devices from configuration does. When that context has hosting enabled, the handler on it starts the subject because the subject entered the graph, and host startup waits for that start. When the resolved context has no hosting handler, `AddSubject<T>` starts an `IHostedService` subject itself and stops that same instance at host shutdown, so the subject runs either way. Do not register the same subject with `AddHostedService<T>` as well, because that is a second owner and a second start.
 
 ### DI Extension Method
 
@@ -538,7 +538,9 @@ public MySubject(IMyDriver driver, ILogger<MySubject> logger)
 }
 ```
 
-Declare an `IInterceptorSubjectContext` parameter only when the constructor genuinely needs the context, for example to build child subjects. The one thing worth knowing turns on whether construction actually attaches the subject, which is what the generated context constructor does: `configure` then runs against an attached subject, so its assignments are intercepted and race the start the attach queued. A constructor that declares the parameter and never attaches with it behaves like one that never declared it.
+Declare an `IInterceptorSubjectContext` parameter only when the constructor genuinely needs the context, for example to build child subjects.
+
+What changes if it does is the order of two things. The generated context constructor attaches the subject itself, so by the time `AddSubject` runs `configure` the subject is already in the graph: its assignments are intercepted and tracked, and they race the start that attach queued. Without such a constructor `AddSubject` attaches after `configure`, so the assignments are not intercepted and no start can observe them half written. A constructor that declares the parameter but never calls `AddFallbackContext` with it behaves like one that never declared it.
 
 ### Restart Contract
 
