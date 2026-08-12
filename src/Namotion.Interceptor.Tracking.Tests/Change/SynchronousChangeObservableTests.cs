@@ -127,7 +127,7 @@ public class SynchronousChangeObservableTests
     }
 
     [Fact]
-    public void WhenCalledTwice_ThenEachCallReturnsADistinctInstance()
+    public void WhenCalledTwice_ThenEachCallReturnsAnIndependentInstance()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
@@ -136,16 +136,17 @@ public class SynchronousChangeObservableTests
         var firstReceived = new List<string?>();
         var secondReceived = new List<string?>();
 
-        // Act
         var first = property.GetSynchronousChangeObservable();
         var second = property.GetSynchronousChangeObservable();
 
         using var firstSubscription = first.Subscribe(change => firstReceived.Add(change.GetNewValue<string?>()));
         using var secondSubscription = second.Subscribe(change => secondReceived.Add(change.GetNewValue<string?>()));
 
+        // Act
         person.FirstName = "Rico";
 
-        // Assert: nothing may key observables by identity, and each instance carries its own subscription.
+        // Assert: distinct instances are not enough on their own. A facade multicasting over one shared
+        // subscription would pass NotSame and fill both lists, and is caught only by the count.
         Assert.NotSame(first, second);
         Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount());
         Assert.Equal(["Rico"], firstReceived);

@@ -98,8 +98,9 @@ public static class PropertyChangeSubscriptionExtensions
     /// <c>TaskPoolScheduler</c> do, so composing it per property is unaffordable. And an exception from the
     /// handler escapes the <c>ObserveOn</c> sink into the scheduler, which does not catch it: on
     /// <c>Scheduler.Default</c> it goes unhandled and terminates the process, and on
-    /// <c>TaskPoolScheduler</c> it becomes an unobserved task exception, so the failure is lost silently.
-    /// Prefer the scheduler overloads of <c>Subscribe</c>, which have neither.
+    /// <c>TaskPoolScheduler</c> it becomes an unobserved task exception and the subscription stops
+    /// delivering, so one bad change silently ends the stream. Prefer the scheduler overloads of
+    /// <c>Subscribe</c>, which have neither.
     /// </para>
     /// <para>
     /// The sequence never completes and never signals OnError, so operators that wait for completion, such
