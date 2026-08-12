@@ -18,48 +18,52 @@ public sealed class QueueMetrics
     private Snapshot _snapshot = new(0, null, null, null);
 
     /// <summary>
-    /// Points this instance at a newly created buffer.
+    /// Points this instance at a newly created buffer. A live registration must be released with
+    /// <see cref="Deregister"/> before another can be made.
     /// </summary>
     /// <remarks>
     /// Neither delegate may throw; a throwing delegate is treated as reporting zero rather than
-    /// letting the exception escape a diagnostics read.
+    /// letting the exception escape a diagnostics read. Neither delegate may take a lock owned by
+    /// this library either, because a diagnostics read can happen while a monitor holds its own lock.
     /// </remarks>
     /// <param name="depth">Reads the buffer's current item count.</param>
     /// <param name="dropped">
     /// Reads the buffer's own drop counter, or <c>null</c> for a buffer that has none and reports
     /// through <see cref="AddDropped"/> instead. Passing <c>() =&gt; 0</c> instead of <c>null</c>
-    /// would work but invites a later implementer to add a counter that then double counts.
+    /// would work but invites a later implementer to add a counter that then double counts. Must be
+    /// non-decreasing: both <see cref="Reset"/> and the fold on handover rely on that to keep
+    /// <see cref="TotalDropped"/> from decreasing.
     /// </param>
     /// <param name="capacity">The buffer's bound, or <c>null</c> if it is unbounded.</param>
+    /// <exception cref="InvalidOperationException">
+    /// A registration is already live. Call <see cref="Deregister"/> first.
+    /// </exception>
     public void Register(Func<int> depth, Func<long>? dropped, int? capacity)
     {
         ArgumentNullException.ThrowIfNull(depth);
 
-        Swap((Depth: depth, Dropped: dropped, Capacity: capacity), static (current, state) =>
+        // Checked before the Swap loop, not inside the update delegate, so it cannot fire from within
+        // a CAS retry: a live registration means someone forgot to call Deregister, not a race to
+        // resolve by retrying.
+        if (Volatile.Read(ref _snapshot).Depth is not null)
         {
-            var accumulated = current.Accumulated;
+            throw new InvalidOperationException(
+                "A registration is already live on this QueueMetrics instance. Call Deregister before registering again.");
+        }
 
-            // Only fold when the provider is actually being replaced. Re-registering the same
-            // delegate instance (the caller handing back the buffer it already registered) must not
-            // fold its count in again, or every such call would double count.
-            if (current.Dropped is not null && !ReferenceEquals(current.Dropped, state.Dropped))
-            {
-                accumulated += SafeInvokeDropped(current.Dropped);
-            }
-
-            return new Snapshot(accumulated, state.Depth, state.Dropped, state.Capacity);
-        });
+        Swap((Depth: depth, Dropped: dropped, Capacity: capacity), static (current, state) =>
+            new Snapshot(current.Accumulated + SafeInvokeDropped(current.Dropped), state.Depth, state.Dropped, state.Capacity));
     }
 
     /// <summary>
-    /// Folds the live drop count into the accumulator and clears the providers. Must run before the
-    /// buffer is disposed.
+    /// Folds the live drop count into the accumulator and clears the providers.
     /// </summary>
     /// <remarks>
-    /// Clearing the providers first narrows the race with a concurrent reader rather than closing
-    /// it: a reader can hold a non-null provider and be preempted. That is safe only because
-    /// <see cref="ChangeQueueProcessor"/> keeps its queue and drop count alive through
-    /// <see cref="ChangeQueueProcessor.Dispose"/>.
+    /// The buffer must have stopped producing before this runs: any drop that lands between the fold
+    /// and the compare-exchange is lost. Clearing the providers first narrows the race with a
+    /// concurrent reader rather than closing it: a reader can hold a non-null provider and be
+    /// preempted. That is safe only because <see cref="ChangeQueueProcessor"/> keeps its queue and
+    /// drop count alive through <see cref="ChangeQueueProcessor.Dispose"/>.
     /// </remarks>
     public void Deregister()
     {
@@ -95,7 +99,12 @@ public sealed class QueueMetrics
         get
         {
             var snapshot = Volatile.Read(ref _snapshot);
-            return snapshot.Accumulated + SafeInvokeDropped(snapshot.Dropped);
+
+            // Reset stores a negative Accumulated and relies on the same provider adding that count
+            // back on the next read. If that provider then throws, SafeInvokeDropped returns 0 and
+            // the sum would surface as negative; clamp so a throwing provider can never produce a
+            // negative total.
+            return Math.Max(0, snapshot.Accumulated + SafeInvokeDropped(snapshot.Dropped));
         }
     }
 
