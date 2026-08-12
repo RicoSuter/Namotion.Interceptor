@@ -75,9 +75,16 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     /// <summary>
     /// Drops liveness alone, for the paths that observe a session which is no longer usable but must
-    /// not report a connection loss: the state transition and the writer generation bump that
-    /// <see cref="NotifyConnectionLost"/> also performs have either already happened or do not apply.
+    /// not report a connection loss.
     /// </summary>
+    /// <remarks>
+    /// The state transition and the writer generation bump that <see cref="NotifyConnectionLost"/>
+    /// also performs are left to the caller. A caller that performs neither leaves
+    /// <see cref="ISubjectSource.State"/> where it was, so the source can read
+    /// <see cref="Namotion.Interceptor.Connectors.Monitoring.SourceState.Synchronized"/> beside a
+    /// client reporting itself as not operational until a reconnection or a later health check tick
+    /// moves the state.
+    /// </remarks>
     internal void NotifySessionNotHealthy() => Metrics.MarkNotOperational();
 
     /// <inheritdoc />
@@ -214,15 +221,19 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 RunHealthCheckLoopAsync,
                 async () =>
                 {
+                    try { await sessionManagerForLifetime.DisposeAsync().ConfigureAwait(false); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "OPC UA session manager threw during listen-lifetime disposal."); }
+
                     // The lifetime is disposed on every way out of this attempt, including a failure
                     // that happens after this method returned (the initial load, the retry queue
                     // reconcile or the change processor). The retry loop records that failure but
                     // touches no liveness, so without this the client keeps reporting itself as
-                    // serving for the whole retry delay with its session already gone.
+                    // serving for the whole retry delay with its session already gone. After the
+                    // disposal, which latches the manager's disposed flag: an OnReconnectComplete
+                    // still in flight on a pool thread would otherwise observe a transferred,
+                    // connected session and raise liveness again behind this call, and that stale
+                    // rise would then stand for the whole retry delay.
                     Metrics.MarkNotOperational();
-
-                    try { await sessionManagerForLifetime.DisposeAsync().ConfigureAwait(false); }
-                    catch (Exception ex) { _logger.LogWarning(ex, "OPC UA session manager threw during listen-lifetime disposal."); }
                 });
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -703,13 +714,15 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             }
             else
             {
-                // No manual reconnection in progress, so clear the session directly. Liveness is
-                // dropped here rather than left to the next health check, a whole
-                // SubscriptionHealthCheckInterval away: the session is about to be gone, so the
-                // client is no longer serving.
-                Metrics.MarkNotOperational();
-
+                // No manual reconnection in progress, so clear the session directly.
                 await sessionManager.ClearSessionAsync(CancellationToken.None).ConfigureAwait(false);
+
+                // Liveness is dropped here rather than left to the next health check, a whole
+                // SubscriptionHealthCheckInterval away: the session is gone, so the client is no
+                // longer serving. After the clear rather than before it, because the clear waits for
+                // the reconnection lock and an SDK reconnect completing while it waits would raise
+                // liveness again on the very session the clear is about to take away.
+                Metrics.MarkNotOperational();
 
                 // If ReconnectSessionAsync started between our _reconnectCts check and ClearSessionAsync,
                 // cancel it to speed up recovery instead of waiting for it to fail naturally.

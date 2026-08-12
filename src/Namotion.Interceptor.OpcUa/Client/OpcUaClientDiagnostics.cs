@@ -6,14 +6,16 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// What the OPC UA client reports about its session, on top of the shared source diagnostics.
 /// </summary>
 /// <remarks>
-/// <see cref="ConnectorDiagnostics.IsOperational"/> means the client has a live session and has
-/// finished setting up its subscriptions. It stays false for the whole address space browse and
-/// subscription creation, which on a large server takes minutes, and rises on the first health check
-/// tick once those have completed. It drops again whenever the session is lost, killed or torn down,
-/// and whenever a connect attempt ends.
+/// <see cref="ConnectorDiagnostics.IsOperational"/> means the client has a live session with its
+/// subscriptions set up. It stays false for the whole address space browse and subscription
+/// creation, which on a large server takes minutes. Which step raises it depends on how the session
+/// came about: the first health check tick on an initial connect, the completed subscription
+/// transfer on an SDK reconnect, and the completed state reload on a manual reconnect. It drops
+/// whenever the session is lost, killed or torn down, and whenever a connect attempt ends.
 /// <para>
-/// True does not mean the model is in sync: the initial value read runs after the rise, and while it
-/// runs the source state is
+/// True does not mean the model is in sync, and the two are not ordered against each other: the
+/// initial value read can run either side of the rise on an initial connect, and on a manual
+/// reconnect the reload always finishes first. While that read runs the source state is
 /// <see cref="Namotion.Interceptor.Connectors.Monitoring.SourceState.Synchronizing"/>. Read the two
 /// together to tell a network outage from a connected client still loading. See
 /// docs/connectors-monitoring.md.
@@ -31,25 +33,34 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     }
 
     /// <summary>
+    /// Gets the session manager every block below reads through, or <c>null</c> once it has been
+    /// disposed. The source keeps its field pointing at the manager of the attempt that just ended,
+    /// so without this check the blocks would report the subscriptions, polling items and pending
+    /// reads of a session that is already gone for the whole retry delay.
+    /// </summary>
+    private Connection.SessionManager? ActiveSessionManager =>
+        _source.SessionManager is { IsDisposed: false } sessionManager ? sessionManager : null;
+
+    /// <summary>
     /// Gets a value indicating whether the client is currently attempting to reconnect. A distinct
     /// sub-state of not being operational, not a second spelling of it.
     /// </summary>
-    public bool IsReconnecting => _source.SessionManager?.IsReconnecting ?? false;
+    public bool IsReconnecting => ActiveSessionManager?.IsReconnecting ?? false;
 
     /// <summary>
     /// Gets the current session identifier, or <c>null</c> if there is no session.
     /// </summary>
-    public string? SessionId => _source.SessionManager?.CurrentSession?.SessionId?.ToString();
+    public string? SessionId => ActiveSessionManager?.CurrentSession?.SessionId?.ToString();
 
     /// <summary>
     /// Gets the number of active OPC UA subscriptions.
     /// </summary>
-    public int SubscriptionCount => _source.SessionManager?.Subscriptions.Count ?? 0;
+    public int SubscriptionCount => ActiveSessionManager?.Subscriptions.Count ?? 0;
 
     /// <summary>
     /// Gets the number of monitored items across all subscriptions.
     /// </summary>
-    public int MonitoredItemCount => _source.SessionManager?.SubscriptionManager.MonitoredItems.Count ?? 0;
+    public int MonitoredItemCount => ActiveSessionManager?.SubscriptionManager.MonitoredItems.Count ?? 0;
 
     /// <summary>
     /// Gets the reconnection history.
@@ -61,16 +72,17 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     /// set up yet, or the client is between connect attempts.
     /// </summary>
     /// <remarks>
-    /// This reads through the session manager, which is discarded on every failed connect attempt, so
-    /// the block is <c>null</c> for the whole retry delay rather than only before the first session.
-    /// The underlying totals are owned by the source and survive that, so they reappear at their
-    /// previous values once a session exists again.
+    /// This reads through the session manager and stops seeing it the moment that manager is
+    /// disposed, which every way out of a connect attempt does, so the block is <c>null</c> for the
+    /// whole retry delay rather than only before the first session. The underlying totals are owned
+    /// by the source and survive that, so they reappear at their previous values once a session
+    /// exists again.
     /// </remarks>
     public PollingDiagnostics? Polling
     {
         get
         {
-            var pollingManager = _source.SessionManager?.PollingManager;
+            var pollingManager = ActiveSessionManager?.PollingManager;
             return pollingManager is not null ? new PollingDiagnostics(pollingManager) : null;
         }
     }
@@ -87,7 +99,7 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     {
         get
         {
-            var manager = _source.SessionManager?.ReadAfterWriteManager;
+            var manager = ActiveSessionManager?.ReadAfterWriteManager;
             return manager is not null ? new ReadAfterWriteDiagnostics(manager) : null;
         }
     }
