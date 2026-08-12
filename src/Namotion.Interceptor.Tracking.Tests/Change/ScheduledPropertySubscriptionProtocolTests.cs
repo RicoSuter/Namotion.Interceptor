@@ -234,6 +234,69 @@ public class ScheduledPropertySubscriptionProtocolTests : IDisposable
     }
 
     [Fact]
+    public void WhenDisposed_ThenTheObserverReferenceIsReleased()
+    {
+        // Arrange: these handles get parked in DI containers, so a disposed one that still held its observer
+        // would keep the closure and everything it captured alive for as long as the handle is reachable.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        var scheduler = new ControllableScheduler();
+        var received = new List<string?>();
+
+        var subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe((in SubjectPropertyChange change) => received.Add(change.GetNewValue<string?>()), scheduler);
+
+        // Precondition: the observer is held while the subscription is live, so the assertion below is not
+        // passing on a reference that was never there.
+        Assert.False(subscription.IsObserverReleasedForTests);
+
+        // Act
+        subscription.Dispose();
+
+        // Assert
+        Assert.True(subscription.IsObserverReleasedForTests);
+    }
+
+    [Fact]
+    public void WhenTheObserverDisposesItsOwnSubscriptionMidBatch_ThenTheRestOfTheBatchIsDroppedAndNothingEscapes()
+    {
+        // Arrange: a self-disposing observer is the one dispose-against-delivery interleaving a test can pin
+        // deterministically. The recording wrapper is what makes an escape observable at all, since on a pool
+        // scheduler it would be unhandled and take the test host down instead of failing an assertion.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        var inner = new ControllableScheduler();
+        var scheduler = new RecordingScheduler(inner);
+        var received = new List<string?>();
+        var errors = new List<Exception>();
+        ScheduledPropertySubscription? subscription = null;
+
+        subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe(
+                (in SubjectPropertyChange change) =>
+                {
+                    received.Add(change.GetNewValue<string?>());
+                    subscription!.Dispose();
+                },
+                scheduler,
+                errors.Add);
+
+        person.FirstName = "one";
+        person.FirstName = "two";
+        person.FirstName = "thre";
+
+        // Act
+        inner.RunUntilIdle();
+
+        // Assert
+        Assert.Equal(["one"], received);
+        Assert.Empty(scheduler.Escaped);
+        Assert.Empty(errors);
+        Assert.True(subscription.IsObserverReleasedForTests);
+        Assert.Equal(0, subscription.PendingCount);
+    }
+
+    [Fact]
     public void WhenDisposedTwice_ThenTheProcessWideCountIsDecrementedOnce()
     {
         // Arrange

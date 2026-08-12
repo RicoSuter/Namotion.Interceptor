@@ -23,8 +23,14 @@ public sealed class ScheduledPropertySubscription : IDisposable
     // either way, so accepted work is neither stranded nor drained twice at once.
     //
     // Dispose against enqueue: a writer already past its _state check can still enqueue and still schedule
-    // after Dispose returns. Nothing is delivered because the drain re-checks _state, and the _wip it leaves
-    // behind gates nothing afterwards, since every reschedule is conditioned on _state too.
+    // after Dispose returns. Two different primitives handle the two halves of that. The drain's in-loop
+    // _state re-check, together with the settle's _state check, stops the reschedule, and the _wip left behind
+    // gates nothing afterwards. It does not stop the delivery: a drain whose Volatile.Read(ref _state) ran
+    // before the CAS proceeds to TryDequeue and can dequeue a change a late writer enqueued after the CAS,
+    // because that enqueue lands in the fresh segment _queue.Clear() installed. What stops the delivery is
+    // Deliver's _observer null guard, and only from TransitionOutOfLive's Volatile.Write(ref _observer, null),
+    // which is a later statement than the CAS. So a change accepted after disposal began can still be
+    // delivered, bounded by Dispose not having returned yet.
     //
     // Dispose against a mid-flight delivery: Deliver and ReportError read _observer and _onError into locals
     // before use, so a transition that nulls them cannot null-reference a delivery already running. A
@@ -100,10 +106,16 @@ public sealed class ScheduledPropertySubscription : IDisposable
     /// instead of discovering it through memory pressure. A writer already past its state check can still
     /// enqueue after <see cref="Dispose"/> cleared the queue, and nothing is guaranteed to dequeue such a
     /// change afterwards, so this is not guaranteed to reach zero once the subscription is disposed.
+    /// A fault clears the queue the same way, so a faulted subscription reads zero from here forever with
+    /// acceptance already stopped, which is indistinguishable from a healthy idle one. With the default null
+    /// <c>onError</c> that failure is otherwise silent, so a consumer that needs to detect it has to supply an
+    /// error handler rather than watch this value.
     /// </summary>
     public int PendingCount => _queue.Count;
 
     internal int WorkInProgressForTests => Volatile.Read(ref _wip);
+
+    internal bool IsObserverReleasedForTests => Volatile.Read(ref _observer) is null;
 
     internal int ReentrancyCountForTests => Volatile.Read(ref _reentrancyCount);
 
@@ -145,8 +157,11 @@ public sealed class ScheduledPropertySubscription : IDisposable
         }
 
         // Enqueue before the increment: TryDequeue then cannot report empty while the counter is positive,
-        // because ConcurrentQueue spins on a reserved-but-unpublished slot instead. Reversing these is a
-        // liveness bug, not a correctness one, and it shows up as drains that find nothing.
+        // because ConcurrentQueue spins on a reserved-but-unpublished slot instead. Reversed, a drain can find
+        // nothing and exit with processed == 0, so the settling Interlocked.Add(ref _wip, 0) returns the
+        // counter unchanged and positive, _state is still Live, and the drain reschedules itself having made
+        // no progress. That is a self-sustaining reschedule storm occupying a scheduler thread until the
+        // writer's enqueue finally lands, not merely a wasted work item.
         _queue.Enqueue(change);
         if (Interlocked.Increment(ref _wip) == 1)
         {
@@ -200,6 +215,9 @@ public sealed class ScheduledPropertySubscription : IDisposable
 
     private void ScheduleDrain()
     {
+        // Captured before the try rather than read inside the catch: a winning Dispose nulls _onError, and a
+        // read that lands after that null-write would swallow the scheduler fault silently.
+        var onError = Volatile.Read(ref _onError);
         try
         {
             // Scheduling happens inside the write, so without suppression the observer would inherit the
@@ -207,6 +225,9 @@ public sealed class ScheduledPropertySubscription : IDisposable
             // batch would run under whichever writer enqueued first.
             if (ExecutionContext.IsFlowSuppressed())
             {
+                // Not a guard against a throw: a nested SuppressFlow is legal on .NET 9 and leaves the outer
+                // scope intact. It saves the ExecutionContext clone SuppressFlow makes, and it is reachable
+                // because a writer can write from inside its own suppressed-flow scope.
                 _scheduler.Schedule(this, DrainAction);
             }
             else
@@ -219,7 +240,7 @@ public sealed class ScheduledPropertySubscription : IDisposable
         }
         catch (Exception exception)
         {
-            ReportError(exception);
+            ReportError(onError, exception);
             TransitionOutOfLive(Faulted);
         }
     }
@@ -257,9 +278,10 @@ public sealed class ScheduledPropertySubscription : IDisposable
         }
     }
 
-    private void ReportError(Exception exception)
+    private void ReportError(Exception exception) => ReportError(Volatile.Read(ref _onError), exception);
+
+    private static void ReportError(Action<Exception>? onError, Exception exception)
     {
-        var onError = Volatile.Read(ref _onError);
         if (onError is null)
         {
             return;
@@ -276,11 +298,11 @@ public sealed class ScheduledPropertySubscription : IDisposable
         }
     }
 
-    private bool TransitionOutOfLive(int target)
+    private void TransitionOutOfLive(int target)
     {
         if (Interlocked.CompareExchange(ref _state, target, Live) != Live)
         {
-            return false;
+            return;
         }
 
         Volatile.Write(ref _observer, null);
@@ -293,7 +315,6 @@ public sealed class ScheduledPropertySubscription : IDisposable
         // Queued changes each pin a subject and its boxed values, and these handles get parked in DI
         // containers, so they are released rather than retained.
         _queue.Clear();
-        return true;
     }
 
     /// <summary>
