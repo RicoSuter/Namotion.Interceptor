@@ -189,7 +189,25 @@ State follows the pump: construction starts at `Synchronizing`, `StartBuffering(
 
 `Stopped` is terminal: no further transition succeeds, and `ExecuteAsync` sets it in a `finally` so it fires on every exit path. A guard in `SubjectSourceBase.StartAsync` enforces this, because `BackgroundService` would otherwise happily run `ExecuteAsync` again against a fresh token. Create a new instance rather than restarting a stopped one.
 
-`LastSynchronizedAt` records when the most recent initial synchronization completed (`null` if it never has), so a source that is `Synchronizing` after a drop can still be reported as "stale, last confirmed at T" rather than just "not synchronized." `PendingWriteCount` is orthogonal to `State`: it describes the outbound write retry queue and can be non-empty during entirely normal synchronized operation.
+Two timestamps sit next to `State`, and they answer different questions.
+
+`StateChangeTime` moves on every transition and is stamped at construction, so it is always meaningful. Read with `State` it says how long the current state has lasted: `Synchronized` plus T reads as in sync since T, `Synchronizing` plus T reads as stale since T. That is the stale-duration question operators ask during an incident.
+
+`LastSynchronizedAt` records when the most recent initial synchronization completed, or `null` if it never has. Because it is stamped only on the way into `Synchronized` and never cleared, it answers whether a good period ever began, not when the current one did: a source that synchronized a week ago and dropped an hour ago still reports the week. It is load-bearing rather than diagnostic, and is what lets a completed wait tell `Stale` from `Incomplete` (see [What the Result Means](#what-the-result-means)).
+
+Neither can be derived from the other, which is why both exist: `StateChangeTime` cannot say whether the source was ever synchronized, and `LastSynchronizedAt` cannot say when synchronization was lost.
+
+Reading `State` and `StateChangeTime` in sequence is two separate snapshots. Each read is internally consistent and the timestamps are monotonic, but the pair is not guaranteed to be from the same instant, so do not build a decision that depends on it being so.
+
+### Diagnostics and State answer different questions
+
+`State` answers "can I trust these values". It describes the inbound direction only, it is what `WaitForSynchronizationAsync` gates on, and it drives program behaviour.
+
+`ISubjectConnector.Diagnostics` answers "what is the transport doing", in both directions, and gates nothing. It is where liveness, throughput, the outbound backlog and the last error live. See [Connector Diagnostics](connectors.md#connector-diagnostics) for the full member tree.
+
+The outbound backlog is the clearest case of the split: `Diagnostics.OutboundRetries.Depth`, which replaced the former `ISubjectSource.PendingWriteCount`, can be non-zero during entirely normal synchronized operation, because a queued write says nothing about whether the model mirrors the external system.
+
+Read the two together to tell a network outage from a connected source that is still loading: the first is `IsOperational` false, the second is `IsOperational` true with a state of `Synchronizing`.
 
 ### The Event Stream
 

@@ -54,9 +54,9 @@ Several patterns already exist that would implement this interface:
 
 | Subject | Current Health Reporting | Maps To |
 |---------|------------------------|---------|
-| OPC UA client | `OpcUaClientDiagnostics`: IsConnected, IsReconnecting, ConsecutiveFailures, LastError | Unhealthy when disconnected, Degraded when reconnecting or items failing |
-| OPC UA server | `OpcUaServerDiagnostics`: IsRunning, LastError, ConsecutiveFailures | Unhealthy when not running or consecutive failures |
-| MQTT client/server | Connection state, error tracking | Unhealthy when disconnected |
+| OPC UA client | `OpcUaClientDiagnostics`: IsOperational, OperationalChangeTime, IsReconnecting, Reconnects.TotalFailed, LastError | Unhealthy when not operational, Degraded when reconnecting or items failing |
+| OPC UA server | `OpcUaServerDiagnostics`: IsOperational, OperationalChangeTime, LastError, ConsecutiveFailures | Unhealthy when not operational or consecutive failures |
+| MQTT and WebSocket clients/servers | The same `ConnectorDiagnostics` base: IsOperational, OperationalChangeTime, LastError | Unhealthy when not operational |
 | Storage containers | `StorageStatus` enum (Connected/Disconnected/Error) | Maps directly to health status |
 | Background services | `ServiceStatus` enum (Running/Error/Unavailable) | Maps directly to health status |
 | Network subjects | `IConnectionState.IsConnected` | Unhealthy when disconnected |

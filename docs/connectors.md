@@ -208,7 +208,7 @@ var context = InterceptorSubjectContext
     .WithSourceMonitoring(builder.Services);
 ```
 
-See [Source Monitoring](connectors-monitoring.md) for waiting on synchronization, reading per-property state, and the event stream.
+See [Source Monitoring](connectors-monitoring.md) for waiting on synchronization, reading per-property state, and the event stream. That answers whether the model can be trusted; what the transport itself is doing is [Connector Diagnostics](#connector-diagnostics).
 
 ### Inbound Update Error Handling
 
@@ -268,13 +268,30 @@ public interface ISubjectSource : ISubjectConnector
     Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken);
 
     SourceState State { get; }
+    DateTimeOffset StateChangeTime { get; }
     DateTimeOffset? LastSynchronizedAt { get; }
-    int PendingWriteCount { get; }
+    new SourceDiagnostics Diagnostics { get; }
     event EventHandler<SourceEvent>? StateChanged;
 }
 ```
 
-Direct interface implementation without the base class is supported for advanced scenarios, but the implementer is then responsible for its own listening loop, buffering, and outbound dispatch, as well as the four synchronization-state members. See the XML docs on `ISubjectSource` for their exact contract, including the lock-free requirement on `State`/`LastSynchronizedAt`/`RootSubject` and the obligation to register with every reachable `SourceMonitor`.
+Direct interface implementation without the base class is supported for advanced scenarios, but the implementer is then responsible for its own listening loop, buffering, and outbound dispatch, as well as the four synchronization-state members. See the XML docs on `ISubjectSource` for their exact contract, including the lock-free requirement on `State`/`StateChangeTime`/`RootSubject` and the obligation to register with every reachable `SourceMonitor`.
+
+A direct implementer needs **two** diagnostics members, not one, because C# has no covariant implicit interface implementation: the property that satisfies `ISubjectSource.Diagnostics` cannot also satisfy `ISubjectConnector.Diagnostics`, so the base interface's member is implemented explicitly and forwards to it.
+
+```csharp
+private readonly SourceMetrics _metrics = new();
+
+public SourceDiagnostics Diagnostics { get; }
+
+ConnectorDiagnostics ISubjectConnector.Diagnostics => Diagnostics;
+
+public MySource() => Diagnostics = new SourceDiagnostics(_metrics);
+```
+
+The `SourceMetrics` instance is the writable side and stays private to the source: it is what the source calls `MarkStarted()`, `MarkOperational()`, `ReportError()` and the queue registrations on, and nothing outside the source can reach it through the returned view. See [Connector Diagnostics](#connector-diagnostics). Deriving from `SubjectSourceBase` instead gets both members, and the whole liveness and error lifecycle, for free.
+
+`StateChangeTime` and `LastSynchronizedAt` are both required, and neither can answer the other's question. `StateChangeTime` moves on every transition, so read with `State` it says how long the current state has lasted: `Synchronizing` plus T reads as stale since T. `LastSynchronizedAt` is stamped only on the way into `Synchronized` and never cleared, so it says whether a good period ever began, and it cannot say when synchronization was lost.
 
 `LastSynchronizedAt` is load-bearing rather than diagnostic: branch waits use it to tell a source that stopped having delivered from one that stopped having never delivered. An implementation that reaches `Synchronized` must stamp it and never clear it, or every branch it participates in reports `Incomplete` once it stops. See [Source Monitoring](connectors-monitoring.md).
 
@@ -589,7 +606,7 @@ builder.Services.AddWebSocketSubjectServer<Sensor>(configuration =>
 
 ### ISubjectConnector
 
-Minimal marker interface for components that connect subjects to external systems:
+The interface for components that connect subjects to an external system, source or server. It carries what the component is bound to and what its transport is doing:
 
 ```csharp
 public interface ISubjectConnector
@@ -598,6 +615,11 @@ public interface ISubjectConnector
     /// The root subject being connected to an external system.
     /// </summary>
     IInterceptorSubject RootSubject { get; }
+
+    /// <summary>
+    /// What this connector reports about the transport it drives.
+    /// </summary>
+    ConnectorDiagnostics Diagnostics { get; }
 }
 ```
 
@@ -606,6 +628,50 @@ This interface is:
 - **Optional** for servers (they can implement it for type consistency)
 
 > **Note**: Path providers are implementation details. A source/server may use a path provider internally to decide which properties to include and how to map them, or it may not use one at all.
+
+### Connector Diagnostics
+
+Every connector reports what its transport is doing through `ISubjectConnector.Diagnostics`. The declared type is `ConnectorDiagnostics`, narrowed to `SourceDiagnostics` on `ISubjectSource` and to a sealed per-connector type on each concrete connector, so `IOpcUaSubjectClientSource.Diagnostics` hands back an `OpcUaClientDiagnostics` with no cast. The shared members:
+
+```
+ConnectorDiagnostics
+  IsOperational          bool               the transport is up and serving
+  OperationalChangeTime  DateTimeOffset?    when IsOperational last changed, null until it first does
+  LastError              Exception?         the most recent error in either direction, null if there has been none
+  StartTime              DateTimeOffset?    when the current run began, the epoch for every Total below
+  Throughput
+    IncomingPerSecond    double?            changes per second into the subject tree, null = not measured
+    OutgoingPerSecond    double?            changes per second out of the subject tree, null = not measured
+  OutboundChanges        subject changes waiting to be written out
+    Depth                int                current item count
+    Capacity             int?               null = unbounded, 0 = the buffer is disabled
+    TotalDropped         long               items thrown away since StartTime
+
+SourceDiagnostics : ConnectorDiagnostics
+  ClaimedPropertyCount   int                properties this source currently owns
+  OutboundRetries        writes parked for retry, same three members
+  InboundBuffer          inbound updates held while the initial state loads, same three members
+```
+
+`IsOperational` is the one liveness spelling every connector uses. What it means is decided per connector and documented on that connector's own diagnostics type: for a client it is roughly "connected and usable", for a server "listening and accepting connections". It is not a claim about the model being in sync, which is a separate question answered by `ISubjectSource.State`; see [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
+
+Direction is stated once, from the subject tree's point of view, and means the same for clients and servers: incoming is changes flowing into the tree, outgoing is changes flowing out of it. A `null` rate means the connector does not measure that direction at all, decided at construction and never changing, which is different from a measured `0.0`.
+
+The three buffers answer three different questions, and reading which one is growing is how you tell them apart:
+
+- `OutboundChanges` growing means changes are produced faster than they flush.
+- `OutboundRetries` growing means the far end is rejecting writes.
+- `InboundBuffer` growing means an initial load is still in progress.
+
+`InboundBuffer.TotalDropped` is the one drop count that is not data loss: it counts buffered updates discarded when a connect attempt was abandoned before its load completed, and applying a superseded snapshot would have been wrong. It is still worth watching, because it is the only signal of how often initial loads are being superseded, which is reconnect thrash.
+
+`LastError` is sticky: it survives recovery and is cleared only by a restart, so a non-null value means "this went wrong at some point during this run", not "this is broken now". Use `IsOperational` for the current answer. This is a change from the OPC UA connectors' former behaviour of clearing the error on recovery.
+
+Everything on these types is read-only. The writable side is a `ConnectorMetrics` (or `SourceMetrics`) that each connector constructs and never exposes, so a consumer cannot flip another connector's liveness or inject an error it did not have. Reads take no lock owned by this library and no getter throws, which makes them safe from any thread, including from inside a `StateChanged` handler. `Depth` is the one that is not free: on the change queue it is a segment walk that briefly takes that queue's own internal lock, so sample it rather than polling it tightly.
+
+Each individual read is internally consistent and the timestamps are monotonic, but two property reads are two separate snapshots. Reading `IsOperational` and then `OperationalChangeTime` can pair a stale flag with a fresh timestamp, and the same applies to `State` and `StateChangeTime`. That is fine for a dashboard sampling every few seconds; do not build a decision that depends on the pair being from the same instant.
+
+`Total` marks a counter that only rises within a run, measured from `StartTime`. A member without it is a gauge that can go both ways, such as `Depth`, `ClaimedPropertyCount` or the OPC UA server's `ConsecutiveFailures`. A restart resets the `Total` counters along with `StartTime` and `LastError`; a transport-level reconnect does not.
 
 ### Property Mappers
 
@@ -780,11 +846,11 @@ Cases where the local model and the external system can end up disagreeing, or w
 
 **A property with an `OnChanging` hook loses a connect-window write to the initial-state load.** A hook that rewrites the incoming value, which the generated `partial void OnPropertyNameChanging(ref TProperty newValue, ref bool cancel)` can do, means the stored value is not the value the source sent, so the change publishes as `Local`. The drain then treats the load's own value as an ordinary local write and it wins the per-property collapse, discarding a write the user made moments earlier. Without the hook the load's apply is skipped as an echo and the user's write is restored and sent, which is what [Write Consistency Guarantees](#write-consistency-guarantees) promises. Both ends still converge, on the loaded value; what is lost is the user's write. Tracked in the connectors epic [#442](https://github.com/RicoSuter/Namotion.Interceptor/issues/442).
 
-**Disabling the retry queue discards connect-window writes silently.** With `writeRetryQueueSize: 0` there is no queue to park them in, so the drain empties the subscription and returns, and the queue's own "buffering is disabled" warning never fires because there is no queue to emit it.
+**Disabling the retry queue discards connect-window writes silently.** With `writeRetryQueueSize: 0` there is no queue to park them in, so the drain empties the subscription and returns, and the queue's own "buffering is disabled" warning never fires because there is no queue to emit it. `Diagnostics.OutboundRetries.TotalDropped` does not cover this path either, so in that configuration the number is a floor rather than the whole loss: it counts the failed writes discarded directly, but not the drain, which has no ownership filter and so cannot attribute its discards to one source.
 
-**Writes to properties a source has not claimed yet are discarded.** Ownership is established inside `StartListeningAsync`, and the drain must empty the subscription to keep it bounded, so a write it cannot attribute is dropped without an error. First connection only, since ownership persists across reconnects.
+**Writes to properties a source has not claimed yet are discarded.** Ownership is established inside `StartListeningAsync`, and the drain must empty the subscription to keep it bounded, so a write it cannot attribute is dropped without an error. First connection only, since ownership persists across reconnects. These discards are not counted by `Diagnostics.OutboundRetries.TotalDropped`, for the same reason: counting them needs an ownership-aware accumulator the drain does not have. Tracked as a follow-up.
 
-**Connector-internal reconnects skip the reconcile.** Transport-level reconnects handled inside a connector (the OPC UA health loop, the MQTT and WebSocket monitors) reload initial state without running the connect-window reconciliation. They also do not flush the retry queue: the queue is flushed only when the change processor hands it a change, or by the reconcile that these reconnects skip. So a write parked before such a reconnect is not merely delivered without the supersession check, it may not be delivered at all until some other owned property changes, while the source still reports `Synchronized` and `PendingWriteCount` shows it pending. Tracked as [#362](https://github.com/RicoSuter/Namotion.Interceptor/issues/362).
+**Connector-internal reconnects skip the reconcile.** Transport-level reconnects handled inside a connector (the OPC UA health loop, the MQTT and WebSocket monitors) reload initial state without running the connect-window reconciliation. They also do not flush the retry queue: the queue is flushed only when the change processor hands it a change, or by the reconcile that these reconnects skip. So a write parked before such a reconnect is not merely delivered without the supersession check, it may not be delivered at all until some other owned property changes, while the source still reports `Synchronized` and `Diagnostics.OutboundRetries.Depth` shows it pending. Tracked as [#362](https://github.com/RicoSuter/Namotion.Interceptor/issues/362).
 
 **A property with no setter cannot be restored.** If the load moves the model off a parked write for a derived or getter-only property, there is nothing to write back locally, so the change is dropped and logged by name rather than silently counted as restored.
 

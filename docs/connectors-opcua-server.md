@@ -254,9 +254,20 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 ## Diagnostics
 
-`IOpcUaSubjectServer.Diagnostics` exposes a live facade. Resolve it once and poll (see [Resolving the Server](#resolving-the-server)).
+`IOpcUaSubjectServer.Diagnostics` exposes a live facade of type `OpcUaServerDiagnostics`. Resolve it once and poll (see [Resolving the Server](#resolving-the-server)). Every read is thread-safe, takes no lock owned by this library, and cannot throw.
 
-Properties: `IsRunning`, `ActiveSessionCount`, `StartTime`, `Uptime`, `LastError`, `ConsecutiveFailures` (resets on successful start, see [Resilience](#resilience)), `IncomingChangesPerSecond` (client writes to server, 60-second sliding window), `OutgoingChangesPerSecond` (subject changes pushed to OPC UA nodes, 60-second sliding window).
+`OpcUaServerDiagnostics` derives from `ConnectorDiagnostics`, so it carries the shared members every connector reports (`IsOperational`, `OperationalChangeTime`, `LastError`, `StartTime`, `Throughput`, `OutboundChanges`) plus the two below. See [Connector Diagnostics](connectors.md#connector-diagnostics) for the shared tree, the `Total` naming convention, and the read consistency rules.
+
+**`IsOperational` for this server means it has started and is accepting client connections.** It replaces the former `IsRunning`. `OperationalChangeTime` replaces the former `StartTime` and `Uptime` pair: it moves on every internal restart, where the inherited `StartTime` marks the current run of the hosted service and does not.
+
+This server measures both throughput directions, so `Throughput.IncomingPerSecond` (client writes to the server, 60-second sliding window) and `Throughput.OutgoingPerSecond` (subject changes pushed to OPC UA nodes, same window) are never `null` here. `OutboundChanges` is the change queue feeding the address space: `Depth` growing means changes are produced faster than they flush, and `Capacity` is `null` because that queue is unbounded.
+
+| Member | Meaning |
+|---|---|
+| `ActiveSessionCount` | Currently active client sessions. |
+| `ConsecutiveFailures` | Consecutive startup failures. A gauge that resets on a successful start, which is why it carries no `Total` prefix. See [Resilience](#resilience). |
+
+`LastError` is sticky: it survives recovery and is cleared only by a restart of the hosted service, not by the server's own internal restart. A non-null value therefore means "a start or a change flush failed at some point during this run", and `IsOperational` is what says whether the server is serving now.
 
 ## Direct Server Access
 
