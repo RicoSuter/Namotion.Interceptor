@@ -216,9 +216,10 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             await CleanupSessionManagerAsync().ConfigureAwait(false);
             throw;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            Metrics.ReportError(ex);
+            // Deliberately not reported here: this rethrows into SubjectSourceBase.RunAsync, whose
+            // retry loop records the same exception, so reporting it twice would be redundant.
             await CleanupSessionManagerAsync().ConfigureAwait(false);
             throw;
         }

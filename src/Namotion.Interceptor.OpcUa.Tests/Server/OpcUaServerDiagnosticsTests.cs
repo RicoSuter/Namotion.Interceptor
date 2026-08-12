@@ -23,29 +23,36 @@ public class OpcUaServerDiagnosticsTests
     [Fact]
     public void WhenNeverStarted_ThenTheServerReportsNotOperational()
     {
-        // Arrange & Act
+        // Arrange
         using var server = CreateServer();
 
+        // Act
+        var diagnostics = server.Diagnostics;
+
         // Assert
-        Assert.False(server.Diagnostics.IsOperational);
-        Assert.Null(server.Diagnostics.OperationalChangeTime);
-        Assert.Null(server.Diagnostics.StartTime);
-        Assert.Null(server.Diagnostics.LastError);
-        Assert.Equal(0, server.Diagnostics.ConsecutiveFailures);
-        Assert.Equal(0, server.Diagnostics.ActiveSessionCount);
+        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.OperationalChangeTime);
+        Assert.Null(diagnostics.StartTime);
+        Assert.Null(diagnostics.LastError);
+        Assert.Equal(0, diagnostics.ConsecutiveFailures);
+        Assert.Equal(0, diagnostics.ActiveSessionCount);
     }
 
     [Fact]
-    public void WhenThroughputIsInstrumented_ThenBothDirectionsReportARate()
+    public void WhenThroughputIsInstrumented_ThenBothDirectionsAreWiredToACounter()
     {
-        // Arrange & Act
+        // Arrange
         using var server = CreateServer();
+
+        // Act
+        var throughput = server.Diagnostics.Throughput;
 
         // Assert
         // A null rate means "this connector does not measure the direction", so it would mean the two
-        // counters the read and write paths feed never reached the metrics the diagnostics read.
-        Assert.NotNull(server.Diagnostics.Throughput.IncomingPerSecond);
-        Assert.NotNull(server.Diagnostics.Throughput.OutgoingPerSecond);
+        // counters the read and write paths feed never reached the metrics the diagnostics read. The
+        // rates themselves are 0.0 here: this server has never run, so nothing has been counted.
+        Assert.NotNull(throughput.IncomingPerSecond);
+        Assert.NotNull(throughput.OutgoingPerSecond);
     }
 
     /// <summary>

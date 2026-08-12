@@ -1,11 +1,14 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.WebSocket.Client;
 using Namotion.Interceptor.WebSocket.Tests.Integration;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.WebSocket.Tests.Client;
 
@@ -17,6 +20,13 @@ namespace Namotion.Interceptor.WebSocket.Tests.Client;
 /// </summary>
 public class WebSocketClientDiagnosticsTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public WebSocketClientDiagnosticsTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
     /// <summary>
     /// A compile-level pin of the member tree plus the defaults a fresh <c>SourceMetrics</c> reports,
     /// not behavioural coverage: nothing here can fail while the members exist. Its value is that
@@ -26,19 +36,22 @@ public class WebSocketClientDiagnosticsTests
     [Fact]
     public async Task WhenNeverConnected_ThenTheSourceReportsNotOperationalAndNoThroughput()
     {
-        // Arrange & Act
+        // Arrange
         await using var source = CreateClientSource();
 
+        // Act
+        var diagnostics = source.Diagnostics;
+
         // Assert
-        Assert.False(source.Diagnostics.IsOperational);
-        Assert.Null(source.Diagnostics.OperationalChangeTime);
-        Assert.Null(source.Diagnostics.StartTime);
-        Assert.Null(source.Diagnostics.LastError);
-        Assert.Equal(0, source.Diagnostics.ClaimedPropertyCount);
+        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.OperationalChangeTime);
+        Assert.Null(diagnostics.StartTime);
+        Assert.Null(diagnostics.LastError);
+        Assert.Equal(0, diagnostics.ClaimedPropertyCount);
 
         // Null rather than 0: the client measures neither direction.
-        Assert.Null(source.Diagnostics.Throughput.IncomingPerSecond);
-        Assert.Null(source.Diagnostics.Throughput.OutgoingPerSecond);
+        Assert.Null(diagnostics.Throughput.IncomingPerSecond);
+        Assert.Null(diagnostics.Throughput.OutgoingPerSecond);
     }
 
     [Fact]
@@ -49,17 +62,61 @@ public class WebSocketClientDiagnosticsTests
         var property = ((TestRoot)source.RootSubject).GetPropertyReference(nameof(TestRoot.Name));
 
         // Act
-        Assert.True(source.Ownership.ClaimSource(property));
+        var claimed = source.Ownership.ClaimSource(property);
+        var whileClaimed = source.Diagnostics.ClaimedPropertyCount;
+        source.Ownership.ReleaseSource(property);
+        var afterRelease = source.Diagnostics.ClaimedPropertyCount;
 
         // Assert
-        Assert.Equal(1, source.Diagnostics.ClaimedPropertyCount);
+        Assert.True(claimed);
+        Assert.Equal(1, whileClaimed);
 
         // And it falls again, because it is a gauge rather than a counter.
-        source.Ownership.ReleaseSource(property);
-        Assert.Equal(0, source.Diagnostics.ClaimedPropertyCount);
+        Assert.Equal(0, afterRelease);
     }
 
-    private static WebSocketSubjectClientSource CreateClientSource()
+    /// <summary>
+    /// The reconnect loop lives in the listen lifetime, outside the try in
+    /// <c>SubjectSourceBase.RunAsync</c> that records per-attempt failures, so the client has to
+    /// report these itself. Without that, a server that stays down leaves <c>IsOperational</c> false
+    /// beside a <c>LastError</c> of <c>null</c> for the whole outage.
+    /// </summary>
+    [Trait("Category", "Integration")]
+    [Fact]
+    public async Task WhenTheServerStaysDownAfterAConnection_ThenTheFailedReconnectReachesLastError()
+    {
+        // Arrange - connected first, so the failure under test is the reconnect rather than the
+        // initial connect, which the base class would report on its own.
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        var server = new WebSocketTestServer<TestRoot>(_output);
+        await server.StartAsync(context => new TestRoot(context), port: portLease.Port);
+        await using var source = CreateClientSource(portLease.Port);
+
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational,
+                message: "The client should report operational once the handshake is accepted.");
+            Assert.Null(source.Diagnostics.LastError);
+
+            // Act
+            await server.StopAsync();
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.LastError is not null,
+                message: "A client that cannot reconnect should report the failure.");
+            Assert.False(source.Diagnostics.IsOperational);
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+            await server.DisposeAsync();
+        }
+    }
+
+    private static WebSocketSubjectClientSource CreateClientSource(int? port = null)
     {
         var context = InterceptorSubjectContext
             .Create()
@@ -69,8 +126,13 @@ public class WebSocketClientDiagnosticsTests
 
         return new WebSocketSubjectClientSource(
             new TestRoot(context),
-            // Never dialled: nothing in these tests starts a connect attempt.
-            new WebSocketClientConfiguration { ServerUri = new Uri("ws://localhost:59999/ws") },
+            new WebSocketClientConfiguration
+            {
+                // Port 59999 is never dialled: nothing but the reconnect test starts a connect attempt.
+                ServerUri = new Uri($"ws://localhost:{port ?? 59999}/ws"),
+                ReconnectDelay = TimeSpan.FromMilliseconds(200),
+                MaxReconnectDelay = TimeSpan.FromSeconds(2)
+            },
             NullLogger<WebSocketSubjectClientSource>.Instance);
     }
 }

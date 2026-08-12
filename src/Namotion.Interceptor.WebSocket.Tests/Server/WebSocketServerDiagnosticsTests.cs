@@ -24,20 +24,23 @@ public class WebSocketServerDiagnosticsTests
     [Fact]
     public void WhenNeverStarted_ThenTheServerReportsNotOperational()
     {
-        // Arrange & Act
+        // Arrange
         using var server = CreateServer();
 
+        // Act
+        var diagnostics = server.Diagnostics;
+
         // Assert
-        Assert.False(server.Diagnostics.IsOperational);
-        Assert.Null(server.Diagnostics.OperationalChangeTime);
-        Assert.Null(server.Diagnostics.StartTime);
-        Assert.Null(server.Diagnostics.LastError);
-        Assert.Equal(0, server.Diagnostics.ConnectionCount);
-        Assert.Equal(0L, server.Diagnostics.CurrentSequence);
+        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.OperationalChangeTime);
+        Assert.Null(diagnostics.StartTime);
+        Assert.Null(diagnostics.LastError);
+        Assert.Equal(0, diagnostics.ConnectionCount);
+        Assert.Equal(0L, diagnostics.CurrentSequence);
 
         // Null rather than 0: the server measures neither direction.
-        Assert.Null(server.Diagnostics.Throughput.IncomingPerSecond);
-        Assert.Null(server.Diagnostics.Throughput.OutgoingPerSecond);
+        Assert.Null(diagnostics.Throughput.IncomingPerSecond);
+        Assert.Null(diagnostics.Throughput.OutgoingPerSecond);
     }
 
     private static WebSocketSubjectServer CreateServer()

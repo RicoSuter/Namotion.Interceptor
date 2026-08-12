@@ -5,7 +5,7 @@ The `Namotion.Interceptor.Connectors` package provides infrastructure for bridgi
 | Type                   | Data Owner      | Typical Role                            | Base                                                 |
 |------------------------|-----------------|-----------------------------------------|------------------------------------------------------|
 | **Source** (Client)    | External system | Client connecting to an external system | `SubjectSourceBase` (`ISubjectSource`)               |
-| **Connector** (Server) | Local model     | Exposing subjects to external clients   | `BackgroundService` (optionally `ISubjectConnector`) |
+| **Connector** (Server) | Local model     | Exposing subjects to external clients   | `SubjectConnectorBase` (`ISubjectConnector`)         |
 
 In practice, sources act as network clients and servers act as network servers, but this is a convention, not a requirement. The defining distinction is which side owns the data.
 
@@ -235,10 +235,10 @@ The base class handles everything else: retry loop with backoff, buffering durin
 
 #### Pump Lifecycle
 
-Each iteration of the sealed `ExecuteAsync` runs the following sequence. On failure, the base disposes the listen lifetime, waits `retryTime` (default 10s), and restarts from the top. Only `OperationCanceledException` when the host stopping token is cancelled exits the loop. All other exceptions (including internal protocol timeouts) trigger a retry.
+Each iteration of the sealed `RunAsync` runs the following sequence. On failure, the base disposes the listen lifetime, waits `retryTime` (default 10s), and restarts from the top. Only `OperationCanceledException` when the host stopping token is cancelled exits the loop. All other exceptions (including internal protocol timeouts) trigger a retry.
 
 ```
-ExecuteAsync
+RunAsync
  ├── create source-lifetime subscription  ← captures local writes continuously (no gap across reconnects)
  └── retry loop (per connection attempt)
       ├── Task.Delay(retryTime)            ← retries only; the subscription keeps capturing during the wait
@@ -556,7 +556,7 @@ A **server** exposes subject properties to external clients. Unlike sources, the
 
 **Examples**: `OpcUaSubjectServer` exposes subjects as OPC UA nodes, `MqttSubjectServer` publishes changes to MQTT topics, `WebSocketSubjectServer` streams updates over WebSocket connections.
 
-There is no `SubjectServerBase`. Servers are implemented as `BackgroundService` classes that optionally implement `ISubjectConnector`. The infrastructure provides building blocks, but the server implementation is up to you.
+There is no server-specific base class. All three built-in servers derive from `SubjectConnectorBase`, the base every connector shares, which supplies the hosting lifecycle and the diagnostics lifecycle and leaves the protocol work to the server. `ISubjectConnector` comes with it, and `Diagnostics` is not optional on that interface. The infrastructure provides building blocks, but the server implementation is up to you.
 
 ### Responsibilities
 
@@ -571,11 +571,11 @@ A server implementation typically handles:
 
 All built-in servers (OPC UA, MQTT, WebSocket) follow the same structure:
 
-1. Extend `BackgroundService` for hosting lifecycle
-2. Implement `ISubjectConnector` for type consistency and connector enumeration
-3. Create a `ChangeQueueProcessor` in `ExecuteAsync` to subscribe to property changes. Only the OPC UA server does this before its protocol server starts accepting clients; MQTT and WebSocket create it once theirs is already listening, so changes made during their startup are not captured
+1. Extend `SubjectConnectorBase` for the hosting and diagnostics lifecycle, and override `RunAsync`
+2. Expose a sealed diagnostics type from the `Diagnostics` override, so callers reach the server's own numbers without a cast
+3. Create a `ChangeQueueProcessor` in `RunAsync` to subscribe to property changes. Only the OPC UA server does this before its protocol server starts accepting clients; MQTT and WebSocket create it once theirs is already listening, so changes made during their startup are not captured
 4. Accept incoming client connections and route write requests to the local model via `SetValueFromSource()`
-5. Use a retry/restart loop in `ExecuteAsync` to recover from protocol failures
+5. Use a retry/restart loop in `RunAsync` to recover from protocol failures
 
 The built-in server implementations serve as reference for building custom servers. See the protocol-specific documentation for details:
 - [OPC UA Server](connectors-opcua-server.md)
@@ -623,11 +623,84 @@ public interface ISubjectConnector
 }
 ```
 
-This interface is:
-- **Required** for sources (`ISubjectSource : ISubjectConnector`)
-- **Optional** for servers (they can implement it for type consistency)
+Every built-in connector implements it, sources through `ISubjectSource : ISubjectConnector` and servers through `SubjectConnectorBase`. `Diagnostics` is not optional: a connector that implements the interface reports what its transport is doing.
 
 > **Note**: Path providers are implementation details. A source/server may use a path provider internally to decide which properties to include and how to map them, or it may not use one at all.
+
+### SubjectConnectorBase
+
+`SubjectConnectorBase` is the base every connector shares, client or server. It is a `BackgroundService` that implements `ISubjectConnector` and owns the diagnostics lifecycle, so a connector cannot forget to report that it stopped serving. `SubjectSourceBase` derives from it and adds the source pump on top; a server derives from it directly.
+
+`ExecuteAsync` is `protected sealed override`. The member to override is `RunAsync`, which the base wraps:
+
+```csharp
+public sealed class MySubjectServer : SubjectConnectorBase
+{
+    public MySubjectServer(IInterceptorSubject subject)
+        : base(new ConnectorMetrics())
+    {
+        RootSubject = subject;
+
+        // The same instance the base holds, so the read side and the write side agree.
+        Diagnostics = new MyServerDiagnostics(this, Metrics);
+    }
+
+    public override IInterceptorSubject RootSubject { get; }
+
+    /// <inheritdoc cref="SubjectConnectorBase.Diagnostics" />
+    public override MyServerDiagnostics Diagnostics { get; }
+
+    protected override async Task RunAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await ListenAsync(stoppingToken);
+                Metrics.MarkOperational();
+                try
+                {
+                    await ServeUntilFailureAsync(stoppingToken);
+                }
+                finally
+                {
+                    Metrics.MarkNotOperational();
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                // Swallowed failures never reach the base class, so report them here.
+                Metrics.ReportError(exception);
+                await Task.Delay(RetryDelay, stoppingToken);
+            }
+        }
+    }
+}
+```
+
+What the base provides around that call:
+
+| Behaviour | Where |
+|---|---|
+| Stamps the start epoch that every `Total` counter and `StartTime` are measured from, clears `LastError`, and resets the registered metrics | `MarkStarted()`, once per `ExecuteAsync` entry |
+| Records a fault that escapes `RunAsync` into `LastError` | the catch around the `RunAsync` call |
+| Leaves an expected shutdown unrecorded, so a graceful stop does not overwrite the genuine error that made the connector fail | the `OperationCanceledException` filter on the stopping token |
+| Forces liveness false when `RunAsync` exits, on every path | `MarkStopped()` in the `finally` |
+| Forces liveness false on disposal, because `BackgroundService.Dispose` cancels the token without awaiting `ExecuteAsync` | the `Dispose` override |
+
+What a server author must implement:
+
+- `RootSubject`, the subject tree this connector is bound to.
+- `Diagnostics`, narrowed to the connector's own sealed type via a covariant override, so callers reach the protocol-specific numbers without a cast.
+- `RunAsync`, the protocol work. It runs until cancellation, and a cancellation caused by the stopping token must not be turned into a fault: either return, as the sample does, or let the exception leave, which the base recognises and does not record.
+- Handing the diagnostics view the same metrics object the base holds, by constructing it from the inherited `Metrics` property rather than from a second instance. A view built over its own `ConnectorMetrics` compiles and then reports nothing.
+- Every failure the connector's own loop swallows: the base only sees what escapes `RunAsync`, so a retry loop that catches its own failures has to call `ReportError` itself, and move liveness with `MarkOperational` and `MarkNotOperational` around the serving window.
+
+A connector whose transport work runs in a task the loop does not await, such as a client's reconnect monitor, is outside `RunAsync` too, and has to report its own failures for the same reason.
 
 ### Connector Diagnostics
 

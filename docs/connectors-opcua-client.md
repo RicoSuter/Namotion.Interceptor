@@ -660,7 +660,7 @@ This client measures both throughput directions, so `Throughput.IncomingPerSecon
 | `SubscriptionCount` | Active OPC UA subscriptions. |
 | `MonitoredItemCount` | Monitored items across all subscriptions. |
 
-`Reconnects` is the reconnection history. Every counter is monotonic since `StartTime`, so a reconnect storm is visible as `TotalAttempts` climbing without `TotalSucceeded` keeping up:
+`Reconnects` is the reconnection history. Every counter is monotonic since `StartTime`, so a reconnect storm is visible as `TotalAttempts` climbing without `TotalSucceeded` keeping up. `LastConnectionTime` is the exception listed first below: it is not a counter and deliberately survives the epoch reset, because it records a discrete past event rather than an amount accumulated during the run.
 
 | Member | Meaning |
 |---|---|
@@ -670,7 +670,7 @@ This client measures both throughput directions, so `Throughput.IncomingPerSecon
 | `Reconnects.TotalFailed` | Attempts that ended with an exception. |
 | `Reconnects.TotalAbandoned` | Attempts that threw nothing but produced an unusable result: a null session, a failed transfer, a preserved session after a server restart, a stall reset, or a kill cancellation. |
 
-`Polling` is `null` when the [polling fallback](#polling-fallback-for-unsupported-nodes) is off or no session has been set up yet, and otherwise reports:
+`Polling` is `null` when the [polling fallback](#polling-fallback-for-unsupported-nodes) is off, no session has been set up yet, or the client is between connect attempts. That last case is not a startup-only condition: the block reads through the session manager, which is discarded on every failed connect attempt, so it stays `null` for the whole retry delay. The totals underneath survive that and reappear at their previous values once a session exists again. Otherwise it reports:
 
 | Member | Meaning |
 |---|---|
@@ -683,7 +683,7 @@ This client measures both throughput directions, so `Throughput.IncomingPerSecon
 | `Polling.IsCircuitBreakerOpen` | The circuit breaker is currently open. |
 | `Polling.IsRunning` | The polling loop is running. This is a sub-component's own state, not a second spelling of `IsOperational`, which describes the connector as a whole. |
 
-`ReadAfterWrite` is `null` when [read-after-write](#read-after-write-fallback) is off or no session has been set up yet. Every counter here describes a read that follows a write, and each member names its noun so a failed verification read does not read as a failed write:
+`ReadAfterWrite` is `null` when [read-after-write](#read-after-write-fallback) is off, no session has been set up yet, or the client is between connect attempts, for the same reason as `Polling` above and with its totals surviving the same way. Every counter here describes a read that follows a write, and each member names its noun so a failed verification read does not read as a failed write:
 
 | Member | Meaning |
 |---|---|

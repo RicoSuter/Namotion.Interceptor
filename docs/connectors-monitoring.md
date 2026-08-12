@@ -187,7 +187,7 @@ See the XML docs on `SourceState` for what each member means. On a source itself
 
 State follows the pump: construction starts at `Synchronizing`, `StartBuffering()` returns to `Synchronizing` on every connect and reconnect, a completed initial load reaches `Synchronized`, and a pump failure falls back to `Synchronizing` before the retry delay. A connector that detects a loss *before* it buffers calls the protected `ReportConnectionLost()` so `State` does not sit at `Synchronized` for the whole reconnect window; OPC UA does this from its keep-alive handler and its manual reconnect path.
 
-`Stopped` is terminal: no further transition succeeds, and `ExecuteAsync` sets it in a `finally` so it fires on every exit path. A guard in `SubjectSourceBase.StartAsync` enforces this, because `BackgroundService` would otherwise happily run `ExecuteAsync` again against a fresh token. Create a new instance rather than restarting a stopped one.
+`Stopped` is terminal: no further transition succeeds, and `SubjectSourceBase.RunAsync` sets it in a `finally` so it fires on every exit path. A guard in `SubjectSourceBase.StartAsync` enforces this, because `BackgroundService` would otherwise happily run the pump again against a fresh token. Create a new instance rather than restarting a stopped one.
 
 Two timestamps sit next to `State`, and they answer different questions.
 

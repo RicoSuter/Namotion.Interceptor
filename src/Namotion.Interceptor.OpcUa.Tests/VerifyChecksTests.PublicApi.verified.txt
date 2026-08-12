@@ -164,7 +164,7 @@ namespace Namotion.Interceptor.OpcUa.Client
         public int TotalWrites { get; }
         public int TransientFailureCount { get; }
     }
-    public class PollingDiagnostics
+    public sealed class PollingDiagnostics
     {
         public bool IsCircuitBreakerOpen { get; }
         public bool IsRunning { get; }
@@ -175,7 +175,7 @@ namespace Namotion.Interceptor.OpcUa.Client
         public long TotalSuccessfulReads { get; }
         public long TotalValueChanges { get; }
     }
-    public class ReadAfterWriteDiagnostics
+    public sealed class ReadAfterWriteDiagnostics
     {
         public int PendingReads { get; }
         public long TotalCoalescedReads { get; }

@@ -22,8 +22,10 @@ public class OpcUaClientDiagnosticsTests
     [Fact]
     public async Task WhenNeverConnected_ThenEveryGetterAnswersWithoutThrowing()
     {
-        // Arrange & Act
+        // Arrange
         await using var source = CreateClientSource();
+
+        // Act
         var diagnostics = source.Diagnostics;
 
         // Assert
@@ -87,10 +89,9 @@ public class OpcUaClientDiagnosticsTests
     }
 
     /// <summary>
-    /// Runs the real client rather than a metrics instance of its own, so it fails if either of the
-    /// client's own catch blocks stops writing to the shared metrics. A diagnostics view built over a
-    /// second <see cref="SourceMetrics"/> would keep reporting no error at all, which is what this
-    /// reads back.
+    /// Runs the real client rather than a metrics instance of its own, so it fails if the retry loop
+    /// stops writing to the shared metrics. A diagnostics view built over a second
+    /// <see cref="SourceMetrics"/> would keep reporting no error at all, which is what this reads back.
     /// </summary>
     /// <remarks>
     /// Left in the unit suite rather than tagged Integration: the connect is refused on the first
@@ -140,14 +141,17 @@ public class OpcUaClientDiagnosticsTests
         var property = ((TestRoot)source.RootSubject).GetPropertyReference(nameof(TestRoot.Name));
 
         // Act
-        Assert.True(source.Ownership.ClaimSource(property));
+        var claimed = source.Ownership.ClaimSource(property);
+        var whileClaimed = source.Diagnostics.ClaimedPropertyCount;
+        source.Ownership.ReleaseSource(property);
+        var afterRelease = source.Diagnostics.ClaimedPropertyCount;
 
         // Assert
-        Assert.Equal(1, source.Diagnostics.ClaimedPropertyCount);
+        Assert.True(claimed);
+        Assert.Equal(1, whileClaimed);
 
         // And it falls again, because it is a gauge rather than a counter.
-        source.Ownership.ReleaseSource(property);
-        Assert.Equal(0, source.Diagnostics.ClaimedPropertyCount);
+        Assert.Equal(0, afterRelease);
     }
 
     [Fact]
@@ -178,11 +182,6 @@ public class OpcUaClientDiagnosticsTests
         Assert.NotNull(reconnects.LastConnectionTime);
     }
 
-    /// <summary>
-    /// Spins until the wall clock reports a new tick, so a timestamp stamped after this call cannot
-    /// land on the same value as one stamped before it. A condition rather than a fixed delay,
-    /// because the clock's resolution differs per platform and is coarse on Windows.
-    /// </summary>
     private static int GetFreeTcpPort()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -192,6 +191,11 @@ public class OpcUaClientDiagnosticsTests
         return port;
     }
 
+    /// <summary>
+    /// Spins until the wall clock reports a new tick, so a timestamp stamped after this call cannot
+    /// land on the same value as one stamped before it. A condition rather than a fixed delay,
+    /// because the clock's resolution differs per platform and is coarse on Windows.
+    /// </summary>
     private static void WaitForClockTick()
     {
         var start = DateTimeOffset.UtcNow.UtcTicks;

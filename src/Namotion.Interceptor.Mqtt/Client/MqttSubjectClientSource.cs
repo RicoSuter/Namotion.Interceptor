@@ -129,7 +129,9 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 {
                     _propertyWriter?.StartBuffering();
                     return Task.CompletedTask;
-                }, _logger);
+                },
+                Metrics.ReportError,
+                _logger);
             _connectionMonitor = connectionMonitor;
 
             var clientForLifetime = client;

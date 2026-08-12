@@ -648,6 +648,10 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             }
             catch (Exception ex)
             {
+                // This loop runs inside the listen lifetime, outside the try in
+                // SubjectSourceBase.RunAsync that records per-attempt failures, so nothing else
+                // reports what happens here. The clause above already took the shutdown cancellation.
+                Metrics.ReportError(ex);
                 _logger.LogError(ex, "Error in WebSocket connection monitoring");
             }
             finally
@@ -682,6 +686,10 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
         catch (Exception ex)
         {
+            // Swallowed here so the monitor can back off and try again, which means the base class
+            // never sees it. Without this, a server that stays down leaves LastError null for the
+            // whole outage, beside an IsOperational of false.
+            Metrics.ReportError(ex);
             _logger.LogError(ex, "Failed to reconnect to WebSocket server");
 
             if (_circuitBreaker is not null && _circuitBreaker.RecordFailure())

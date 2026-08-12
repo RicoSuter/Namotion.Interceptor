@@ -16,19 +16,22 @@ public class MqttServerDiagnosticsTests
     [Fact]
     public async Task WhenNeverStarted_ThenTheServerReportsNotOperationalAndNoThroughput()
     {
-        // Arrange & Act
+        // Arrange
         await using var server = CreateServer(new MqttServerConfiguration());
 
+        // Act
+        var diagnostics = server.Diagnostics;
+
         // Assert
-        Assert.False(server.Diagnostics.IsOperational);
-        Assert.Null(server.Diagnostics.OperationalChangeTime);
-        Assert.Null(server.Diagnostics.StartTime);
-        Assert.Null(server.Diagnostics.LastError);
-        Assert.Equal(0, server.Diagnostics.ConnectedClientCount);
+        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.OperationalChangeTime);
+        Assert.Null(diagnostics.StartTime);
+        Assert.Null(diagnostics.LastError);
+        Assert.Equal(0, diagnostics.ConnectedClientCount);
 
         // Null rather than 0: the broker measures neither direction.
-        Assert.Null(server.Diagnostics.Throughput.IncomingPerSecond);
-        Assert.Null(server.Diagnostics.Throughput.OutgoingPerSecond);
+        Assert.Null(diagnostics.Throughput.IncomingPerSecond);
+        Assert.Null(diagnostics.Throughput.OutgoingPerSecond);
     }
 
     /// <summary>

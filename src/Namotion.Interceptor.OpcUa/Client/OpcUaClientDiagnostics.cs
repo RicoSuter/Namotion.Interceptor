@@ -51,9 +51,15 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     public ReconnectDiagnostics Reconnects { get; }
 
     /// <summary>
-    /// Gets polling diagnostics, or <c>null</c> when the polling fallback is off or no session has
-    /// been set up yet.
+    /// Gets polling diagnostics, or <c>null</c> when the polling fallback is off, no session has been
+    /// set up yet, or the client is between connect attempts.
     /// </summary>
+    /// <remarks>
+    /// This reads through the session manager, which is discarded on every failed connect attempt, so
+    /// the block is <c>null</c> for the whole retry delay rather than only before the first session.
+    /// The underlying totals are owned by the source and survive that, so they reappear at their
+    /// previous values once a session exists again.
+    /// </remarks>
     public PollingDiagnostics? Polling
     {
         get
@@ -64,9 +70,13 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     }
 
     /// <summary>
-    /// Gets read-after-write diagnostics, or <c>null</c> when read-after-write is off or no session
-    /// has been set up yet.
+    /// Gets read-after-write diagnostics, or <c>null</c> when read-after-write is off, no session has
+    /// been set up yet, or the client is between connect attempts.
     /// </summary>
+    /// <remarks>
+    /// Null between connect attempts for the same reason as <see cref="Polling"/>, and its totals
+    /// survive the same way.
+    /// </remarks>
     public ReadAfterWriteDiagnostics? ReadAfterWrite
     {
         get
@@ -79,7 +89,9 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
 
 /// <summary>
 /// The client's reconnection history. Every counter is monotonic since
-/// <see cref="ConnectorDiagnostics.StartTime"/>.
+/// <see cref="ConnectorDiagnostics.StartTime"/>. <see cref="LastConnectionTime"/> is not a counter
+/// and deliberately survives the epoch reset, because it records a discrete past event rather than
+/// an amount accumulated during the run.
 /// </summary>
 public sealed class ReconnectDiagnostics
 {
@@ -124,7 +136,7 @@ public sealed class ReconnectDiagnostics
 /// <summary>
 /// The polling fallback used for nodes that do not support subscriptions.
 /// </summary>
-public class PollingDiagnostics
+public sealed class PollingDiagnostics
 {
     private readonly Polling.PollingManager _pollingManager;
 
@@ -183,7 +195,7 @@ public class PollingDiagnostics
 /// Every counter here describes a read that follows a write. The block name contains both words, so
 /// each member names its noun to keep a failed verification read from reading as a failed write.
 /// </remarks>
-public class ReadAfterWriteDiagnostics
+public sealed class ReadAfterWriteDiagnostics
 {
     private readonly ReadAfterWrite.ReadAfterWriteManager _manager;
 

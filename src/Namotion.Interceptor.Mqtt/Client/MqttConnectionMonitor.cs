@@ -21,6 +21,12 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
     private readonly Func<CancellationToken, Task> _onReconnected;
     private readonly Func<Task> _onDisconnected;
 
+    // Every failure below is swallowed so the monitor can back off and try again, and the monitor
+    // runs inside the source's listen lifetime, outside the try in SubjectSourceBase.RunAsync that
+    // records per-attempt failures. Without this callback a broker that stays down would be reported
+    // as not operational with no error at all. Shutdown cancellations are deliberately not passed on.
+    private readonly Action<Exception> _onError;
+
     private readonly SemaphoreSlim _reconnectSignal = new(0, 1);
     private readonly CircuitBreaker? _circuitBreaker;
 
@@ -34,6 +40,7 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
         Func<MqttClientOptions> optionsBuilder,
         Func<CancellationToken, Task> onReconnected,
         Func<Task> onDisconnected,
+        Action<Exception> onError,
         ILogger logger)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
@@ -42,6 +49,7 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
         _optionsBuilder = optionsBuilder ?? throw new ArgumentNullException(nameof(optionsBuilder));
         _onReconnected = onReconnected ?? throw new ArgumentNullException(nameof(onReconnected));
         _onDisconnected = onDisconnected ?? throw new ArgumentNullException(nameof(onDisconnected));
+        _onError = onError ?? throw new ArgumentNullException(nameof(onError));
 
         // Initialize circuit breaker if enabled
         if (configuration.CircuitBreakerFailureThreshold > 0)
@@ -200,6 +208,8 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
                             }
                             catch (Exception ex)
                             {
+                                _onError(ex);
+
                                 var isTransient = MqttExceptionClassifier.IsTransient(ex);
                                 var description = MqttExceptionClassifier.GetFailureDescription(ex);
 
@@ -247,6 +257,7 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
             }
             catch (Exception ex)
             {
+                _onError(ex);
                 _logger.LogError(ex, "Error in connection monitoring.");
             }
         }

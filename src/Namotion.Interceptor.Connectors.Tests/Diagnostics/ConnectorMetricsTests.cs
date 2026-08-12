@@ -46,6 +46,9 @@ public class ConnectorMetricsTests
         var first = diagnostics.OperationalChangeTime;
 
         // Act
+        // The tick is what makes this a test: without it both calls sample the same coarse clock
+        // value, so it would pass even if the no-op guard were replaced by a fresh stamp.
+        ClockTestHelpers.WaitForClockTick();
         metrics.MarkOperational();
 
         // Assert
@@ -310,6 +313,7 @@ public class ConnectorMetricsTests
         });
 
         var previous = DateTimeOffset.MinValue;
+        var stampedReads = 0;
         for (var i = 0; i < 100_000; i++)
         {
             metrics.MarkNotOperational();
@@ -326,6 +330,11 @@ public class ConnectorMetricsTests
                 movedBackwards = true;
             }
 
+            if (changeTime is not null)
+            {
+                stampedReads++;
+            }
+
             previous = changeTime ?? previous;
         }
 
@@ -334,6 +343,13 @@ public class ConnectorMetricsTests
 
         // Assert
         Assert.False(movedBackwards);
+
+        // Deterministic backstops, so the flag above cannot pass vacuously. A null timestamp compares
+        // false against everything, so a getter that stopped stamping would leave the flag false while
+        // the test observed nothing. Both counts are exact: every iteration reads a stamped timestamp,
+        // and both threads end their loop on MarkOperational.
+        Assert.Equal(100_000, stampedReads);
+        Assert.True(diagnostics.IsOperational);
     }
 
     private sealed class CountingResettable : IResettableMetrics

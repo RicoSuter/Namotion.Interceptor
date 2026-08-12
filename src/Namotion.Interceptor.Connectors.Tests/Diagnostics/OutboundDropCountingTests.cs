@@ -274,14 +274,13 @@ public class OutboundDropCountingTests
         // Act
         metrics.OutboundChanges.Deregister();
         first.Dispose();
-        var second = CreateBoundedProcessor(context, maxQueueDepth: 1);
+        using var second = CreateBoundedProcessor(context, maxQueueDepth: 1);
         metrics.OutboundChanges.Register(() => second.QueueDepth, () => second.DropCount, capacity: 1);
         await OverflowAsync(second, person, tag: "two");
 
         // Assert
         Assert.True(afterFirst > 0);
         Assert.Equal(afterFirst * 2, diagnostics.OutboundChanges.TotalDropped);
-        second.Dispose();
     }
 
     [Fact]
