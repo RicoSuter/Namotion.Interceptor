@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Connectors.Monitoring;
 
 namespace Namotion.Interceptor.Connectors;
@@ -17,6 +18,7 @@ public sealed class SubjectPropertyWriter
 {
     private readonly SubjectSourceBase _source;
     private readonly ILogger _logger;
+    private readonly QueueMetrics? _inboundBuffer;
     private readonly Lock _lock = new();
 
     private List<Action>? _updates = [];
@@ -33,15 +35,24 @@ public sealed class SubjectPropertyWriter
     /// </summary>
     /// <param name="source">The source associated with this writer.</param>
     /// <param name="logger">The logger.</param>
+    /// <param name="inboundBuffer">
+    /// Where this writer reports the depth of its buffer and the updates a superseded load throws
+    /// away, or <c>null</c> for a writer whose buffer nothing observes.
+    /// </param>
     /// <remarks>
     /// Typed to the concrete base rather than <see cref="ISubjectSource"/> because this writer
     /// drives the source's state transitions, which only <see cref="SubjectSourceBase"/> defines. A
     /// source implementing the interface directly owns its own write path and its own transitions.
     /// </remarks>
-    public SubjectPropertyWriter(SubjectSourceBase source, ILogger logger)
+    public SubjectPropertyWriter(SubjectSourceBase source, ILogger logger, QueueMetrics? inboundBuffer = null)
     {
         _source = source;
         _logger = logger;
+        _inboundBuffer = inboundBuffer;
+
+        // Unbounded: the buffer holds whatever arrives while the initial state loads. Never
+        // deregistered, because the writer and its buffer live as long as the source does.
+        _inboundBuffer?.Register(() => BufferedUpdateCount, dropped: null, capacity: null);
     }
 
     /// <summary>
@@ -64,6 +75,11 @@ public sealed class SubjectPropertyWriter
     {
         lock (_lock)
         {
+            // Replacing the list discards whatever the previous attempt buffered. Deliberate rather
+            // than data loss: a superseded snapshot must not be applied. Counted because it is the
+            // only signal of how often initial loads are being superseded, which is reconnect thrash.
+            _inboundBuffer?.AddDropped(_updates?.Count ?? 0);
+
             _updates = [];
             Volatile.Write(ref _bufferedUpdateCount, 0);
             _generation++;

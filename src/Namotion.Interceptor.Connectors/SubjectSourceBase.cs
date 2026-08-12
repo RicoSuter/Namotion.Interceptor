@@ -79,10 +79,24 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         // disabled, and those connect/reconnect-window writes are dropped rather than reconciled.
         if (writeRetryQueueSize > 0)
         {
-            WriteRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger);
+            // Through the local rather than the property, so the depth provider neither captures a
+            // half-constructed this nor needs a null-forgiving read of a nullable property.
+            var writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger, metrics.OutboundRetries);
+            WriteRetryQueue = writeRetryQueue;
+
+            // Never deregistered: the queue lives as long as the source, and its count field stays
+            // readable after Dispose.
+            metrics.OutboundRetries.Register(
+                () => writeRetryQueue.PendingWriteCount, dropped: null, capacity: writeRetryQueueSize);
+        }
+        else
+        {
+            // Registered as disabled rather than left unregistered: an unregistered QueueMetrics
+            // reports a null capacity, which reads as unbounded, the opposite of the truth.
+            metrics.OutboundRetries.Register(static () => 0, dropped: null, capacity: 0);
         }
 
-        _propertyWriter = new SubjectPropertyWriter(this, logger);
+        _propertyWriter = new SubjectPropertyWriter(this, logger, metrics.InboundBuffer);
     }
 
     /// <summary>
@@ -271,7 +285,23 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         maxQueueDepth: null,
                         logger: _logger);
 
-                    await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+                    // Registered after construction and released in the finally below, so the retry
+                    // loop's next attempt can register its own processor: a second Register while one
+                    // is still live throws. The using above still disposes the processor if Register
+                    // itself throws.
+                    Metrics.OutboundChanges.Register(
+                        () => processor.QueueDepth, () => processor.DropCount, capacity: null);
+                    try
+                    {
+                        await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        // Runs before the using disposes the processor, so no reader can call into a
+                        // disposed one. This narrows the race rather than closing it, which is safe
+                        // only because the processor's queue and drop count survive its disposal.
+                        Metrics.OutboundChanges.Deregister();
+                    }
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -302,12 +332,14 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     {
         if (WriteRetryQueue is null)
         {
-            // No retry queue - write directly
+            // Without a retry queue there is nowhere to park a failed write, so it is discarded.
+            // Attributed to OutboundRetries, which reports capacity 0 in this configuration.
             try
             {
                 var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
                 if (!result.IsFullySuccessful)
                 {
+                    Metrics.OutboundRetries.AddDropped(result.FailedChanges.Length);
                     _logger.LogError(result.Error, "Failed to write {Count} changes to source.",
                         result.FailedChanges.Length);
                 }
@@ -318,6 +350,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             }
             catch (Exception e)
             {
+                // Defensive: WriteChangesInBatchesAsync turns a throwing source into a failed
+                // WriteResult, so nothing reaches here today. Counted anyway, because a write that
+                // escapes as an exception is still a write this source has thrown away.
+                Metrics.OutboundRetries.AddDropped(changes.Length);
                 _logger.LogError(e, "Failed to write changes to source.");
             }
             return;
@@ -375,9 +411,12 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
     }
 
-    private void DrainOwnedWritesToRetryQueue(PropertyChangeQueueSubscription subscription)
+    internal void DrainOwnedWritesToRetryQueue(PropertyChangeQueueSubscription subscription)
     {
         // No retry queue: still drain the subscription to empty it, but there is nothing to reconcile.
+        // Deliberately uncounted: this drain has no ownership filter and the subscription carries every
+        // committed change in the process, including other sources' properties and this source's own
+        // inbound applies. Counting it would report other sources' traffic as this source's lost writes.
         if (WriteRetryQueue is null)
         {
             while (subscription.TryDequeueImmediate(out _))
@@ -465,7 +504,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         return collapsed;
     }
 
-    private async Task ReconcileRetryQueueAsync(CancellationToken cancellationToken)
+    internal async Task ReconcileRetryQueueAsync(CancellationToken cancellationToken)
     {
         var retryChanges = WriteRetryQueue?.DrainForLocalReapply();
         if (retryChanges is null || retryChanges.Length == 0)
@@ -521,6 +560,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     // queue. Derived properties reach this: their recomputation commits as Local and is
                     // parked like any other write. Counted as dropped rather than reported as restored.
                     dropped++;
+                    Metrics.OutboundRetries.AddDropped(1);
                     _logger.LogWarning(
                         "Cannot restore the queued write for property '{PropertyName}': it has no setter, so the change is dropped.",
                         property.Name);
@@ -532,6 +572,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     "Failed to reconcile retry queue change for property '{PropertyName}', dropping.",
                     change.Property.Name);
                 failed++;
+                Metrics.OutboundRetries.AddDropped(1);
             }
         }
 
@@ -642,6 +683,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     public override void Dispose()
     {
         // Publish the final Stopped while still registered, so a dispose without a stop is not silent.
+        // Deliberately before base.Dispose forces liveness false, which leaves a sub-microsecond window
+        // where a reader sees Stopped beside IsOperational true. The reverse order has an equally small
+        // window and loses the property this ordering buys: publishing Stopped while still registered is
+        // what makes a dispose-without-stop reach monitors at all.
         TransitionStateTo(SourceState.Stopped);
 
         // Take-and-clear in one step, so a concurrent StartAsync unwinding through its own local

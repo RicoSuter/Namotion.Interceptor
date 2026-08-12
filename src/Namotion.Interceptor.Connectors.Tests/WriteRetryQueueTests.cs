@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -11,7 +12,7 @@ public class WriteRetryQueueTests
     public async Task WhenEnqueueAndFlush_ThenChangesAreWritten()
     {
         // Arrange
-        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics());
         var sourceMock = new Mock<ISubjectSource>();
 
         SubjectPropertyChange[]? writtenChanges = null;
@@ -38,7 +39,7 @@ public class WriteRetryQueueTests
     public async Task WhenQueueIsEmpty_ThenFlushReturnsTrue()
     {
         // Arrange
-        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics());
         var sourceMock = new Mock<ISubjectSource>();
 
         // Act
@@ -55,7 +56,7 @@ public class WriteRetryQueueTests
     public async Task WhenQueueIsFull_ThenOldestAreDropped()
     {
         // Arrange
-        var queue = new WriteRetryQueue(5, NullLogger.Instance);
+        var queue = new WriteRetryQueue(5, NullLogger.Instance, new QueueMetrics());
         var sourceMock = new Mock<ISubjectSource>();
 
         SubjectPropertyChange[]? writtenChanges = null;
@@ -90,7 +91,7 @@ public class WriteRetryQueueTests
     public async Task WhenFlushFails_ThenChangesAreRequeued()
     {
         // Arrange
-        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics());
         var sourceMock = new Mock<ISubjectSource>();
 
         sourceMock
@@ -111,7 +112,7 @@ public class WriteRetryQueueTests
     public async Task WhenFlushFailsWithoutEnumeratedFailedChanges_ThenWholeBatchIsRequeued()
     {
         // Arrange: the source fails wholesale but does not enumerate the failed changes.
-        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics());
         var sourceMock = new Mock<ISubjectSource>();
 
         sourceMock
@@ -133,7 +134,7 @@ public class WriteRetryQueueTests
     public async Task WhenFlushFailsAtCapacity_ThenRequeueDoesNotDropItems()
     {
         // Arrange
-        var queue = new WriteRetryQueue(5, NullLogger.Instance);
+        var queue = new WriteRetryQueue(5, NullLogger.Instance, new QueueMetrics());
         var sourceMock = new Mock<ISubjectSource>();
 
         sourceMock
@@ -154,7 +155,7 @@ public class WriteRetryQueueTests
     public void WhenMaxQueueSizeIsZero_ThenWritesAreDropped()
     {
         // Arrange
-        var queue = new WriteRetryQueue(0, NullLogger.Instance);
+        var queue = new WriteRetryQueue(0, NullLogger.Instance, new QueueMetrics());
 
         // Act
         queue.Enqueue(CreateChanges(5));
@@ -168,7 +169,7 @@ public class WriteRetryQueueTests
     public async Task WhenManyItems_ThenFlushProcessesInBatches()
     {
         // Arrange
-        var queue = new WriteRetryQueue(2000, NullLogger.Instance);
+        var queue = new WriteRetryQueue(2000, NullLogger.Instance, new QueueMetrics());
         var sourceMock = new Mock<ISubjectSource>();
 
         var totalWritten = 0;
@@ -199,7 +200,7 @@ public class WriteRetryQueueTests
     public async Task WhenCancelled_ThenFlushReturnsFalse()
     {
         // Arrange
-        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics());
         var sourceMock = new Mock<ISubjectSource>();
         var cts = new CancellationTokenSource();
         await cts.CancelAsync();
@@ -217,7 +218,7 @@ public class WriteRetryQueueTests
     public async Task WhenMultipleFlushes_ThenOnlyOneRunsAtATime()
     {
         // Arrange
-        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics());
         var sourceMock = new Mock<ISubjectSource>();
 
         var callCount = 0;
@@ -252,7 +253,7 @@ public class WriteRetryQueueTests
     public async Task WhenSourceBatchSizeSet_ThenWriteChangesInBatchesRespectsBatchSize()
     {
         // Arrange
-        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics());
         var sourceMock = new Mock<ISubjectSource>();
 
         var batchSizes = new List<int>();
@@ -280,7 +281,7 @@ public class WriteRetryQueueTests
     public async Task WhenConcurrentEnqueues_ThenAllItemsAreQueued()
     {
         // Arrange
-        var queue = new WriteRetryQueue(10000, NullLogger.Instance);
+        var queue = new WriteRetryQueue(10000, NullLogger.Instance, new QueueMetrics());
         var tasks = new List<Task>();
 
         // Act - enqueue from multiple threads
@@ -300,7 +301,7 @@ public class WriteRetryQueueTests
     public async Task WhenFlushSucceeds_ThenQueueIsEmpty()
     {
         // Arrange
-        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics());
         var sourceMock = new Mock<ISubjectSource>();
 
         sourceMock
@@ -321,7 +322,7 @@ public class WriteRetryQueueTests
     public async Task WhenExactlyMaxBatchSizeItems_ThenAllItemsAreFlushed()
     {
         // Arrange
-        var queue = new WriteRetryQueue(2000, NullLogger.Instance);
+        var queue = new WriteRetryQueue(2000, NullLogger.Instance, new QueueMetrics());
         var sourceMock = new Mock<ISubjectSource>();
 
         var totalWritten = 0;
@@ -346,7 +347,7 @@ public class WriteRetryQueueTests
     public void WhenDrainForLocalReapply_ThenReturnsAllItemsAndClearsQueue()
     {
         // Arrange
-        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics());
         queue.Enqueue(CreateChanges(5));
         Assert.Equal(5, queue.PendingWriteCount);
 
@@ -363,7 +364,7 @@ public class WriteRetryQueueTests
     public void WhenDrainForLocalReapplyOnEmptyQueue_ThenReturnsEmptyArray()
     {
         // Arrange
-        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics());
 
         // Act
         var drained = queue.DrainForLocalReapply();

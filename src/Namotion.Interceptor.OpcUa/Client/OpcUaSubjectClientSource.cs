@@ -62,7 +62,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     /// <remarks>
     /// Hides the source-level diagnostics of the base class: this is the protocol-specific view and
     /// the two are not related by inheritance. Callers holding a base-typed reference still get the
-    /// source-level one.
+    /// source-level one. Temporary: the unrelated hierarchy is a stopgap until this type derives from
+    /// the source-level view, at which point the two become one object and the hiding goes away.
     /// </remarks>
     public new OpcUaClientDiagnostics Diagnostics { get; }
 

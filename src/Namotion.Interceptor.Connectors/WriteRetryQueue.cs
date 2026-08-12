@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
@@ -20,6 +21,7 @@ internal sealed class WriteRetryQueue : IDisposable
     private SubjectPropertyChange[] _scratchBuffer = new SubjectPropertyChange[64];
 
     private readonly ILogger _logger;
+    private readonly QueueMetrics _metrics;
     private readonly int _maxQueueSize;
     private int _count;
 
@@ -37,13 +39,17 @@ internal sealed class WriteRetryQueue : IDisposable
     /// </summary>
     public int PendingWriteCount => Volatile.Read(ref _count);
 
-    public WriteRetryQueue(int maxQueueSize, ILogger logger)
+    // metrics is required rather than optional so a new construction site cannot silently start
+    // dropping writes that nothing counts.
+    public WriteRetryQueue(int maxQueueSize, ILogger logger, QueueMetrics metrics)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(maxQueueSize);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(metrics);
 
         _maxQueueSize = maxQueueSize;
         _logger = logger;
+        _metrics = metrics;
     }
 
     /// <summary>
@@ -80,6 +86,7 @@ internal sealed class WriteRetryQueue : IDisposable
 
         if (droppedCount > 0)
         {
+            _metrics.AddDropped(droppedCount);
             _logger.LogWarning(
                 "Write queue at capacity, dropped {Count} oldest writes (queue size: {QueueSize}).",
                 droppedCount,

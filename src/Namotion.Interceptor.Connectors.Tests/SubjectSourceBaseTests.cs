@@ -107,7 +107,7 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
-    public async Task WhenExecuteAsyncExitsViaCancellation_ThenTheFinallyTransitionsToStopped()
+    public async Task WhenRunAsyncExitsViaCancellation_ThenTheFinallyTransitionsToStopped()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithLifecycle();
@@ -649,7 +649,7 @@ public class SubjectSourceBaseTests
         var subject = new Person(context);
         var source = new TestSubjectSource(subject, context, NullLogger.Instance);
 
-        // Act & Assert - StartAsync surfaces the faulted ExecuteAsync task
+        // Act & Assert - StartAsync surfaces the faulted RunAsync task
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => source.StartAsync(CancellationToken.None));
         Assert.Contains("PropertyChangeInterceptor", exception.Message);
@@ -1682,6 +1682,14 @@ public class SubjectSourceBaseTests
         // Act
         var stateProperty = ExtractExpressionBodiedMember(source, "public SourceState State =>");
         var stateChangeTimeProperty = ExtractExpressionBodiedMember(source, "public DateTimeOffset StateChangeTime =>");
+
+        // Located rather than hard-coded, like the sibling scans above: a rename that keeps both
+        // getters on one snapshot field preserves the invariant, and without this the assertions below
+        // would fail with a raw string-contains diff that reads as a broken invariant rather than a
+        // moved field.
+        const string snapshotFieldDeclaration = "private SourceStateSnapshot _stateSnapshot";
+        Assert.True(source.Contains(snapshotFieldDeclaration, StringComparison.Ordinal),
+            $"'{snapshotFieldDeclaration}' not found; this scan needs updating");
 
         // Assert
         Assert.Contains("Volatile.Read(ref _stateSnapshot)", stateProperty);
