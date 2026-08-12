@@ -506,9 +506,7 @@ public class SubjectSourceExtensionsTests
 
         public SourceState State => SourceState.Synchronizing;
 
-        public DateTimeOffset? LastSynchronizedAt => null;
-
-        public int PendingWriteCount => 0;
+        public DateTimeOffset StateChangeTime { get; } = DateTimeOffset.UtcNow;
 
         public event EventHandler<SourceEvent>? StateChanged
         {

@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.Connectors;
 /// <see cref="StartListeningAsync"/> (protected), <see cref="LoadInitialStateAsync"/> (public),
 /// and <see cref="WriteChangesAsync"/> (public).
 /// </summary>
-public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
+public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 {
     private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
@@ -31,26 +31,45 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     private static readonly TimeSpan ConnectWindowDrainInterval = TimeSpan.FromSeconds(1);
 
     private readonly Lock _stateLock = new();
-    private int _state = (int)SourceState.Synchronizing;
-    private long _lastSynchronizedTicks;
+
+    // The state and its timestamp are swapped as one value. Held in separate fields, a reader can see
+    // the new state beside the previous timestamp and report a stale duration that never happened.
+    private sealed record SourceStateSnapshot(SourceState State, DateTimeOffset ChangeTime);
+
+    private SourceStateSnapshot _stateSnapshot = new(SourceState.Synchronizing, DateTimeOffset.UtcNow);
     private int _started;
 
     private ImmutableArray<SourceMonitor> _registeredMonitors = [];
 
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
-    /// <summary>
-    /// Gets the number of writes currently queued for retry.
-    /// </summary>
-    public int PendingWriteCount => WriteRetryQueue?.PendingWriteCount ?? 0;
-
     protected SubjectSourceBase(
         IInterceptorSubjectContext context,
         ILogger logger,
         TimeSpan? bufferTime = null,
         TimeSpan? retryTime = null,
-        int writeRetryQueueSize = 1000)
+        int writeRetryQueueSize = 1000,
+        ThroughputCounter? incomingThroughput = null,
+        ThroughputCounter? outgoingThroughput = null)
+        : this(context, logger, bufferTime, retryTime, writeRetryQueueSize,
+            new SourceMetrics(incomingThroughput, outgoingThroughput))
     {
+    }
+
+    // A constructor initializer cannot reference this, so the metrics instance is threaded through
+    // here: it has to reach both base(...) and the narrowed Metrics property as the same object.
+    private SubjectSourceBase(
+        IInterceptorSubjectContext context,
+        ILogger logger,
+        TimeSpan? bufferTime,
+        TimeSpan? retryTime,
+        int writeRetryQueueSize,
+        SourceMetrics metrics)
+        : base(metrics)
+    {
+        Metrics = metrics;
+        Diagnostics = new SourceDiagnostics(metrics);
+
         _context = context;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
@@ -66,8 +85,15 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         _propertyWriter = new SubjectPropertyWriter(this, logger);
     }
 
-    /// <inheritdoc cref="ISubjectConnector.RootSubject" />
-    public abstract IInterceptorSubject RootSubject { get; }
+    /// <summary>
+    /// Gets the write side of this source's diagnostics, narrowed to <see cref="SourceMetrics"/>.
+    /// </summary>
+    protected new SourceMetrics Metrics { get; }
+
+    /// <summary>
+    /// Gets what this source reports about its transport and its buffers.
+    /// </summary>
+    public override SourceDiagnostics Diagnostics { get; }
 
     /// <inheritdoc cref="ISubjectSource.WriteBatchSize" />
     public virtual int WriteBatchSize => 0;
@@ -160,7 +186,12 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     }
 
     /// <inheritdoc />
-    protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
+    /// <remarks>
+    /// The base class stamps the start epoch, records a fault and forces liveness false around this.
+    /// The per-attempt failures the retry loop below swallows never reach it, so they are reported
+    /// explicitly.
+    /// </remarks>
+    protected sealed override async Task RunAsync(CancellationToken stoppingToken)
     {
         // Inside the try, so the finally below still publishes Stopped when startup fails. Outside it, a
         // configuration error leaves the source registered as Synchronizing for the process lifetime:
@@ -248,6 +279,11 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                 }
                 catch (Exception ex)
                 {
+                    // The base class only sees exceptions that leave RunAsync, and this loop swallows
+                    // every per-attempt failure. Without this, a source that can never connect would
+                    // report no error at all.
+                    Metrics.ReportError(ex);
+
                     // Whatever it reported before the failure, the source is no longer serving the model.
                     TransitionStateTo(SourceState.Synchronizing);
                     _logger.LogError(ex, "Failed to listen for changes in source.");
@@ -521,17 +557,10 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     // ---- Source monitoring surface ----
 
     /// <inheritdoc />
-    public SourceState State => (SourceState)Volatile.Read(ref _state);
+    public SourceState State => Volatile.Read(ref _stateSnapshot).State;
 
     /// <inheritdoc />
-    public DateTimeOffset? LastSynchronizedAt
-    {
-        get
-        {
-            var ticks = Interlocked.Read(ref _lastSynchronizedTicks);
-            return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
-        }
-    }
+    public DateTimeOffset StateChangeTime => Volatile.Read(ref _stateSnapshot).ChangeTime;
 
     /// <inheritdoc />
     public event EventHandler<SourceEvent>? StateChanged;
@@ -577,19 +606,14 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     {
         lock (_stateLock)
         {
-            var oldState = (SourceState)_state;
+            var oldState = _stateSnapshot.State;
             if (oldState == newState || oldState == SourceState.Stopped)
             {
                 return;
             }
 
-            _state = (int)newState;
-
             var now = DateTimeOffset.UtcNow;
-            if (newState == SourceState.Synchronized)
-            {
-                Interlocked.Exchange(ref _lastSynchronizedTicks, now.UtcTicks);
-            }
+            Volatile.Write(ref _stateSnapshot, new SourceStateSnapshot(newState, now));
 
             var handlers = StateChanged;
             if (handlers is not null)

@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.Connectors;
 /// Sources must claim ownership of properties by calling <c>SetSource(this)</c> during initialization.
 /// </summary>
 /// <remarks>
-/// <see cref="ISubjectConnector.RootSubject"/>, <see cref="State"/> and <see cref="LastSynchronizedAt"/>
+/// <see cref="ISubjectConnector.RootSubject"/>, <see cref="State"/> and <see cref="StateChangeTime"/>
 /// must be lock-free. <c>SourceMonitor</c> reads them while holding its own lock, and
 /// <see cref="StateChanged"/> is raised from inside the source's transition lock, so a getter that
 /// took that lock would close an ABBA cycle. <see cref="SubjectSourceBase"/> satisfies this.
@@ -56,22 +56,17 @@ public interface ISubjectSource : ISubjectConnector
 
     /// <summary>
     /// Gets the source's synchronization state. Describes the inbound direction only: the model
-    /// mirroring the external system. Outbound backlog is <see cref="PendingWriteCount"/>.
+    /// mirroring the external system. Outbound backlog is reported by the connector's diagnostics.
     /// </summary>
     SourceState State { get; }
 
     /// <summary>
-    /// Gets when the most recent initial synchronization completed, or <c>null</c> if it never has.
-    /// While <see cref="SourceState.Synchronizing"/> after a drop, this is how a dashboard says
-    /// "stale, last confirmed at T".
+    /// Gets when <see cref="State"/> last changed. Stamped at construction, so it is always
+    /// meaningful. Read with <see cref="State"/> it answers both questions an operator asks:
+    /// <c>Synchronized</c> plus T reads as in sync since T, <c>Synchronizing</c> plus T reads as
+    /// stale since T.
     /// </summary>
-    DateTimeOffset? LastSynchronizedAt { get; }
-
-    /// <summary>
-    /// Gets the number of writes currently queued for retry. Orthogonal to <see cref="State"/>:
-    /// this queue can be non-empty during entirely normal synchronized operation.
-    /// </summary>
-    int PendingWriteCount { get; }
+    DateTimeOffset StateChangeTime { get; }
 
     /// <summary>
     /// Raised when <see cref="State"/> changes.

@@ -102,7 +102,7 @@ public class OutageStateTests
                 () => source.State == SourceState.Synchronized,
                 timeout: TimeSpan.FromSeconds(60),
                 message: "Initial sync should complete");
-            var firstSynchronizedAt = source.LastSynchronizedAt;
+            var firstSynchronizedAt = source.StateChangeTime;
 
             // Act - Disconnect is the soft fault: it breaks the transport without stopping the
             // connector, which is exactly what a real network blip does. It kills the transport
@@ -124,12 +124,16 @@ public class OutageStateTests
                 message: "SDK should begin auto-reconnecting after the transport is disconnected");
             Assert.Equal(SourceState.Synchronizing, source.State);
 
+            // The timestamp now records when the state last moved, so losing synchronization has to
+            // advance it past the moment the initial sync completed.
+            Assert.True(source.StateChangeTime > firstSynchronizedAt,
+                "Losing synchronization should have moved StateChangeTime past the initial sync.");
+
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.State == SourceState.Synchronized,
                 timeout: TimeSpan.FromSeconds(60),
                 message: "Source should recover to Synchronized after the SDK reconnects");
-            Assert.NotNull(firstSynchronizedAt);
-            Assert.True(source.LastSynchronizedAt > firstSynchronizedAt);
+            Assert.True(source.StateChangeTime > firstSynchronizedAt);
         }
         finally
         {

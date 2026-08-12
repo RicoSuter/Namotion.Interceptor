@@ -59,7 +59,12 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     public override int WriteBatchSize => _writer?.WriteBatchSize ?? 0;
 
     /// <inheritdoc />
-    public OpcUaClientDiagnostics Diagnostics { get; }
+    /// <remarks>
+    /// Hides the source-level diagnostics of the base class: this is the protocol-specific view and
+    /// the two are not related by inheritance. Callers holding a base-typed reference still get the
+    /// source-level one.
+    /// </remarks>
+    public new OpcUaClientDiagnostics Diagnostics { get; }
 
     /// <inheritdoc />
     public ISession? CurrentSession => _sessionManager?.CurrentSession;

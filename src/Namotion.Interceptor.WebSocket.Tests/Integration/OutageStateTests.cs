@@ -70,7 +70,7 @@ public class OutageStateTests
                 () => source.State == SourceState.Synchronized,
                 timeout: TimeSpan.FromSeconds(30),
                 message: "Initial sync should complete");
-            var firstSynchronizedAt = source.LastSynchronizedAt;
+            var firstSynchronizedAt = source.StateChangeTime;
 
             // Act - Disconnect is the soft fault: it aborts the socket without stopping the
             // connector, matching a real network blip.
@@ -81,12 +81,17 @@ public class OutageStateTests
                 () => source.State == SourceState.Synchronizing,
                 timeout: TimeSpan.FromSeconds(15),
                 message: "Source should report Synchronizing during the outage");
+
+            // The timestamp now records when the state last moved, so losing synchronization has to
+            // advance it past the moment the initial sync completed.
+            Assert.True(source.StateChangeTime > firstSynchronizedAt,
+                "Losing synchronization should have moved StateChangeTime past the initial sync.");
+
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.State == SourceState.Synchronized,
                 timeout: TimeSpan.FromSeconds(30),
                 message: "Source should recover to Synchronized after reconnecting");
-            Assert.NotNull(firstSynchronizedAt);
-            Assert.True(source.LastSynchronizedAt > firstSynchronizedAt);
+            Assert.True(source.StateChangeTime > firstSynchronizedAt);
         }
         finally
         {

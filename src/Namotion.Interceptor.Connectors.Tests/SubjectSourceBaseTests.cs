@@ -91,14 +91,14 @@ public class SubjectSourceBaseTests
 
         // Located rather than sliced blind: without these the slices below throw a bare range exception
         // on the refactor this test exists to survive, which reads as a broken test rather than a moved one.
-        var executeAsyncIndex = source.IndexOf("protected sealed override async Task ExecuteAsync", StringComparison.Ordinal);
-        Assert.True(executeAsyncIndex >= 0, "ExecuteAsync not found; this scan needs updating");
+        var runAsyncIndex = source.IndexOf("protected sealed override async Task RunAsync", StringComparison.Ordinal);
+        Assert.True(runAsyncIndex >= 0, "RunAsync not found; this scan needs updating");
 
-        var executeAsync = source[executeAsyncIndex..];
-        var catchIndex = executeAsync.IndexOf("catch (Exception ex)", StringComparison.Ordinal);
+        var runAsync = source[runAsyncIndex..];
+        var catchIndex = runAsync.IndexOf("catch (Exception ex)", StringComparison.Ordinal);
         Assert.True(catchIndex >= 0, "the catch block was not found; this scan needs updating");
 
-        var catchBlock = executeAsync[catchIndex..];
+        var catchBlock = runAsync[catchIndex..];
         var finallyIndex = catchBlock.IndexOf("finally", StringComparison.Ordinal);
         Assert.True(finallyIndex >= 0, "no finally after the catch; this scan needs updating");
 
@@ -1641,7 +1641,7 @@ public class SubjectSourceBaseTests
     public void WhenSubjectSourceBaseDeclaresState_ThenItReadsLockFreeNotUnderStateLock()
     {
         // Arrange
-        // The docs' lock-free getter contract (docs/connectors-monitoring.md: State, LastSynchronizedAt
+        // The docs' lock-free getter contract (docs/connectors-monitoring.md: State, StateChangeTime
         // and RootSubject must not acquire any lock held while StateChanged is raised) has no dynamic
         // test: SourceMonitor reads source.State while holding its own _lock, and TransitionTo raises
         // StateChanged while holding _stateLock - a regression that made State take _stateLock too
@@ -1654,11 +1654,38 @@ public class SubjectSourceBaseTests
         var sourceFilePath = GetSubjectSourceBaseFilePath();
         var source = File.ReadAllText(sourceFilePath);
         var stateProperty = ExtractExpressionBodiedMember(source, "public SourceState State =>");
+        var stateChangeTimeProperty = ExtractExpressionBodiedMember(source, "public DateTimeOffset StateChangeTime =>");
 
         // Act & Assert
-        Assert.Contains("Volatile.Read", stateProperty);
-        Assert.DoesNotContain("_stateLock", stateProperty);
-        Assert.DoesNotContain("lock (", stateProperty);
+        foreach (var getter in new[] { stateProperty, stateChangeTimeProperty })
+        {
+            Assert.Contains("Volatile.Read", getter);
+            Assert.DoesNotContain("_stateLock", getter);
+            Assert.DoesNotContain("lock (", getter);
+        }
+    }
+
+    [Fact]
+    public void WhenSubjectSourceBaseDeclaresStateAndItsTimestamp_ThenBothReadTheSameSnapshotField()
+    {
+        // Arrange
+        // A caller reading State and StateChangeTime separately can always be preempted between the
+        // two, so the property this pins is narrower: each individual read is internally consistent,
+        // because both getters dereference one immutable snapshot. Split back into two fields, a
+        // single read of StateChangeTime could report the previous transition's moment beside the new
+        // state, which is a stale duration that never happened. No dynamic test can force that: the
+        // wall clock is far coarser than the window between the two writes and many transitions share
+        // one tick, so a torn pair is indistinguishable from a legal one by its timestamp alone. Same
+        // shape as the lock-free getter pinned above, so the same static-scan technique.
+        var source = File.ReadAllText(GetSubjectSourceBaseFilePath());
+
+        // Act
+        var stateProperty = ExtractExpressionBodiedMember(source, "public SourceState State =>");
+        var stateChangeTimeProperty = ExtractExpressionBodiedMember(source, "public DateTimeOffset StateChangeTime =>");
+
+        // Assert
+        Assert.Contains("Volatile.Read(ref _stateSnapshot)", stateProperty);
+        Assert.Contains("Volatile.Read(ref _stateSnapshot)", stateChangeTimeProperty);
     }
 
     private static string ExtractExpressionBodiedMember(string source, string signature)

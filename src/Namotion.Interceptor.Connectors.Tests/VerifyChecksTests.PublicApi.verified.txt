@@ -58,9 +58,8 @@ namespace Namotion.Interceptor.Connectors
     }
     public interface ISubjectSource : Namotion.Interceptor.Connectors.ISubjectConnector
     {
-        System.DateTimeOffset? LastSynchronizedAt { get; }
-        int PendingWriteCount { get; }
         Namotion.Interceptor.Connectors.Monitoring.SourceState State { get; }
+        System.DateTimeOffset StateChangeTime { get; }
         int WriteBatchSize { get; }
         event System.EventHandler<Namotion.Interceptor.Connectors.Monitoring.SourceEvent>? StateChanged;
         System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
@@ -115,19 +114,20 @@ namespace Namotion.Interceptor.Connectors
         public void StartBuffering() { }
         public void Write<TState>(TState state, System.Action<TState> update) { }
     }
-    public abstract class SubjectSourceBase : Microsoft.Extensions.Hosting.BackgroundService, Namotion.Interceptor.Connectors.ISubjectConnector, Namotion.Interceptor.Connectors.ISubjectSource
+    public abstract class SubjectSourceBase : Namotion.Interceptor.Connectors.SubjectConnectorBase, Namotion.Interceptor.Connectors.ISubjectConnector, Namotion.Interceptor.Connectors.ISubjectSource
     {
-        protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000) { }
-        public System.DateTimeOffset? LastSynchronizedAt { get; }
-        public int PendingWriteCount { get; }
-        public abstract Namotion.Interceptor.IInterceptorSubject RootSubject { get; }
+        protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000, Namotion.Interceptor.Connectors.ThroughputCounter? incomingThroughput = null, Namotion.Interceptor.Connectors.ThroughputCounter? outgoingThroughput = null) { }
+        [get: System.Runtime.CompilerServices.PreserveBaseOverrides]
+        public new virtual Namotion.Interceptor.Connectors.Diagnostics.SourceDiagnostics Diagnostics { get; }
+        protected new Namotion.Interceptor.Connectors.Diagnostics.SourceMetrics Metrics { get; }
         public Namotion.Interceptor.Connectors.Monitoring.SourceState State { get; }
+        public System.DateTimeOffset StateChangeTime { get; }
         public virtual int WriteBatchSize { get; }
         public event System.EventHandler<Namotion.Interceptor.Connectors.Monitoring.SourceEvent>? StateChanged;
         public override void Dispose() { }
-        protected override sealed System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         public abstract System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
         protected void ReportConnectionLost() { }
+        protected override sealed System.Threading.Tasks.Task RunAsync(System.Threading.CancellationToken stoppingToken) { }
         public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
         protected abstract System.Threading.Tasks.Task<System.IAsyncDisposable?> StartListeningAsync(Namotion.Interceptor.Connectors.SubjectPropertyWriter propertyWriter, System.Threading.CancellationToken cancellationToken);
         public abstract System.Threading.Tasks.ValueTask<Namotion.Interceptor.Connectors.WriteResult> WriteChangesAsync(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, System.Threading.CancellationToken cancellationToken);

@@ -70,8 +70,10 @@ public class SubjectSourceRetryQueueTests
                 failWholesale = true;
             }
             person.FirstName = "John";
+            // Read from the queue itself rather than from Diagnostics.OutboundRetries.Depth, which has
+            // no depth provider registered yet and would report 0 forever.
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.PendingWriteCount > 0,
+                () => source.WriteRetryQueue!.PendingWriteCount > 0,
                 message: "Wholesale-failed write was not queued for retry.");
 
             // Recover the source; subsequent outbound writes flush the retry queue first.

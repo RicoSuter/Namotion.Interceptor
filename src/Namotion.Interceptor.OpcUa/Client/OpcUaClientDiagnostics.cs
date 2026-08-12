@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Connectors;
+
 namespace Namotion.Interceptor.OpcUa.Client;
 
 /// <summary>
@@ -93,7 +95,11 @@ public class OpcUaClientDiagnostics
     /// <summary>
     /// Gets the number of writes currently queued for retry (buffered during disconnection).
     /// </summary>
-    public int PendingWriteCount => _source.PendingWriteCount;
+    /// <remarks>
+    /// Read through the base type because the source's own <c>Diagnostics</c> is this type, which
+    /// would otherwise recurse.
+    /// </remarks>
+    public int PendingWriteCount => ((SubjectSourceBase)_source).Diagnostics.OutboundRetries.Depth;
 
     /// <summary>
     /// Gets the most recent error that occurred while establishing or restoring the session,
