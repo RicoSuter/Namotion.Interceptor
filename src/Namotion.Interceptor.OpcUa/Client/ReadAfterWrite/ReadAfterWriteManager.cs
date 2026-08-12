@@ -376,57 +376,55 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 // stored write timestamp; a read-back the revisions rank is applied whatever it says.
                 var sourceTimestamp = result.SourceTimestamp.ToUtcDateTimeOffset();
 
-                // Ranked in two domains, because the two candidates are not always produced by the same
-                // clock. A local write that committed after the one this read-back verifies is newer
-                // than anything the server can have seen, and revisions order it without a clock at all.
-                //
-                // Both revisions are taken before either is used, the one counting source commits first.
-                // A local commit landing between the two reads then only ever raises localRevision, which
-                // skips below, instead of raising lastCommitRevision alone and passing a local commit off
-                // as a source one. A commit landing after both reads is caught by re-reading localRevision
-                // just before the apply, because neither guard below is evaluated again once passed. What
-                // stays open is the apply itself, which no lookup here can close.
-                reference.TryGetWriteState(true, out var lastCommitRevision, out _);
-                reference.TryGetWriteState(false, out var localRevision, out _);
-
-                if (sentRevision != 0 && localRevision > sentRevision)
-                {
-                    skippedCount++;
-                    continue;
-                }
-
-                // Otherwise the last commit may have come from a source, and only then is the stored
-                // write timestamp the server's own SourceTimestamp, which is what makes comparing it
-                // against the read-back's a comparison of one clock with itself. A change that carried
-                // no revision leaves the question above unanswerable, so for it the comparison decides
-                // alone, which is the only ranking this path had before revisions ranked it. Dropping
-                // that fallback would let the read-back apply a pre-write value over a newer local write.
-                //
-                // That fallback compares two clocks, not one: a local commit stores the model's own
-                // timestamp, and a write no longer carries it to the server, so the read-back answers
-                // with the server's receive time instead. Being the later of the two, it errs toward
-                // applying the server's value rather than skipping it, which is the safe direction: a
-                // local write the revisions could rank was already handled above.
-                var timestampDecidesAlone = sentRevision == 0 || lastCommitRevision > localRevision;
-
-                if (timestampDecidesAlone &&
-                    reference.TryGetWriteTimestamp() is { } writeTimestamp &&
-                    writeTimestamp >= sourceTimestamp)
-                {
-                    skippedCount++;
-                    continue;
-                }
-
                 try
                 {
+                    // Converted before the ranking rather than after it, so that everything the ranking
+                    // reads is read immediately before the apply it decides. The conversion is the one
+                    // call here slow enough for a commit to land inside it, and a commit the ranking
+                    // cannot see is one the apply reverts. Ranking first and converting after leaves that
+                    // gap open for a source commit in particular, which the revisions below do rank but
+                    // which no later re-read of the local revision alone would notice. The price is a
+                    // conversion for a read-back that then skips, which only a superseded one pays.
                     var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
 
-                    // Read again as late as the apply allows. Both guards above ran before the conversion,
-                    // and a local commit since then is newer than anything this read-back can carry, so
-                    // applying it would revert that write and leave the model behind the server with no
-                    // notification to correct it: the node never changed, so none is coming.
-                    reference.TryGetWriteState(false, out var localRevisionBeforeApply, out _);
-                    if (localRevisionBeforeApply != localRevision)
+                    // Ranked in two domains, because the two candidates are not always produced by the
+                    // same clock. A local write that committed after the one this read-back verifies is
+                    // newer than anything the server can have seen, and revisions order it without a
+                    // clock at all.
+                    //
+                    // Both revisions are taken before either is used, the one counting source commits
+                    // first. A local commit landing between the two reads then only ever raises
+                    // localRevision, which skips below, instead of raising lastCommitRevision alone and
+                    // passing a local commit off as a source one. What stays open is the apply itself:
+                    // SetValueFromSource runs the whole inbound interceptor chain, and outside the
+                    // subject lock, so no lookup here can close it.
+                    reference.TryGetWriteState(true, out var lastCommitRevision, out _);
+                    reference.TryGetWriteState(false, out var localRevision, out _);
+
+                    if (sentRevision != 0 && localRevision > sentRevision)
+                    {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    // Otherwise the last commit may have come from a source, and only then is the stored
+                    // write timestamp the server's own SourceTimestamp, which is what makes comparing it
+                    // against the read-back's a comparison of one clock with itself. A change that carried
+                    // no revision leaves the question above unanswerable, so for it the comparison decides
+                    // alone, which is the only ranking this path had before revisions ranked it. Dropping
+                    // that fallback would let the read-back apply a pre-write value over a newer local
+                    // write.
+                    //
+                    // That fallback compares two clocks, not one: a local commit stores the model's own
+                    // timestamp, and a write no longer carries it to the server, so the read-back answers
+                    // with the server's receive time instead. Being the later of the two, it errs toward
+                    // applying the server's value rather than skipping it, which is the safe direction: a
+                    // local write the revisions could rank was already handled above.
+                    var timestampDecidesAlone = sentRevision == 0 || lastCommitRevision > localRevision;
+
+                    if (timestampDecidesAlone &&
+                        reference.TryGetWriteTimestamp() is { } writeTimestamp &&
+                        writeTimestamp >= sourceTimestamp)
                     {
                         skippedCount++;
                         continue;

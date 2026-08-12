@@ -78,6 +78,33 @@ public class OpcUaReadAfterWriteTests
     }
 
     [Fact]
+    public async Task WhenASourceValueCommitsWhileTheReadBackConverts_ThenItStillSurvives()
+    {
+        // Arrange
+        await using var fixture = await ReadAfterWriteFixture.StartAsync(_output);
+        fixture.ClientChild.Trigger = "first";
+        await fixture.WaitForScheduledReadBackAsync();
+
+        // Act: the same window as the test above, entered by a source commit rather than a local one.
+        // It is the half a re-read of the local revision alone cannot see, because a source commit moves
+        // the other marker, and the half with no repair behind it: both commits come from the source, so
+        // nothing is queued outbound and no supersession check ever runs.
+        fixture.GateInboundValueOf(ReadAfterWriteFixture.ServerValue);
+        fixture.WaitUntilInboundValueIsGated();
+
+        fixture.PublishToNode("from-server", StatusCodes.UncertainLastUsableValue, DateTime.UtcNow);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => fixture.ClientChild.Trigger == "from-server",
+            message: "the status change should carry the server's value to the client while the read-back waits");
+
+        fixture.ReleaseInboundValue();
+
+        // Assert
+        await fixture.WaitForSkippedReadBackAsync();
+        Assert.Equal("from-server", fixture.ClientChild.Trigger);
+    }
+
+    [Fact]
     public async Task WhenASourceValueCommitsAfterTheWrite_ThenItSurvives()
     {
         // Arrange
