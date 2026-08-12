@@ -18,12 +18,12 @@ public class SourceMetrics : ConnectorMetrics
     /// <summary>
     /// Gets the metrics of the queue holding outbound writes awaiting retry.
     /// </summary>
-    public QueueMetrics OutboundRetries { get; } = new();
+    public QueueMetrics OutboundRetries { get; } = new(nameof(OutboundRetries));
 
     /// <summary>
     /// Gets the metrics of the buffer holding inbound updates while the initial state loads.
     /// </summary>
-    public QueueMetrics InboundBuffer { get; } = new();
+    public QueueMetrics InboundBuffer { get; } = new(nameof(InboundBuffer));
 
     /// <summary>
     /// Points the claimed-property gauge at the source's ownership manager. A source that registers

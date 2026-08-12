@@ -105,6 +105,15 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// <summary>
     /// Gets the write side of this source's diagnostics, narrowed to <see cref="SourceMetrics"/>.
     /// </summary>
+    /// <remarks>
+    /// A derived source must not register on <see cref="Diagnostics.ConnectorMetrics.OutboundChanges"/>
+    /// or on <see cref="SourceMetrics.OutboundRetries"/> and
+    /// <see cref="SourceMetrics.InboundBuffer"/>: this base owns all three, and re-registers the
+    /// outbound change queue on every connect attempt. A second live registration makes that
+    /// <see cref="Diagnostics.QueueMetrics.Register"/> throw, which the retry loop catches and reports
+    /// before trying again and throwing again, so the source never connects. The servers register their
+    /// own processor because they own their metrics outright; a source does not.
+    /// </remarks>
     protected new SourceMetrics Metrics { get; }
 
     /// <summary>
@@ -325,8 +334,14 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                 {
                     // The base class only sees exceptions that leave RunAsync, and this loop swallows
                     // every per-attempt failure. Without this, a source that can never connect would
-                    // report no error at all.
-                    Metrics.ReportError(ex);
+                    // report no error at all. A failure the stop itself caused is left unrecorded: the
+                    // clause above only covers the cancellation, not the arbitrary exception a
+                    // connection torn down mid-connect raises, and recording that would overwrite the
+                    // genuine fault for good.
+                    if (!IsExpectedShutdown(stoppingToken))
+                    {
+                        Metrics.ReportError(ex);
+                    }
 
                     // Whatever it reported before the failure, the source is no longer serving the model.
                     TransitionStateTo(SourceState.Synchronizing);
@@ -351,7 +366,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             try
             {
                 var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
-                if (!result.IsFullySuccessful && !IsExpectedShutdown(result.Error, cancellationToken))
+                if (!result.IsFullySuccessful && !IsExpectedShutdown(cancellationToken))
                 {
                     Metrics.OutboundRetries.AddDropped(result.FailedChanges.Length);
                     _logger.LogError(result.Error, "Failed to write {Count} changes to source.",
@@ -407,18 +422,24 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     }
 
     /// <summary>
-    /// Whether a failed write is nothing more than the host stopping while it was in flight.
+    /// Whether a failure is nothing more than the host stopping while the work was in flight.
     /// </summary>
     /// <remarks>
-    /// <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/> reports cancellation as a
-    /// failed <see cref="WriteResult"/> rather than throwing it, so without this filter every graceful
-    /// stop that caught a write in flight would add the whole batch to
-    /// <see cref="Diagnostics.QueueDiagnostics.TotalDropped"/>, and an operator who sees that counter
-    /// jump at every restart learns to ignore it. Matches the decision in
+    /// Decided by the token rather than by the exception type, because a stop tears down connections
+    /// and in-flight requests and the failure that produces can be any exception, while
+    /// <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/> reports even the cancellation
+    /// itself as a failed <see cref="WriteResult"/> rather than throwing it.
+    /// <para>
+    /// Two paths need it. Unfiltered, every graceful stop that caught a write in flight would add the
+    /// whole batch to <see cref="Diagnostics.QueueDiagnostics.TotalDropped"/>, and an operator who sees
+    /// that counter jump at every restart learns to ignore it; and the retry loop would record the
+    /// teardown as this source's last error over the genuine fault that made it fail, which is sticky
+    /// and cannot be cleared because a stopped source does not start again. Matches the decision in
     /// <see cref="SubjectConnectorBase.ExecuteAsync"/>: an expected shutdown is not a fault.
+    /// </para>
     /// </remarks>
-    private static bool IsExpectedShutdown(Exception? error, CancellationToken cancellationToken) =>
-        error is OperationCanceledException && cancellationToken.IsCancellationRequested;
+    private static bool IsExpectedShutdown(CancellationToken cancellationToken) =>
+        cancellationToken.IsCancellationRequested;
 
     /// <summary>
     /// Parks owned writes into the retry queue at intervals while the initial state loads, so a slow
@@ -445,9 +466,12 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     internal void DrainOwnedWritesToRetryQueue(PropertyChangeQueueSubscription subscription)
     {
         // No retry queue: still drain the subscription to empty it, but there is nothing to reconcile.
-        // Deliberately uncounted: this drain has no ownership filter and the subscription carries every
-        // committed change in the process, including other sources' properties and this source's own
-        // inbound applies. Counting it would report other sources' traffic as this source's lost writes.
+        // Deliberately uncounted. The subscription carries every committed change in the process,
+        // including other sources' properties and this source's own inbound applies, so counting the
+        // discards honestly means running the same ownership filter the branch below runs, per change,
+        // on a path that exists only when the retry queue is disabled and that has nothing to do with
+        // the result. The cost buys a number that changes no decision: the configuration itself is what
+        // says these writes are being thrown away.
         if (WriteRetryQueue is null)
         {
             while (subscription.TryDequeueImmediate(out _))

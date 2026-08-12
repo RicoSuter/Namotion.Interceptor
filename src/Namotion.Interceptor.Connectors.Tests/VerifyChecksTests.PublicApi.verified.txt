@@ -196,7 +196,7 @@ namespace Namotion.Interceptor.Connectors.Diagnostics
     }
     public sealed class QueueMetrics
     {
-        public QueueMetrics() { }
+        public QueueMetrics(string name = "queue") { }
         public void AddDropped(long count) { }
         public void Deregister() { }
         public void Register(System.Func<int> depth, System.Func<long>? dropped, int? capacity) { }

@@ -37,8 +37,10 @@ public class SourceDiagnostics : ConnectorDiagnostics
     /// <para>
     /// In that configuration the total is a floor rather than the whole loss. The larger loss path is
     /// the connect-window drain, which discards every captured write because without a queue there is
-    /// nothing to park them in, and which is deliberately uncounted: it has no ownership filter, so its
-    /// discards cannot be attributed to this source.
+    /// nothing to park them in, and which is deliberately uncounted: the drain is unfiltered, so
+    /// counting only this source's share of it costs an ownership check per change on a path that runs
+    /// only when the queue is disabled, and the configuration already says those writes are being
+    /// thrown away.
     /// </para>
     /// </remarks>
     public QueueDiagnostics OutboundRetries { get; }

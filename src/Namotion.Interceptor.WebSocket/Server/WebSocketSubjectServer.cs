@@ -18,8 +18,8 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// </summary>
 public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncDisposable
 {
-    // Matches the MQTT broker's restart delay. Without it a listener that cannot bind, or a processing
-    // layer that ends on its own, rebuilds and rebinds Kestrel in a tight loop.
+    // Matches the MQTT broker's restart delay. Without it a listener that cannot bind rebuilds and
+    // rebinds Kestrel in a tight loop.
     private static readonly TimeSpan RestartBackoff = TimeSpan.FromSeconds(5);
 
     private readonly WebSocketSubjectHandler _handler;
@@ -28,8 +28,20 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
 
     private WebApplication? _app;
     private int _disposed;
-    private volatile bool _isForceKill;
-    private volatile CancellationTokenSource? _forceKillCts;
+    private volatile RunAttempt? _currentAttempt;
+
+    /// <summary>
+    /// One loop iteration's cancellation and its kill flag, held together so a kill can only be
+    /// honoured for the attempt whose token source it actually cancelled. A flag on the server itself
+    /// stays set when the kill arrives after that attempt has torn down, and the next attempt then
+    /// reads a kill that never reached it.
+    /// </summary>
+    private sealed class RunAttempt(CancellationTokenSource cancellation)
+    {
+        public readonly CancellationTokenSource Cancellation = cancellation;
+
+        public volatile bool WasForceKilled;
+    }
 
     /// <inheritdoc />
     public override IInterceptorSubject RootSubject { get; }
@@ -66,9 +78,22 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
         switch (faultType)
         {
             case FaultType.Kill:
-                _isForceKill = true;
-                try { _forceKillCts?.Cancel(); }
-                catch (ObjectDisposedException) { /* CTS disposed between loop iterations */ }
+                var attempt = _currentAttempt;
+                if (attempt is not null)
+                {
+                    // Marked before the cancel, so the loop cannot reach its kill check ahead of this
+                    // write, and unmarked again when the token source turns out to be disposed: the
+                    // loop is then between attempts and this kill reached nothing.
+                    attempt.WasForceKilled = true;
+                    try
+                    {
+                        await attempt.Cancellation.CancelAsync().ConfigureAwait(false);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        attempt.WasForceKilled = false;
+                    }
+                }
                 break;
 
             case FaultType.Disconnect:
@@ -85,98 +110,140 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            _forceKillCts = cts;
-            var linkedToken = cts.Token;
+            var attempt = new RunAttempt(CancellationTokenSource.CreateLinkedTokenSource(stoppingToken));
+            _currentAttempt = attempt;
+            var linkedToken = attempt.Cancellation.Token;
 
-            // Decided inside the try below, because _isForceKill is cleared in the finally. A
-            // force-kill restarts at once, matching the MQTT and OPC UA servers: it is an injected
-            // fault the caller is waiting on, not a failure to back off from.
+            // Set by the catch below only, which is where a listener that cannot start or bind lands.
+            // A force-kill and a processing layer that ended on its own both restart at once: the
+            // listener is healthy in both cases, and holding the port for the backoff would disconnect
+            // every client to rebuild a layer that binds nothing.
             var restartBackoff = TimeSpan.Zero;
 
             try
             {
-                // Build a new WebApplication each iteration because IHost doesn't support
-                // Start/Stop cycles. On Kill, the entire Kestrel instance is torn down and
-                // rebuilt, matching real crash behavior (like MQTT restarts its broker).
-                _app = BuildWebApplication(linkedToken, out var listenUrl);
-
-                _logger.LogInformation("WebSocket server starting on {Url}{Path}", listenUrl, _configuration.Path);
-                await _app.StartAsync(stoppingToken).ConfigureAwait(false);
-                Metrics.MarkOperational();
-
-                using var changeQueueProcessor = _handler.CreateChangeQueueProcessor(_logger);
-
-                // Registered after construction and released in the finally below, so the next restart
-                // can register its own processor: a second Register while one is still live throws. The
-                // using above still disposes the processor if Register itself throws. The embedded
-                // mode's own processor deliberately does not register, so it cannot wire itself into
-                // this server's metrics.
-                Metrics.OutboundChanges.Register(
-                    () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
                 try
                 {
-                    var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);
-                    var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedToken);
+                    // Build a new WebApplication each iteration because IHost doesn't support
+                    // Start/Stop cycles. On Kill, the entire Kestrel instance is torn down and
+                    // rebuilt, matching real crash behavior (like MQTT restarts its broker).
+                    _app = BuildWebApplication(linkedToken, out var listenUrl);
 
-                    // The filter below cannot be narrowed to the force-kill the way the OPC UA and MQTT
-                    // servers narrow theirs, because cts.CancelAsync makes a cancellation the normal
-                    // exit path here. The exception is kept instead and judged below, where an
-                    // unexpected completion is actually identified.
-                    OperationCanceledException? completionCancellation = null;
+                    _logger.LogInformation("WebSocket server starting on {Url}{Path}", listenUrl, _configuration.Path);
+                    await _app.StartAsync(stoppingToken).ConfigureAwait(false);
+                    Metrics.MarkOperational();
+
+                    using var changeQueueProcessor = _handler.CreateChangeQueueProcessor(_logger);
                     try
                     {
-                        // When either task completes, cancel the other to prevent blocking forever.
-                        await Task.WhenAny(processorTask, heartbeatTask).ConfigureAwait(false);
-                        await cts.CancelAsync().ConfigureAwait(false);
-                        await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException exception) when (!stoppingToken.IsCancellationRequested)
-                    {
-                        // Kill or one task completed: linkedToken canceled
-                        completionCancellation = exception;
-                    }
+                        // Registered inside the try whose finally releases it, so the next restart can
+                        // register its own processor: a second Register while one is still live throws,
+                        // and a registration made outside would never be released if it threw. The
+                        // embedded mode's own processor deliberately does not register, so it cannot
+                        // wire itself into this server's metrics.
+                        Metrics.OutboundChanges.Register(
+                            () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
 
-                    // Both tasks completed, either normally (tasks catch OCE internally and
-                    // return) or via caught OCE above. Check why we stopped:
-                    if (stoppingToken.IsCancellationRequested)
-                    {
-                        break;
-                    }
+                        var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);
+                        var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedToken);
 
-                    // linkedToken was canceled (Kill) or completed unexpectedly, so restart.
-                    if (_isForceKill)
-                    {
-                        // Deliberately not reported through ReportError: it is an injected fault the
-                        // server recovers from by restarting, and handling it here is also what keeps it
-                        // from reaching the base class, which would record a cancellation the stopping
-                        // token did not cause as a genuine fault.
-                        _logger.LogWarning("WebSocket server force-killed. Restarting...");
-                    }
-                    else
-                    {
-                        // Neither the host stopping nor an injected fault, so the processing layer ended
-                        // on its own. The loop restarts instead of leaving RunAsync, so the base class
-                        // never sees it and without this the server would restart with nothing
-                        // explaining why.
-                        //
-                        // The captured cancellation is almost always the one cts.CancelAsync above
-                        // produced to stop the sibling task, so reporting it in its own right would put
-                        // "A task was canceled" on the diagnostics surface in place of the reason. It is
-                        // kept as the cause instead.
-                        var error = new InvalidOperationException(
-                            "WebSocket server processing completed unexpectedly.", completionCancellation);
+                        // The filter below cannot be narrowed to the force-kill the way the OPC UA and
+                        // MQTT servers narrow theirs, because cancelling the attempt makes a
+                        // cancellation the normal exit path here. The exception is kept instead and
+                        // judged below, where an unexpected completion is actually identified.
+                        OperationCanceledException? completionCancellation = null;
+                        try
+                        {
+                            // When either task completes, cancel the other to prevent blocking forever.
+                            await Task.WhenAny(processorTask, heartbeatTask).ConfigureAwait(false);
+                            await attempt.Cancellation.CancelAsync().ConfigureAwait(false);
+                            await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException exception) when (!stoppingToken.IsCancellationRequested)
+                        {
+                            // Kill or one task completed: linkedToken canceled
+                            completionCancellation = exception;
+                        }
 
-                        Metrics.ReportError(error);
-                        _logger.LogWarning(error, "WebSocket server processing completed unexpectedly. Restarting...");
-                        restartBackoff = RestartBackoff;
+                        // Both tasks completed, either normally (tasks catch OCE internally and
+                        // return) or via caught OCE above. Check why we stopped:
+                        if (stoppingToken.IsCancellationRequested)
+                        {
+                            break;
+                        }
+
+                        // linkedToken was canceled (Kill) or completed unexpectedly, so restart.
+                        if (attempt.WasForceKilled)
+                        {
+                            // Deliberately not reported through ReportError: it is an injected fault the
+                            // server recovers from by restarting, and handling it here is also what
+                            // keeps it from reaching the base class, which would record a cancellation
+                            // the stopping token did not cause as a genuine fault.
+                            _logger.LogWarning("WebSocket server force-killed. Restarting...");
+                        }
+                        else
+                        {
+                            // Neither the host stopping nor an injected fault, so the processing layer
+                            // ended on its own. The loop restarts instead of leaving RunAsync, so the
+                            // base class never sees it and without this the server would restart with
+                            // nothing explaining why.
+                            //
+                            // Neither task surfaces the cancellation raised above to stop the sibling:
+                            // the change processor returns because its dequeue reports the cancellation
+                            // rather than throwing it, and the heartbeat loop swallows its own. So on
+                            // this path the captured value is normally null and the recorded error
+                            // carries no inner exception. It is kept for the case where one of them does
+                            // throw, where it names the cancellation that ended the layer.
+                            var error = new InvalidOperationException(
+                                "WebSocket server processing completed unexpectedly.", completionCancellation);
+
+                            Metrics.ReportError(error);
+                            _logger.LogWarning(error, "WebSocket server processing completed unexpectedly. Restarting...");
+                        }
+                    }
+                    finally
+                    {
+                        // Runs before the using disposes the processor, so no reader can call into a
+                        // disposed one. Deregistering without a live registration is a no-op fold, so
+                        // this is also correct when the Register above threw.
+                        Metrics.OutboundChanges.Deregister();
                     }
                 }
                 finally
                 {
-                    // Runs before the using disposes the processor, so no reader can call into a
-                    // disposed one.
-                    Metrics.OutboundChanges.Deregister();
+                    // Inside the try the catches below guard, like the MQTT broker's teardown: disposing
+                    // the WebApplication disposes its whole service provider, and a singleton that
+                    // throws on disposal would otherwise leave RunAsync and end the connector.
+                    //
+                    // First in the teardown, so a throw further down cannot leave a server that has
+                    // stopped accepting connections reporting that it is serving.
+                    Metrics.MarkNotOperational();
+
+                    await _handler.CloseAllConnectionsAsync().ConfigureAwait(false);
+
+                    var app = _app;
+                    if (app is not null)
+                    {
+                        // Cleared before the teardown rather than after it, so a stop or a dispose that
+                        // throws cannot leave a half-torn-down app reachable for the next iteration to
+                        // overwrite.
+                        _app = null;
+
+                        // Use a short timeout to avoid the default 30-second ASP.NET graceful
+                        // shutdown. Connections are already closed above, so Kestrel should stop
+                        // quickly. The timeout is just a safety net.
+                        using var shutdownCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                        try
+                        {
+                            await app.StopAsync(shutdownCts.Token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // Shutdown timed out, so DisposeAsync will force-release the port.
+                        }
+
+                        await app.DisposeAsync().ConfigureAwait(false);
+                    }
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -194,39 +261,23 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
             }
             finally
             {
-                // First in the teardown, so a throw further down cannot leave a server that has stopped
-                // accepting connections reporting that it is serving.
-                Metrics.MarkNotOperational();
-
-                await _handler.CloseAllConnectionsAsync().ConfigureAwait(false);
-
-                if (_app is not null)
-                {
-                    // Use a short timeout to avoid the default 30-second ASP.NET graceful
-                    // shutdown. Connections are already closed above, so Kestrel should stop
-                    // quickly. The timeout is just a safety net.
-                    using var shutdownCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    try
-                    {
-                        await _app.StopAsync(shutdownCts.Token).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        // Shutdown timed out, so DisposeAsync will force-release the port.
-                    }
-
-                    await _app.DisposeAsync().ConfigureAwait(false);
-                    _app = null;
-                }
-
-                _isForceKill = false;
-                cts.Dispose();
+                _currentAttempt = null;
+                attempt.Cancellation.Dispose();
             }
 
             // After the teardown above, so the port is free rather than held for the whole delay.
             if (restartBackoff > TimeSpan.Zero)
             {
-                await Task.Delay(restartBackoff, stoppingToken).ConfigureAwait(false);
+                try
+                {
+                    await Task.Delay(restartBackoff, stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    // The delay sits outside every catch above, so a stop landing here would otherwise
+                    // leave RunAsync as a cancellation and end the hosted service task canceled.
+                    break;
+                }
             }
         }
     }

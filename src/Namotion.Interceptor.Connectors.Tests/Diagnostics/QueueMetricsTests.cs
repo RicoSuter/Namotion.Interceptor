@@ -8,7 +8,7 @@ public class QueueMetricsTests
     public void WhenNothingIsRegistered_ThenDepthIsZeroAndCapacityIsNull()
     {
         // Arrange
-        var metrics = new QueueMetrics();
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
 
         // Act
         var diagnostics = new QueueDiagnostics(metrics);
@@ -23,7 +23,7 @@ public class QueueMetricsTests
     public void WhenProviderIsRegistered_ThenDepthAndCapacityComeFromIt()
     {
         // Arrange
-        var metrics = new QueueMetrics();
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
         var depth = 7;
         var diagnostics = new QueueDiagnostics(metrics);
 
@@ -39,7 +39,7 @@ public class QueueMetricsTests
     public void WhenProviderIsDeregistered_ThenDepthReturnsToZeroButCapacityStays()
     {
         // Arrange
-        var metrics = new QueueMetrics();
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
         metrics.Register(() => 7, dropped: null, capacity: 100);
         var diagnostics = new QueueDiagnostics(metrics);
 
@@ -55,7 +55,7 @@ public class QueueMetricsTests
     public void WhenLiveProviderReportsDrops_ThenTotalAdvancesDuringTheBurst()
     {
         // Arrange
-        var metrics = new QueueMetrics();
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
         var live = 0L;
         metrics.Register(() => 0, () => live, capacity: 10);
         var diagnostics = new QueueDiagnostics(metrics);
@@ -71,7 +71,7 @@ public class QueueMetricsTests
     public void WhenProviderIsHandedOver_ThenTotalNeitherDecreasesNorDoubleCounts()
     {
         // Arrange
-        var metrics = new QueueMetrics();
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
         var first = 5L;
         metrics.Register(() => 0, () => first, capacity: 10);
         var diagnostics = new QueueDiagnostics(metrics);
@@ -96,7 +96,7 @@ public class QueueMetricsTests
     public async Task WhenAddDroppedRacesWithDeregister_ThenNoIncrementIsLost()
     {
         // Arrange
-        var metrics = new QueueMetrics();
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
         var diagnostics = new QueueDiagnostics(metrics);
         const int iterations = 10_000;
 
@@ -128,7 +128,7 @@ public class QueueMetricsTests
     public async Task WhenTotalIsReadRepeatedlyDuringChurn_ThenItNeverDecreases()
     {
         // Arrange
-        var metrics = new QueueMetrics();
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
         var diagnostics = new QueueDiagnostics(metrics);
         var stop = false;
         var observed = 0L;
@@ -182,7 +182,7 @@ public class QueueMetricsTests
     public void WhenReset_ThenTotalDroppedReturnsToZeroAndRegistrationSurvives()
     {
         // Arrange
-        var metrics = new QueueMetrics();
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
         metrics.AddDropped(9);
         metrics.Register(() => 4, dropped: null, capacity: 10);
         var diagnostics = new QueueDiagnostics(metrics);
@@ -200,7 +200,7 @@ public class QueueMetricsTests
     public void WhenProviderIsReplacedAfterReset_ThenTotalDroppedKeepsTheDropsAndNeverGoesNegative()
     {
         // Arrange
-        var metrics = new QueueMetrics();
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
         var first = 5L;
         metrics.Register(() => 0, () => first, capacity: 10);
         var diagnostics = new QueueDiagnostics(metrics);
@@ -224,7 +224,7 @@ public class QueueMetricsTests
     public void WhenRegisterIsCalledWhileARegistrationIsLive_ThenItThrowsAndDeregisterAllowsRegisteringAgain()
     {
         // Arrange
-        var metrics = new QueueMetrics();
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
         metrics.Register(() => 0, dropped: null, capacity: 10);
 
         // Act & Assert
@@ -241,10 +241,27 @@ public class QueueMetricsTests
     }
 
     [Fact]
+    public void WhenRegisterIsCalledWhileARegistrationIsLive_ThenTheMessageNamesTheBuffer()
+    {
+        // Arrange
+        // The failure surfaces from inside a connector's retry loop, which catches it, reports it and
+        // tries again, so the message is all an operator gets: it has to say which of the connector's
+        // three buffers is involved.
+        var metrics = new SourceMetrics();
+        metrics.OutboundRetries.Register(() => 0, dropped: null, capacity: 10);
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => metrics.OutboundRetries.Register(() => 0, dropped: null, capacity: 20));
+
+        Assert.Contains(nameof(SourceMetrics.OutboundRetries), exception.Message);
+    }
+
+    [Fact]
     public void WhenProviderThrowsAfterReset_ThenTotalDroppedNeverGoesNegative()
     {
         // Arrange
-        var metrics = new QueueMetrics();
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
         var shouldThrow = false;
         var live = 5L;
         metrics.Register(() => 0, () => shouldThrow ? throw new InvalidOperationException("boom") : live, capacity: 10);

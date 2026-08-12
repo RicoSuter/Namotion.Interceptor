@@ -289,7 +289,9 @@ ConnectorDiagnostics ISubjectConnector.Diagnostics => Diagnostics;
 public MySource() => Diagnostics = new SourceDiagnostics(_metrics);
 ```
 
-The `SourceMetrics` instance is the writable side and stays private to the source: it is what the source calls `MarkStarted()`, `MarkOperational()`, `ReportError()` and the queue registrations on, and nothing outside the source can reach it through the returned view. See [Connector Diagnostics](#connector-diagnostics). Deriving from `SubjectSourceBase` instead gets both members, and the whole liveness and error lifecycle, for free.
+The `SourceMetrics` instance is the writable side and stays private to the source: it is what the source calls `MarkStarted()`, `MarkOperational()`, `ReportError()` and the queue registrations on, and nothing outside the source can reach it through the returned view. See [Connector Diagnostics](#connector-diagnostics).
+
+Deriving from `SubjectSourceBase` instead gets both members, the start epoch, the recording of a failed connect attempt, and the drop of liveness on the way out. **Raising liveness is the derived class's job**: the base never calls `MarkOperational()`, because each protocol becomes usable at a different point and that point is what `IsOperational` means for that connector. A source that never calls it reports not operational for its entire life while its `State` reaches `Synchronized`. The three in-tree clients show where to put the call: the MQTT client raises it once `ConnectAsync` returns, the WebSocket client once the server's Welcome has been accepted, and the OPC UA client from its session manager when a session is created and healthy. Each drops it again from the path that detects the loss.
 
 `StateChangeTime` and `LastSynchronizedAt` are both required, and neither can answer the other's question. `StateChangeTime` moves on every transition, so read with `State` it says how long the current state has lasted: `Synchronizing` plus T reads as stale since T. `LastSynchronizedAt` is stamped only on the way into `Synchronized` and never cleared, so it says whether a good period ever began, and it cannot say when synchronization was lost.
 
@@ -699,8 +701,29 @@ What a server author must implement:
 - `RunAsync`, the protocol work. It runs until cancellation, and a cancellation caused by the stopping token must not be turned into a fault: either return, as the sample does, or let the exception leave, which the base recognises and does not record.
 - Handing the diagnostics view the same metrics object the base holds, by constructing it from the inherited `Metrics` property rather than from a second instance. A view built over its own `ConnectorMetrics` compiles and then reports nothing.
 - Every failure the connector's own loop swallows: the base only sees what escapes `RunAsync`, so a retry loop that catches its own failures has to call `ReportError` itself, and move liveness with `MarkOperational` and `MarkNotOperational` around the serving window.
+- Wiring the outbound change queue into diagnostics, so `Diagnostics.OutboundChanges` reports the processor the server actually publishes through.
 
 A connector whose transport work runs in a task the loop does not await, such as a client's reconnect monitor, is outside `RunAsync` too, and has to report its own failures for the same reason.
+
+The outbound queue is wired up by registering the processor's two providers and releasing them again when that processor goes away:
+
+```csharp
+using var processor = CreateChangeQueueProcessor();
+try
+{
+    Metrics.OutboundChanges.Register(
+        () => processor.QueueDepth, () => processor.DropCount, capacity: null);
+
+    await processor.ProcessAsync(stoppingToken);
+}
+finally
+{
+    // Before the processor is disposed, and before the next restart registers its own.
+    Metrics.OutboundChanges.Deregister();
+}
+```
+
+`Register` allows one live registration at a time and throws while one is still held, so a restart that does not deregister first fails on every attempt. Skipping the registration altogether is silent instead: the block reports a depth of 0 and a `TotalDropped` of 0 for the life of the server. The `maxQueueDepth` argument of `ChangeQueueProcessor` is a bound on the buffered queue and must be either `null` for unbounded, which is what all three built-in servers pass, or positive; zero is rejected, because a bound has to leave room for at least one change. A server that wants no buffering at all passes a `bufferTime` of zero, which takes the immediate path and never fills a queue.
 
 ### Connector Diagnostics
 
@@ -717,7 +740,7 @@ ConnectorDiagnostics
     OutgoingPerSecond    double?            changes per second out of the subject tree, null = not measured
   OutboundChanges        subject changes waiting to be written out
     Depth                int                current item count
-    Capacity             int?               null = unbounded, 0 = the buffer is disabled
+    Capacity             int?               null = unbounded, 0 = the buffer is switched off
     TotalDropped         long               items thrown away since StartTime
 
 SourceDiagnostics : ConnectorDiagnostics
@@ -729,6 +752,8 @@ SourceDiagnostics : ConnectorDiagnostics
 `IsOperational` is the one liveness spelling every connector uses. What it means is decided per connector and documented on that connector's own diagnostics type: for a client it is roughly "connected and usable", for a server "listening and accepting connections". It is not a claim about the model being in sync, which is a separate question answered by `ISubjectSource.State`; see [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
 
 Direction is stated once, from the subject tree's point of view, and means the same for clients and servers: incoming is changes flowing into the tree, outgoing is changes flowing out of it. Both rates are averaged over a 60-second sliding window. A `null` rate means the connector does not measure that direction at all, decided at construction and never changing, which is different from a measured `0.0`.
+
+`Capacity` is what the buffer reports, not a value you configure: a `0` there means the connector registered the buffer as switched off, which is what a source does with `writeRetryQueueSize: 0`. It is not the same number as `ChangeQueueProcessor`'s `maxQueueDepth`, which rejects zero and takes `null` for an unbounded queue.
 
 The three buffers answer three different questions, and reading which one is growing is how you tell them apart:
 
@@ -919,9 +944,9 @@ Cases where the local model and the external system can end up disagreeing, or w
 
 **A property with an `OnChanging` hook loses a connect-window write to the initial-state load.** A hook that rewrites the incoming value, which the generated `partial void OnPropertyNameChanging(ref TProperty newValue, ref bool cancel)` can do, means the stored value is not the value the source sent, so the change publishes as `Local`. The drain then treats the load's own value as an ordinary local write and it wins the per-property collapse, discarding a write the user made moments earlier. Without the hook the load's apply is skipped as an echo and the user's write is restored and sent, which is what [Write Consistency Guarantees](#write-consistency-guarantees) promises. Both ends still converge, on the loaded value; what is lost is the user's write. Tracked in the connectors epic [#442](https://github.com/RicoSuter/Namotion.Interceptor/issues/442).
 
-**Disabling the retry queue discards connect-window writes silently.** With `writeRetryQueueSize: 0` there is no queue to park them in, so the drain empties the subscription and returns, and the queue's own "buffering is disabled" warning never fires because there is no queue to emit it. `Diagnostics.OutboundRetries.TotalDropped` does not cover this path either, so in that configuration the number is a floor rather than the whole loss: it counts the failed writes discarded directly, but not the drain, which has no ownership filter and so cannot attribute its discards to one source.
+**Disabling the retry queue discards connect-window writes silently.** With `writeRetryQueueSize: 0` there is no queue to park them in, so the drain empties the subscription and returns, and the queue's own "buffering is disabled" warning never fires because there is no queue to emit it. `Diagnostics.OutboundRetries.TotalDropped` does not cover this path either, so in that configuration the number is a floor rather than the whole loss: it counts the failed writes discarded directly, but not the drain, which is left uncounted because attributing its discards means an ownership check per change on a path that only runs when the queue is disabled, and the configuration already says those writes are being thrown away.
 
-**Writes to properties a source has not claimed yet are discarded.** Ownership is established inside `StartListeningAsync`, and the drain must empty the subscription to keep it bounded, so a write it cannot attribute is dropped without an error. First connection only, since ownership persists across reconnects. These discards are not counted by `Diagnostics.OutboundRetries.TotalDropped`, for the same reason: counting them needs an ownership-aware accumulator the drain does not have.
+**Writes to properties a source has not claimed yet are discarded.** Ownership is established inside `StartListeningAsync`, and the drain must empty the subscription to keep it bounded, so a write it cannot attribute is dropped without an error. First connection only, since ownership persists across reconnects. These discards are not counted by `Diagnostics.OutboundRetries.TotalDropped`: with no owner recorded yet, there is nothing to attribute them to.
 
 **Connector-internal reconnects skip the reconcile.** Transport-level reconnects handled inside a connector (the OPC UA health loop, the MQTT and WebSocket monitors) reload initial state without running the connect-window reconciliation. They also do not flush the retry queue: the queue is flushed only when the change processor hands it a change, or by the reconcile that these reconnects skip. So a write parked before such a reconnect is not merely delivered without the supersession check, it may not be delivered at all until some other owned property changes, while the source still reports `Synchronized` and `Diagnostics.OutboundRetries.Depth` shows it pending. Tracked as [#362](https://github.com/RicoSuter/Namotion.Interceptor/issues/362).
 

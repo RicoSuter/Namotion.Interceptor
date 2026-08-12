@@ -15,7 +15,25 @@ public sealed class QueueMetrics
 {
     private sealed record Snapshot(long Accumulated, Func<int>? Depth, Func<long>? Dropped, int? Capacity);
 
+    private readonly string _name;
+
     private Snapshot _snapshot = new(0, null, null, null);
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="QueueMetrics"/> class.
+    /// </summary>
+    /// <param name="name">
+    /// Which buffer this instance describes, for example <c>OutboundChanges</c>. Named so the
+    /// registration failure below says which of a connector's buffers it is about. The three a
+    /// connector gets from <see cref="ConnectorMetrics"/> and <see cref="SourceMetrics"/> are named
+    /// for you; pass one only when constructing an instance directly.
+    /// </param>
+    public QueueMetrics(string name = "queue")
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        _name = name;
+    }
 
     /// <summary>
     /// Points this instance at a newly created buffer. A live registration must be released with
@@ -47,8 +65,10 @@ public sealed class QueueMetrics
         // resolve by retrying.
         if (Volatile.Read(ref _snapshot).Depth is not null)
         {
+            // Names the buffer, because this fires from inside a connector's own retry loop, which
+            // catches it, reports it and tries again, so the message is all an operator gets.
             throw new InvalidOperationException(
-                "A registration is already live on this QueueMetrics instance. Call Deregister before registering again.");
+                $"A registration is already live on the '{_name}' queue metrics. Call Deregister before registering again.");
         }
 
         Swap((Depth: depth, Dropped: dropped, Capacity: capacity), static (current, state) =>

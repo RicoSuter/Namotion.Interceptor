@@ -136,6 +136,28 @@ public class SubjectConnectorBaseTests
     }
 
     [Fact]
+    public async Task WhenARegisteredResettableThrowsOnStart_ThenTheErrorIsRecordedAndTheConnectorIsNotOperational()
+    {
+        // Arrange
+        // Both RegisterResettable and IResettableMetrics are public, so a third-party Reset that throws
+        // is reachable. It faults the connector like any other failure and has to be treated like one.
+        var failure = new InvalidOperationException("reset failed");
+        using var connector = new TestConnector();
+        connector.RegisterResettable(new ThrowingResettableMetrics(failure));
+        connector.MarkOperational();
+        Assert.True(connector.Diagnostics.IsOperational);
+
+        // Act
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => ((IHostedService)connector).StartAsync(CancellationToken.None));
+
+        // Assert
+        Assert.Same(failure, thrown);
+        Assert.Same(failure, connector.Diagnostics.LastError);
+        Assert.False(connector.Diagnostics.IsOperational);
+    }
+
+    [Fact]
     public void WhenReadThroughTheConnectorInterface_ThenItIsTheConnectorsOwnDiagnostics()
     {
         // Arrange
@@ -149,6 +171,11 @@ public class SubjectConnectorBaseTests
         // covariant override, so the interface has to land on that same override rather than on a
         // second diagnostics view reading metrics nobody writes to.
         Assert.Same(connector.Diagnostics, throughInterface);
+    }
+
+    private sealed class ThrowingResettableMetrics(Exception failure) : IResettableMetrics
+    {
+        public void Reset() => throw failure;
     }
 
     private sealed class TestConnector : SubjectConnectorBase
@@ -177,6 +204,8 @@ public class SubjectConnectorBaseTests
         public override ConnectorDiagnostics Diagnostics { get; }
 
         public void MarkOperational() => _metrics.MarkOperational();
+
+        public void RegisterResettable(IResettableMetrics metrics) => _metrics.RegisterResettable(metrics);
 
         public void AddOutboundDrop(long count) => _metrics.OutboundChanges.AddDropped(count);
 

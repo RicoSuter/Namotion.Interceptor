@@ -50,9 +50,13 @@ public abstract class SubjectConnectorBase : BackgroundService, ISubjectConnecto
     /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        Metrics.MarkStarted();
         try
         {
+            // Inside the try, because it calls Reset on every registered resettable and both that
+            // interface and its registration are public: a third-party Reset that throws would
+            // otherwise fault this method with neither the error recorded nor liveness forced false.
+            Metrics.MarkStarted();
+
             await RunAsync(stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

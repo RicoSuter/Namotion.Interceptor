@@ -90,4 +90,45 @@ public class SubjectSourceDiagnosticsTests
         Assert.Equal(SourceState.Synchronizing, source.State);
         await ((IHostedService)source).StopAsync(CancellationToken.None);
     }
+
+    [Fact]
+    public async Task WhenTheStopTearsDownAConnectAttempt_ThenTheTeardownFailureIsNotRecorded()
+    {
+        // Arrange
+        // A connect that fails with something other than the cancellation once the stop reaches it,
+        // which is what a torn-down transport raises. Recorded, it would replace the genuine fault of a
+        // source that had already failed, and that error is sticky and can never be cleared because a
+        // stopped source does not start again.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
+        var subject = new Person(context);
+        var connecting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var source = new TestSubjectSource(subject, context, NullLogger.Instance)
+        {
+            StartListeningOverride = async (_, cancellationToken) =>
+            {
+                connecting.TrySetResult();
+
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw new InvalidOperationException("the connection was torn down by the stop");
+                }
+
+                return null;
+            }
+        };
+
+        await ((IHostedService)source).StartAsync(CancellationToken.None);
+        await connecting.Task;
+
+        // Act
+        await ((IHostedService)source).StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Null(source.Diagnostics.LastError);
+    }
 }

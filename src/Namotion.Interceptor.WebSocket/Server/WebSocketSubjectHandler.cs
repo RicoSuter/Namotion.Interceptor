@@ -291,15 +291,27 @@ public sealed class WebSocketSubjectHandler
             cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Broadcasts a heartbeat to every connected client on
+    /// <see cref="WebSocketServerConfiguration.HeartbeatInterval"/>, and runs until
+    /// <paramref name="cancellationToken"/> is cancelled.
+    /// </summary>
+    /// <remarks>
+    /// The returned task runs until cancellation in both branches, including the one where heartbeats
+    /// are disabled, so it never completes on its own. Callers race it against the change processor
+    /// with <see cref="Task.WhenAny(Task, Task)"/> and treat either one finishing as a reason to tear
+    /// the server down and restart it, which a task that returned as soon as heartbeats were disabled
+    /// would trigger in a tight loop. Pass a token that is cancelled when the caller stops; a token
+    /// that is never cancelled never lets this task complete.
+    /// </remarks>
+    /// <param name="cancellationToken">Cancelled to end the loop.</param>
+    /// <returns>The task.</returns>
     public async Task RunHeartbeatLoopAsync(CancellationToken cancellationToken)
     {
         var interval = _configuration.HeartbeatInterval;
         if (interval <= TimeSpan.Zero)
         {
-            // Heartbeats are disabled, but this must not complete: both callers race this task
-            // against the change processor with Task.WhenAny and treat either one finishing as a
-            // reason to tear down and restart. Returning here made a server configured with
-            // HeartbeatInterval = TimeSpan.Zero rebuild its host in a tight loop and never serve.
+            // Heartbeats are disabled, but this must not complete, for the reason on the remarks above.
             try
             {
                 await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);

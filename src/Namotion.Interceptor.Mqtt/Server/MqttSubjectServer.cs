@@ -148,6 +148,10 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
     /// <inheritdoc />
     protected override async Task RunAsync(CancellationToken stoppingToken)
     {
+        // Captured once: the token stays usable after DisposeAsync has disposed its source, while
+        // reading the property again from inside a catch block would throw there.
+        var shutdownToken = _shutdownCts.Token;
+
         _lifecycleInterceptor = _context.TryGetLifecycleInterceptor();
         if (_lifecycleInterceptor is not null)
         {
@@ -240,11 +244,20 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                 Volatile.Write(ref _isListening, 0);
                 Metrics.MarkNotOperational();
 
+                // A cancellation this broker's own shutdown produced is an expected stop rather than a
+                // fault, and recording it would leave a sticky LastError on a broker that shut down
+                // normally. Same policy the base class applies to the stopping token.
+                if (ex is OperationCanceledException cancellation && cancellation.CancellationToken == shutdownToken)
+                {
+                    return;
+                }
+
                 // The base class only sees exceptions that leave RunAsync, and this loop swallows every
                 // per-attempt failure. Without this, a broker that can never bind reports no error.
-                // Recorded before the cancellation check below, because a cancellation neither the
-                // stopping token nor a force-kill caused is a genuine fault, and leaving the pump on it
-                // with no error recorded is a broker that stops serving with nothing explaining why.
+                // Recorded before the cancellation check below, because a cancellation that neither the
+                // stopping token, nor a force-kill, nor the shutdown above caused is a genuine fault,
+                // and leaving the pump on it with no error recorded is a broker that stops serving with
+                // nothing explaining why.
                 Metrics.ReportError(ex);
                 _logger.LogError(ex, "Error in MQTT server.");
 

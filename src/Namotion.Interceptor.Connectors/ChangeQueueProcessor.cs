@@ -76,13 +76,15 @@ public class ChangeQueueProcessor : IDisposable
     /// <param name="bufferTime">Time to buffer changes before flushing.</param>
     /// <param name="maxQueueDepth">Bound on the buffered change queue, or null for unbounded (existing
     /// connector behavior). When set, enqueuing past the bound drops the oldest unprocessed change and
-    /// increments <see cref="DropCount"/>, so the newest change is retained.</param>
+    /// increments <see cref="DropCount"/>, so the newest change is retained. Read only on the buffered
+    /// path, so a processor with a buffer time of zero never touches the queue this bounds.</param>
     /// <param name="logger">The logger.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
     /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
     /// the first flush, where it would end delivery for this processor's lifetime. Also thrown when
-    /// <paramref name="maxQueueDepth"/> is zero or negative, since that would drop every change
-    /// immediately; pass null for an unbounded queue instead.</exception>
+    /// <paramref name="maxQueueDepth"/> is zero or negative, since a bound has to leave room for at
+    /// least one change: pass null for an unbounded queue, or a <paramref name="bufferTime"/> of zero
+    /// for the immediate path, which buffers nothing.</exception>
     public ChangeQueueProcessor(
         object? source,
         IInterceptorSubjectContext context,
@@ -103,8 +105,10 @@ public class ChangeQueueProcessor : IDisposable
         {
             if (maxQueueDepth is <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(maxQueueDepth),
-                    "A bound of zero or less would drop every change immediately. Pass null for an unbounded queue.");
+                throw new ArgumentOutOfRangeException(nameof(maxQueueDepth), maxQueueDepth,
+                    "A bounded change queue must have room for at least one change. Pass null for an unbounded " +
+                    "queue, or a buffer time of zero for the immediate path, which writes each change as it is " +
+                    "dequeued and buffers nothing.");
             }
 
             _maxQueueDepth = maxQueueDepth;
@@ -145,8 +149,10 @@ public class ChangeQueueProcessor : IDisposable
         {
             if (maxQueueDepth is <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(maxQueueDepth),
-                    "A bound of zero or less would drop every change immediately. Pass null for an unbounded queue.");
+                throw new ArgumentOutOfRangeException(nameof(maxQueueDepth), maxQueueDepth,
+                    "A bounded change queue must have room for at least one change. Pass null for an unbounded " +
+                    "queue, or a buffer time of zero for the immediate path, which writes each change as it is " +
+                    "dequeued and buffers nothing.");
             }
 
             _maxQueueDepth = maxQueueDepth;

@@ -64,6 +64,12 @@ public class WebSocketServerConfiguration
     /// Set to TimeSpan.Zero to disable heartbeats, otherwise at least
     /// <see cref="MinimumHeartbeatInterval"/>.
     /// </summary>
+    /// <remarks>
+    /// Disabling heartbeats stops the broadcasts, not the loop:
+    /// <see cref="WebSocketSubjectHandler.RunHeartbeatLoopAsync"/> runs until its token is cancelled
+    /// either way, because the server races it against the change processor and treats either one
+    /// finishing as a reason to restart.
+    /// </remarks>
     public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>

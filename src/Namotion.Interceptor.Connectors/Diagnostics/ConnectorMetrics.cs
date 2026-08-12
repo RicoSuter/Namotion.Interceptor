@@ -42,7 +42,7 @@ public class ConnectorMetrics
     /// <summary>
     /// Gets the metrics of the outbound change queue that carries subject changes to the external system.
     /// </summary>
-    public QueueMetrics OutboundChanges { get; } = new();
+    public QueueMetrics OutboundChanges { get; } = new(nameof(OutboundChanges));
 
     /// <summary>
     /// Opens a new counter epoch: stamps a fresh start time, clears the last error, releases the
@@ -52,6 +52,12 @@ public class ConnectorMetrics
     /// <remarks>
     /// Deliberately not idempotent. Called once per <c>ExecuteAsync</c> entry, so a host stop and
     /// start moves the epoch while a transport reconnect inside the connector's own loop does not.
+    /// <para>
+    /// One connector instance is meant to run once. Driving start, stop and start again by hand can
+    /// have the previous run's <see cref="MarkStopped"/> land after the new run's
+    /// <see cref="MarkStarted"/>, which re-latches the fresh epoch and makes every
+    /// <see cref="MarkOperational"/> in it a no-op; use a new instance per run.
+    /// </para>
     /// </remarks>
     public void MarkStarted()
     {
