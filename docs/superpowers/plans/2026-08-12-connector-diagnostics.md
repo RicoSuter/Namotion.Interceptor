@@ -1511,6 +1511,16 @@ public abstract class SubjectConnectorBase : BackgroundService, ISubjectConnecto
         {
             await RunAsync(stoppingToken).ConfigureAwait(false);
         }
+        // An expected shutdown is not a fault, and LastError is sticky until the next
+        // MarkStarted, so recording it here would overwrite a real error for the rest of the
+        // process. The servers reach this: both back off with Task.Delay(backoff, stoppingToken)
+        // from inside their own catch blocks, where their sibling cancellation filters cannot
+        // catch it. A cancellation not caused by the stopping token is a genuine fault and still
+        // falls through to the catch-all below.
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception exception)
         {
             Metrics.ReportError(exception);
@@ -4271,6 +4281,8 @@ WebSocketSubjectClientSource.Diagnostics  -> SourceDiagnostics (no additions)
 **Not covered, and deliberately so.** The spec's follow-ups stay follow-ups: throughput for the MQTT and WebSocket servers, counting the unclaimed-property discard, making `WebSocketSubjectChangeProcessor` its own connector, and bounding the queues (#281, #352).
 
 **A guarantee the spec overstated, corrected during Task 2's review.** The spec justified packing each value-and-timestamp pair into one record by saying that otherwise "a reader can see the new flag with the previous timestamp, reporting operational since the moment it went down". The record makes each individual read internally consistent and makes the terminal latch implementable without a lock, but it cannot deliver atomicity across two property reads: `IsOperational` and `OperationalChangeTime` each take their own snapshot, so a consumer calling both in sequence can still pair a stale flag with a fresh timestamp. The same applies to `State` and `StateChangeTime` in Task 7. What is actually guaranteed is that each read is internally consistent and that the timestamps are monotonic. Say that in the XML docs and in Task 17's documentation rather than repeating the stronger claim. Closing the gap properly would mean exposing a snapshot-returning member, which no consumer has asked for and which is not in scope here.
+
+**A narrow restart hazard the terminal latch introduces, accepted.** If a connector's `ExecuteAsync` outlives its `StopAsync`, which happens only when `StopAsync`'s own token fires first on a shutdown timeout, and the same instance is then started again, the old run's `finally` calls `MarkStopped()` after the new run's `MarkStarted()` and latches the fresh epoch permanently at not-operational. Sources cannot reach this, because `SubjectSourceBase.StartAsync` refuses to restart a stopped source. The three servers have no such guard, but `IHost` never starts the same `IHostedService` instance twice, so reaching it requires application code driving `StartAsync`/`StopAsync`/`StartAsync` on one instance by hand. Guarding it properly means an epoch counter that `MarkStopped` compares against, which is more machinery than the scenario earns. Noted so Tasks 9 through 11 do not rediscover it.
 
 **Known risks the plan carries rather than resolves.** Two facts are stated in the tasks that use them and are worth naming once more. `OutboundRetries.TotalDropped` under-reports when a source is configured with `writeRetryQueueSize: 0`, because the dominant loss path in that configuration is the unfiltered drain, which cannot be attributed to one source. And `StateChangeTime` loses the ability to say when a currently stale source was last in sync.
 
