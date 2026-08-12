@@ -425,7 +425,8 @@ Repo conventions: `When<Condition>_Then<ExpectedBehavior>`, explicit Arrange/Act
 - **`TotalDropped` advances during a burst**, never decreases across a handover, and does not double-count. Written against `QueueMetrics` and a bounded processor directly, since no in-repo connector sets a bound.
 - **A faulted, a disposed and a stopped connector all report not operational**, for a server as well as a source, since the server path is the one revision 5 got wrong.
 - **`StateChangeTime` moves on every transition**, and is non-null on a source that never leaves its initial state.
-- **The  pairs are never observed torn.**
+- **The value-and-timestamp pairs are never observed torn**, for liveness and for state.
+- **`ClaimedPropertyCount` tracks all four mutation sites**, including detach cleanup and dispose. A missed site drifts permanently rather than transiently, so each gets its own assertion.
 - **`ClaimedPropertyCount` tracks all four mutation sites**, including detach cleanup and dispose, since a missed site drifts permanently rather than transiently.
 - **Concurrency**: a reader loop over every property while a writer loop recreates the processor.
 - **Snapshot and migration**: the #425 regression assertions preserved through their new path.
