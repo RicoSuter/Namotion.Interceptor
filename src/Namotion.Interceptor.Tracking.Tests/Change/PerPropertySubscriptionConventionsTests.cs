@@ -13,6 +13,14 @@ public class PerPropertySubscriptionConventionsTests
         "SubscribeToPath",
         "IPropertyChangeObserver",
         "PropertyChangeCallback",
+        // The scheduled channel and the observable adapter install real per-property subscriptions
+        // without naming any type above: the observable is subscribed in Rx form
+        // (.Subscribe(change => ...)), which matches none of the lambda markers below. The observable
+        // marker matches the construction expression rather than the bare type name, which is a
+        // substring of the unrelated context-level GetPropertyChangeObservable.
+        "GetSynchronousChangeObservable",
+        "ScheduledPropertySubscription",
+        "new PropertyChangeObservable",
         // The low-level PropertyReference.Subscribe overloads taking an inline callback name none
         // of the types above, so match the lambda form itself (both `in` spellings).
         ".Subscribe((in ",
