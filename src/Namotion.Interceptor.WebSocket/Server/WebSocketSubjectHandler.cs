@@ -296,7 +296,19 @@ public sealed class WebSocketSubjectHandler
         var interval = _configuration.HeartbeatInterval;
         if (interval <= TimeSpan.Zero)
         {
-            return; // Heartbeat disabled
+            // Heartbeats are disabled, but this must not complete: both callers race this task
+            // against the change processor with Task.WhenAny and treat either one finishing as a
+            // reason to tear down and restart. Returning here made a server configured with
+            // HeartbeatInterval = TimeSpan.Zero rebuild its host in a tight loop and never serve.
+            try
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+
+            return;
         }
 
         _logger.LogInformation("Heartbeat loop started (interval: {Interval})", interval);
