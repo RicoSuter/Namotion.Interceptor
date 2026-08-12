@@ -144,6 +144,29 @@ namespace Namotion.Interceptor.Connectors
 }
 namespace Namotion.Interceptor.Connectors.Diagnostics
 {
+    public class ConnectorDiagnostics
+    {
+        public ConnectorDiagnostics(Namotion.Interceptor.Connectors.Diagnostics.ConnectorMetrics metrics) { }
+        public bool IsOperational { get; }
+        public System.Exception? LastError { get; }
+        public System.DateTimeOffset? OperationalChangeTime { get; }
+        public Namotion.Interceptor.Connectors.Diagnostics.QueueDiagnostics OutboundChanges { get; }
+        public System.DateTimeOffset? StartTime { get; }
+        public Namotion.Interceptor.Connectors.Diagnostics.ThroughputDiagnostics Throughput { get; }
+    }
+    public class ConnectorMetrics
+    {
+        public ConnectorMetrics(Namotion.Interceptor.Connectors.ThroughputCounter? incoming = null, Namotion.Interceptor.Connectors.ThroughputCounter? outgoing = null) { }
+        public Namotion.Interceptor.Connectors.ThroughputCounter? Incoming { get; }
+        public Namotion.Interceptor.Connectors.Diagnostics.QueueMetrics OutboundChanges { get; }
+        public Namotion.Interceptor.Connectors.ThroughputCounter? Outgoing { get; }
+        public void MarkNotOperational() { }
+        public void MarkOperational() { }
+        public void MarkStarted() { }
+        public void MarkStopped() { }
+        public void RegisterResettable(Namotion.Interceptor.Connectors.Diagnostics.IResettableMetrics metrics) { }
+        public void ReportError(System.Exception error) { }
+    }
     public interface IResettableMetrics
     {
         void Reset();
@@ -161,6 +184,27 @@ namespace Namotion.Interceptor.Connectors.Diagnostics
         public void AddDropped(long count) { }
         public void Deregister() { }
         public void Register(System.Func<int> depth, System.Func<long>? dropped, int? capacity) { }
+    }
+    public class SourceDiagnostics : Namotion.Interceptor.Connectors.Diagnostics.ConnectorDiagnostics
+    {
+        public SourceDiagnostics(Namotion.Interceptor.Connectors.Diagnostics.SourceMetrics metrics) { }
+        public int ClaimedPropertyCount { get; }
+        public Namotion.Interceptor.Connectors.Diagnostics.QueueDiagnostics InboundBuffer { get; }
+        public Namotion.Interceptor.Connectors.Diagnostics.QueueDiagnostics OutboundRetries { get; }
+    }
+    public class SourceMetrics : Namotion.Interceptor.Connectors.Diagnostics.ConnectorMetrics
+    {
+        public SourceMetrics(Namotion.Interceptor.Connectors.ThroughputCounter? incoming = null, Namotion.Interceptor.Connectors.ThroughputCounter? outgoing = null) { }
+        public Namotion.Interceptor.Connectors.Diagnostics.QueueMetrics InboundBuffer { get; }
+        public Namotion.Interceptor.Connectors.Diagnostics.QueueMetrics OutboundRetries { get; }
+        public void RegisterClaimedProperties(System.Func<int> count) { }
+    }
+    public sealed class ThroughputDiagnostics
+    {
+        public ThroughputDiagnostics(Namotion.Interceptor.Connectors.ThroughputCounter? incoming, Namotion.Interceptor.Connectors.ThroughputCounter? outgoing) { }
+        public double? IncomingPerSecond { get; }
+        public double? OutgoingPerSecond { get; }
+        public static Namotion.Interceptor.Connectors.Diagnostics.ThroughputDiagnostics NotInstrumented { get; }
     }
 }
 namespace Namotion.Interceptor.Connectors.Mapping
