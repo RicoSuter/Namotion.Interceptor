@@ -156,7 +156,7 @@ var attachment = person.AttachHostedService(() => new PersonBackgroundService(pe
 
 ### The factory must construct
 
-`() => existingInstance` is the one shape that defeats the design. The handler stops the instance when the subject leaves the graph, disposes it as well when it implements `IDisposable` or `IAsyncDisposable`, and invokes the factory again when the subject comes back, so a factory that hands out a captured instance would restart something it has already stopped.
+`() => existingInstance` is the one shape that defeats the design. The handler [stops and disposes what it created](#detach-stops-and-disposes-and-keeps-the-attachment) when the subject leaves the graph and invokes the factory again when the subject comes back, so a factory that hands out a captured instance would restart something it has already stopped.
 
 ```csharp
 // Correct: a fresh instance every time the handler needs one.
@@ -183,7 +183,7 @@ When a subject leaves the graph, the handler stops the subject first and holds e
 
 Nothing resolves that. The wedged queue never drains, the instance is never stopped and never disposed, and every later start or stop for the same service queues behind it for the rest of the process. Shutdown is the one thing the wedge cannot hold: the handler stops waiting for its outstanding stops when the host's `ShutdownTimeout` expires, so `StopAsync` returns even though the wedged service is still sitting there. That bounds the process, not the damage.
 
-Detaching from an operation, from a configuration change, or from any path not reached through the service's own stop is fine. Nothing detects the bad shape, so it is a rule rather than a guard. `HostedServiceHandlerTests.WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout` is the regression guard for it in this repository; both OPC UA wrappers in HomeBlaze had this shape and were changed.
+Detaching from an operation, from a configuration change, or from any path not reached through the service's own stop is fine. Nothing detects the bad shape, so it is a rule rather than a guard. `HostedServiceHandlerTests.WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout` is the regression guard for it in this repository.
 
 ### Keep the dispose path out of the lifecycle lock
 
@@ -294,7 +294,7 @@ Holds are counted, so nested attaches compose: a service that attaches children 
 
 `SourceMonitor` is the one implementation in this repository. It is what makes an attached source count towards source registration from the moment it is attached rather than from the moment it finally starts, so a synchronization wait cannot complete against a tree whose sources have not registered yet. See [Applications That Create Sources at Runtime](connectors-monitoring.md#applications-that-create-sources-at-runtime).
 
-A deferrer runs inside the lifecycle lock, so neither `DeferCompletion` nor the hold's `Dispose` may block on anything that can be waiting for that lock. A lock of the deferrer's own is allowed, but only where the acquisition order is already fixed: it is safe when nothing held under that lock ever waits on anything that needs the lifecycle lock, so the two are always taken in the same order, and unsafe as soon as they can be taken in either. The constraint is written on `IStartupCompletionDeferrer`, and an implementation that follows it cannot take part in the deadlock: see [A deferrer that takes a lock of its own](design/hosting-service-ownership.md#4-a-deferrer-that-takes-a-lock-of-its-own).
+A deferrer runs inside the lifecycle lock, so neither `DeferCompletion` nor the hold's `Dispose` may block on anything that can be waiting for a hosted service transition, and a lock of the deferrer's own is allowed only where its order against the lifecycle lock is already fixed. The full constraint is on `IStartupCompletionDeferrer`, and an implementation that follows it cannot take part in the deadlock: see [A deferrer that takes a lock of its own](design/hosting-service-ownership.md#4-a-deferrer-that-takes-a-lock-of-its-own).
 
 ## Migrating from the Previous API
 

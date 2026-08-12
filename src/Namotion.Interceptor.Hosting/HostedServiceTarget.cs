@@ -74,11 +74,10 @@ internal sealed class HostedServiceTarget
 
     /// <summary>
     /// Records the instance the factory just produced and reports whether it differs from the one the
-    /// previous invocation produced. A repeat is refused whatever the instance is: the handler owns
-    /// every instance it creates and has already stopped this one, and disposed it as well when it was
-    /// disposable. The recorded reference is held for the life of the attachment, which keeps one
-    /// stopped instance reachable per attachment. Only start bodies call this, and the chain serializes
-    /// them, so the field needs no synchronization of its own.
+    /// previous invocation produced. Only start bodies call this, and the chain serializes them, so the
+    /// field needs no synchronization of its own. It is never cleared, because the comparison has to
+    /// outlive the stop that disposed the instance it names or the repeat it exists to catch is exactly
+    /// the case it cannot see; the cost is one dead reference per attachment the application created.
     /// </summary>
     public bool TryRecordFactoryInstance(IHostedService instance)
     {

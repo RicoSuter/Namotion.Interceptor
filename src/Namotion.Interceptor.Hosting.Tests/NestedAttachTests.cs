@@ -54,8 +54,7 @@ public class NestedAttachTests
             var containerTarget = ((IInterceptorSubject)container).TryGetSubjectTarget()!;
             var childTarget = ((IInterceptorSubject)child).TryGetSubjectTarget()!;
 
-            // Empty transitions on both chains drain whatever the two attaches appended, so the counts
-            // are read once every queued start has run rather than after a delay.
+            // Empty transitions on both chains drain what the two attaches appended.
             await containerTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
             await childTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
 
@@ -246,9 +245,8 @@ public class NestedAttachTests
             Assert.Same(handler, containerTarget.Owner);
             Assert.Same(handler, childTarget.Owner);
 
-            // Holds are counted, which is what lets a nested attach take its own while the outer one is
-            // still outstanding. A hold that outlives its start hangs every synchronization wait on the
-            // tree, so the inner one has to be released as reliably as the outer.
+            // The counted holds are what let a nested attach take its own while the outer one is still
+            // outstanding, and the inner one has to be released as reliably as the outer.
             Assert.Equal(2, deferrer.Taken);
             Assert.Equal(0, deferrer.Outstanding);
         }

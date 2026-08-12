@@ -11,6 +11,12 @@ namespace Namotion.Interceptor.Hosting.Tests;
 /// seam (<c>HostedServiceTarget.TransitionGate</c>, <c>HostedServiceHandler.DrainGate</c> or the
 /// startup gate) rather than through delays, so the interleaving under test provably happens.
 /// </summary>
+/// <remarks>
+/// An assertion that has to observe a queued transition appends an empty transition to the same chain
+/// and awaits it. Appending never runs a body, so that completes only once everything already on the
+/// chain has run, which is what makes those reads deterministic rather than timed. The same idiom is
+/// used in the other hosting test classes.
+/// </remarks>
 public class HostedServiceHandlerRaceTests
 {
     /// <summary>
@@ -110,8 +116,7 @@ public class HostedServiceHandlerRaceTests
                 return new TrackedBackgroundService();
             });
 
-            // Assert - an empty transition on the target's chain drains whatever the attach appended,
-            // so the count is read after any start would have run rather than after a delay.
+            // Assert
             var target = ((IHostedServiceAttachmentTarget)attachment).Target;
             await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
 
@@ -228,8 +233,7 @@ public class HostedServiceHandlerRaceTests
                 return new TrackedBackgroundService();
             });
 
-            // Assert - an empty transition on the target's chain drains whatever the attach appended,
-            // so the count is read after any start would have run rather than after a delay.
+            // Assert
             var target = ((IHostedServiceAttachmentTarget)attachment).Target;
             await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
 
@@ -357,7 +361,7 @@ public class HostedServiceHandlerRaceTests
         // handler owns can ever start, and its release loop covers only the targets its own snapshot
         // held, so a target taken past that point stays owned by a dead handler and no later handler
         // can ever win the compare and exchange for it. The public attach paths have to reject the
-        // window themselves; the liveness flag they used to check is still set here.
+        // window themselves: the liveness flag is still set here.
         var builder = Host.CreateApplicationBuilder();
 
         var context = InterceptorSubjectContext
@@ -433,8 +437,7 @@ public class HostedServiceHandlerRaceTests
                 return new TrackedBackgroundService();
             });
 
-            // Assert - an empty transition on the target's chain drains anything the attach appended,
-            // so the count is read after any start would have run rather than after a delay.
+            // Assert
             await ((IHostedServiceAttachmentTarget)attachment).Target
                 .AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
 
@@ -953,7 +956,7 @@ public class HostedServiceHandlerRaceTests
             // Act
             ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext);
 
-            // Assert - an empty transition drains whatever the second attach appended.
+            // Assert
             await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
 
             Assert.Equal(1, subject.StartCount);
@@ -1299,8 +1302,6 @@ public class HostedServiceHandlerRaceTests
         Assert.True(detachStarted, "The detaching thread never started.");
         Assert.True(detachSettled, "The detaching thread neither blocked on the chain lock nor finished.");
 
-        // An empty transition drains everything both paths appended, so the outcome is read after the
-        // chain has run rather than after a delay.
         await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
 
         var leaked = attachment.Current is not null;

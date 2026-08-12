@@ -103,9 +103,9 @@ public class HostedServiceHandlerTests
     [Fact]
     public async Task WhenTheFactoryReturnsTheInstanceItAlreadyProduced_ThenTheStartFaultsInsteadOfUsingItAfterDispose()
     {
-        // Arrange - the shape a caller migrating from the old instance based API is steered into:
-        // "AttachHostedService(myService)" no longer compiles and "AttachHostedService(() => myService)"
-        // does. The handler disposed that instance when the subject left the graph, so a re-entry that
+        // Arrange - the shape a caller migrating from an instance based API is steered into: the only
+        // attach overload takes a factory, so "AttachHostedService(() => myService)" is what compiles.
+        // The handler disposed that instance when the subject left the graph, so a re-entry that
         // started it again would be a use after dispose with nothing reported anywhere.
         await RunWithAppLifecycleAsync(async context =>
         {
@@ -179,9 +179,8 @@ public class HostedServiceHandlerTests
             parent.Child = null;
             parent.Child = child;
 
-            // Assert - an empty transition on the target's chain drains whatever the two graph moves
-            // appended, so the count is read after any create would have run rather than after a
-            // delay. Counting is the claim in the name; the attachment being gone is the mechanism.
+            // Assert - the empty transition drains what the two graph moves appended. Counting is the
+            // claim in the name; the attachment being gone is the mechanism.
             await ((IHostedServiceAttachmentTarget)attachment).Target
                 .AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
 
@@ -331,9 +330,8 @@ public class HostedServiceHandlerTests
             parent.SecondChild = child;
             parent.Child = null;
 
-            // Assert - an empty transition on the target's chain drains whatever the two graph moves
-            // appended. Without it a stop is still waiting out its transition delay when Current is
-            // read, so the assertion cannot observe a restart even when one happens.
+            // Assert - without the empty transition a stop is still waiting out its transition delay
+            // when Current is read, so the assertion cannot observe a restart even when one happens.
             await ((IHostedServiceAttachmentTarget)attachment).Target
                 .AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
 
@@ -716,8 +714,7 @@ public class HostedServiceHandlerTests
             // Act
             firstParent.Child = null;
 
-            // Assert - an empty transition on each chain drains whatever the detach appended, so the
-            // state is read after any stop would have run rather than after a delay.
+            // Assert - the empty transitions drain what the detach appended to each chain.
             var subjectTarget = ((IInterceptorSubject)child).TryGetSubjectTarget()!;
             var attachmentTarget = ((IHostedServiceAttachmentTarget)attachment).Target;
             await subjectTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);

@@ -73,8 +73,8 @@ public class WithHostedServicesTests
             ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
             ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext);
 
-            // Assert - an empty transition appended after both attaches drains the target's chain,
-            // so the count is read once every queued start has run rather than after a delay.
+            // Assert - the empty transition drains the target's chain, so the count is read once every
+            // queued start has run.
             await ((IInterceptorSubject)subject)
                 .TryGetSubjectTarget()!
                 .AppendAsync(_ => Task.CompletedTask, CancellationToken.None);

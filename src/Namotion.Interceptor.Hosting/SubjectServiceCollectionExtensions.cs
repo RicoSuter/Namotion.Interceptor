@@ -22,25 +22,15 @@ public static class SubjectServiceCollectionExtensions
     /// nor <paramref name="configure"/> is applied.
     /// </para>
     /// <para>
-    /// Where <paramref name="configure"/> runs relative to the context attach depends on the
-    /// constructor shape of <typeparamref name="T"/>, and the attach is what makes a hosting enabled
-    /// context start the subject. When <typeparamref name="T"/> has no constructor taking an
-    /// <see cref="IInterceptorSubjectContext"/>, this method performs the attach itself and runs
-    /// <paramref name="configure"/> before it, so the subject is fully configured before anything can
-    /// start it. Its assignments are then not intercepted and not tracked, because the subject has no
-    /// context yet.
-    /// </para>
-    /// <para>
-    /// When <typeparamref name="T"/> does take a context, <paramref name="configure"/> still runs
-    /// before the attach this method performs, but a generated context constructor has already
-    /// attached the subject and that attach cannot be reordered from here. For that shape the
-    /// assignments are intercepted and tracked, and they race the start the attach appended exactly as
-    /// they do for a hand written <c>new MySubject(context) { Name = "x" }</c>. A constructor that
-    /// takes the context and ignores it, which is the documented
-    /// <c>MySubject(IInterceptorSubjectContext? context = null)</c> shape, attaches nothing, so there
-    /// the attach below is the first one and <paramref name="configure"/> precedes it. Its assignments
-    /// are then not intercepted and not tracked either, so that shape behaves exactly like the one with
-    /// no context parameter at all.
+    /// <paramref name="configure"/> always runs before the attach this method performs, and the attach
+    /// is what makes a hosting enabled context start the subject. When that attach is the first one,
+    /// which is the case for a <typeparamref name="T"/> that has no context constructor and for one
+    /// that takes a context and ignores it, the subject is fully configured before anything can start
+    /// it and the assignments are neither intercepted nor tracked. When a generated context constructor
+    /// has already attached the subject, that attach cannot be reordered from here, so the assignments
+    /// are intercepted and tracked and they race the start it appended, exactly as they do for a hand
+    /// written <c>new MySubject(context) { Name = "x" }</c>. The three shapes are set out side by side
+    /// in docs/hosting.md.
     /// </para>
     /// </remarks>
     /// <typeparam name="T">The subject type.</typeparam>
@@ -96,9 +86,9 @@ public static class SubjectServiceCollectionExtensions
 
             var instance = ActivatorUtilities.CreateInstance<T>(serviceProvider);
 
-            // Ordered ahead of the attach, which is the only ordering the factory controls: nothing
-            // has seen this subject yet, so running configure first is what keeps a handler from
-            // starting it half configured. The handler's start delay is not a synchronisation.
+            // Ordered ahead of the attach for the reason above. The handler's start delay is not a
+            // synchronisation, so it is this ordering that keeps a handler from starting the subject
+            // half configured.
             configure?.Invoke(instance);
 
             if (context is not null)

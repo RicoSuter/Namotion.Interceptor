@@ -8,15 +8,13 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Hosting;
 
-// No longer IDisposable: the old implementation existed only to cancel the action loop's token
-// source, and there is no such token under per target chains.
 [RunsAfter(typeof(ContextInheritanceHandler))]
 internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 {
     // A workaround, not a design choice: the generated context constructor attaches the subject
     // before the caller has assigned anything, so "new Car(context) { Name = "x" }" would otherwise
-    // start a service that reads a half built subject. Removing it needs a signal that a subject is
-    // fully constructed, which touches the generator. See docs/design/hosting-service-ownership.md.
+    // start a service that reads a half built subject.
+    // See docs/design/hosting-service-ownership.md#the-50-ms-delay.
     private const int StartDelayMilliseconds = 50;
 
     private readonly Func<ILogger?> _loggerResolver;
@@ -37,7 +35,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// <summary>
     /// Test seam, awaited in <see cref="StopAsync"/> after the gate begins draining and after the
     /// queued stops are snapshotted, but before liveness is cleared and before the running set is
-    /// snapshotted. Null in production, where the statements it sits between are adjacent. The
+    /// snapshotted. Null in production, where the statements it sits between are adjacent. That
     /// placement is what makes the drain window observable: a start appended while this is held sees
     /// a draining gate and a still live subject, which is the interleaving the start body's gate
     /// re-read exists for.
@@ -58,14 +56,12 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // Invoked from inside LifecycleInterceptor's lock (_attachedSubjects). Everything here only
         // appends, and appending never blocks and never runs a transition body.
         //
-        // Third party code does run under that lock, though, and calling it a hazard is more honest
-        // than calling it impossible: an attach takes a startup completion hold from every
-        // IStartupCompletionDeferrer on the context, and a refused append disposes those holds again,
-        // both synchronously (see TakeStartupHolds). A deferrer that takes a lock of its own therefore
-        // joins the lock order of this lock, and a thread holding that lock while waiting for a
-        // transition that needs this one wedges all three. The hold has to exist before the append
-        // completes, and the event that appends arrives already inside the lock, so there is nowhere
-        // else to take it without reopening the window the hold exists to close.
+        // Third party code does run under that lock: TakeStartupHolds calls IStartupCompletionDeferrer
+        // synchronously, and the refused append path disposes those holds from here too. The hold has
+        // to exist before the append completes and the event that appends arrives already inside the
+        // lock, so there is nowhere else to take it. That is an accepted hazard with a constraint on
+        // the implementer: see IStartupCompletionDeferrer and residual hazard 4 in
+        // docs/design/hosting-service-ownership.md.
         if (change.IsContextAttach)
         {
             AttachSubject(change.Subject);
@@ -127,9 +123,9 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // that lost the compare and exchange. It cannot move into the transition body either,
         // because ownership is released a few lines below, so the body would always see a stranger.
         //
-        // Stops are appended NOW, not issued later from inside another transition. Deferring them
-        // lets a re-attach's create land first on the attachment chain, after which the deferred stop
-        // disposes the NEW instance and leaks the old one.
+        // Stops are appended NOW, never deferred into another transition; deferring them disposes the
+        // instance a re-attach created and leaks the one this detach meant to stop. The walkthrough is
+        // in docs/design/hosting-service-ownership.md#why-a-composite-transition-is-wrong.
         TaskCompletionSource? subjectStopped = null;
         if (subjectTarget is not null && ReferenceEquals(subjectTarget.Owner, this))
         {
@@ -148,8 +144,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             if (ReferenceEquals(target.Owner, this))
             {
                 // A null wait is the "nothing to order behind" case, which is what the subject target
-                // being absent or owned by another handler means. It was an already completed task
-                // before, and awaiting one of those is the same no-op with an allocation in front.
+                // being absent or owned by another handler means. The stop body skips it, so that
+                // case allocates no completed task to await.
                 AppendStop(subject, target, signal: null, waitFor: subjectStopped?.Task, CancellationToken.None);
             }
         }
@@ -187,14 +183,9 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
 
         // Taken here, synchronously, and not inside the body: appending never runs the body, so the
-        // service is not running when the attach returns. Anything that treats "the graph has
-        // finished starting" as a completion point would otherwise reach it while this start is
-        // still queued - concretely, a source attached here would not have registered with its
-        // SourceMonitor yet, and a synchronization wait would complete against a tree that is not
-        // synchronized. Taking the hold before the append leaves no window in which that can happen.
-        //
-        // Nested attaches compose because holds are counted: a service that attaches children during
-        // its own StartAsync takes their holds before its own is released below.
+        // service is not running when the attach returns, and anything that treats "the graph has
+        // finished starting" as a completion point would otherwise reach it while this start is still
+        // queued. Taking the hold before the append leaves no window in which that can happen.
         var startupHolds = TakeStartupHolds(subject.Context);
 
         var start = target.TryTakeOwnershipAndAppendAsync(
@@ -281,16 +272,10 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 var instance = target.Subject ?? target.Factory!();
                 if (target.IsHandlerOwnedInstance && !target.TryRecordFactoryInstance(instance))
                 {
-                    // Refused for every factory attachment, which is wider than the damage: an
-                    // instance the handler created is stopped in every case but disposed only when it
-                    // is IDisposable or IAsyncDisposable, so one that is neither would in fact still
-                    // start. The check does not look, because the rule is the attachment's rather than
-                    // the type's, and reusability that depends on which interfaces a service happens
-                    // to implement is not a rule anyone can hold in their head. Enforced rather than
-                    // documented, because it is the one shape a caller migrating from the old instance
-                    // based API is steered into: "AttachHostedService(myService)" no longer compiles
-                    // and "AttachHostedService(() => myService)" does. Recorded as a fault, which is
-                    // the channel that caller already reads.
+                    // Refused for every factory attachment, whatever the instance is, and recorded as
+                    // a fault because that is the channel the caller already reads. Why it fails
+                    // closed rather than only where the repeat would be a use after dispose is in
+                    // docs/design/hosting-service-ownership.md#faults-and-failed-starts.
                     throw new InvalidOperationException(
                         "The hosted service factory returned the instance it returned last time. The handler owns " +
                         "every instance it creates and stops it when the subject leaves the graph, disposing it as " +
@@ -322,9 +307,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         finally
         {
             // In a finally, so every way out releases: gated out by a drain, not live, skipped by
-            // the one instance guard, or a start that threw. A leaked hold blocks every
-            // synchronization wait on the tree forever, which is a hang rather than a wrong
-            // answer, and worse than never having taken the hold.
+            // the one instance guard, or a start that threw.
             ReleaseStartupHolds(startupHolds);
         }
     }
@@ -334,14 +317,10 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// </summary>
     /// <remarks>
     /// Empty for an application that configures no deferring subsystem (no source monitoring, for
-    /// example), which is the common case and costs one empty check per attach.
-    /// <para>
-    /// <c>DeferCompletion</c> is third party code and, on the lifecycle driven path, it runs under
-    /// LifecycleInterceptor's lock. A deferrer must therefore not block on anything that can be waiting
-    /// for a transition, and may take a lock of its own only where the order against that lock is
-    /// already fixed, which means nothing held under it ever waits on anything that needs that lock.
-    /// See the note on <see cref="HandleLifecycleChange"/>.
-    /// </para></remarks>
+    /// example), which is the common case and costs one empty check per attach. The constraint this
+    /// call site puts on an implementer is on <see cref="IStartupCompletionDeferrer"/>; see also the
+    /// note on <see cref="HandleLifecycleChange"/>.
+    /// </remarks>
     private IDisposable[] TakeStartupHolds(IInterceptorSubjectContext context)
     {
         var deferrers = context.GetServices<IStartupCompletionDeferrer>();
@@ -409,11 +388,9 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                     await waitFor.ConfigureAwait(false);
                 }
 
-                // Waited for, but not read: a stop runs at every state, Drained included. The null
-                // check below already makes it a no-op once the drain has stopped the target, so the
-                // only case a Drained check changes is the one it must not. StopAsync waits for the
-                // stops queued before it, but one appended afterwards, by a graph move racing the
-                // drain, is in no snapshot of either kind and reaches Drained still running.
+                // Waited for, but not read: a stop runs at every state, Drained included, because one
+                // appended after the drain snapshotted everything would otherwise never stop and never
+                // dispose its instance. The null check below is what makes a stop idempotent.
                 await _gate.WaitForOpenAsync().ConfigureAwait(false);
 
                 var instance = target.Current;
@@ -462,8 +439,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
     /// <summary>
     /// Registers a stop so <see cref="StopAsync"/> can be a barrier for it. A target leaves the
-    /// running set when its stop is appended, so a stop queued before the drain is in no running set
-    /// snapshot, and the host disposes the service provider as soon as the drain returns.
+    /// running set when its stop is appended, so no running set snapshot covers a stop queued before
+    /// the drain.
     /// </summary>
     private void TrackInFlightStop(Task stop)
     {

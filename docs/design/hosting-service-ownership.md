@@ -8,7 +8,7 @@ Everything below exists to keep [the rule](../hosting.md#the-rule) true under co
 
 The unit of management is a **target**: either a subject that implements `IHostedService`, or one factory attachment. Each target owns a serialized **transition chain**, so start, stop and dispose for that one target never interleave, while transitions for unrelated targets run concurrently.
 
-Several decisions below look like they could be simplified. Each was measured, and the obvious simplification was measured to be wrong. The reason is recorded with the decision, because the reason is the only thing that stops it being simplified again.
+Several decisions below look like they could be simplified. Each was measured, and the obvious simplification was measured to be wrong. The reason is recorded with the decision, because the reason is the only thing that stops it being simplified again. Where the code already carries the whole argument next to the mechanism, this document names the mechanism and points at it rather than repeating it.
 
 ## Data Structures
 
@@ -34,7 +34,7 @@ The fields are synchronized differently, and each difference is deliberate:
 
 - `Current` and `Fault` use `Volatile.Read` and `Volatile.Write`. Awaiting a transition already gives its awaiter a happens before edge, but a diagnostics poll reads `Current` from an unrelated thread with no such edge, so this is required rather than decorative.
 - `Owner` uses `Volatile.Read`, and it is never written with `Volatile.Write`. The only two writers are `TryTakeOwnership` and `ReleaseOwnership`, and both go through `Interlocked.CompareExchange`, which carries the fence itself. A plain write would lose the compare and swap that decides which of two racing handlers claims the target.
-- `_lastFactoryInstance` is neither volatile nor locked. Only start bodies touch it, and the chain serializes start bodies against each other, so the chain already provides the ordering. It is never cleared, so an attachment that has run once roots one stopped, usually disposed, instance for as long as the attachment itself lives. That is deliberate: the comparison has to outlive the stop that disposed the instance, or the repeat it exists to catch is exactly the case it cannot see. The cost is bounded by the number of attachments the application created, at one dead reference each.
+- `_lastFactoryInstance` is neither volatile nor locked, and it is never cleared. Both are deliberate, and both reasons are on `HostedServiceTarget.TryRecordFactoryInstance`.
 - `_detached` is written and read under `_sync`, which is what pairs it with the append (see [Refusing a start for an attachment a detach already removed](#refusing-a-start-for-an-attachment-a-detach-already-removed)).
 
 `IsHandlerOwnedInstance` is simply `Factory is not null`, and it is the whole disposal policy: the handler created the instance if and only if it invoked a factory to get it, so it disposes attachment instances and never disposes a subject.
@@ -49,22 +49,20 @@ _running         ConcurrentDictionary    target -> subject, for targets this han
 _liveSubjects    ConcurrentDictionary    subject -> unused, for subjects in the graph for this handler
 _inFlightStops   ConcurrentDictionary    stop task -> unused, for stops appended but not yet finished
 DrainGate        Func<Task>?             test seam, null in production
-OwnershipTakenGate Action?               test seam invoked between the take and the gate re-read, null in production
+OwnershipTakenGate Action?               test seam, null in production
 ```
 
-The three concurrent dictionaries are the state the rest of this document is about. `_running` maps a target to its subject rather than being a set, because the drain has to group the targets it stops per subject to reproduce the ordering a context detach gives.
+The three concurrent dictionaries are the state the rest of this document is about. `_running` maps a target to its subject rather than being a set, because the drain has to group the targets it stops per subject to reproduce the ordering a context detach gives. The two seams are documented where they are declared; each one holds open a window between two statements that are adjacent in production.
 
-`_liveSubjects` holds an entry for **every** subject that attaches, not only the subjects that host something, and that is what it has to be. An attachment can be added to a subject at any time after it entered the graph, and this entry is the only thing that lets that later attach tell a live subject from a detached one, so recording only the subjects hosting something at attach time would refuse every attachment onto every other subject. The entry is removed on context detach and the whole set is cleared by the drain, so it tracks the graph rather than growing with the process, but the cost is paid by graphs that host nothing at all. The shape of that cost is one concurrent dictionary entry per subject in the graph, tens of bytes each, plus one dictionary write on every attach and one removal on every detach: retained memory linear in the size of the graph rather than in the number of hosted services, and a graph with no hosted services anywhere pays all of it. Bounded by the graph and paid for correctness on the attach path, which is why it stays.
+`_liveSubjects` holds an entry for **every** subject that attaches, not only the subjects that host something, and that is what it has to be. An attachment can be added to a subject at any time after it entered the graph, and this entry is the only thing that lets that later attach tell a live subject from a detached one, so recording only the subjects hosting something at attach time would refuse every attachment onto every other subject. The cost is one concurrent dictionary entry per subject in the graph, tens of bytes each, plus one write on every attach and one removal on every detach: retained memory linear in the size of the graph rather than in the number of hosted services, and a graph with no hosted services anywhere pays all of it. Bounded by the graph and paid for correctness on the attach path, which is why it stays.
 
 The logger is resolved through a callback rather than injected because `WithHostedServices` constructs the handler while the context is being configured, which is before any service provider exists; the registration it adds to the `IServiceCollection` assigns the logger when the provider builds it.
-
-`DrainGate` is awaited in `StopAsync` after the gate begins draining and after the queued stops are snapshotted, but before liveness is cleared and before the running set is snapshotted. That placement is what makes the drain window reachable from a test: a start appended while the seam is held sees a draining gate and a still live subject.
 
 ### Where records live
 
 Records live on subjects rather than in the handler, so nothing in the handler roots a detached subject and a factory survives a detach. That survival is what lets a subject that leaves the graph and re-enters it get working services again: the next context attach invokes the surviving factory, so no restart contract is needed from the service.
 
-Attachments live under one data key as an `ImmutableArray`, mutated with `AddOrUpdate`. The record is built outside the update delegate, because `ConcurrentDictionary` may invoke that delegate more than once without rolling back its side effects, so a record built inside it could register a target that loses the compare and swap and is never seen again. The subject target is read with `TryGetValue` before any `GetOrAdd`, and stored with the value overload rather than the factory overload: a factory closing over the target is a display class the compiler allocates at the top of the method, so the fast path would allocate on every re-attach. Pinned by `HostedServiceHandlerTests.WhenASubjectTargetAlreadyExists_ThenReadingItAllocatesNothing`.
+Attachments live under one data key as an `ImmutableArray`, and the subject target under another. The correctness and allocation constraints on both paths are on `InterceptorHostingExtensions.AddAttachment` and `InterceptorHostingExtensions.GetOrAddSubjectTarget`; the allocation half is pinned by `HostedServiceHandlerTests.WhenASubjectTargetAlreadyExists_ThenReadingItAllocatesNothing`.
 
 The handler carries `[RunsAfter(typeof(ContextInheritanceHandler))]`, because it resolves startup completion deferrers from `subject.Context` and for a subject entering as a child it is `ContextInheritanceHandler` that installs the parent context as a fallback. Ahead of the descent the child's context would still be its private executor and would resolve nothing. See [Handler Order Around the Descent](tracking-lifecycle.md#handler-order-around-the-descent).
 
@@ -83,34 +81,15 @@ One guarantee is deliberately given up. `LifecycleInterceptor.DetachFromProperty
 
 ## Appending a Transition
 
-Both append paths, `AppendAsync` and `TryTakeOwnershipAndAppendAsync`, end in the same three lines under `_sync`:
+Both append paths, `AppendAsync` and `TryTakeOwnershipAndAppendAsync`, end in `HostedServiceTarget.AppendCore`, under the target's `_sync` lock, where the comment records why the lock and `TaskScheduler.Default` are each required. Two appenders race there in ordinary use: a lifecycle event appends while holding `_attachedSubjects`, and a user driven detach appends from a pool thread. Pinned by `HostedServiceTargetTests.WhenTransitionsAreAppendedConcurrently_ThenTheyNeverOverlap`.
 
-```csharp
-_tail = _tail
-    .ContinueWith(_ => RunAsync(body, cancellationToken), CancellationToken.None,
-        TaskContinuationOptions.None, TaskScheduler.Default)
-    .Unwrap();
-
-return _tail;
-```
-
-### Why the lock is required
-
-`_tail = _tail.ContinueWith(...)` is a read modify write; two racing appenders lose an assignment and both transitions then run concurrently on the same target, which is exactly what the chain exists to prevent. Two appenders race here in ordinary use: a lifecycle event appends while holding `_attachedSubjects`, and a user driven detach appends from a pool thread. Pinned by `HostedServiceTargetTests.WhenTransitionsAreAppendedConcurrently_ThenTheyNeverOverlap`.
-
-### Why `TaskScheduler.Default` is required
-
-`ContinueWith` otherwise captures `TaskScheduler.Current`, which can be a scheduler the appending task is itself occupying, in which case the continuation is queued to a scheduler that never gets around to running it.
+`RunAsync` catches everything, so the chain is never faulted. Bodies record failures into `Fault` and log them instead.
 
 ### Appending never blocks and never runs the body
 
 A default `ContinueWith` never executes inline on the appending thread, so a lifecycle handler may append while the lifecycle interceptor holds `_attachedSubjects`, and no transition **body** ever runs under that lock. That is structural rather than a rule somebody has to remember, and it is pinned by `HostedServiceTargetTests.WhenATransitionIsAppended_ThenItDoesNotRunOnTheAppendingThread`.
 
 Third party code does run under that lock, though, and it is not the body: taking and releasing the startup completion holds calls into `IStartupCompletionDeferrer` synchronously from the lifecycle event. That is [residual hazard 4](#4-a-deferrer-that-takes-a-lock-of-its-own).
-
-### Bodies never throw
-
-`RunAsync` catches everything, so the chain is never faulted. A faulted `_tail` is retained until the target transitions again, and every dropped fire and forget transition would raise `UnobservedTaskException`. Bodies record failures into `Fault` and log them instead.
 
 ## Appending at Event Time
 
@@ -133,7 +112,7 @@ So `DetachSubject` appends immediately, under `lock (_attachedSubjects)`, to eve
 - a stop on the subject's chain if the subject is an `IHostedService` this handler owns, which sets a `subjectStopped` completion in a `finally`, so cancellation and failure release it too;
 - for each attachment this handler owns, a stop on that attachment's own chain that first awaits `subjectStopped`, then stops, disposes and clears `Current`.
 
-`subjectStopped` is allocated only when both halves exist: the handler is appending the subject's own stop **and** the subject has at least one attachment to order behind it. In every other case the attachment stops are appended with a null wait, which the stop body skips, and no completion source is created at all. `DetachSubject` reads the subject target and the attachment array before it allocates anything and returns immediately when the subject hosts neither, which is the case for essentially every subject in a detaching graph. Pinned by `HostedServiceHandlerTests.WhenASubjectWithoutHostedServicesIsDetached_ThenNothingIsAllocated`.
+`subjectStopped` is allocated only when the handler is appending the subject's own stop **and** the subject has at least one attachment to order behind it; the reasons are at that allocation and at the null wait below it. It returns before allocating anything at all for a subject that hosts neither, which is essentially every subject in a detaching graph. Pinned by `HostedServiceHandlerTests.WhenASubjectWithoutHostedServicesIsDetached_ThenNothingIsAllocated`.
 
 Ordering holds because both appends happen under the lifecycle lock, so any later re-attach queues behind them on the same chains. The wait is acyclic: an attachment chain waits on the subject's signal and the subject's chain waits on nothing, **provided the subject's stop does not itself wait on an attachment chain**. That proviso is [residual hazard 3](#3-a-subject-that-detaches-its-own-attachment-while-unwinding).
 
@@ -147,35 +126,23 @@ Context attach is the mirror image, also under the lock: a start on the subject'
 
 ### A subject created from inside a lifecycle handler
 
-Giving a container a default child from the container's own context attach is a legitimate pattern, and it is the one place where a subject enters the graph while another subject's attach event is still being dispatched:
-
-```csharp
-public void HandleLifecycleChange(SubjectLifecycleChange change)
-{
-    if (change.IsContextAttach && change.Subject is Container { Child: null } container)
-    {
-        container.Child = new ChildSubject();
-    }
-}
-```
-
-The assignment runs under `_attachedSubjects`, which is re-entrant, so the child's own context attach is raised before the assigning handler returns. It is **not** raised inside `AttachSubject`, though. `LifecycleInterceptor.InvokeAddedLifecycleHandlers` walks the handler array one entry at a time, so a handler that creates children either runs ahead of `HostedServiceHandler`, in which case the child is handled to completion before the container is, or behind it, in which case the container is handled to completion first. Either way the child's attach is an ordinary one, carrying its own liveness write, its own ownership take, its own appended start and its own pair of gate reads, and the two orders reach the same state. Pinned for both orders by `NestedAttachTests.WhenAnAttachHandlerCreatesTheContainersChild_ThenBothStartOnceAndEachOwnsItsOwnTarget`.
+Giving a container a default child from the container's own context attach is a legitimate pattern, and it is the one place where a subject enters the graph while another subject's attach event is still being dispatched. `ChildCreatingLifecycleHandler` in the test project is the shape, and the remarks on `NestedAttachTests` record why the child's attach is an ordinary one rather than a re-entrant call. Both handler orders reach the same state, pinned by `NestedAttachTests.WhenAnAttachHandlerCreatesTheContainersChild_ThenBothStartOnceAndEachOwnsItsOwnTarget`.
 
 The way back out is the same shape. The child is reached by the detach cascade through the container's property rather than by anything an explicit `AttachHostedService` left behind, and both ownerships are released, which is what lets a re-attach start the same two subjects again rather than finding targets no handler can claim. Pinned by `NestedAttachTests.WhenAContainerWhoseChildAnAttachHandlerCreatedLeavesTheGraph_ThenBothStopAndTheGraphCanRunThemAgain`.
 
-The one caller that really does re-enter `AttachSubject` is an `IStartupCompletionDeferrer`, because `TakeStartupHolds` calls it synchronously from inside `TryTakeOwnershipAndStart`, which is inside the outer `AttachSubject`. A deferrer that assigns a subject typed property therefore runs the whole inner attach before the outer call has taken its own target. Nothing is shared between the two: liveness is per subject, ownership is per target, and the holds are counted, so the inner attach takes and releases its own while the outer one is still outstanding. Pinned by `NestedAttachTests.WhenADeferrerCreatesTheChildWhileTheContainersOwnAttachIsStillRunning_ThenBothStartOnceAndEveryHoldIsReleased`, which reads the container's owner from inside the deferrer to prove the inner attach really did run first. This is [residual hazard 4](#4-a-deferrer-that-takes-a-lock-of-its-own) territory rather than a recommendation: what it costs a deferrer is the constraint stated there, not re-entrancy.
+The one caller that really does re-enter `AttachSubject` is an `IStartupCompletionDeferrer`, because `TakeStartupHolds` calls it synchronously from inside `TryTakeOwnershipAndStart`, which is inside the outer `AttachSubject`. A deferrer that assigns a subject typed property therefore runs the whole inner attach before the outer call has taken its own target. Nothing is shared between the two: liveness is per subject, ownership is per target, and the counted holds let the inner attach take and release its own while the outer one is still outstanding. Pinned by `NestedAttachTests.WhenADeferrerCreatesTheChildWhileTheContainersOwnAttachIsStillRunning_ThenBothStartOnceAndEveryHoldIsReleased`, which reads the container's owner from inside the deferrer to prove the inner attach really did run first. This is [residual hazard 4](#4-a-deferrer-that-takes-a-lock-of-its-own) territory rather than a recommendation: what it costs a deferrer is the constraint stated there, not re-entrancy.
 
 ## Ownership
 
-A target's `Owner` is taken with `Interlocked.CompareExchange`. Finding this handler already installed counts as success; only losing to a different handler means do nothing. The caller is told which of the two successes it got, because a caller that has to undo its own take must leave an earlier one alone: that earlier take belongs to an attach whose instance may already be running.
+A target's `Owner` is taken with `Interlocked.CompareExchange`. Finding this handler already installed counts as success; only losing to a different handler means do nothing. `HostedServiceTarget.TryTakeOwnership` reports which of the two successes the caller got, because a caller that has to undo its own take must leave an earlier one alone.
 
 ### Ownership is read on context detach, at append time
 
-A handler appends a stop only for the targets it owns, so a detach reaching a drained handler, or a sibling handler that lost the exchange, cannot stop and dispose an instance the owning handler created and is still running. The read cannot move into the transition body, because ownership is released a few statements after the appends, so a body would always see a stranger and skip its own stop. Reading it at append time, under the lifecycle lock, is what pairs the read with the release. Pinned by `HostedServiceHandlerTests.WhenADrainedHandlerSeesAContextDetach_ThenTheLiveHandlersInstancesKeepRunning` and `HostedServiceHandlerTests.WhenANonOwningHandlerSeesAContextDetach_ThenTheOwnersInstanceKeepsRunning`; deleting both guards fails exactly those two.
+`DetachSubject` appends a stop only for the targets it owns, and the comment at that read records both what a handler stopping a stranger's instance costs and why the read cannot move into the transition body. Reading it at append time, under the lifecycle lock, is what pairs it with the release a few statements below. Pinned by `HostedServiceHandlerTests.WhenADrainedHandlerSeesAContextDetach_ThenTheLiveHandlersInstancesKeepRunning` and `HostedServiceHandlerTests.WhenANonOwningHandlerSeesAContextDetach_ThenTheOwnersInstanceKeepsRunning`; deleting both guards fails exactly those two.
 
 ### Ownership is released on context detach and on drain
 
-Always after the stops are appended, and never from inside a transition body. Both halves were measured. Releasing at the end of the stop transition lets that transition clobber ownership a re-attach has already retaken, after which the re-attach's start finds a stranger owning the target and no-ops itself, leaving a subject in the graph with nothing running and no error anywhere. Releasing before appending lets a second handler's start land ahead of the first handler's stop on a shared chain.
+Always after the stops are appended, and never from inside a transition body. Both halves were measured. Releasing from the body clobbers an ownership a re-attach has already retaken, and the consequence is a subject in the graph with nothing running and no error anywhere. Releasing before appending lets a second handler's start land ahead of the first handler's stop on a shared chain.
 
 Release on detach is what lets a subject moved between contexts be picked up by the next handler. Release on drain is what lets a second host run over the same subject instances: without it every target the drained handler owned stays owned by it, and no later handler can ever win the compare and exchange for that target. Deleting the release loop in `StopAsync` fails `HostedServiceHandlerTests.WhenADrainedHandlerSeesAContextDetach_ThenTheLiveHandlersInstancesKeepRunning` and `HostedServiceHandlerTests.WhenADrainedHandlerIsAskedToWaitForAStart_ThenItClaimsNothingAndReportsNothingStarted`.
 
@@ -193,9 +160,7 @@ The flag is read on both of the paths a start passes through, and each read is d
 
 ### The read inside the chain lock
 
-`TryTakeOwnershipAndAppendAsync` performs the liveness read, the ownership take and the append under one acquisition of the target's lock. A context detach clears liveness before it appends its stops, and appends each stop under that same lock, which leaves only two orders: this call first, so the detach's stop lands behind a start that then finds the subject dead and no-ops; or the detach's stop first, so this call reads cleared liveness and appends nothing.
-
-Splitting the three steps opens a gap for a detach to append its stop into, and the start then runs behind that stop. The worst thing that reaches is a cycle: a start queued behind an attachment stop that is waiting for the subject's own stop, which is waiting for the caller awaiting this start. The same append order under an explicit detach is the damage a test can read, because there the stop runs first, finds nothing to stop, and leaves the start behind it to create an instance the detach has already made unreachable.
+`TryTakeOwnershipAndAppendAsync` performs the liveness read, the ownership take and the append under one acquisition of the target's lock, and its remarks record what splitting them opens. The damage a test can read is the explicit detach order, where the stop runs first, finds nothing to stop, and leaves the start behind it to create an instance the detach has already made unreachable.
 
 That order is what `HostedServiceHandlerRaceTests.WhenADetachRacesTheAppendInsideTheChainLock_ThenTheStartIsOrderedAheadOfTheStop` reads. It holds the section open on `ChainLockGate` while a real `DetachHostedService` runs on its own thread, and releases the seam only once that thread has provably blocked on the chain lock or run to completion, so both builds decide the same way every time rather than by whichever thread wakes first. Splitting the section fails that test and no other; deleting the liveness read or the detached read inside it leaves it green.
 
@@ -203,7 +168,7 @@ That order is what `HostedServiceHandlerRaceTests.WhenADetachRacesTheAppendInsid
 
 The body re-reads liveness **and** ownership before creating anything, covering a detach that lands after the append and before the body runs. The pair is pinned by `HostedServiceHandlerRaceTests.WhenAQueuedStartRunsAfterTheSubjectDetached_ThenNothingIsStarted`, which fails when both reads are deleted.
 
-Neither read alone is discriminated by the suite, and that is a coverage limit rather than redundancy. The two cover different windows. `DetachSubject` clears liveness first and releases ownership only after it has appended its stops, and this body does not hold the lifecycle lock, so it can read between those two statements: there the ownership read still passes and only the liveness read refuses. A start appended after the detach has finished is the mirror case, where liveness is long gone and ownership is what refuses. Forcing a body into the window between the two statements would mean holding the lifecycle lock open, which blocks every graph write a test needs to make progress, so no seam can drive it.
+Neither read alone is discriminated by the suite, and that is a coverage limit rather than redundancy. The two cover different windows, which the comment on `RunStartAsync` sets out. Forcing a body into the window between the liveness clear and the ownership release would mean holding the lifecycle lock open, which blocks every graph write a test needs to make progress, so no seam can drive it.
 
 The consequence if the liveness read were removed is bounded rather than a leak: the same detach has already appended a stop for that target, chains are first in first out, so the instance the start creates is stopped and disposed by that stop. The cost is a needless create and teardown against a subject that has left the graph, which for a connector means a session opened and closed. Removing the window instead, by releasing ownership before appending the stops, reopens a defect that was measured, so the guard stays and the limit is recorded here.
 
@@ -218,7 +183,7 @@ An explicit `DetachHostedService` clears no liveness, so the flag cannot see it.
 1. The attach wins the lock. The start is appended, the detach's stop lands behind it on that chain, and the stop stops and disposes whatever the start created.
 2. The detach's stop wins the lock. The mark is already visible, so nothing is appended, no ownership is taken and no running set entry is made.
 
-Without the mark, an attach that had published its attachment but not yet appended its start would run that start after the detach had already removed the attachment, and the instance it creates is reachable from nothing: no enumerable attachment remains for a later context detach to stop.
+Without the mark that start runs after the attachment has already been removed, and the instance it creates is reachable from nothing; the remarks on `TryTakeOwnershipAndAppendAsync` carry that argument.
 
 The two marks are independent, so each needs a test that drives its own overload: deleting the mark from one of them leaves every test that reaches the window through the other green. Pinned by `HostedServiceHandlerRaceTests.WhenAnAttachmentIsDetachedBeforeItsStartIsAppended_ThenNothingIsStarted` and `HostedServiceHandlerRaceTests.WhenAnAwaitedAttachmentIsDetachedBeforeItsStartIsAppended_ThenNothingIsStarted`, which both detach through the synchronous overload, the second against the awaiting attach; and by `HostedServiceHandlerRaceTests.WhenAnAttachmentIsDetachedByTheAwaitingOverloadBeforeItsStartIsAppended_ThenNothingIsStarted` for the awaiting detach.
 
@@ -247,7 +212,7 @@ A gated out transition therefore still runs its signalling and its bookkeeping, 
 
 ### Why a stop runs at every state, `Drained` included
 
-That row is not a rounding error. Shutdown awaits the stops queued before the drain and the stops it appends itself, but a stop appended after both snapshots, by a graph move racing the drain, is in neither and reaches `Drained` still holding a running instance. A stop that no-oped there would leave that instance never stopped and never disposed. Nothing is lost by letting it run, because a target the drain already stopped has a null `Current` and the stop returns immediately. It is that null check, not the gate state, that makes a stop idempotent. Pinned by `HostedServiceHandlerRaceTests.WhenAStopIsStillQueuedWhenTheDrainCompletes_ThenItStillStopsAndDisposes`.
+That row is not a rounding error. Shutdown awaits the stops queued before the drain and the stops it appends itself, but a stop appended after both snapshots, by a graph move racing the drain, is in neither and reaches `Drained` still holding a running instance. A stop that no-oped there would leave that instance never stopped and never disposed, and nothing is lost by letting it run, because the null `Current` check at the top of the body, not the gate state, is what makes a stop idempotent. Pinned by `HostedServiceHandlerRaceTests.WhenAStopIsStillQueuedWhenTheDrainCompletes_ThenItStillStopsAndDisposes`.
 
 `BeginDraining` sets the opened signal even though it never opens the gate for work, which releases anything parked on a gate that was never opened. Without it, a host that aborts startup or is disposed without starting leaves transitions and their awaiters hanging forever. Pinned by `HostedServiceGateTests.WhenDrainingStartsFromNotStarted_ThenParkedWaitersAreReleased`, which fails when the signal is removed from `BeginDraining`.
 
@@ -257,7 +222,7 @@ This is a real decision, because "nothing runs before host start" and "a caller 
 
 ## Startup Completion Holds
 
-The user facing contract is in [Deferred Starts and Startup Completion](../hosting.md#deferred-starts-and-startup-completion). What matters here is where the hold is taken and released.
+The user facing contract is in [Deferred Starts and Startup Completion](../hosting.md#deferred-starts-and-startup-completion), and the constraint an implementer meets is on [`IStartupCompletionDeferrer`](../../src/Namotion.Interceptor.Tracking/IStartupCompletionDeferrer.cs). What matters here is where the hold is taken and released.
 
 The hold is taken in `TryTakeOwnershipAndStart`, synchronously and **before** the append, so there is no window between the attach and the hold in which completion can fire. Pinned by `HostedServiceHandlerRaceTests.WhenASubjectEntersTheGraph_ThenItsStartupHoldIsTakenBeforeTheGraphWriteReturns`, which asserts the hold is outstanding by the time `parent.Child = child` has returned.
 
@@ -269,7 +234,7 @@ It is released in the start body's `finally`, which is what covers every way out
 
 When the append is refused there is no body, so that path releases the holds itself. A leaked hold blocks every synchronization wait on that tree forever, which is a hang rather than a wrong answer and worse than never having taken the hold.
 
-A deferrer that throws while taking or releasing is logged and ignored, because the take runs under the lifecycle lock inside a property write and an exception would surface at an unrelated assignment. A deferrer that blocks is a different matter, and it is a constraint on the implementation rather than an exposure every consumer carries: see [residual hazard 4](#4-a-deferrer-that-takes-a-lock-of-its-own).
+A deferrer that throws while taking or releasing is logged and ignored, for the reason at the `catch` in `TakeStartupHolds`. A deferrer that blocks is a different matter, and it is a constraint on the implementation rather than an exposure every consumer carries: see [residual hazard 4](#4-a-deferrer-that-takes-a-lock-of-its-own).
 
 ## Faults and Failed Starts
 
@@ -279,15 +244,15 @@ A stop records a fault when it fails and never clears one, so a start that fault
 
 A start that faults after creating the instance disposes it when the handler created it, and leaves `Current` null. Leaving a half started connector undisposed is the ownership gap by another route: a connector can hold a semaphore, a session manager and a lifecycle subscription that only its own dispose releases.
 
-A start whose factory returns the instance it returned last time is refused before `StartAsync` and before `SetCurrent`, with an `InvalidOperationException` recorded on `Fault` and `Current` left null.
+A start whose factory returns the instance it returned last time is refused before `StartAsync` and before `SetCurrent`, with an `InvalidOperationException` recorded on `Fault` and `Current` left null. The rule and what it does not catch are stated for consumers in [The factory must construct](../hosting.md#the-factory-must-construct).
 
-The guard gates on `IsHandlerOwnedInstance`, which is wider than the harm it names: `DisposeInstanceAsync` acts on `IDisposable` and `IAsyncDisposable` only, so a hosted service implementing neither is stopped and never disposed, and handing it back would in fact start it cleanly. Measured both ways: with the guard such a service starts once and the fault is set, and with the guard disabled it starts twice and works. The rule stated is therefore "a factory attachment constructs on every call", not "the handler would otherwise hand back a disposed instance". Failing closed is the choice: reusability that depends on which interfaces a service happens to implement is not a rule a caller can hold in their head, and the only thing it buys is keeping one allocation the caller asked for by writing the factory that way.
+Failing closed was measured both ways. The guard gates on `IsHandlerOwnedInstance`, which is wider than the harm it names: `DisposeInstanceAsync` acts on `IDisposable` and `IAsyncDisposable` only, so a hosted service implementing neither is stopped and never disposed, and handing it back would in fact start it cleanly. With the guard such a service starts once and the fault is set; with the guard disabled it starts twice and works. The rule stated is therefore "a factory attachment constructs on every call", not "the handler would otherwise hand back a disposed instance"; why the wider rule is the better one is argued in the consumer facing section linked above.
 
-It is enforced rather than documented because it is the shape a caller migrating from the removed instance based API is steered into: `AttachHostedService(myService)` no longer compiles and `AttachHostedService(() => myService)` does. The check is one reference comparison against `_lastFactoryInstance`, whose reach is described in [The factory must construct](../hosting.md#the-factory-must-construct); it sits ahead of the dispose-on-failed-start path, so nothing is disposed twice. Pinned by `HostedServiceHandlerTests.WhenTheFactoryReturnsTheInstanceItAlreadyProduced_ThenTheStartFaultsInsteadOfUsingItAfterDispose`.
+The check is one reference comparison against `_lastFactoryInstance`, and it sits ahead of the dispose-on-failed-start path, so nothing is disposed twice. Pinned by `HostedServiceHandlerTests.WhenTheFactoryReturnsTheInstanceItAlreadyProduced_ThenTheStartFaultsInsteadOfUsingItAfterDispose`.
 
-A cancelled stop is caught and **not** recorded as a fault, because it is the caller's token expiring rather than a failure, and the dispose after it still has to run. `Current` is already cleared by then, so an instance that escaped there would be unreachable and never disposed, which is the ordinary `ShutdownTimeout` path.
+A cancelled stop is caught and **not** recorded as a fault, and the dispose after it still runs; the comment at that `catch` records why, and `HostedServiceHandlerTests.WhenAStopIsCancelled_ThenTheInstanceIsStillDisposed` pins both halves.
 
-Both places that rethrow a recorded fault to a caller, `HostedServiceHandler.WaitForStartAsync` and `InterceptorHostingExtensions.AttachHostedServiceAsync`, use `ExceptionDispatchInfo.Capture(fault).Throw()` rather than `throw fault`. The fault was raised on a transition thread, and a plain rethrow overwrites its stack with the rethrowing one, which is the stack a user reads when a failing subject aborts host startup. Two callers can also reach the same recorded fault, and only one of them would keep a usable trace. Pinned by `HostedServiceHandlerTests.WhenAFailedStartIsRethrownToTheAttachingCaller_ThenTheOriginalStackSurvives` and `HostedServiceHandlerTests.WhenAStartFaultedForAWaitingCaller_ThenTheFaultIsRethrown`.
+Both places that rethrow a recorded fault to a caller, `HostedServiceHandler.WaitForStartAsync` and `InterceptorHostingExtensions.AttachHostedServiceAsync`, use `ExceptionDispatchInfo.Capture(fault).Throw()` rather than `throw fault`, for the reason recorded at the second of them. Pinned by `HostedServiceHandlerTests.WhenAFailedStartIsRethrownToTheAttachingCaller_ThenTheOriginalStackSurvives` and `HostedServiceHandlerTests.WhenAStartFaultedForAWaitingCaller_ThenTheFaultIsRethrown`.
 
 ## Shutdown
 
@@ -297,22 +262,22 @@ Both places that rethrow a recorded fault to a caller, `HostedServiceHandler.Wai
 
 1. `BeginDraining`, which stops new targets being taken and releases parked waiters.
 2. Snapshot `_inFlightStops` immediately, so it holds exactly the stops queued before the drain.
-3. Clear `_liveSubjects`. A handler still reporting a subject as live would claim ownership of every attachment added afterwards, append a start that no-ops, and never release it, because the release loop in step 6 only covers the drain's own snapshot. The clear is also what stops `WaitForStartAsync` appending an empty transition behind the drain's own stop, which is what `HostedServiceHandlerTests.WhenAHandlerIsAskedToWaitWhileItsOwnDrainIsStopping_ThenItAnswersWithoutQueueingBehindTheStop` pins: deleting the clear is the one change that fails it.
+3. Clear `_liveSubjects`, for the reason recorded there, and because it is also what stops `WaitForStartAsync` appending an empty transition behind the drain's own stop, which is what `HostedServiceHandlerTests.WhenAHandlerIsAskedToWaitWhileItsOwnDrainIsStopping_ThenItAnswersWithoutQueueingBehindTheStop` pins: deleting the clear is the one change that fails it.
 4. Snapshot `_running` and append stops in the same per subject shape a context detach uses: a stop carrying a `subjectStopped` signal for every subject target, then a stop for every attachment target that awaits its own subject's signal when that subject was in the snapshot.
 5. Await those plus the stops from step 2, bounded by the host's stopping token.
 6. Release ownership of every target in the snapshot, clear `_running`, `CompleteDraining`.
 
-A cancelled wait in step 5 is swallowed rather than propagated, and the drain still finishes. Rethrowing would abandon step 6, so every target this handler owns would stay owned by a dead handler and a second host over the same subjects would start nothing. The host treats an exception here as a failed shutdown and disposes the provider anyway, so there is nothing to gain and the whole cleanup to lose. Nothing below observes the token: the chain waits inside a stop body are untokened by design, and a stop wedged behind one of them would otherwise hold the process open forever. Pinned by `HostedServiceHandlerTests.WhenAServiceStopNeverReturns_ThenShutdownDoesNotOutlastTheTimeout` and `HostedServiceHandlerTests.WhenTheShutdownTokenIsAlreadyCancelled_ThenTheInstanceIsStillDisposed`, both of which fail when the cancellation is rethrown instead.
+A cancelled wait in step 5 is swallowed rather than propagated, and the drain still finishes: rethrowing would abandon step 6, so every target this handler owns would stay owned by a dead handler and a second host over the same subjects would start nothing. That reason is at the `catch`, and why nothing below step 5 observes the token is at the wait above it. Pinned by `HostedServiceHandlerTests.WhenAServiceStopNeverReturns_ThenShutdownDoesNotOutlastTheTimeout` and `HostedServiceHandlerTests.WhenTheShutdownTokenIsAlreadyCancelled_ThenTheInstanceIsStillDisposed`, both of which fail when the cancellation is rethrown instead.
 
 ### Joining and leaving the running set
 
-**A target joins `_running` when its start is taken and leaves when its stop is appended**, not when either completes. Joining at completion would let the drain's snapshot miss a queued start, which is the same race the `Draining` state closes and should not depend on two mechanisms agreeing. Joining happens after the ownership take rather than before, because an entry for a target this handler failed to take would make the drain stop and dispose an instance another handler created.
+**A target joins `_running` when its start is taken and leaves when its stop is appended**, not when either completes. Joining at completion would let the drain's snapshot miss a queued start, which is the same race the `Draining` state closes and should not depend on two mechanisms agreeing. Joining happens after the ownership take rather than before, for the reason recorded at the join.
 
 Leaving at append time is why step 2 exists: a stop appended just before the drain is in no `_running` snapshot, so without it the drain returns while that stop is still running, and the host disposes the service provider the moment `StopAsync` returns. Each entry removes itself through a continuation, so the set does not grow with the process. Pinned by `HostedServiceHandlerRaceTests.WhenAStopIsInFlightWhenTheHostDrains_ThenTheDrainWaitsForIt`.
 
 ### The two gate reads in `TryTakeOwnershipAndStart`
 
-`TryTakeOwnershipAndStart` reads the gate twice, once on entry and once after writing both `_running` and the owner. The second read is what turns the first from a narrowing into a guard: reading `Running` after both writes proves the drain had not begun when they landed, so the drain's own snapshot covers this target. Reading anything later means the drain may already have swept past, so the take is undone there rather than left to a release loop that will never see it. Only an ownership this call installed is undone. `AttachSubject` re-reads the gate after writing `_liveSubjects` for the same reason.
+`TryTakeOwnershipAndStart` reads the gate twice, once on entry and once after writing both `_running` and the owner, for the reasons recorded at both reads. `AttachSubject` re-reads the gate after writing `_liveSubjects` for the same reason.
 
 `HostedServiceHandlerRaceTests.WhenAnAttachmentIsAddedDuringTheDrain_ThenTheDrainingHandlerTakesNoOwnership` pins that a draining handler ends up owning nothing, and it fails only when **both** reads are deleted: its attach arrives after `BeginDraining`, so the read on entry already refuses it. Each read also has a test the other does not satisfy, and deleting either one alone fails exactly that one:
 
@@ -330,28 +295,26 @@ The read on entry has no test that fails for it alone, and that is a coverage li
 
 ## Activation and Waiting for a Start
 
-`SubjectActivation<T>` exists because a singleton nobody resolves is never constructed, never attached to its context and never started, and `IHostedService` is the only hook the generic host offers for forcing that construction. Resolving the subject attaches it, which makes the handler append the start.
-
-When the resolved context has no `HostedServiceHandler`, there is nothing to hand the subject to, so the activation starts it directly and records that it did. Its own `StopAsync` stops exactly what it started and nothing else, because the subject can gain a hosting context between start and stop and a stop that resolved a handler at that point would hand the stop to a handler that never started it. Pinned by `AddSubjectTests.WhenThereIsNoHostingHandler_ThenTheActivationStartsTheSubjectItself`.
+`SubjectActivation<T>` exists because a singleton nobody resolves is never constructed, never attached to its context and never started, and `IHostedService` is the only hook the generic host offers for forcing that construction. Resolving the subject attaches it, which makes the handler append the start. When the resolved context has no `HostedServiceHandler` the activation starts the subject itself and stops exactly that instance, for the reason at the field it records it in. Pinned by `AddSubjectTests.WhenThereIsNoHostingHandler_ThenTheActivationStartsTheSubjectItself`.
 
 `WaitForStartAsync` appends an empty transition to the same chain and awaits it. Appending never runs a body, so that transition completes only once the start ahead of it has run. It then rethrows the recorded fault, which preserves the `AddHostedService` guarantee that a failing subject aborts host startup and that `ApplicationStarted` implies the subject is running.
 
-It reads the target and never creates one, and never takes ownership: a claim taken there would never be released, because a drained handler releases only what its own drain snapshotted, so the next handler over the same subject would lose the compare and exchange forever. It returns false when it started nothing, which is not licence for the caller to start the subject itself: false means either another handler owns the target, where a start would be a second instance, or that this handler is draining, where a start would be something nothing stops. Pinned by `HostedServiceHandlerTests.WhenADrainedHandlerIsAskedToWaitForAStart_ThenItClaimsNothingAndReportsNothingStarted` and `HostedServiceHandlerTests.WhenANonOwningHandlerIsAskedToWaitForAStart_ThenItReportsNothingStarted`.
+It reads the target and never creates one, and never takes ownership; the comment there records why a claim taken from a wait would never be released. Its false result is not licence for the caller to start the subject itself, and `SubjectActivation<T>` records that decision at the call it makes. Pinned by `HostedServiceHandlerTests.WhenADrainedHandlerIsAskedToWaitForAStart_ThenItClaimsNothingAndReportsNothingStarted` and `HostedServiceHandlerTests.WhenANonOwningHandlerIsAskedToWaitForAStart_ThenItReportsNothingStarted`.
 
 ## The 50 ms Delay
 
 Both the start and the stop body delay 50 ms before touching the instance. It covers a caller side hazard: the generated context constructor attaches the subject last, so `new Car(context) { Name = "x" }`, deserialization, and `AddSubject`'s `configure` on the generated context constructor path all assign after the attach has fired and after the start has been appended.
 
-The delay is a mitigation, not a synchronization, and removing it is a separate problem: it needs a "subject fully constructed" signal, which touches the generator. The old loop's staggering across services was a side effect of serialization rather than a guarantee, so nothing is lost by moving the delay into each target's own transition: what protects against the hazard is the gap between a target's own attach event and its own start, and that is 50 ms either way. Both delays pass `CancellationToken.None`, so shutdown waits each one out per target.
+The delay is a mitigation, not a synchronization, and removing it is a separate problem: it needs a "subject fully constructed" signal, which touches the generator. What protects against the hazard is the gap between a target's own attach event and its own start, and that is 50 ms whether the delay sits in a shared loop or in each target's own transition, so moving it into the transition lost nothing. Both delays pass `CancellationToken.None`, so shutdown waits each one out per target.
 
-### What the move actually bought, and where it did not
+### Where the cost is constant, and where it is linear
 
-The delay no longer serializes across targets, but that only removes the linear cost on the path where nothing waits for the starts one at a time. The two paths differ in shape:
+Per target chains stop the delay serializing across targets, but that only removes the linear cost on the path where nothing waits for the starts one at a time. The two paths differ in shape:
 
-- **Subjects entering the graph.** Each start is appended to its own target's chain and nothing awaits them in turn, so the delays overlap: a set of subjects entering the graph together pays one delay rather than one each, and the cost is constant in how many of them there are. Under the shared loop it was linear, because every start waited out the delay of the start ahead of it. `HostedServiceStartupShapeTests.WhenManySubjectsEnterTheGraphTogether_ThenTheirStartsOverlap` pins it without measuring time at all: every subject reports arrival in its own `StartAsync` and then waits for the rest, so the run completes only if all thirty two are inside `StartAsync` at once, and serialized starts never reach the second arrival. A ratio of elapsed times was tried first and was wrong. It measured near 1.0 on a developer machine and 5.4 on a two core continuous integration runner, against a tolerance of 4, so any tolerance wide enough to be stable there was close to the signal it was meant to detect.
+- **Subjects entering the graph.** Each start is appended to its own target's chain and nothing awaits them in turn, so the delays overlap: a set of subjects entering the graph together pays one delay rather than one each, and the cost is constant in how many of them there are. Under the shared loop it was linear, because every start waited out the delay of the start ahead of it. `HostedServiceStartupShapeTests.WhenManySubjectsEnterTheGraphTogether_ThenTheirStartsOverlap` pins it without measuring time at all, and its remarks record the timing based version that was tried first and why it was wrong.
 - **`AddSubject<T>`.** Still linear. `AddSubject<T>` registers one `SubjectActivation<T>` per type through `AddHostedService`, the activation awaits `WaitForStartAsync` when `T` is an `IHostedService`, and the generic host starts hosted services one after another by default, so each activation's 50 ms is over before the next one begins. The cost is linear in the number of registered types that implement `IHostedService`, at one delay each. A registered type that is a plain subject awaits no start and adds nothing. Nothing pins this path, because what it measures is the generic host's own sequential start rather than anything this package decides.
 
-`AddSubject` does not fix its own path, and that is deliberate. The switch that fixes it is `HostOptions.ServicesStartConcurrently`, which is host wide: it would change the startup behaviour of every hosted service in the application, including services this package knows nothing about, which is too broad a side effect for a registration helper to impose. It belongs to the application author, and it works: the activations' waits overlap again, so the same registrations pay one delay between them rather than one each. This is stated for consumers in [`AddSubject<T>()`](../hosting.md#addsubjectt).
+`AddSubject` does not fix its own path, and that is deliberate: the switch that fixes it, `HostOptions.ServicesStartConcurrently`, is host wide and belongs to the application author. Stated for consumers in [`AddSubject<T>()`](../hosting.md#addsubjectt).
 
 ## Residual Hazards
 
@@ -374,7 +337,7 @@ The subject's stop transition waits on the unwind, the unwind waits on the attac
 3. That call appends its own stop to the attachment's chain, behind the stop from step 1, and awaits it.
 4. The attachment's chain head is still awaiting `subjectStopped`, which is set in the `finally` of the subject's stop, which cannot finish because it is still inside step 2.
 
-Shape 3 is the one that occurs in practice, because it is what a `BackgroundService` reaches when `ExecuteAsync` unwinds into a stop helper that detaches. Both HomeBlaze OPC UA wrappers had exactly this shape and were changed so the unwind resets status and nothing else. The rule is stated in [the user documentation](../hosting.md#do-not-detach-from-your-own-stop-path) rather than guarded, and `HostedServiceHandlerTests.WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout` is the regression guard. A wedged chain is unbounded in damage but bounded in blast radius: shutdown gives up on it at `ShutdownTimeout` and every other chain drains normally.
+Shape 3 is the one that occurs in practice, because it is what a `BackgroundService` reaches when `ExecuteAsync` unwinds into a stop helper that detaches. It is the shape both HomeBlaze OPC UA wrappers would have if their unwind detached, which is why each one's unwind only resets its reported state. The rule is stated in [the user documentation](../hosting.md#do-not-detach-from-your-own-stop-path) rather than guarded, and `HostedServiceHandlerTests.WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout` is the regression guard. A wedged chain is unbounded in damage but bounded in blast radius: shutdown gives up on it at `ShutdownTimeout` and every other chain drains normally.
 
 ### 4. A deferrer that takes a lock of its own
 
@@ -388,18 +351,13 @@ Shape 3 is the one that occurs in practice, because it is what a `BackgroundServ
 
 **The call site is accepted rather than fixed, and it is not by itself the deadlock.** The hold must exist before the append completes, or the window it closes reopens: a subsystem that treats "the graph has finished starting" as a completion point would pass that point with a queued start still on its way in. On the lifecycle driven path the event that appends arrives already inside `_attachedSubjects`, so there is no earlier point at which to take it. Every alternative that keeps the guarantee either calls `DeferCompletion` from the same place, or needs a new cross-package protocol between Hosting and Connectors, which is a design change rather than a defect fix. Deferring only the release off the lock was considered and rejected: it costs an allocation and a thread hop on a rare path and leaves the take, which is the main exposure, exactly where it was.
 
-What the call site does is put a constraint on the implementer, and an implementation that follows it cannot supply the step the cycle needs. The constraint is on [`IStartupCompletionDeferrer`](../../src/Namotion.Interceptor.Tracking/IStartupCompletionDeferrer.cs), where an implementer meets it, and it is: do not block, in `DeferCompletion` or in the returned hold's `Dispose`, on anything that can be waiting for a transition, and take a lock of your own only where the order against `_attachedSubjects` is already fixed, which means nothing held under that lock ever waits on anything that needs `_attachedSubjects`. A lock a thread inside `_attachedSubjects` can wait for is allowed under exactly that condition and forbidden without it, because without it the two locks can be acquired in either order. Step 3 of the cycle is the only step a deferrer supplies, so a deferrer that never blocks there leaves nothing for `A` and `T` to close a cycle against. The exposure is therefore per implementation, not per consumer: an application whose deferrers all follow the rule is not exposed to this hazard at all.
+What the call site does is put a constraint on the implementer, and an implementation that follows it cannot supply the step the cycle needs. The constraint is stated on [`IStartupCompletionDeferrer`](../../src/Namotion.Interceptor.Tracking/IStartupCompletionDeferrer.cs), where an implementer meets it. Step 3 of the cycle is the only step a deferrer supplies, so a deferrer that never blocks there leaves nothing for `A` and `T` to close a cycle against. The exposure is therefore per implementation, not per consumer: an application whose deferrers all follow the rule is not exposed to this hazard at all.
 
-`SourceMonitor`, the only implementation in this repository, follows it, and the two halves follow it for different reasons:
-
-- **The take acquires nothing.** `DeferCompletion` delegates to `DeferWaitCompletion`, which is an `Interlocked.Increment` and a handle allocation. It cannot be the take side of any cycle, whatever the rest of the process is doing.
-- **The release does acquire a lock, and the order it acquires it in is already fixed.** Disposing the last hold reaches `OnWaitConditionChanged`, which takes the monitor's `_lock` to re-evaluate pending waits, and on the refused append path that release runs under `_attachedSubjects`. That is safe because `SourceMonitor` establishes the same order for itself independently: `IsBranchSynchronized` walks the parent graph under `_lock`, and it is reached from `SourceMonitor`'s own lifecycle handler, which runs inside `_attachedSubjects`. The order is always `_attachedSubjects` then `_lock` and never the reverse, because nothing held under `_lock` waits on anything that needs `_attachedSubjects`: the walk reads parent sets, and completing a wait uses `RunContinuationsAsynchronously` so no continuation runs on that thread.
-
-A lock on the release path is safe under exactly that condition, and it is the reason the constraint is written on the interface rather than assumed.
+`SourceMonitor`, the only implementation in this repository, follows it: its take is an `Interlocked.Increment` that acquires nothing, and its release takes the monitor's `_lock` in an order that type already fixes for itself, which its `DeferCompletion` remarks set out. What holds that order is that nothing under `_lock` ever waits on anything that needs `_attachedSubjects`: the graph walk in `IsBranchSynchronized` reads parent sets, and completing a wait uses `RunContinuationsAsynchronously`, so no continuation runs on the releasing thread.
 
 ### Disposal from a handler transition
 
-Moving disposal from the caller to the handler puts a constraint on connectors that nothing enforces and no test covers. The handler disposes from a transition that can run while a detach cascade still holds `_attachedSubjects`, where previously the caller disposed and the two never interleaved.
+The handler disposing what it created puts a constraint on connectors that nothing enforces and no test covers: it disposes from a transition that can run while a detach cascade still holds `_attachedSubjects`, so a connector's dispose path and that lock interleave.
 
 The concrete collision is `SourceOwnershipManager`. Both its `Dispose` and its `SubjectDetaching` handler take its own lock and invoke `onReleasing` from inside it, and the `SubjectDetaching` handler runs from inside `_attachedSubjects`. That fixes one lock order, `_attachedSubjects` then the manager's lock, and a dispose that runs from a handler transition takes the manager's lock without holding `_attachedSubjects`. The order reverses the moment anything on that dispose path enters `_attachedSubjects`, which is what an `onReleasing` callback that writes a subject typed property or attaches or detaches a subject does.
 

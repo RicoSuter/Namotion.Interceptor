@@ -213,11 +213,11 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
         {
         }
 
-        // Deliberately does NOT detach. ExecuteAsync unwinds inside the handler's own stop transition for
-        // this subject, and detaching from there waits on the attachment chain, whose head is waiting on
-        // this subject's stop to complete. The handler owns the detach on graph events; the explicit
-        // detach lives on the Stop operation and ApplyConfigurationAsync, neither of which is reached
-        // through StopAsync. The gate is not taken here either, for the same reason.
+        // Deliberately does NOT detach, and deliberately does not take the gate: this unwind runs inside
+        // the handler's own stop transition for this subject, and either one would wait on that
+        // transition. See docs/hosting.md#do-not-detach-from-your-own-stop-path. The handler owns the
+        // detach on graph events; the explicit detach lives on the Stop operation and
+        // ApplyConfigurationAsync, neither of which is reached through StopAsync.
         Status = ServiceStatus.Stopped;
         ResetDiagnostics();
     }
@@ -226,8 +226,8 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     {
         await StopServerAsync(cancellationToken);
 
-        // Guarded, unlike ExecuteAsync's caller-side check alone: an edit that disables the server used
-        // to stop it and start it again in the same call.
+        // Guarded here rather than left to ExecuteAsync's caller-side check: without it an edit that
+        // disables the server stops it and starts it again in the same call.
         if (IsEnabled)
         {
             await StartServerAsync(cancellationToken);
@@ -363,8 +363,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
 
             // The attachment survives a context detach, so on re-attach the handler re-invokes the
             // factory itself. Without this guard a restarted ExecuteAsync would attach a second server
-            // alongside the one the handler just re-created. The gate is what makes the guard hold: the
-            // read and the write below sit on either side of the attach's await.
+            // alongside the one the handler just re-created.
             if (_attachment is null)
             {
                 // The awaited overload, and CancellationToken.None rather than the caller's token. The
@@ -431,8 +430,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
         }
 
         // A synchronous factory can only signal a failed lookup by throwing. AttachHostedServiceAsync
-        // rethrows it, and the catch above turns it into the same StatusMessage the inline null check
-        // used to produce.
+        // rethrows it, and the catch on the start path turns it into a StatusMessage.
         var targetSubject = _pathResolver.ResolveSubject(Path, PathStyle.Canonical)
             ?? throw new InvalidOperationException($"Could not resolve subject at path: {Path}");
 

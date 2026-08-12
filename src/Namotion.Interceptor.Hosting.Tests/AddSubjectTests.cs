@@ -114,7 +114,7 @@ public class AddSubjectTests
     public async Task WhenAddSubjectIsRegisteredBeforeWithHostedServices_ThenStartupDoesNotHang()
     {
         // Arrange - the activation awaits a transition gated on the handler having started. Without
-        // EnsureStartedAsync opening the gate, host startup would deadlock on registration order.
+        // EnsureStarted opening the gate, host startup would deadlock on registration order.
         var builder = Host.CreateApplicationBuilder();
 
         var contextHolder = new IInterceptorSubjectContext[1];

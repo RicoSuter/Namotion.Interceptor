@@ -222,11 +222,11 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
         {
         }
 
-        // Deliberately does NOT detach. ExecuteAsync unwinds inside the handler's own stop transition for
-        // this subject, and detaching from there waits on the attachment chain, whose head is waiting on
-        // this subject's stop to complete. The handler owns the detach on graph events; the explicit
-        // detach lives on the Stop operation and ApplyConfigurationAsync, neither of which is reached
-        // through StopAsync. The gate is not taken here either, for the same reason.
+        // Deliberately does NOT detach, and deliberately does not take the gate: this unwind runs inside
+        // the handler's own stop transition for this subject, and either one would wait on that
+        // transition. See docs/hosting.md#do-not-detach-from-your-own-stop-path. The handler owns the
+        // detach on graph events; the explicit detach lives on the Stop operation and
+        // ApplyConfigurationAsync, neither of which is reached through StopAsync.
         //
         // Root is left alone for the same reason: the source is still running here and is stopped only
         // after this unwind returns, so clearing it would pull the tree out from under a live source. It
@@ -240,8 +240,8 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     {
         await StopClientAsync(cancellationToken);
 
-        // Guarded, unlike ExecuteAsync's caller-side check alone: an edit that disables the client used
-        // to stop it and start it again in the same call.
+        // Guarded here rather than left to ExecuteAsync's caller-side check: without it an edit that
+        // disables the client stops it and starts it again in the same call.
         if (IsEnabled)
         {
             await StartClientAsync(cancellationToken);
@@ -372,8 +372,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
 
             // The attachment survives a context detach, so on re-attach the handler re-invokes the
             // factory itself. Without this guard a restarted ExecuteAsync would attach a second source
-            // alongside the one the handler just re-created. The gate is what makes the guard hold: the
-            // read and the write below sit on either side of the attach's await.
+            // alongside the one the handler just re-created.
             if (_attachment is null)
             {
                 // The awaited overload, and CancellationToken.None rather than the caller's token. The
