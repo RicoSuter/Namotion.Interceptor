@@ -39,6 +39,12 @@ public class ChangeQueueProcessor : IDisposable
     /// </summary>
     public long DropCount => Interlocked.Read(ref _dropCount);
 
+    /// <summary>
+    /// Gets the number of changes currently buffered. Approximate: read without a lock while the
+    /// pump is running. Always 0 when the processor is on its immediate path (no buffer time).
+    /// </summary>
+    public int QueueDepth => _changes.Count;
+
     // Scratch state used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
     private readonly ChangeMerger _changeMerger = new();
@@ -74,7 +80,9 @@ public class ChangeQueueProcessor : IDisposable
     /// <param name="logger">The logger.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
     /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
-    /// the first flush, where it would end delivery for this processor's lifetime.</exception>
+    /// the first flush, where it would end delivery for this processor's lifetime. Also thrown when
+    /// <paramref name="maxQueueDepth"/> is zero or negative, since that would drop every change
+    /// immediately; pass null for an unbounded queue instead.</exception>
     public ChangeQueueProcessor(
         object? source,
         IInterceptorSubjectContext context,
@@ -90,6 +98,13 @@ public class ChangeQueueProcessor : IDisposable
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
+
+        if (maxQueueDepth is <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxQueueDepth),
+                "A bound of zero or less would drop every change immediately. Pass null for an unbounded queue.");
+        }
+
         _maxQueueDepth = maxQueueDepth;
         _deliveryRule = ValidateRule(deliveryRule);
 
@@ -125,6 +140,13 @@ public class ChangeQueueProcessor : IDisposable
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
+
+        if (maxQueueDepth is <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxQueueDepth),
+                "A bound of zero or less would drop every change immediately. Pass null for an unbounded queue.");
+        }
+
         _maxQueueDepth = maxQueueDepth;
         _subscription = subscription;
         _ownsSubscription = false;

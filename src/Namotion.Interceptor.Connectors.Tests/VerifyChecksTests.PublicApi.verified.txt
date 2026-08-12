@@ -25,6 +25,7 @@ namespace Namotion.Interceptor.Connectors
     {
         public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, Namotion.Interceptor.Connectors.ChangeDeliveryRule deliveryRule, System.TimeSpan? bufferTime, int? maxQueueDepth, Microsoft.Extensions.Logging.ILogger logger) { }
         public long DropCount { get; }
+        public int QueueDepth { get; }
         public void Dispose() { }
         public System.Threading.Tasks.Task ProcessAsync(System.Threading.CancellationToken cancellationToken) { }
     }
@@ -139,6 +140,27 @@ namespace Namotion.Interceptor.Connectors
         public static Namotion.Interceptor.Connectors.WriteResult Success { get; }
         public static Namotion.Interceptor.Connectors.WriteResult Failure(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> failedChanges, System.Exception error) { }
         public static Namotion.Interceptor.Connectors.WriteResult PartialFailure(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> failedChanges, System.Exception error) { }
+    }
+}
+namespace Namotion.Interceptor.Connectors.Diagnostics
+{
+    public interface IResettableMetrics
+    {
+        void Reset();
+    }
+    public sealed class QueueDiagnostics
+    {
+        public QueueDiagnostics(Namotion.Interceptor.Connectors.Diagnostics.QueueMetrics metrics) { }
+        public int? Capacity { get; }
+        public int Depth { get; }
+        public long TotalDropped { get; }
+    }
+    public sealed class QueueMetrics
+    {
+        public QueueMetrics() { }
+        public void AddDropped(long count) { }
+        public void Deregister() { }
+        public void Register(System.Func<int> depth, System.Func<long>? dropped, int? capacity) { }
     }
 }
 namespace Namotion.Interceptor.Connectors.Mapping
