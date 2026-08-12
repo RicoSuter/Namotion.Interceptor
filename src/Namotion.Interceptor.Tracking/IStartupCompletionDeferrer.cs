@@ -18,11 +18,11 @@ namespace Namotion.Interceptor.Tracking;
 /// Namotion.Interceptor.Hosting calls <see cref="DeferCompletion"/> synchronously from a lifecycle
 /// event, which fires inside <see cref="Lifecycle.LifecycleInterceptor"/>'s attach lock during a
 /// property write, and it disposes the returned hold from that same place when the start it was taken
-/// for is refused. So do not block, in either method, on anything that needs the lifecycle lock to make
-/// progress, and take a lock of your own only where its order against the lifecycle lock is already
-/// fixed, which means nothing held under that lock ever waits on anything that needs the lifecycle
-/// lock. Awaiting a hosted service transition is one such thing, and the one this repository reaches,
-/// because a transition that writes a subject typed property needs that lock too. A lock that a thread inside the lifecycle lock can wait for is allowed under exactly
+/// for is refused. So do not block, in either method, on anything that needs the lifecycle lock to
+/// make progress, and take a lock of your own only where its order against the lifecycle lock is
+/// already fixed, which means nothing held under that lock ever waits on anything that needs the
+/// lifecycle lock. Awaiting a hosted service transition is one such thing, and the one this
+/// repository reaches, because a transition that writes a subject typed property needs that lock. A lock that a thread inside the lifecycle lock can wait for is allowed under exactly
 /// that condition and forbidden without it, because without it the two can be acquired in either order
 /// and a cycle closes that nothing resolves. That cycle is set out in
 /// docs/design/hosting-service-ownership.md, section "A deferrer that takes a lock of its own", and its

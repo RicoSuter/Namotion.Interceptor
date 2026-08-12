@@ -183,7 +183,7 @@ When a subject leaves the graph, the handler stops the subject first and holds e
 
 Nothing resolves that. The wedged queue never drains, the instance is never stopped and never disposed, and every later start or stop for the same service queues behind it for the rest of the process. Shutdown is the one thing the wedge cannot hold: the handler stops waiting for its outstanding stops when the host's `ShutdownTimeout` expires, so `StopAsync` returns even though the wedged service is still sitting there. That bounds the process, not the damage.
 
-Detaching from an operation, from a configuration change, or from any path not reached through the service's own stop is fine. Nothing detects the bad shape, so it is a rule rather than a guard. `HostedServiceHandlerTests.WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout` is the regression guard for it in this repository.
+Detaching from an operation, from a configuration change, or from any path not reached through the service's own stop is fine. Nothing detects the bad shape, so it is a rule rather than a guard. Both OPC UA wrappers in this repository had it and were changed, so it is a shape that gets written rather than a hypothetical one. `HostedServiceHandlerTests.WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout` is the regression guard.
 
 ### Keep the dispose path out of the lifecycle lock
 

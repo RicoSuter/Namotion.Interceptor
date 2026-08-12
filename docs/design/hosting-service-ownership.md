@@ -212,7 +212,7 @@ A gated out transition therefore still runs its signalling and its bookkeeping, 
 
 ### Why a stop runs at every state, `Drained` included
 
-That row is not a rounding error. Shutdown awaits the stops queued before the drain and the stops it appends itself, but a stop appended after both snapshots, by a graph move racing the drain, is in neither and reaches `Drained` still holding a running instance. A stop that no-oped there would leave that instance never stopped and never disposed, and nothing is lost by letting it run, because the null `Current` check at the top of the body, not the gate state, is what makes a stop idempotent. Pinned by `HostedServiceHandlerRaceTests.WhenAStopIsStillQueuedWhenTheDrainCompletes_ThenItStillStopsAndDisposes`.
+That row is not a rounding error. Shutdown awaits the stops queued before the drain and the stops it appends itself, but a stop appended after both snapshots, by a graph move racing the drain, is in neither and reaches `Drained` still holding a running instance. A stop that no-oped there would leave that instance never stopped and never disposed, and nothing is lost by letting it run, because the null `Current` check, not the gate state, is what makes a stop idempotent. Pinned by `HostedServiceHandlerRaceTests.WhenAStopIsStillQueuedWhenTheDrainCompletes_ThenItStillStopsAndDisposes`.
 
 `BeginDraining` sets the opened signal even though it never opens the gate for work, which releases anything parked on a gate that was never opened. Without it, a host that aborts startup or is disposed without starting leaves transitions and their awaiters hanging forever. Pinned by `HostedServiceGateTests.WhenDrainingStartsFromNotStarted_ThenParkedWaitersAreReleased`, which fails when the signal is removed from `BeginDraining`.
 
@@ -234,7 +234,7 @@ It is released in the start body's `finally`, which is what covers every way out
 
 When the append is refused there is no body, so that path releases the holds itself. A leaked hold blocks every synchronization wait on that tree forever, which is a hang rather than a wrong answer and worse than never having taken the hold.
 
-A deferrer that throws while taking or releasing is logged and ignored, for the reason at the `catch` in `TakeStartupHolds`. A deferrer that blocks is a different matter, and it is a constraint on the implementation rather than an exposure every consumer carries: see [residual hazard 4](#4-a-deferrer-that-takes-a-lock-of-its-own).
+A deferrer that throws is logged and ignored on both paths, for the reason at the `catch` in `TakeStartupHolds` when taking and at the one in `ReleaseStartupHolds` when releasing, where the reason is that one deferrer must not strand the others. A deferrer that blocks is a different matter, and it is a constraint on the implementation rather than an exposure every consumer carries: see [residual hazard 4](#4-a-deferrer-that-takes-a-lock-of-its-own).
 
 ## Faults and Failed Starts
 

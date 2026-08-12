@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Hosting.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -91,6 +92,23 @@ public class AddSubjectTests
         {
             await host.StopAsync();
         }
+    }
+
+    [Fact]
+    public void WhenTheCallerAlreadyRegisteredTheType_ThenAddSubjectDoesNotThrow()
+    {
+        // Arrange - a caller who built the subject themselves and registers AddSubject to start it is a
+        // different case from calling AddSubject twice, and the guard must not catch it.
+        var builder = Host.CreateApplicationBuilder();
+        var context = CreateContext(builder);
+        builder.Services.AddSingleton(context);
+        builder.Services.AddSingleton(new SubjectWithDependencies(NullLogger<SubjectWithDependencies>.Instance));
+
+        // Act
+        var exception = Record.Exception(() => builder.Services.AddSubject<SubjectWithDependencies>());
+
+        // Assert
+        Assert.Null(exception);
     }
 
     [Fact]
