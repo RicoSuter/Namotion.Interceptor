@@ -38,9 +38,9 @@ public class HostedServiceTargetTests
         var maximumConcurrent = 0;
         var sync = new object();
 
-        var stall = target.AppendAsync(async _ => await head.Task, CancellationToken.None);
+        var stall = target.AppendAsync(async () => await head.Task);
 
-        async Task BodyAsync(CancellationToken cancellationToken)
+        async Task BodyAsync()
         {
             lock (sync)
             {
@@ -69,7 +69,7 @@ public class HostedServiceTargetTests
             threads[slot] = new Thread(() =>
             {
                 barrier.SignalAndWait();
-                transitions[slot] = target.AppendAsync(BodyAsync, CancellationToken.None);
+                transitions[slot] = target.AppendAsync(BodyAsync);
             });
 
             threads[slot].Start();
@@ -99,12 +99,12 @@ public class HostedServiceTargetTests
         var secondRan = false;
 
         // Act
-        await target.AppendAsync(_ => throw new InvalidOperationException("boom"), CancellationToken.None);
-        await target.AppendAsync(_ =>
+        await target.AppendAsync(() => throw new InvalidOperationException("boom"));
+        await target.AppendAsync(() =>
         {
             secondRan = true;
             return Task.CompletedTask;
-        }, CancellationToken.None);
+        });
 
         // Assert
         Assert.True(secondRan);
@@ -125,11 +125,11 @@ public class HostedServiceTargetTests
         var appendingThread = new Thread(() =>
         {
             var appendingThreadId = Environment.CurrentManagedThreadId;
-            transition = target.AppendAsync(_ =>
+            transition = target.AppendAsync(() =>
             {
                 ranInline = Environment.CurrentManagedThreadId == appendingThreadId;
                 return Task.CompletedTask;
-            }, CancellationToken.None);
+            });
         });
 
         // Act
@@ -152,11 +152,11 @@ public class HostedServiceTargetTests
         target.TransitionGate = () => release.Task;
 
         // Act
-        var transition = target.AppendAsync(_ =>
+        var transition = target.AppendAsync(() =>
         {
             ran = true;
             return Task.CompletedTask;
-        }, CancellationToken.None);
+        });
 
         // Assert
         Assert.False(ran);

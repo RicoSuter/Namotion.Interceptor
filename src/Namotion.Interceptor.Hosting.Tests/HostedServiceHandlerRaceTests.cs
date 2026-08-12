@@ -32,7 +32,7 @@ public class HostedServiceHandlerRaceTests
     {
         // Arrange - holding the subject's stop is what makes the re-attach provably land mid-stop.
         // Without the hold the test passes while the move is broken.
-        await RunWithAppLifecycleAsync(async context =>
+        await HostingTestHost.RunAsync(async context =>
         {
             var parent = new HostedParent(context);
             var child = new CountingHostedSubject();
@@ -83,10 +83,7 @@ public class HostedServiceHandlerRaceTests
         // that window, so the deferrer drives the interleaving rather than a delay.
         var builder = Host.CreateApplicationBuilder();
 
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
+        var context = HostingTestHost.CreateContext(builder);
 
         var detacher = new CallbackStartupDeferrer();
         context.AddService<IStartupCompletionDeferrer>(detacher);
@@ -118,7 +115,7 @@ public class HostedServiceHandlerRaceTests
 
             // Assert
             var target = ((IHostedServiceAttachmentTarget)attachment).Target;
-            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await target.AppendAsync(() => Task.CompletedTask);
 
             Assert.Equal(1, detacher.Taken);
             Assert.Empty(child.GetHostedServiceAttachments());
@@ -138,10 +135,7 @@ public class HostedServiceHandlerRaceTests
         // Arrange - the same window on the awaiting overload, which appends through the same call.
         var builder = Host.CreateApplicationBuilder();
 
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
+        var context = HostingTestHost.CreateContext(builder);
 
         var detacher = new CallbackStartupDeferrer();
         context.AddService<IStartupCompletionDeferrer>(detacher);
@@ -173,7 +167,7 @@ public class HostedServiceHandlerRaceTests
 
             // Assert
             var target = ((IHostedServiceAttachmentTarget)attachment).Target;
-            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await target.AppendAsync(() => Task.CompletedTask);
 
             Assert.Equal(1, detacher.Taken);
             Assert.Empty(child.GetHostedServiceAttachments());
@@ -196,10 +190,7 @@ public class HostedServiceHandlerRaceTests
         // DetachHostedServiceAsync alone leaves them green.
         var builder = Host.CreateApplicationBuilder();
 
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
+        var context = HostingTestHost.CreateContext(builder);
 
         var detacher = new CallbackStartupDeferrer();
         context.AddService<IStartupCompletionDeferrer>(detacher);
@@ -235,7 +226,7 @@ public class HostedServiceHandlerRaceTests
 
             // Assert
             var target = ((IHostedServiceAttachmentTarget)attachment).Target;
-            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await target.AppendAsync(() => Task.CompletedTask);
 
             Assert.All(await Task.WhenAll(detaches), Assert.True);
             Assert.Equal(1, detacher.Taken);
@@ -256,15 +247,7 @@ public class HostedServiceHandlerRaceTests
         // Arrange - two stops reach the same instance, so stop and dispose have to be idempotent per
         // target. The seam holds the drain's stop inside its body, so the explicit detach's stop is
         // provably queued behind it rather than merely near it.
-        var builder = Host.CreateApplicationBuilder();
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
-
-        var host = builder.Build();
-        await host.StartAsync();
+        var (host, context) = await HostingTestHost.StartAsync();
 
         var parent = new Parent(context);
         var child = new Person();
@@ -306,15 +289,7 @@ public class HostedServiceHandlerRaceTests
         // while the subject is still live, which is the interleaving the liveness check alone cannot
         // reject. A start that reaches the chain anyway is caught a second time by the gate re-read in
         // the start body, which is what a start queued before the drain depends on.
-        var builder = Host.CreateApplicationBuilder();
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
-
-        var host = builder.Build();
-        await host.StartAsync();
+        var (host, context) = await HostingTestHost.StartAsync();
 
         var parent = new Parent(context);
         var child = new Person();
@@ -343,7 +318,7 @@ public class HostedServiceHandlerRaceTests
         // An empty transition behind the start on the same chain, awaited before the drain is let
         // go: this is what pins the start body inside the window rather than merely near it.
         await ((IHostedServiceAttachmentTarget)attachment).Target
-            .AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            .AppendAsync(() => Task.CompletedTask);
 
         releaseDrain.SetResult();
 
@@ -362,15 +337,7 @@ public class HostedServiceHandlerRaceTests
         // held, so a target taken past that point stays owned by a dead handler and no later handler
         // can ever win the compare and exchange for it. The public attach paths have to reject the
         // window themselves: the liveness flag is still set here.
-        var builder = Host.CreateApplicationBuilder();
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
-
-        var host = builder.Build();
-        await host.StartAsync();
+        var (host, context) = await HostingTestHost.StartAsync();
 
         var parent = new Parent(context);
         var child = new Person();
@@ -411,15 +378,7 @@ public class HostedServiceHandlerRaceTests
         // ownership of the fresh target itself. The subject is constructed with the context, so its
         // own context keeps resolving the handler after the graph detach and the attach really does
         // reach the handler.
-        var builder = Host.CreateApplicationBuilder();
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
-
-        var host = builder.Build();
-        await host.StartAsync();
+        var (host, context) = await HostingTestHost.StartAsync();
 
         try
         {
@@ -439,7 +398,7 @@ public class HostedServiceHandlerRaceTests
 
             // Assert
             await ((IHostedServiceAttachmentTarget)attachment).Target
-                .AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+                .AppendAsync(() => Task.CompletedTask);
 
             Assert.Equal(0, Volatile.Read(ref created));
             Assert.Null(attachment.Current);
@@ -457,10 +416,7 @@ public class HostedServiceHandlerRaceTests
         // point. That is what lets the detach provably overtake a start that is already queued.
         var builder = Host.CreateApplicationBuilder();
 
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
+        var context = HostingTestHost.CreateContext(builder);
 
         var host = builder.Build();
 
@@ -483,7 +439,7 @@ public class HostedServiceHandlerRaceTests
         {
             // Assert
             await ((IHostedServiceAttachmentTarget)attachment).Target
-                .AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+                .AppendAsync(() => Task.CompletedTask);
 
             Assert.Equal(0, Volatile.Read(ref created));
             Assert.Null(attachment.Current);
@@ -523,10 +479,7 @@ public class HostedServiceHandlerRaceTests
 
         var builder = Host.CreateApplicationBuilder();
 
-        var secondContext = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
+        var secondContext = HostingTestHost.CreateContext(builder);
 
         var secondHost = builder.Build();
         await secondHost.StartAsync();
@@ -557,15 +510,7 @@ public class HostedServiceHandlerRaceTests
         // read yet. The drain skips it through whichever guard it reaches first, the gate re-read or
         // the cleared liveness, and the fault has to survive either way. Two seams: the transition
         // seam queues the start, and the drain seam proves the drain has begun when it runs.
-        var builder = Host.CreateApplicationBuilder();
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
-
-        var host = builder.Build();
-        await host.StartAsync();
+        var (host, context) = await HostingTestHost.StartAsync();
 
         var parent = new Parent(context);
         var child = new Person();
@@ -622,15 +567,7 @@ public class HostedServiceHandlerRaceTests
         // disposed underneath it while it unwinds. The shutdown path builds the same shape from its own
         // code, so it pins nothing here: dropping the wait DetachSubject passes leaves the drain test
         // below green. The hold makes the window the subject is inside observable rather than timed.
-        var builder = Host.CreateApplicationBuilder();
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
-
-        var host = builder.Build();
-        await host.StartAsync();
+        var (host, context) = await HostingTestHost.StartAsync();
 
         try
         {
@@ -681,15 +618,7 @@ public class HostedServiceHandlerRaceTests
         // Arrange - shutdown shares the ordering hazard of a context detach: a hosted subject's stop
         // is slow, and the attachments it uses must not be disposed underneath it while it unwinds.
         // The hold makes the window the subject is inside observable rather than timed.
-        var builder = Host.CreateApplicationBuilder();
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
-
-        var host = builder.Build();
-        await host.StartAsync();
+        var (host, context) = await HostingTestHost.StartAsync();
 
         var parent = new HostedParent(context);
         var child = new CountingHostedSubject();
@@ -733,15 +662,7 @@ public class HostedServiceHandlerRaceTests
         // the drain returns. The second subject is what makes the ordering observable: the drain
         // releases the ownership of the targets it snapshotted only once it has waited for
         // everything, so that owner is still set when the queued stop finally runs.
-        var builder = Host.CreateApplicationBuilder();
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
-
-        var host = builder.Build();
-        await host.StartAsync();
+        var (host, context) = await HostingTestHost.StartAsync();
 
         var detachingParent = new HostedParent(context);
         var detaching = new CountingHostedSubject();
@@ -812,7 +733,7 @@ public class HostedServiceHandlerRaceTests
             Assert.Equal(1, deferrer.Outstanding);
 
             release.SetResult();
-            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await target.AppendAsync(() => Task.CompletedTask);
 
             Assert.Equal(0, deferrer.Outstanding);
             Assert.NotNull(attachment.Current);
@@ -904,7 +825,7 @@ public class HostedServiceHandlerRaceTests
             release.SetResult();
 
             // Assert
-            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await target.AppendAsync(() => Task.CompletedTask);
 
             Assert.Equal(0, Volatile.Read(ref created));
             Assert.Equal(0, deferrer.Outstanding);
@@ -924,15 +845,9 @@ public class HostedServiceHandlerRaceTests
         // in the body, where the chain serializes the two, and owes the release from there.
         var builder = Host.CreateApplicationBuilder();
 
-        var firstContext = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
+        var firstContext = HostingTestHost.CreateContext(builder);
 
-        var secondContext = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
+        var secondContext = HostingTestHost.CreateContext(builder);
 
         // Registered on one context only: the subject's own context reaches it through the fallback,
         // so both handlers resolve the same single deferrer.
@@ -948,7 +863,7 @@ public class HostedServiceHandlerRaceTests
             ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
 
             var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
-            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await target.AppendAsync(() => Task.CompletedTask);
 
             Assert.Equal(1, subject.StartCount);
             var takenByTheFirstAttach = deferrer.Taken;
@@ -957,7 +872,7 @@ public class HostedServiceHandlerRaceTests
             ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext);
 
             // Assert
-            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await target.AppendAsync(() => Task.CompletedTask);
 
             Assert.Equal(1, subject.StartCount);
 
@@ -989,10 +904,7 @@ public class HostedServiceHandlerRaceTests
         // the chain lock, so the deferrer drives the detach rather than a delay.
         var firstBuilder = Host.CreateApplicationBuilder();
 
-        var firstContext = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(firstBuilder.Services);
+        var firstContext = HostingTestHost.CreateContext(firstBuilder);
 
         var deferrer = new CallbackStartupDeferrer();
         firstContext.AddService<IStartupCompletionDeferrer>(deferrer);
@@ -1002,10 +914,7 @@ public class HostedServiceHandlerRaceTests
 
         var secondBuilder = Host.CreateApplicationBuilder();
 
-        var secondContext = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(secondBuilder.Services);
+        var secondContext = HostingTestHost.CreateContext(secondBuilder);
 
         var secondHost = secondBuilder.Build();
         await secondHost.StartAsync();
@@ -1047,7 +956,7 @@ public class HostedServiceHandlerRaceTests
             var secondParent = new Parent(secondContext);
             secondParent.Child = child;
 
-            await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await target.AppendAsync(() => Task.CompletedTask);
 
             Assert.Equal(1, Volatile.Read(ref created));
             Assert.NotNull(attachment.Current);
@@ -1116,7 +1025,7 @@ public class HostedServiceHandlerRaceTests
         releaseDrain.SetResult();
         await stopping!;
 
-        await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+        await target.AppendAsync(() => Task.CompletedTask);
 
         Assert.Equal(0, Volatile.Read(ref created));
         Assert.Null(attachment.Current);
@@ -1131,15 +1040,7 @@ public class HostedServiceHandlerRaceTests
         // it. Keeping that window empty is what the read on entry is for. The seam holds the window
         // open, and it is reached only when that read is gone, so an intact build simply runs the
         // attach to completion and the seam never fires.
-        var builder = Host.CreateApplicationBuilder();
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
-
-        var host = builder.Build();
-        await host.StartAsync();
+        var (host, context) = await HostingTestHost.StartAsync();
 
         var parent = new Parent(context);
         var child = new Person();
@@ -1199,15 +1100,7 @@ public class HostedServiceHandlerRaceTests
         // context detach enumerates it and it is never stopped and never disposed. The two racing
         // appenders are the two the chain lock exists for, a lifecycle driven attach holding the
         // lifecycle lock and a user driven detach on another thread.
-        var builder = Host.CreateApplicationBuilder();
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
-
-        var host = builder.Build();
-        await host.StartAsync();
+        var (host, context) = await HostingTestHost.StartAsync();
 
         try
         {
@@ -1302,7 +1195,7 @@ public class HostedServiceHandlerRaceTests
         Assert.True(detachStarted, "The detaching thread never started.");
         Assert.True(detachSettled, "The detaching thread neither blocked on the chain lock nor finished.");
 
-        await target.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+        await target.AppendAsync(() => Task.CompletedTask);
 
         var leaked = attachment.Current is not null;
         Assert.Equal(1, Volatile.Read(ref created));
@@ -1318,10 +1211,7 @@ public class HostedServiceHandlerRaceTests
     {
         var builder = Host.CreateApplicationBuilder();
 
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
+        var context = HostingTestHost.CreateContext(builder);
 
         var deferrer = new CallbackStartupDeferrer();
         context.AddService<IStartupCompletionDeferrer>(deferrer);
@@ -1341,15 +1231,7 @@ public class HostedServiceHandlerRaceTests
     private static async Task<(CountingHostedSubject Child, ConcurrentQueue<TrackedBackgroundService> Created, TaskCompletionSource Release)>
         ArrangeDetachedSubjectWithTheDrainCompletedAsync()
     {
-        var builder = Host.CreateApplicationBuilder();
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
-
-        var host = builder.Build();
-        await host.StartAsync();
+        var (host, context) = await HostingTestHost.StartAsync();
 
         var parent = new HostedParent(context);
         var child = new CountingHostedSubject();
@@ -1390,24 +1272,4 @@ public class HostedServiceHandlerRaceTests
         return (child, created, release);
     }
 
-    private static async Task RunWithAppLifecycleAsync(Func<IInterceptorSubjectContext, Task> action)
-    {
-        var builder = Host.CreateApplicationBuilder();
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
-
-        var host = builder.Build();
-        await host.StartAsync();
-        try
-        {
-            await action(context);
-        }
-        finally
-        {
-            await host.StopAsync();
-        }
-    }
 }

@@ -191,8 +191,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         var start = target.TryTakeOwnershipAndAppendAsync(
             this,
             subject,
-            _ => RunStartAsync(subject, target, startupHolds),
-            CancellationToken.None,
+            () => RunStartAsync(subject, target, startupHolds),
             out var ownershipTaken);
 
         if (start is null)
@@ -376,7 +375,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     {
         _running.TryRemove(target, out _);
 
-        var stop = target.AppendAsync(async _ =>
+        var stop = target.AppendAsync(async () =>
         {
             try
             {
@@ -431,7 +430,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 // attachment stop parks forever on a signal that is never set.
                 signal?.TrySetResult();
             }
-        }, cancellationToken);
+        });
 
         TrackInFlightStop(stop);
         return stop;
@@ -503,7 +502,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // An empty transition on the same chain. Appending never runs a body, so this completes only
         // once the start appended ahead of it has run.
         await target
-            .AppendAsync(_ => Task.CompletedTask, cancellationToken)
+            .AppendAsync(() => Task.CompletedTask)
             .WaitAsync(cancellationToken)
             .ConfigureAwait(false);
 

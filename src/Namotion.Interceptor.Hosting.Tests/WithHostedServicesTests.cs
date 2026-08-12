@@ -13,15 +13,9 @@ public class WithHostedServicesTests
         // Arrange
         var builder = Host.CreateApplicationBuilder();
 
-        var firstContext = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
+        var firstContext = HostingTestHost.CreateContext(builder);
 
-        var secondContext = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
+        var secondContext = HostingTestHost.CreateContext(builder);
 
         var host = builder.Build();
         await host.StartAsync();
@@ -52,15 +46,9 @@ public class WithHostedServicesTests
         // so without a single owner per target the subject is started twice.
         var builder = Host.CreateApplicationBuilder();
 
-        var firstContext = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
+        var firstContext = HostingTestHost.CreateContext(builder);
 
-        var secondContext = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
+        var secondContext = HostingTestHost.CreateContext(builder);
 
         var host = builder.Build();
         await host.StartAsync();
@@ -77,7 +65,7 @@ public class WithHostedServicesTests
             // queued start has run.
             await ((IInterceptorSubject)subject)
                 .TryGetSubjectTarget()!
-                .AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+                .AppendAsync(() => Task.CompletedTask);
 
             Assert.Equal(1, subject.StartCount);
         }

@@ -55,8 +55,8 @@ public class NestedAttachTests
             var childTarget = ((IInterceptorSubject)child).TryGetSubjectTarget()!;
 
             // Empty transitions on both chains drain what the two attaches appended.
-            await containerTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
-            await childTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await containerTarget.AppendAsync(() => Task.CompletedTask);
+            await childTarget.AppendAsync(() => Task.CompletedTask);
 
             Assert.Equal(1, container.StartCount);
             Assert.Equal(1, child.StartCount);
@@ -102,8 +102,8 @@ public class NestedAttachTests
             // Act
             holder.Container = null;
 
-            await containerTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
-            await childTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await containerTarget.AppendAsync(() => Task.CompletedTask);
+            await childTarget.AppendAsync(() => Task.CompletedTask);
 
             // Assert
             Assert.Equal(1, container.StopCount);
@@ -117,8 +117,8 @@ public class NestedAttachTests
             // the same two subjects again rather than a third one appearing.
             holder.Container = container;
 
-            await containerTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
-            await childTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await containerTarget.AppendAsync(() => Task.CompletedTask);
+            await childTarget.AppendAsync(() => Task.CompletedTask);
 
             Assert.Equal(1, initializer.Created);
             Assert.Same(child, container.Child);
@@ -237,8 +237,8 @@ public class NestedAttachTests
 
             var containerTarget = ((IInterceptorSubject)container).TryGetSubjectTarget()!;
             var childTarget = ((IInterceptorSubject)child).TryGetSubjectTarget()!;
-            await containerTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
-            await childTarget.AppendAsync(_ => Task.CompletedTask, CancellationToken.None);
+            await containerTarget.AppendAsync(() => Task.CompletedTask);
+            await childTarget.AppendAsync(() => Task.CompletedTask);
 
             Assert.Equal(1, container.StartCount);
             Assert.Equal(1, child.StartCount);
@@ -353,10 +353,7 @@ public class NestedAttachTests
         BuildHostWithDeferrer()
     {
         var builder = Host.CreateApplicationBuilder();
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
+        var context = HostingTestHost.CreateContext(builder);
 
         var deferrer = new CallbackStartupDeferrer();
         context.AddService<IStartupCompletionDeferrer>(deferrer);

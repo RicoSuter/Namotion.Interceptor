@@ -110,11 +110,11 @@ internal sealed class HostedServiceTarget
     /// Appends a transition to this target's chain and returns a task that completes when it has run.
     /// Appending never blocks and never runs the body, so callers may append while holding a lock.
     /// </summary>
-    public Task AppendAsync(Func<CancellationToken, Task> body, CancellationToken cancellationToken)
+    public Task AppendAsync(Func<Task> body)
     {
         lock (_sync)
         {
-            return AppendCore(body, cancellationToken);
+            return AppendCore(body);
         }
     }
 
@@ -144,8 +144,7 @@ internal sealed class HostedServiceTarget
     public Task? TryTakeOwnershipAndAppendAsync(
         HostedServiceHandler handler,
         IInterceptorSubject subject,
-        Func<CancellationToken, Task> body,
-        CancellationToken cancellationToken,
+        Func<Task> body,
         out bool ownershipTaken)
     {
         ownershipTaken = false;
@@ -164,11 +163,11 @@ internal sealed class HostedServiceTarget
 
             ChainLockGate?.Invoke();
 
-            return AppendCore(body, cancellationToken);
+            return AppendCore(body);
         }
     }
 
-    private Task AppendCore(Func<CancellationToken, Task> body, CancellationToken cancellationToken)
+    private Task AppendCore(Func<Task> body)
     {
         // The lock the callers hold is required: "_tail = _tail.ContinueWith(...)" is a
         // read-modify-write, and two racing appenders lose an assignment and run both transitions
@@ -176,7 +175,7 @@ internal sealed class HostedServiceTarget
         // TaskScheduler.Current, which can be a scheduler the appending task is itself occupying.
         _tail = _tail
             .ContinueWith(
-                _ => RunAsync(body, cancellationToken),
+                _ => RunAsync(body),
                 CancellationToken.None,
                 TaskContinuationOptions.None,
                 TaskScheduler.Default)
@@ -185,7 +184,7 @@ internal sealed class HostedServiceTarget
         return _tail;
     }
 
-    private async Task RunAsync(Func<CancellationToken, Task> body, CancellationToken cancellationToken)
+    private async Task RunAsync(Func<Task> body)
     {
         // Bodies never throw. A faulted tail would raise UnobservedTaskException for every dropped
         // fire and forget transition and would be retained until the target transitions again.
@@ -196,7 +195,7 @@ internal sealed class HostedServiceTarget
                 await gate().ConfigureAwait(false);
             }
 
-            await body(cancellationToken).ConfigureAwait(false);
+            await body().ConfigureAwait(false);
         }
         catch (Exception)
         {

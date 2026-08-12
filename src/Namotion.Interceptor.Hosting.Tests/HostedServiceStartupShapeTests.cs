@@ -39,14 +39,7 @@ public class HostedServiceStartupShapeTests
     public async Task WhenManySubjectsEnterTheGraphTogether_ThenTheirStartsOverlap()
     {
         // Arrange
-        var builder = Host.CreateApplicationBuilder();
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithContextInheritance()
-            .WithHostedServices(builder.Services);
-
-        var host = builder.Build();
-        await host.StartAsync();
+        var (host, context) = await HostingTestHost.StartAsync();
 
         try
         {
