@@ -2,7 +2,7 @@
 
 Status: designed, not implemented. Closes #277.
 
-Revision 9. Four adversarial reviews ran against revisions 1, 3, 5 and 8. Between them they found five factual errors about existing code and a cluster of implementation defects, all corrected here. The revision 5 review compiled the proposed type shape rather than reasoning about it, which is why the type model below differs materially from earlier revisions.
+Revision 10. Four adversarial reviews ran against revisions 1, 3, 5 and 8. Between them they found five factual errors about existing code and a cluster of implementation defects, all corrected here. The revision 5 review compiled the proposed type shape rather than reasoning about it, which is why the type model below differs materially from earlier revisions.
 
 Two review arguments are answered rather than accepted, in "Why drop counting matters despite being zero in-repo" and in the naming section, so the next reader does not relitigate them.
 
@@ -118,7 +118,8 @@ public class ConnectorMetrics
 
     public QueueMetrics OutboundChanges { get; }
 
-    public void MarkStarted();          // once per ExecuteAsync entry; moves the totals epoch
+    public void MarkStarted();          // once per ExecuteAsync entry; new epoch, resets Total*
+    public void RegisterResettable(IResettableMetrics metrics);   // hoisted metrics join the reset
     public void MarkOperational();
     public void MarkNotOperational();
     public void ReportError(Exception error);
@@ -270,7 +271,11 @@ protected sealed override async Task ExecuteAsync(CancellationToken stoppingToke
 protected abstract Task RunAsync(CancellationToken stoppingToken);
 ```
 
-Each server renames its `ExecuteAsync` to `RunAsync`; `SubjectSourceBase` moves its sealed body into `RunAsync`. This also settles what revision 5 left contradictory: `MarkStarted` is **not** idempotent, it stamps once per `ExecuteAsync` entry, which is exactly a connector restart. The servers' internal restart loops live inside `RunAsync` and do not re-enter it, so a transport reconnect does not move the epoch while a host stop/start does, which is the intended semantics.
+Each server renames its `ExecuteAsync` to `RunAsync`; `SubjectSourceBase` moves its sealed body into `RunAsync`. This also settles what revision 5 left contradictory: `MarkStarted` is **not** idempotent. It stamps a new `StartTime` and resets every `Total*` counter, once per `ExecuteAsync` entry. The servers' internal restart loops live inside `RunAsync` and do not re-enter it, so a transport reconnect does not move the epoch while a host stop/start does.
+
+**Only servers exercise the second call today.** `SubjectSourceBase.StartAsync` refuses to restart a stopped source and latches `_started` (`:97-107`, `:112`), so a source enters `ExecuteAsync` at most once and its counters never reset. That is a property of the source lifecycle, not of this design, and it is deliberately not special-cased: `MarkStarted` is shared, servers exercise the reset, and a source would behave correctly if restart support were ever added. Nothing here proposes adding it.
+
+**The reset must reach the hoisted metrics.** `PollingMetrics` and the read-after-write metrics are owned by the source rather than by `ConnectorMetrics`, precisely so they survive `SessionManager` recreation. A reset that only covers what the metrics object owns would leave those nine counters holding values older than the `StartTime` beside them, which breaks the convention in the subtler direction. They register themselves with `ConnectorMetrics` for reset, so the rule stays mechanical rather than becoming a note someone has to find later.
 
 `SubjectConnectorBase` must derive from `BackgroundService`; all six connectors already do. Dispose-time forcing works because all four `DisposeAsync` implementations chain to `Dispose()` (`MqttSubjectServer.cs:655`, `WebSocketSubjectServer.cs:224`, `OpcUaSubjectClientSource.cs:731`, `WebSocketSubjectClientSource.cs:713`).
 
@@ -454,7 +459,7 @@ Also out: incoming throughput for MQTT and WebSocket and both directions for the
 
 **A disposed or faulted connector reports not operational**, with `OperationalChangeTime` stamped at that moment.
 
-**A restart is a new epoch.** `StartTime` moves on `ExecuteAsync` re-entry and every `Total*` resets with it; a transport reconnect inside `RunAsync` does not move it.
+**A restart is a new epoch.** `StartTime` moves on `ExecuteAsync` re-entry and every `Total*` resets with it, including the hoisted ones; a transport reconnect inside `RunAsync` does not move it. Only servers can re-enter today.
 
 **`Capacity`**: `null` unbounded, `0` disabled, with the collision noted above.
 
