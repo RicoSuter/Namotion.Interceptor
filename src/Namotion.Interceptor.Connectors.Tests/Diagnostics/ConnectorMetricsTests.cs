@@ -88,6 +88,23 @@ public class ConnectorMetricsTests
     }
 
     [Fact]
+    public void WhenRestartedAfterStopping_ThenTheLatchIsReleasedAndLivenessCanMoveAgain()
+    {
+        // Arrange
+        var metrics = new ConnectorMetrics();
+        var diagnostics = new ConnectorDiagnostics(metrics);
+        metrics.MarkOperational();
+        metrics.MarkStopped();
+
+        // Act
+        metrics.MarkStarted();
+        metrics.MarkOperational();
+
+        // Assert
+        Assert.True(diagnostics.IsOperational);
+    }
+
+    [Fact]
     public void WhenStoppedTwice_ThenTheSecondCallLeavesStateAndTimestampUnchanged()
     {
         // Arrange
@@ -176,6 +193,7 @@ public class ConnectorMetricsTests
 
         // Assert
         Assert.NotEqual(firstStart, diagnostics.StartTime);
+        Assert.False(diagnostics.IsOperational);
         Assert.Equal(0, diagnostics.OutboundChanges.TotalDropped);
         Assert.Equal(0, diagnostics.OutboundRetries.TotalDropped);
         Assert.Equal(0, diagnostics.InboundBuffer.TotalDropped);

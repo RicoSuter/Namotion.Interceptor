@@ -45,8 +45,9 @@ public class ConnectorMetrics
     public QueueMetrics OutboundChanges { get; } = new();
 
     /// <summary>
-    /// Opens a new counter epoch: stamps a fresh start time, clears the last error and resets every
-    /// <c>Total</c> counter, including those of registered hoisted metrics.
+    /// Opens a new counter epoch: stamps a fresh start time, clears the last error, releases the
+    /// <see cref="MarkStopped"/> latch and resets every <c>Total</c> counter, including those of
+    /// registered hoisted metrics.
     /// </summary>
     /// <remarks>
     /// Deliberately not idempotent. Called once per <c>ExecuteAsync</c> entry, so a host stop and
@@ -56,6 +57,7 @@ public class ConnectorMetrics
     {
         Interlocked.Exchange(ref _startTicks, DateTimeOffset.UtcNow.UtcTicks);
         Volatile.Write(ref _lastError, null);
+        ResetLiveness();
         ResetTotals();
 
         foreach (var resettable in _resettables)
@@ -82,7 +84,8 @@ public class ConnectorMetrics
     }
 
     /// <summary>
-    /// Reports that the connector is now serving. Ignored once <see cref="MarkStopped"/> has run.
+    /// Reports that the connector is now serving. Ignored between <see cref="MarkStopped"/> and the
+    /// next <see cref="MarkStarted"/>.
     /// </summary>
     public void MarkOperational() => SetOperational(true, terminal: false);
 
@@ -92,7 +95,8 @@ public class ConnectorMetrics
     public void MarkNotOperational() => SetOperational(false, terminal: false);
 
     /// <summary>
-    /// Reports that the connector has stopped for good and latches that.
+    /// Reports that the connector has stopped for good and latches that for the rest of the epoch,
+    /// until the next <see cref="MarkStarted"/>.
     /// </summary>
     /// <remarks>
     /// Liveness transitions are raised from wherever a connector detects them, which for the OPC UA
@@ -136,6 +140,35 @@ public class ConnectorMetrics
     }
 
     private protected virtual void ResetTotals() => OutboundChanges.Reset();
+
+    // Only the latch is cleared. The operational flag is already false whenever a connector re-enters
+    // its loop, because ExecuteAsync marks stopped on the way out, and the transition timestamp is
+    // left alone so the pair keeps reading as "down since T" rather than inventing a new transition.
+    private void ResetLiveness()
+    {
+        SpinWait spin = default;
+        while (true)
+        {
+            var current = Volatile.Read(ref _liveness);
+            if (!current.IsStopped)
+            {
+                return;
+            }
+
+            // Compare-exchange rather than a blind Interlocked.Exchange, so this shares the discipline
+            // every other write to the field follows: an exchange would overwrite whatever a
+            // concurrent transition had just written. Reference equality for the same reason as in
+            // SetOperational below: Liveness is a record, so == is value equality and would read a
+            // genuinely failed exchange as success.
+            var updated = current with { IsStopped = false };
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _liveness, updated, current), current))
+            {
+                return;
+            }
+
+            spin.SpinOnce();
+        }
+    }
 
     private void SetOperational(bool isOperational, bool terminal)
     {
