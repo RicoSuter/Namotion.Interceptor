@@ -17,10 +17,6 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     // before the caller has assigned anything, so "new Car(context) { Name = "x" }" would otherwise
     // start a service that reads a half built subject. Removing it needs a signal that a subject is
     // fully constructed, which touches the generator. See docs/design/hosting-service-ownership.md.
-    //
-    // Removing it also breaks HostedServiceStartupShapeTests, which guards against starts going back
-    // into series and can only see that regression while this delay dominates its measurements. That
-    // test needs a different mechanism or an honest deletion at the same time, not afterwards.
     private const int StartDelayMilliseconds = 50;
 
     private readonly Func<ILogger?> _loggerResolver;
