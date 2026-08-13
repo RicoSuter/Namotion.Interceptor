@@ -94,10 +94,15 @@ public sealed class QueueMetrics
     /// Folds the live drop count into the accumulator and clears the providers.
     /// </summary>
     /// <remarks>
+    /// <see cref="BeginRegister"/> is the preferred form, whose handle does this at the end of the
+    /// buffer's scope. Call this one for a registration made with <see cref="Register"/>, whose release
+    /// is not tied to a scope, such as one that spans the connector's lifetime.
+    /// <para>
     /// The buffer must have stopped producing before this runs: any drop that lands between the fold
     /// and the compare-exchange is lost. A concurrent reader can still be holding a provider that has
     /// just been cleared, which is safe only because <see cref="ChangeQueueProcessor"/> keeps its
     /// queue and drop count alive through <see cref="ChangeQueueProcessor.Dispose"/>.
+    /// </para>
     /// </remarks>
     public void Deregister()
     {

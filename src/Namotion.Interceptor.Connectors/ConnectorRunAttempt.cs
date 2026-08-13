@@ -50,6 +50,11 @@ public sealed class ConnectorRunAttempt : IDisposable
     /// kill check before the mark is visible. An attempt that is already disposed is left unmarked: the
     /// loop is then between attempts and this kill reached nothing.
     /// </summary>
+    /// <remarks>
+    /// The mark is set and cleared without a compare-exchange, so two kills that overlap can leave it
+    /// clear: the second unmarks after finding the attempt disposed, even though the first one cancelled
+    /// it and the loop has yet to run its kill check.
+    /// </remarks>
     public async Task ForceKillAsync()
     {
         _wasForceKilled = true;
@@ -66,6 +71,11 @@ public sealed class ConnectorRunAttempt : IDisposable
     /// <summary>
     /// Cancels this attempt without marking it as force-killed, for a loop that ends its own iteration.
     /// </summary>
+    /// <remarks>
+    /// Call it only while the attempt is live: unlike <see cref="ForceKillAsync"/> it does not tolerate a
+    /// disposed attempt, and that failure arrives as a faulted task which a caller that does not await it
+    /// never observes.
+    /// </remarks>
     public Task CancelAsync() => _cancellation.CancelAsync();
 
     /// <inheritdoc />
