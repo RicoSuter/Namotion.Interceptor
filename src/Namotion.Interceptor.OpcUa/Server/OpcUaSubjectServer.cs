@@ -30,9 +30,21 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
 
     private LifecycleInterceptor? _lifecycleInterceptor;
     private volatile OpcUaStandardServer? _server;
-    private volatile bool _isForceKill;
-    private volatile CancellationTokenSource? _forceKillCts;
+    private volatile RunAttempt? _currentAttempt;
     private int _consecutiveFailures;
+
+    /// <summary>
+    /// One loop iteration's cancellation and its kill flag, held together so a kill can only be
+    /// honoured for the attempt whose token source it actually cancelled. A flag on the server itself
+    /// stays set when the kill arrives after that attempt has torn down, and the next attempt then
+    /// reads a kill that never reached it.
+    /// </summary>
+    private sealed class RunAttempt(CancellationTokenSource cancellation)
+    {
+        public readonly CancellationTokenSource Cancellation = cancellation;
+
+        public volatile bool WasForceKilled;
+    }
 
     internal ThroughputCounter IncomingThroughput { get; }
 
@@ -57,14 +69,30 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     public override IInterceptorSubject RootSubject => _subject;
 
     /// <inheritdoc />
-    Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
+    async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
     {
         // For a multi-connection server, all fault types are treated as force-kill.
         // There's no meaningful "soft disconnect" when the server has multiple clients.
-        _isForceKill = true;
-        try { _forceKillCts?.Cancel(); }
-        catch (ObjectDisposedException) { /* CTS disposed between loop iterations */ }
-        return Task.CompletedTask;
+        //
+        // With no current attempt the loop is between attempts, so there is nothing to kill and
+        // nothing is signalled back: the teardown and the backoff this fault stands for have already
+        // happened or are already under way.
+        var attempt = _currentAttempt;
+        if (attempt is not null)
+        {
+            // Marked before the cancel, so the loop cannot reach its kill check ahead of this write,
+            // and unmarked again when the token source turns out to be disposed: the loop is then
+            // between attempts and this kill reached nothing.
+            attempt.WasForceKilled = true;
+            try
+            {
+                await attempt.Cancellation.CancelAsync().ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                attempt.WasForceKilled = false;
+            }
+        }
     }
 
     /// <inheritdoc cref="SubjectConnectorBase.Diagnostics" />
@@ -240,9 +268,9 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            _forceKillCts = cts;
-            var linkedToken = cts.Token;
+            var attempt = new RunAttempt(CancellationTokenSource.CreateLinkedTokenSource(stoppingToken));
+            _currentAttempt = attempt;
+            var linkedToken = attempt.Cancellation.Token;
 
             var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
 
@@ -301,9 +329,10 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 // Normal shutdown takes priority over force-kill (checked first intentionally).
-                // If both stoppingToken and _isForceKill are set, we exit cleanly rather than restart.
+                // If both the stopping token and this attempt's kill flag are set, we exit cleanly
+                // rather than restart.
             }
-            catch (OperationCanceledException) when (_isForceKill)
+            catch (OperationCanceledException) when (attempt.WasForceKilled)
             {
                 // Force-kill: CTS was cancelled by KillAsync. Deliberately not reported through
                 // ReportError: it is an injected fault the server recovers from by restarting, and
@@ -313,6 +342,16 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
             }
             catch (Exception ex)
             {
+                // A failure the stop itself caused is an expected shutdown rather than a fault: the
+                // first clause above only covers the cancellation, not the arbitrary exception a server
+                // torn down mid-stop raises, and recording that would overwrite the genuine fault for
+                // good, because LastError is sticky and a stopped server does not start again. Counting
+                // it would also leave ConsecutiveFailures blaming a start that never failed.
+                if (stoppingToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
                 _consecutiveFailures++;
 
                 // The base class only sees exceptions that leave RunAsync, and this loop swallows every
@@ -330,7 +369,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
             {
                 try
                 {
-                    if (_isForceKill)
+                    if (attempt.WasForceKilled)
                     {
                         // Force-kill: close transport listeners immediately so clients see
                         // an abrupt connection loss (realistic crash simulation).
@@ -346,7 +385,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                     // fire-and-forget tasks keep the entire server object graph alive as
                     // GC roots, causing ~8-16 MB leak per server restart.
                     // On force-kill the transport is already dead, so this only cleans up
-                    // internal state — it doesn't change what clients observe.
+                    // internal state and does not change what clients observe.
                     await ShutdownServerAsync(application).ConfigureAwait(false);
                 }
                 catch (Exception ex)
@@ -355,12 +394,14 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                 }
                 finally
                 {
-                    _isForceKill = false;
+                    // Released before the token source is disposed, so a kill arriving from here on
+                    // finds no attempt rather than a disposed one.
+                    _currentAttempt = null;
 
                     try { server.Dispose(); }
                     catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA server."); }
 
-                    cts.Dispose();
+                    attempt.Cancellation.Dispose();
                 }
             }
         }

@@ -88,6 +88,11 @@ public class OpcUaServerLivenessTests
                 () => serverService.Diagnostics.IsOperational &&
                       serverService.Diagnostics.OperationalChangeTime != firstOperationalTime,
                 message: "The server should report operational again after restarting.");
+
+            // An injected fault is not a fault of the transport, so the restart it causes leaves no
+            // error behind. Anything the restart routes into the loop's catch-all instead, including
+            // a teardown that leaves the endpoint bound for the next attempt, is recorded there.
+            Assert.Null(serverService.Diagnostics.LastError);
         }
         finally
         {
