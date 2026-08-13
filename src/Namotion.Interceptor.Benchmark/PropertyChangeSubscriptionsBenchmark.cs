@@ -31,6 +31,7 @@ public class PropertyChangeSubscriptionsBenchmark
     private PropertyChangeQueueSubscription? _queueSubscription;
     private IDisposable? _observableSubscription;
     private IDisposable? _perPropertySubscription;
+    private ScheduledPropertySubscription? _scheduledSubscription;
 
     // A reference-typed value (not a string, not inline-sized): its change takes the two-holder
     // BoxedValueHolder path, so the build-once merge shows up as halved allocations under both channels.
@@ -83,6 +84,17 @@ public class PropertyChangeSubscriptionsBenchmark
     {
         _car = CreateCarInFreshContext();
         _perPropertySubscription = _car.SubscribeToPropertyInline(x => x.Name, (in SubjectPropertyChange _) => { });
+    }
+
+    // scheduled-listener-on-written-property: same lookup hit as above, but delivery runs on
+    // Scheduler.Default, so the write pays an enqueue and an interlocked increment instead of the observer
+    // body. Same no-op observer as the inline state, so the two differ only in the channel.
+    [GlobalSetup(Target = nameof(WriteWithScheduledListenerOnSameProperty))]
+    public void SetupScheduledListenerOnWrittenProperty()
+    {
+        _car = CreateCarInFreshContext();
+        _scheduledSubscription = new PropertyReference(_car, nameof(Car.Name))
+            .Subscribe((in SubjectPropertyChange _) => { }, Scheduler.Default);
     }
 
     // listener-elsewhere: a per-property listener on a DIFFERENT property, so the live count is nonzero
@@ -176,6 +188,12 @@ public class PropertyChangeSubscriptionsBenchmark
     }
 
     [Benchmark]
+    public void WriteWithScheduledListenerOnSameProperty()
+    {
+        _car.Name = WriteValue;
+    }
+
+    [Benchmark]
     public void WriteWithListenerOnOtherProperty()
     {
         _car.Name = WriteValue;
@@ -194,7 +212,18 @@ public class PropertyChangeSubscriptionsBenchmark
         _drainThread?.Join();
         _drainCancellation?.Dispose();
 
+        // Draining the scheduled subscription per iteration is what an IterationCleanup would be for, but
+        // declaring one puts BenchmarkDotNet on InvocationCount=1, which replaces a 100 ns write with the
+        // measurement overhead of a single invocation. This reports the backlog left at the end of the whole
+        // run instead: a small number is the evidence that the drain kept up and the allocation column is a
+        // write cost rather than a queue cost.
+        if (_scheduledSubscription is not null)
+        {
+            Console.WriteLine($"// scheduled subscription pending after the run: {_scheduledSubscription.PendingCount}");
+        }
+
         _perPropertySubscription?.Dispose();
+        _scheduledSubscription?.Dispose();
         _observableSubscription?.Dispose();
         _queueSubscription?.Dispose();
     }

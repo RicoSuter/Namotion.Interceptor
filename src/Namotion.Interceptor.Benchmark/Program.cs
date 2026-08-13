@@ -11,6 +11,14 @@ public static class Program
 #if DEBUG
         Run();
 #else
+        // Not a BenchmarkDotNet filter: retained memory and per-thread allocation have no column in a
+        // benchmark summary, so they are measured once, on their own.
+        if (args.Length == 1 && args[0] == "--subscription-memory")
+        {
+            SubscriptionMemoryMeasurements.Report();
+            return;
+        }
+
         BenchmarkDotNet.Running.BenchmarkSwitcher
             .FromAssembly(typeof(Program).Assembly)
             .Run(args);
