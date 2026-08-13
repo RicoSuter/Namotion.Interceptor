@@ -34,7 +34,7 @@ All property change notifications flow through a single `PropertyChangeIntercept
 | `property.GetInlineChangeObservable()` | one property, with Rx operators | the writing thread, inside the write | per subscriber | [Composing with Rx](#composing-with-rx) |
 | `property.Subscribe(callback, scheduler, onError)` | one property whose observer is slow, blocking or may throw | the scheduler | per subscription, not per observer | [Scheduled delivery](#scheduled-delivery) |
 
-The contract they share, per channel and across channels, is in [Delivery Guarantees](#delivery-guarantees).
+The contract they share, per channel and across channels, is in [Delivery Guarantees](#delivery-guarantees), and what each one costs is in [Channel Cost](#channel-cost).
 
 ### Property Change Observable (Rx-based)
 
@@ -183,7 +183,7 @@ using var handle = person.SubscribeToProperty(
 
 ### Delivery Guarantees
 
-Dispatch starts on the writing thread, outside the subject lock, and from there every channel shares one contract.
+Dispatch starts on the writing thread, outside the subject lock, and from there every channel shares one contract. What each channel costs to run is in [Channel Cost](#channel-cost) below.
 
 Every committed write carries a `SubjectPropertyChange.Revision`: a counter that is monotonic **per subject** over committed writes, so two changes to the *same* subject are ordered by comparing it, the higher revision committed later. Revisions of *different* subjects are **not** comparable, and a change constructed outside a terminal write carries `0`, which orders against nothing.
 
@@ -206,16 +206,6 @@ The revision exists because arrival order can differ from commit order: dispatch
 
 An observer on an unserialized channel may be invoked concurrently on multiple threads and must be thread-safe, fast, non-blocking, and must not throw; wrap failing work in a try-catch internally.
 
-**Measured cost**, on an Apple M4 Max, .NET 9.0.10 arm64. Timings are not quoted because the machine could not be pinned and the idle baseline measured bimodal, so only the allocation figures are reliable enough to publish.
-
-| Per-property channel | Per write | Per delivery | Held per live subscription |
-|---|---|---|---|
-| `SubscribeInline` | none | none | about 172 bytes |
-| `GetInlineChangeObservable` | none | none, plus one lock taken | about 172 bytes |
-| Scheduled `Subscribe` | about 34 bytes | about 160 bytes while the observer keeps up, effectively none once a backlog forms | about 5,607 bytes |
-
-An empty `ConcurrentQueue<SubjectPropertyChange>` is about 5,376 bytes on its own, because the change struct is 144 bytes and the initial segment holds 32 slots. That is about 96 percent of a scheduled subscription's footprint, so a thousand scheduled subscriptions cost roughly 5.35 MB against 0.16 MB for a thousand inline ones.
-
 Rules that hold across every channel:
 
 - **Lifecycle runs first** (with `WithLifecycle()`, included in `WithFullPropertyTracking()`): for subject-typed writes, notifications dispatch after attach/detach reconciliation, so at callback time the subject graph and registry already reflect the write (barring a concurrent overwrite or a concurrent detach of the parent). A subject assigned to a property is attached, and writes a consumer makes to it are themselves tracked. Removals are the reverse: the departing subject is already detached, so writes to it from a callback are stored but not tracked, which is intended. One consequence for custom handlers: an `ILifecycleHandler` that writes properties while attaching emits those changes before the structural change that introduced the subject.
@@ -225,6 +215,26 @@ Rules that hold across every channel:
 - **Transactions replay on commit**: with `WithTransactions()`, writes captured inside a transaction do not notify during capture. They replay through the interceptor on commit and notifications fire then. If the transaction is rolled back (disposed without commit), the changes are discarded, no notifications fire, and the property keeps its pre-transaction value. If a best-effort commit partially applies and then reverts, listeners observe the apply-and-revert pair, so a consumer such as a watchdog or dirty flag must not treat the revert as a user change.
 
 Note what the old value is and is not, on every channel. Revisions decide *which* change's old value survives a collapse, not that it is the value the property held at the preceding revision: the old value is what the generated setter observed at the call site, outside the subject lock, including when the subscription raced the write, so under concurrent writers it can be a value that was already superseded and delivered old and new pairs may not chain. The new value is exact, the old value is a best-effort diff baseline. Compare `Revision` or re-read the property if you need more than that.
+
+### Channel Cost
+
+Everything below was measured on an Apple M4 Max running .NET 9.0.10 arm64, so read the figures as one machine's, not as universal. Allocation is quoted in absolute bytes because it came out bit-identical across three runs. Time is quoted only as a factor between channels measured in the same run, because this machine offers no CPU pinning, the noise floor is about 1.5 percent, the idle write baseline measured bimodal and came out slower than rows doing strictly more work, and the burst delivery figure is dominated by a thread-pool handoff the benchmark thread spins on rather than by work.
+
+| Channel | Allocated per write | Allocated per delivery | Held per live subscription | Allocated per subscribe and dispose | Write time, inline = 1 |
+|---|---|---|---|---|---|
+| `GetPropertyChangeObservable()` | none | not measured | not measured | not measured | 1.2, measured with `ImmediateScheduler` |
+| `CreatePropertyChangeQueueSubscription()` | none | not measured | not measured | not measured | 1.9, with a consumer draining |
+| `SubscribeInline` | none | in the write | about 172 bytes | 136 bytes | 1.0, the reference |
+| `GetInlineChangeObservable` | none | in the write, one lock taken | about 172 bytes | not measured | not measured |
+| `Subscribe` with a scheduler | about 34 bytes | 160 bytes keeping up, none under backlog | about 5,607 bytes | 10,912 bytes | 2.6 |
+
+The two context-level channels were measured on the write side only, and every write in the table is the same single-property write, so the factors compare channels rather than workloads. A property whose value is a reference type other than `string` builds its change through boxed holders and adds about 48 bytes per write, once per write no matter how many channels consume it.
+
+**Setup dominates, not steady state.** A `ConcurrentQueue<SubjectPropertyChange>` is about 5,376 bytes while empty, because the change struct is 144 bytes and the initial segment holds 32 slots, which is about 96 percent of what a scheduled subscription holds. A thousand scheduled subscriptions therefore cost roughly 5.35 MB against roughly 0.16 MB for a thousand inline ones. On a wide model that number, not the per-write cost, is what decides the channel, and it is invisible from per-write cost alone.
+
+**Disposing a scheduled subscription allocates rather than releases**, so the subscribe-and-dispose figure above is the two halves added together and a disposed handle that stays referenced keeps holding most of it; see [Scheduled delivery](#scheduled-delivery) for the mechanism and the rule that follows from it.
+
+**The two delivery regimes differ by more than a constant.** While the observer keeps up, every change pays its own scheduler work item and allocates. Once a backlog forms, the batch budget amortises scheduling to one work item per 1024 changes and the per-change allocation falls away, because the queue's segment slots are recycled as the drain consumes them. That zero applies to a queue that is repeatedly filled and drained; a backlog that keeps growing still pays for each new slot. Quoting a single per-delivery number would misrepresent both regimes.
 
 ## Property Value Equality Check
 
