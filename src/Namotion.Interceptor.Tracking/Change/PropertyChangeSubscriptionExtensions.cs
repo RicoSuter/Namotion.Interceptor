@@ -88,16 +88,17 @@ public static class PropertyChangeSubscriptionExtensions
     /// distinct instance.
     /// </summary>
     /// <remarks>
-    /// Delivery keeps the contract of <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/>
-    /// exactly, not a safer one: inline, on the writing thread, possibly concurrent, and a throwing handler
-    /// propagates back into the setter. The context-level <c>GetPropertyChangeObservable</c> reschedules onto
-    /// a scheduler by default and is therefore not the same thing.
+    /// Delivery keeps the inline part of the
+    /// <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/> contract: on the writing
+    /// thread, and a throwing handler propagates back into the setter. The context-level
+    /// <c>GetPropertyChangeObservable</c> reschedules onto a scheduler by default and is therefore not the
+    /// same thing.
     /// <para>
-    /// Notifications are not serialized, so this sequence violates the Rx grammar: OnNext is raised straight
-    /// from the writing thread, and concurrent writers to one property raise it concurrently on one observer.
-    /// Apply <c>.Synchronize()</c> before any stateful operator, including <c>Take</c>, <c>Skip</c>,
-    /// <c>Scan</c>, <c>DistinctUntilChanged</c> and <c>Buffer</c> by count, whose sinks are unlocked and
-    /// corrupt rarely rather than never without it.
+    /// Unlike that contract, notifications are serialized per subscriber as the Rx grammar requires, so
+    /// stateful operators such as <c>Take</c>, <c>Skip</c>, <c>Scan</c>, <c>DistinctUntilChanged</c> and
+    /// <c>Buffer</c> by count compose safely over concurrent writers with no extra work. The handler runs
+    /// under a per-subscription lock held across the call, so it must not block and must not take locks of
+    /// its own that a writer might hold.
     /// </para>
     /// <para>
     /// Adding any operator also changes what a throwing handler does. Operators wrap the observer in the

@@ -8,6 +8,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 [Collection(PerPropertySubscriptionCollection.Name)]
 public class InlineChangeObservableTests
 {
+    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
+
     public InlineChangeObservableTests() => PropertyChangeSubscriptions.ResetForTests();
 
     [Fact]
@@ -94,9 +96,7 @@ public class InlineChangeObservableTests
     [Fact]
     public void WhenComposedWithTakeOne_ThenTheUnderlyingSubscriptionIsReleased()
     {
-        // Arrange: single-threaded on purpose. The source does not serialize OnNext, so Take's unguarded sink
-        // state is only safe here because one thread writes; composing it over concurrent writers needs
-        // .Synchronize() first and is not what this covers.
+        // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var received = new List<string?>();
@@ -153,5 +153,82 @@ public class InlineChangeObservableTests
         Assert.Equal(2, PropertyChangeSubscriptions.ReadSubscriptionCount());
         Assert.Equal(["Rico"], firstReceived);
         Assert.Equal(["Rico"], secondReceived);
+    }
+
+    [Fact]
+    public void WhenSeveralThreadsWriteTheProperty_ThenOneSubscriberIsNeverEnteredConcurrently()
+    {
+        // Arrange
+        const int writerCount = 4;
+        const int writesPerWriter = 500;
+
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        var observer = new OverlapProbeObserver();
+
+        using var subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .GetInlineChangeObservable()
+            .Subscribe(observer);
+
+        using var startGate = new ManualResetEventSlim();
+        var writers = Enumerable
+            .Range(0, writerCount)
+            .Select(writerIndex => new Thread(() =>
+            {
+                startGate.Wait();
+                for (var write = 0; write < writesPerWriter; write++)
+                {
+                    // Values are unique per writer so no write can be collapsed away before dispatch.
+                    person.FirstName = $"{writerIndex}-{write}";
+                }
+            }) { IsBackground = true })
+            .ToList();
+
+        foreach (var writer in writers)
+        {
+            writer.Start();
+        }
+
+        // Act
+        startGate.Set();
+
+        // Assert
+        foreach (var writer in writers)
+        {
+            Assert.True(writer.Join(WaitTimeout), "every writer thread should have finished");
+        }
+
+        Assert.Equal(0, observer.OverlapCount);
+        Assert.Equal(writerCount * writesPerWriter, observer.DeliveryCount);
+    }
+
+    private sealed class OverlapProbeObserver : IObserver<SubjectPropertyChange>
+    {
+        private int _inFlight;
+        private int _overlapCount;
+        private int _deliveryCount;
+
+        public int OverlapCount => Volatile.Read(ref _overlapCount);
+
+        public int DeliveryCount => Volatile.Read(ref _deliveryCount);
+
+        public void OnNext(SubjectPropertyChange value)
+        {
+            if (Interlocked.Increment(ref _inFlight) > 1)
+            {
+                Interlocked.Increment(ref _overlapCount);
+            }
+
+            // An overlap is only visible while a delivery sits inside OnNext, so the window is widened by
+            // spinning rather than waiting: an unserialized adapter then overlaps within a few writes.
+            Thread.SpinWait(200);
+
+            Interlocked.Increment(ref _deliveryCount);
+            Interlocked.Decrement(ref _inFlight);
+        }
+
+        public void OnError(Exception error) => Assert.Fail($"OnError is never raised: {error}");
+
+        public void OnCompleted() => Assert.Fail("the sequence never completes");
     }
 }
