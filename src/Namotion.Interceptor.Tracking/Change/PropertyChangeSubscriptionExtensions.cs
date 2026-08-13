@@ -108,8 +108,11 @@ public static class PropertyChangeSubscriptionExtensions
     /// <para>
     /// Composing the off-thread hop by hand costs more than the scheduler overloads of <c>Subscribe</c>:
     /// <c>ObserveOn</c> dedicates a private thread to each subscription on both <c>Scheduler.Default</c> and
-    /// <c>TaskPoolScheduler</c>, and a handler exception escapes its sink into the scheduler, terminating the
-    /// process on the former and silently ending the stream on the latter.
+    /// <c>TaskPoolScheduler</c>, because <c>Scheduler.AsLongRunning()</c> resolves an
+    /// <c>ISchedulerLongRunning</c> from both through their <c>IServiceProvider</c> implementation rather than
+    /// a direct interface cast. That thread is taken on the first signal rather than at subscribe, so an idle
+    /// property hides the cost until it stops being idle. A handler exception also escapes the sink into the
+    /// scheduler, terminating the process on the former and silently ending the stream on the latter.
     /// </para>
     /// <para>
     /// The sequence never completes and never signals OnError, so operators that wait for completion, such
@@ -132,11 +135,24 @@ public static class PropertyChangeSubscriptionExtensions
     /// <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/>, with three differences that
     /// follow from delivery being scheduled. Within this subscription the observer is never re-entered, so it
     /// needs no synchronization of its own; an observer, closure, or <paramref name="onError"/> delegate
-    /// shared across several subscriptions is still invoked concurrently. An exception from the observer
+    /// shared across several subscriptions is still invoked concurrently. It must still not block: the drain
+    /// owns the scheduler thread for the whole call, so a blocking observer silently starves every other
+    /// subscription sharing that scheduler. An exception from the observer
     /// cannot reach the writer and is reported to <paramref name="onError"/>, leaving the subscription live.
     /// And dormancy stops acceptance but not the drain, so a change accepted before the subject detaches is
     /// still delivered afterwards, unlike disposal, which drops what is still queued; an observer that looks
     /// its subject up in the registry or resolves its path must handle a subject that is no longer there.
+    /// <para>
+    /// Deferral widens the staleness window from microseconds to however long the queue is, so read
+    /// <see cref="SubjectPropertyChange.GetCurrentValue{TValue}"/> rather than the delivered new value when
+    /// you need the current one. That read can throw where the inline one practically cannot: on an
+    /// <c>object</c>-typed or otherwise polymorphic property a window that wide lets the runtime type move on,
+    /// and the read then throws <see cref="InvalidCastException"/> instead of returning something merely
+    /// stale, which without <paramref name="onError"/> is a silently skipped delivery. Staleness is also not
+    /// only about which commit a value describes: a delivered reference-typed value is the live object rather
+    /// than a snapshot, so an array or other mutable object stays shared with the writer, which can keep
+    /// mutating it after the delivery.
+    /// </para>
     /// <para>
     /// The isolation from the writer is one-way. A throwing lifecycle handler, or a throwing inline observer
     /// that ran earlier on the same write, unwinds it before the change is enqueued: the value stays committed
@@ -149,7 +165,10 @@ public static class PropertyChangeSubscriptionExtensions
     /// <c>Sample</c> or <c>Throttle</c> over <see cref="GetInlineChangeObservable"/> is not the remedy: those
     /// operators deliver from a scheduler work item that does not catch a handler exception, so one throwing
     /// handler terminates the process on <c>Scheduler.Default</c>. An observer that writes the property it
-    /// observes never drains, quietly, where the inline overload would raise a StackOverflowException.
+    /// observes never drains: each delivery enqueues its own successor, so work items continue indefinitely
+    /// and <paramref name="onError"/> never fires. The batched handoff keeps that a yielding loop rather than
+    /// a held thread, so it degrades instead of starving, where the inline overload would raise a loud
+    /// StackOverflowException.
     /// </para>
     /// <para>
     /// The caller owns the scheduler and must dispose subscriptions before it. A schedule that throws is
@@ -167,12 +186,20 @@ public static class PropertyChangeSubscriptionExtensions
     /// </remarks>
     /// <param name="property">The property to subscribe to.</param>
     /// <param name="observer">The observer, invoked on <paramref name="scheduler"/>.</param>
-    /// <param name="scheduler">The scheduler each change is delivered on. Synchronous schedulers are rejected.
-    /// Its <c>Schedule</c> is called from inside the write, so it must not block, for the same reason
-    /// <paramref name="onError"/> must not: a scheduler that blocks there blocks the writer and can do so
-    /// under the transaction commit lock.</param>
+    /// <param name="scheduler">The scheduler each change is delivered on. Its <c>Schedule</c> is called from
+    /// inside the write, so it must not block, for the same reason <paramref name="onError"/> must not: a
+    /// scheduler that blocks there blocks the writer and can do so under the transaction commit lock.
+    /// Synchronous schedulers are rejected, and would not give inline delivery anyway: under
+    /// <c>WithTransactions</c> the drain would run consumer code under the commit lock, where an observer that
+    /// starts a transaction is rejected as nested and one that blocks waiting on that lock deadlocks. Only the
+    /// two singletons are detectable; any other scheduler that runs actions inline, including a
+    /// <c>DisableOptimizations()</c> wrapper over them, carries the same hazard undetected and additionally
+    /// turns the batched handoff into recursion rather than a yield, one stack frame per batch of queued
+    /// changes, so the drain's stack depth grows with the backlog.</param>
     /// <param name="onError">Invoked when the observer or the scheduler throws; the exception is swallowed
-    /// when null, which also makes a permanently throwing observer invisible. It must not throw, may run
+    /// when null, which also makes a permanently throwing observer invisible, since such an observer keeps
+    /// firing and keeps failing rather than stopping. It must not throw, and an escape is caught and
+    /// swallowed because a handler failure entering a scheduler work item terminates the process. It may run
     /// after Dispose returns, is serialized per subscription rather than per delegate, and can run
     /// synchronously on the writer thread under a transaction commit lock, so it must not write properties,
     /// start a transaction, or block.</param>

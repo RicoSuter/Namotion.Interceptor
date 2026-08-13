@@ -316,7 +316,9 @@ public sealed class ScheduledPropertySubscription : IDisposable
     }
 
     /// <summary>
-    /// Stops delivery, releases the upstream subscription and drops the queued changes. A delivery already
+    /// Stops delivery, releases the upstream subscription and the reference to the scheduler, so a parked
+    /// handle does not keep an <c>EventLoopScheduler</c> thread reachable, and drops the queued changes so
+    /// they stop pinning their subjects. A delivery already
     /// running can finish after this returns, so an observer that touches state the caller owns and disposes
     /// must tolerate a call arriving late, and a drain work item already queued on the scheduler is not
     /// cancelled either; it runs and finds nothing left to deliver. A writer already past its state check can

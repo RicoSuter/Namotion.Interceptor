@@ -17,7 +17,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// synchronization of its own, but one instance shared across several subscriptions is still invoked
 /// concurrently and must synchronize. It MUST still be non-blocking: the drain owns its scheduler thread for
 /// the whole call, so a blocking implementation silently starves every other subscription sharing that
-/// scheduler, which then delivers nothing at all while its queue grows.
+/// scheduler, which then delivers nothing at all while its queue grows and no error is reported anywhere.
 /// </para>
 /// Deliveries may arrive out of commit order under concurrent writes to the same property in both cases;
 /// re-read the property if you need the current value.
