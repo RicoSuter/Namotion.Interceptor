@@ -194,18 +194,12 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                 {
                     using var changeQueueProcessor = CreateChangeQueueProcessor();
 
-                    // Deregistered in the finally below so the next restart can register its own
-                    // processor: a second Register while one is still live throws.
-                    Metrics.OutboundChanges.Register(
+                    // Declared after the processor so it is released first, which is what lets the
+                    // next restart register its own: a second Register while one is still live throws.
+                    using var outboundRegistration = Metrics.OutboundChanges.BeginRegister(
                         () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
-                    try
-                    {
-                        await changeQueueProcessor.ProcessAsync(linkedToken).ConfigureAwait(false);
-                    }
-                    finally
-                    {
-                        Metrics.OutboundChanges.Deregister();
-                    }
+
+                    await changeQueueProcessor.ProcessAsync(linkedToken).ConfigureAwait(false);
                 }
                 finally
                 {

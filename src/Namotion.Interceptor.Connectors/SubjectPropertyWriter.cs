@@ -18,7 +18,7 @@ public sealed class SubjectPropertyWriter
 {
     private readonly SubjectSourceBase _source;
     private readonly ILogger _logger;
-    private readonly QueueMetrics? _inboundBuffer;
+    private readonly QueueMetrics? _inboundBufferMetrics;
     private readonly Lock _lock = new();
 
     private List<Action>? _updates = [];
@@ -35,7 +35,7 @@ public sealed class SubjectPropertyWriter
     /// </summary>
     /// <param name="source">The source associated with this writer.</param>
     /// <param name="logger">The logger.</param>
-    /// <param name="inboundBuffer">
+    /// <param name="inboundBufferMetrics">
     /// Where this writer reports the depth of its buffer and the updates a superseded load throws
     /// away, or <c>null</c> for a writer whose buffer nothing observes. The instance must have no live
     /// registration: this constructor registers on it and never deregisters, so a derived source must
@@ -43,21 +43,21 @@ public sealed class SubjectPropertyWriter
     /// registered for the writer it owns.
     /// </param>
     /// <exception cref="InvalidOperationException">
-    /// <paramref name="inboundBuffer"/> already has a live registration.
+    /// <paramref name="inboundBufferMetrics"/> already has a live registration.
     /// </exception>
     /// <remarks>
     /// Typed to the concrete base rather than <see cref="ISubjectSource"/> because this writer
     /// drives the source's state transitions, which only <see cref="SubjectSourceBase"/> defines. A
     /// source implementing the interface directly owns its own write path and its own transitions.
     /// </remarks>
-    public SubjectPropertyWriter(SubjectSourceBase source, ILogger logger, QueueMetrics? inboundBuffer = null)
+    public SubjectPropertyWriter(SubjectSourceBase source, ILogger logger, QueueMetrics? inboundBufferMetrics = null)
     {
         _source = source;
         _logger = logger;
-        _inboundBuffer = inboundBuffer;
+        _inboundBufferMetrics = inboundBufferMetrics;
 
         // Never deregistered: the writer and its buffer live as long as the source does.
-        _inboundBuffer?.Register(() => BufferedUpdateCount, dropped: null, capacity: null);
+        _inboundBufferMetrics?.Register(() => BufferedUpdateCount, dropped: null, capacity: null);
     }
 
     /// <summary>
@@ -81,7 +81,7 @@ public sealed class SubjectPropertyWriter
         {
             // The replaced list is a superseded snapshot that must not be applied. Counted anyway,
             // because it is the only signal of how often initial loads are being superseded.
-            _inboundBuffer?.AddDropped(_updates?.Count ?? 0);
+            _inboundBufferMetrics?.AddDropped(_updates?.Count ?? 0);
 
             _updates = [];
             Volatile.Write(ref _bufferedUpdateCount, 0);

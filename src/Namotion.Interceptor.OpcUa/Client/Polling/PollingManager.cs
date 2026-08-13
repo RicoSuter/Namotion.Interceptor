@@ -63,31 +63,6 @@ internal sealed class PollingManager : IAsyncDisposable
     public int PollingItemCount => _pollingItems.Count;
 
     /// <summary>
-    /// Gets the total number of successful read operations performed.
-    /// </summary>
-    public long TotalReads => _metrics.TotalReads;
-
-    /// <summary>
-    /// Gets the total number of failed read operations.
-    /// </summary>
-    public long FailedReads => _metrics.FailedReads;
-
-    /// <summary>
-    /// Gets the total number of value changes detected and processed.
-    /// </summary>
-    public long ValueChanges => _metrics.ValueChanges;
-
-    /// <summary>
-    /// Gets the total number of slow polls (poll duration exceeded polling interval).
-    /// </summary>
-    public long SlowPolls => _metrics.SlowPolls;
-
-    /// <summary>
-    /// Gets the total number of times the circuit breaker has tripped due to persistent failures.
-    /// </summary>
-    public long CircuitBreakerTrips => _metrics.CircuitBreakerTrips;
-
-    /// <summary>
     /// Gets whether the circuit breaker is currently open (polling suspended due to persistent failures).
     /// </summary>
     public bool IsCircuitOpen => _circuitBreaker.IsOpen;

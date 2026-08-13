@@ -34,7 +34,8 @@ public sealed class QueueMetrics
 
     /// <summary>
     /// Points this instance at a newly created buffer. A live registration must be released with
-    /// <see cref="Deregister"/> before another can be made.
+    /// <see cref="Deregister"/> before another can be made. Use
+    /// <see cref="BeginRegister"/> for a registration that ends with the buffer it describes.
     /// </summary>
     /// <remarks>
     /// Neither delegate may throw (a throwing delegate is treated as reporting zero) and neither may
@@ -63,6 +64,30 @@ public sealed class QueueMetrics
 
         Swap((Depth: depth, Dropped: dropped, Capacity: capacity), static (current, state) =>
             new Snapshot(current.Accumulated + SafeInvokeDropped(current.Dropped), state.Depth, state.Dropped, state.Capacity));
+    }
+
+    /// <summary>
+    /// Registers as <see cref="Register"/> does and returns a handle that releases the registration
+    /// when it is disposed. Disposing the handle more than once has no further effect.
+    /// </summary>
+    /// <remarks>
+    /// Declare the handle after the buffer it points at, so that the reverse order of disposal
+    /// releases the registration while the buffer can still answer its counters.
+    /// </remarks>
+    /// <param name="depth">Reads the buffer's current item count.</param>
+    /// <param name="dropped">
+    /// Reads the buffer's own drop counter, or <c>null</c> for a buffer that has none and reports
+    /// through <see cref="AddDropped"/> instead. Must be non-decreasing.
+    /// </param>
+    /// <param name="capacity">The buffer's bound, or <c>null</c> if it is unbounded.</param>
+    /// <returns>The handle that releases this registration.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// A registration is already live. Nothing is registered and there is no handle to release.
+    /// </exception>
+    public IDisposable BeginRegister(Func<int> depth, Func<long>? dropped, int? capacity)
+    {
+        Register(depth, dropped, capacity);
+        return new Registration(this);
     }
 
     /// <summary>
@@ -147,6 +172,20 @@ public sealed class QueueMetrics
         {
             return 0;
         }
+    }
+
+    private sealed class Registration : IDisposable
+    {
+        private QueueMetrics? _metrics;
+
+        public Registration(QueueMetrics metrics)
+        {
+            _metrics = metrics;
+        }
+
+        // Exchanged rather than flagged, so a second disposal cannot release the registration a
+        // later Register has since made.
+        public void Dispose() => Interlocked.Exchange(ref _metrics, null)?.Deregister();
     }
 
     private void Swap<TState>(TState state, Func<Snapshot, TState, Snapshot> update)

@@ -28,7 +28,6 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     private readonly ILogger _logger;
     private readonly OpcUaServerConfiguration _configuration;
 
-    private LifecycleInterceptor? _lifecycleInterceptor;
     private volatile OpcUaStandardServer? _server;
     private volatile ConnectorRunAttempt? _currentAttempt;
     private int _consecutiveFailures;
@@ -215,23 +214,21 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     {
         _context.WithRegistry();
 
-        _lifecycleInterceptor = _context.TryGetLifecycleInterceptor();
-        if (_lifecycleInterceptor is not null)
+        // Null when the context has no lifecycle interceptor, which using treats as nothing to release.
+        using var detachingSubscription = SubscribeToSubjectDetaching();
+
+        await ExecuteServerLoopAsync(stoppingToken).ConfigureAwait(false);
+    }
+
+    private IDisposable? SubscribeToSubjectDetaching()
+    {
+        if (_context.TryGetLifecycleInterceptor() is not { } lifecycleInterceptor)
         {
-            _lifecycleInterceptor.SubjectDetaching += OnSubjectDetaching;
+            return null;
         }
 
-        try
-        {
-            await ExecuteServerLoopAsync(stoppingToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            if (_lifecycleInterceptor is not null)
-            {
-                _lifecycleInterceptor.SubjectDetaching -= OnSubjectDetaching;
-            }
-        }
+        lifecycleInterceptor.SubjectDetaching += OnSubjectDetaching;
+        return new SubjectDetachingSubscription(lifecycleInterceptor, OnSubjectDetaching);
     }
 
     private async Task ExecuteServerLoopAsync(CancellationToken stoppingToken)
@@ -265,27 +262,21 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                     // and not lost in the gap between node creation and processing start.
                     using var changeQueueProcessor = CreateChangeQueueProcessor();
 
-                    // Deregistered in the finally below so the next restart can register its own
-                    // processor: a second Register while one is still live throws.
-                    Metrics.OutboundChanges.Register(
+                    // Declared after the processor so it is released first, which is what lets the
+                    // next restart register its own: a second Register while one is still live throws.
+                    using var outboundRegistration = Metrics.OutboundChanges.BeginRegister(
                         () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
-                    try
-                    {
-                        await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
-                        await application.StartAsync(server).ConfigureAwait(false);
 
-                        _consecutiveFailures = 0;
+                    await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
+                    await application.StartAsync(server).ConfigureAwait(false);
 
-                        // LastError is deliberately left in place: clearing it on recovery would erase
-                        // the only evidence of a transient fault.
-                        Metrics.MarkOperational();
+                    _consecutiveFailures = 0;
 
-                        await changeQueueProcessor.ProcessAsync(linkedToken);
-                    }
-                    finally
-                    {
-                        Metrics.OutboundChanges.Deregister();
-                    }
+                    // LastError is deliberately left in place: clearing it on recovery would erase
+                    // the only evidence of a transient fault.
+                    Metrics.MarkOperational();
+
+                    await changeQueueProcessor.ProcessAsync(linkedToken);
                 }
                 finally
                 {
@@ -464,5 +455,11 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
         _server?.RemoveSubjectNodes(change.Subject);
+    }
+
+    private sealed class SubjectDetachingSubscription(
+        LifecycleInterceptor lifecycleInterceptor, Action<SubjectLifecycleChange> handler) : IDisposable
+    {
+        public void Dispose() => lifecycleInterceptor.SubjectDetaching -= handler;
     }
 }

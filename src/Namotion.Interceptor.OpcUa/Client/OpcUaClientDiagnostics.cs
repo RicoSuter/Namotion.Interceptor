@@ -128,10 +128,12 @@ public sealed class ReconnectDiagnostics
 public sealed class PollingDiagnostics
 {
     private readonly Polling.PollingManager _pollingManager;
+    private readonly Polling.PollingMetrics _metrics;
 
-    internal PollingDiagnostics(Polling.PollingManager pollingManager)
+    internal PollingDiagnostics(Polling.PollingManager pollingManager, Polling.PollingMetrics metrics)
     {
         _pollingManager = pollingManager;
+        _metrics = metrics;
     }
 
     /// <summary>
@@ -142,27 +144,27 @@ public sealed class PollingDiagnostics
     /// <summary>
     /// Gets the number of reads that succeeded.
     /// </summary>
-    public long TotalSuccessfulReads => _pollingManager.TotalReads;
+    public long TotalSuccessfulReads => _metrics.TotalReads;
 
     /// <summary>
     /// Gets the number of reads that failed.
     /// </summary>
-    public long TotalFailedReads => _pollingManager.FailedReads;
+    public long TotalFailedReads => _metrics.FailedReads;
 
     /// <summary>
     /// Gets the number of value changes detected.
     /// </summary>
-    public long TotalValueChanges => _pollingManager.ValueChanges;
+    public long TotalValueChanges => _metrics.ValueChanges;
 
     /// <summary>
     /// Gets the number of polls whose duration exceeded the polling interval.
     /// </summary>
-    public long TotalSlowPolls => _pollingManager.SlowPolls;
+    public long TotalSlowPolls => _metrics.SlowPolls;
 
     /// <summary>
     /// Gets the number of times the circuit breaker has tripped.
     /// </summary>
-    public long TotalCircuitBreakerTrips => _pollingManager.CircuitBreakerTrips;
+    public long TotalCircuitBreakerTrips => _metrics.CircuitBreakerTrips;
 
     /// <summary>
     /// Gets whether the circuit breaker is currently open.
@@ -181,10 +183,13 @@ public sealed class PollingDiagnostics
 public sealed class ReadAfterWriteDiagnostics
 {
     private readonly ReadAfterWrite.ReadAfterWriteManager _manager;
+    private readonly ReadAfterWrite.ReadAfterWriteMetrics _metrics;
 
-    internal ReadAfterWriteDiagnostics(ReadAfterWrite.ReadAfterWriteManager manager)
+    internal ReadAfterWriteDiagnostics(
+        ReadAfterWrite.ReadAfterWriteManager manager, ReadAfterWrite.ReadAfterWriteMetrics metrics)
     {
         _manager = manager;
+        _metrics = metrics;
     }
 
     /// <summary>
@@ -195,20 +200,20 @@ public sealed class ReadAfterWriteDiagnostics
     /// <summary>
     /// Gets the number of verification reads scheduled.
     /// </summary>
-    public long TotalScheduledReads => _manager.Metrics.Scheduled;
+    public long TotalScheduledReads => _metrics.Scheduled;
 
     /// <summary>
     /// Gets the number of verification reads executed.
     /// </summary>
-    public long TotalExecutedReads => _manager.Metrics.Executed;
+    public long TotalExecutedReads => _metrics.Executed;
 
     /// <summary>
     /// Gets the number of scheduled verification reads replaced by a subsequent write.
     /// </summary>
-    public long TotalCoalescedReads => _manager.Metrics.Coalesced;
+    public long TotalCoalescedReads => _metrics.Coalesced;
 
     /// <summary>
     /// Gets the number of verification reads that failed.
     /// </summary>
-    public long TotalFailedReads => _manager.Metrics.Failed;
+    public long TotalFailedReads => _metrics.Failed;
 }

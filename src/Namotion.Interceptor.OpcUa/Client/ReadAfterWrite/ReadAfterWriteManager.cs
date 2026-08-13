@@ -22,6 +22,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     private readonly Lock _lock = new();
     private readonly Timer _timer;
     private readonly CancellationTokenSource _cts = new();
+    private readonly ReadAfterWriteMetrics _metrics;
 
     // NodeId -> (RevisedInterval, Property) for properties that need read-after-writes
     private readonly Dictionary<NodeId, (TimeSpan RevisedInterval, RegisteredSubjectProperty Property)> _trackedProperties = new();
@@ -36,8 +37,6 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     private ISession? _lastKnownSession;
     private int _disposed;
     private int _isProcessing; // 0 = not processing, 1 = processing (for timer callback serialization)
-
-    internal ReadAfterWriteMetrics Metrics { get; }
 
     internal int PendingReadCount
     {
@@ -71,7 +70,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         _source = source;
         _configuration = configuration;
         _logger = logger;
-        Metrics = metrics;
+        _metrics = metrics;
         _circuitBreaker = new CircuitBreaker(
             configuration.PollingCircuitBreakerThreshold,
             configuration.PollingCircuitBreakerCooldown);
@@ -172,11 +171,11 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
             if (_pendingReads.ContainsKey(nodeId))
             {
-                Metrics.RecordCoalesced();
+                _metrics.RecordCoalesced();
             }
             else
             {
-                Metrics.RecordScheduled();
+                _metrics.RecordScheduled();
             }
 
             _pendingReads[nodeId] = (readAt, tracked.Property);
@@ -346,7 +345,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 successCount++;
             }
 
-            Metrics.RecordExecuted(successCount);
+            _metrics.RecordExecuted(successCount);
             _circuitBreaker.RecordSuccess();
 
             _logger.LogDebug(
@@ -355,7 +354,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            Metrics.RecordFailed();
+            _metrics.RecordFailed();
             if (_circuitBreaker.RecordFailure())
             {
                 _logger.LogError(ex, "Read-after-write circuit breaker opened after failures.");
@@ -428,7 +427,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             return;
         }
 
-        _logger.LogDebug("Disposing ReadAfterWriteManager. Metrics: {Metrics}", Metrics);
+        _logger.LogDebug("Disposing ReadAfterWriteManager. Metrics: {Metrics}", _metrics);
 
         await _cts.CancelAsync().ConfigureAwait(false);
 

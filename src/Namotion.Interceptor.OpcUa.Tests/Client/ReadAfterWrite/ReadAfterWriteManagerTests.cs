@@ -13,6 +13,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Client.ReadAfterWrite;
 public class ReadAfterWriteManagerTests : IAsyncDisposable
 {
     private readonly ReadAfterWriteManager _manager;
+    private readonly ReadAfterWriteMetrics _metrics = new();
     private readonly TestPerson _testSubject;
 
     private static RegisteredSubjectProperty CreateTestProperty(TestPerson subject, string name = "FirstName")
@@ -38,7 +39,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
             sessionProvider: () => null,
             source: null!, // Not used in these unit tests
             configuration,
-            new ReadAfterWriteMetrics(),
+            _metrics,
             NullLogger.Instance);
     }
 
@@ -50,10 +51,10 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
     [Fact]
     public void InitialState_HasZeroMetrics()
     {
-        Assert.Equal(0, _manager.Metrics.Scheduled);
-        Assert.Equal(0, _manager.Metrics.Executed);
-        Assert.Equal(0, _manager.Metrics.Coalesced);
-        Assert.Equal(0, _manager.Metrics.Failed);
+        Assert.Equal(0, _metrics.Scheduled);
+        Assert.Equal(0, _metrics.Executed);
+        Assert.Equal(0, _metrics.Coalesced);
+        Assert.Equal(0, _metrics.Failed);
         Assert.Equal(0, _manager.PendingReadCount);
     }
 
@@ -68,7 +69,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         _manager.OnPropertyWritten(nodeId);
 
         // Assert - should have scheduled a read-after-write
-        Assert.Equal(1, _manager.Metrics.Scheduled);
+        Assert.Equal(1, _metrics.Scheduled);
         Assert.Equal(1, _manager.PendingReadCount);
     }
 
@@ -83,7 +84,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         _manager.OnPropertyWritten(nodeId);
 
         // Assert - should NOT have scheduled (sampling interval wasn't 0)
-        Assert.Equal(0, _manager.Metrics.Scheduled);
+        Assert.Equal(0, _metrics.Scheduled);
     }
 
     [Fact]
@@ -93,14 +94,14 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         var nodeId = new NodeId("TestNode", 2);
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
         _manager.OnPropertyWritten(nodeId);
-        Assert.Equal(1, _manager.Metrics.Scheduled);
+        Assert.Equal(1, _metrics.Scheduled);
 
         // Act
         _manager.UnregisterProperty(nodeId);
         _manager.OnPropertyWritten(nodeId); // Should not schedule after unregister
 
         // Assert - still only 1 scheduled (second write ignored)
-        Assert.Equal(1, _manager.Metrics.Scheduled);
+        Assert.Equal(1, _metrics.Scheduled);
     }
 
     [Fact]
@@ -115,8 +116,8 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         _manager.OnPropertyWritten(nodeId);
 
         // Assert - one scheduled, one coalesced
-        Assert.Equal(1, _manager.Metrics.Scheduled);
-        Assert.Equal(1, _manager.Metrics.Coalesced);
+        Assert.Equal(1, _metrics.Scheduled);
+        Assert.Equal(1, _metrics.Coalesced);
     }
 
     [Fact]
@@ -126,7 +127,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         var nodeId = new NodeId("TestNode", 2);
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
         _manager.OnPropertyWritten(nodeId);
-        Assert.Equal(1, _manager.Metrics.Scheduled);
+        Assert.Equal(1, _metrics.Scheduled);
 
         // Act
         _manager.ClearPendingReads();
@@ -136,7 +137,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         _manager.OnPropertyWritten(nodeId);
 
         // Assert - second write should schedule
-        Assert.Equal(2, _manager.Metrics.Scheduled);
+        Assert.Equal(2, _metrics.Scheduled);
         Assert.Equal(1, _manager.PendingReadCount);
     }
 
@@ -147,7 +148,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         var nodeId = new NodeId("TestNode", 2);
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
         _manager.OnPropertyWritten(nodeId);
-        Assert.Equal(1, _manager.Metrics.Scheduled);
+        Assert.Equal(1, _metrics.Scheduled);
 
         // Act
         _manager.ClearAll();
@@ -156,7 +157,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         _manager.OnPropertyWritten(nodeId);
 
         // Assert - still only 1 scheduled (property removed)
-        Assert.Equal(1, _manager.Metrics.Scheduled);
+        Assert.Equal(1, _metrics.Scheduled);
     }
 
     [Fact]
@@ -183,7 +184,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         await Task.WhenAll(tasks);
 
         // Assert - should have scheduled one per operation
-        Assert.Equal(threadCount * operationsPerThread, _manager.Metrics.Scheduled);
+        Assert.Equal(threadCount * operationsPerThread, _metrics.Scheduled);
     }
 
     [Fact]
@@ -193,13 +194,13 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         var nodeId = new NodeId("TestNode", 2);
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
         _manager.OnPropertyWritten(nodeId);
-        Assert.Equal(1, _manager.Metrics.Scheduled);
+        Assert.Equal(1, _metrics.Scheduled);
 
         // Act - Dispose should complete without throwing
         await _manager.DisposeAsync();
 
         // Assert - metrics remain stable after disposal
-        Assert.Equal(1, _manager.Metrics.Scheduled);
+        Assert.Equal(1, _metrics.Scheduled);
     }
 
     [Fact]
@@ -212,12 +213,12 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         // Dispose the manager
         await _manager.DisposeAsync();
 
-        var scheduledBefore = _manager.Metrics.Scheduled;
+        var scheduledBefore = _metrics.Scheduled;
 
         // Act - Write after disposal should be ignored, not throw
         _manager.OnPropertyWritten(nodeId);
 
         // Assert - metrics unchanged
-        Assert.Equal(scheduledBefore, _manager.Metrics.Scheduled);
+        Assert.Equal(scheduledBefore, _metrics.Scheduled);
     }
 }

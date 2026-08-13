@@ -297,20 +297,15 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         maxQueueDepth: null,
                         logger: _logger);
 
-                    // Released in the finally below so the retry loop's next attempt can register its
-                    // own processor: a second Register while one is still live throws.
-                    Metrics.OutboundChanges.Register(
+                    // Declared after the processor so it is released first, which is what lets the
+                    // retry loop's next attempt register its own: a second Register while one is
+                    // still live throws. The release narrows rather than closes the race with a
+                    // concurrent reader, which is safe only because the processor's queue depth and
+                    // drop count survive its disposal.
+                    using var outboundRegistration = Metrics.OutboundChanges.BeginRegister(
                         () => processor.QueueDepth, () => processor.DropCount, capacity: null);
-                    try
-                    {
-                        await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
-                    }
-                    finally
-                    {
-                        // Narrows rather than closes the race with a concurrent reader, which is safe
-                        // only because the processor's queue depth and drop count survive its disposal.
-                        Metrics.OutboundChanges.Deregister();
-                    }
+
+                    await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {

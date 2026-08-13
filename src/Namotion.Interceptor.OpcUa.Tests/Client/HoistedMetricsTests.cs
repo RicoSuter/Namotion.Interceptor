@@ -97,9 +97,9 @@ public class HoistedMetricsTests
         await using var recreated = await CreateSessionManagerAsync(source, propertyWriter);
 
         // Assert
-        Assert.Equal(1, recreated.PollingManager!.TotalReads);
-        Assert.Equal(1, recreated.PollingManager!.CircuitBreakerTrips);
-        Assert.Equal(1, recreated.ReadAfterWriteManager!.Metrics.Scheduled);
+        Assert.Equal(1, recreated.PollingDiagnostics!.TotalSuccessfulReads);
+        Assert.Equal(1, recreated.PollingDiagnostics!.TotalCircuitBreakerTrips);
+        Assert.Equal(1, recreated.ReadAfterWriteDiagnostics!.TotalScheduledReads);
     }
 
     [Fact]

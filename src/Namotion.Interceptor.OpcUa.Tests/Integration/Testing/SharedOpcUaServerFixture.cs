@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 public class SharedOpcUaServerFixture : IAsyncLifetime
 {
     private const int Port = 4840;
-    private const string CertificateStorePath = "pki-shared";
+    private const string CertificateStoreName = "pki-shared";
 
     private OpcUaTestServer<SharedTestModel>? _server;
     private readonly TestLogger _logger;
@@ -46,21 +46,26 @@ public class SharedOpcUaServerFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
+        // Anchored to the output directory, like PortLease does, and handed to the server in that
+        // same form. The SDK resolves a relative store path against the working directory, so under
+        // a runner that moves it the wipe below and the server would use different directories.
+        var certificateStorePath = Path.Combine(AppContext.BaseDirectory, CertificateStoreName);
+
         // Stale self-signed server certificates left in bin/ from a prior run can cause
         // the SDK to reject the server on startup (no usable application certificate),
         // which blocks every shared-server test. Wipe the assembly-scoped cert store
         // before bringing the server up so each assembly run starts from a clean slate.
-        if (Directory.Exists(CertificateStorePath))
+        if (Directory.Exists(certificateStorePath))
         {
             try
             {
-                Directory.Delete(CertificateStorePath, true);
+                Directory.Delete(certificateStorePath, true);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // Best-effort: another fixture instance may be racing, or a file is held by another process.
                 // Logged so a "every shared-server test fails" symptom can be traced back to a stale cert.
-                _logger.Log($"Failed to wipe shared cert store '{CertificateStorePath}': {ex.GetType().Name}: {ex.Message}");
+                _logger.Log($"Failed to wipe shared cert store '{certificateStorePath}': {ex.GetType().Name}: {ex.Message}");
             }
         }
 
@@ -69,7 +74,7 @@ public class SharedOpcUaServerFixture : IAsyncLifetime
             createRoot: context => new SharedTestModel(context),
             initializeDefaults: InitializeTestData,
             baseAddress: $"opc.tcp://localhost:{Port}/",
-            certificateStoreBasePath: CertificateStorePath);
+            certificateStoreBasePath: certificateStorePath);
     }
 
     private void InitializeTestData(IInterceptorSubjectContext context, SharedTestModel root)

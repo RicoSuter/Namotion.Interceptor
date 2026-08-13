@@ -205,7 +205,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 source, sessionManager: this,
                 propertyWriter, _configuration, pollingMetrics, _logger);
 
-            PollingDiagnostics = new PollingDiagnostics(PollingManager);
+            PollingDiagnostics = new PollingDiagnostics(PollingManager, pollingMetrics);
 
             PollingManager.Start();
         }
@@ -219,7 +219,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 readAfterWriteMetrics,
                 logger);
 
-            ReadAfterWriteDiagnostics = new ReadAfterWriteDiagnostics(ReadAfterWriteManager);
+            ReadAfterWriteDiagnostics = new ReadAfterWriteDiagnostics(ReadAfterWriteManager, readAfterWriteMetrics);
         }
 
         SubscriptionManager = new SubscriptionManager(source, propertyWriter, PollingManager, ReadAfterWriteManager, configuration, logger);

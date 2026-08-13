@@ -251,6 +251,80 @@ public class QueueMetricsTests
     }
 
     [Fact]
+    public void WhenTheHandleIsDeclaredAfterTheBuffer_ThenTheRegistrationIsReleasedBeforeTheBufferGoesAway()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
+        var diagnostics = new QueueDiagnostics(metrics);
+        var depthSeenByTheBuffer = -1;
+
+        // Act
+        RunScope();
+
+        // Assert
+        Assert.Equal(0, depthSeenByTheBuffer);
+
+        void RunScope()
+        {
+            using var buffer = new CallbackDisposable(() => depthSeenByTheBuffer = diagnostics.Depth);
+            using var registration = metrics.BeginRegister(() => 7, dropped: null, capacity: null);
+
+            Assert.Equal(7, diagnostics.Depth);
+        }
+    }
+
+    [Fact]
+    public void WhenTheHandleIsDisposedTwice_ThenTheSecondDisposalLeavesALaterRegistrationAlone()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
+        var diagnostics = new QueueDiagnostics(metrics);
+        var registration = metrics.BeginRegister(() => 7, dropped: null, capacity: 10);
+        registration.Dispose();
+        metrics.Register(() => 3, dropped: null, capacity: 20);
+
+        // Act
+        registration.Dispose();
+
+        // Assert
+        Assert.Equal(3, diagnostics.Depth);
+        Assert.Throws<InvalidOperationException>(() => metrics.Register(() => 0, dropped: null, capacity: 30));
+    }
+
+    [Fact]
+    public void WhenBeginRegisterThrows_ThenTheLiveRegistrationIsUntouched()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
+        metrics.Register(() => 7, dropped: null, capacity: 10);
+        var diagnostics = new QueueDiagnostics(metrics);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => metrics.BeginRegister(() => 3, dropped: null, capacity: 20));
+
+        Assert.Equal(7, diagnostics.Depth);
+        Assert.Equal(10, diagnostics.Capacity);
+    }
+
+    [Fact]
+    public void WhenTheHandleIsDisposed_ThenTheProvidersAreReleasedAndTheirDropsKept()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
+        var diagnostics = new QueueDiagnostics(metrics);
+        var dropped = 0L;
+        var registration = metrics.BeginRegister(() => 7, () => dropped, capacity: 10);
+        dropped = 4;
+
+        // Act
+        registration.Dispose();
+
+        // Assert
+        Assert.Equal(0, diagnostics.Depth);
+        Assert.Equal(4, diagnostics.TotalDropped);
+    }
+
+    [Fact]
     public void WhenProviderThrowsAfterReset_ThenTotalDroppedNeverGoesNegative()
     {
         // Arrange
@@ -268,5 +342,10 @@ public class QueueMetricsTests
 
         // Assert
         Assert.Equal(0, diagnostics.TotalDropped);
+    }
+
+    private sealed class CallbackDisposable(Action onDispose) : IDisposable
+    {
+        public void Dispose() => onDispose();
     }
 }

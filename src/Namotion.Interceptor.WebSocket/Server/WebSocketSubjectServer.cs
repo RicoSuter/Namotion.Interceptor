@@ -111,62 +111,56 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                     Metrics.MarkOperational();
 
                     using var changeQueueProcessor = _handler.CreateChangeQueueProcessor(_logger);
+
+                    // Declared after the processor so it is released first, which is what lets the
+                    // next restart register its own: a second Register while one is still live throws.
+                    using var outboundRegistration = Metrics.OutboundChanges.BeginRegister(
+                        () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
+
+                    var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);
+                    var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedToken);
+
+                    // Cancelling the attempt makes a cancellation the normal exit path here, so the
+                    // filter below cannot be narrowed to the force-kill and the exception is kept
+                    // and judged afterwards instead.
+                    OperationCanceledException? completionCancellation = null;
                     try
                     {
-                        // Deregistered in the finally below so the next restart can register its own
-                        // processor: a second Register while one is still live throws.
-                        Metrics.OutboundChanges.Register(
-                            () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
-
-                        var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);
-                        var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedToken);
-
-                        // Cancelling the attempt makes a cancellation the normal exit path here, so the
-                        // filter below cannot be narrowed to the force-kill and the exception is kept
-                        // and judged afterwards instead.
-                        OperationCanceledException? completionCancellation = null;
-                        try
-                        {
-                            // When either task completes, cancel the other to prevent blocking forever.
-                            await Task.WhenAny(processorTask, heartbeatTask).ConfigureAwait(false);
-                            await attempt.CancelAsync().ConfigureAwait(false);
-                            await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
-                        }
-                        catch (OperationCanceledException exception) when (!stoppingToken.IsCancellationRequested)
-                        {
-                            // Kill or one task completed: linkedToken canceled
-                            completionCancellation = exception;
-                        }
-
-                        // Both tasks completed, either normally (tasks catch OCE internally and
-                        // return) or via caught OCE above. Check why we stopped:
-                        if (stoppingToken.IsCancellationRequested)
-                        {
-                            break;
-                        }
-
-                        // linkedToken was canceled (Kill) or completed unexpectedly, so restart.
-                        if (attempt.WasForceKilled)
-                        {
-                            // Not reported as an error: an injected fault the server recovers from by
-                            // restarting.
-                            _logger.LogWarning("WebSocket server force-killed. Restarting...");
-                        }
-                        else
-                        {
-                            // Nothing outside this loop reports its failures. The captured cancellation
-                            // is normally null, because neither task surfaces the one raised above to
-                            // stop its sibling.
-                            var error = new InvalidOperationException(
-                                "WebSocket server processing completed unexpectedly.", completionCancellation);
-
-                            Metrics.ReportError(error);
-                            _logger.LogWarning(error, "WebSocket server processing completed unexpectedly. Restarting...");
-                        }
+                        // When either task completes, cancel the other to prevent blocking forever.
+                        await Task.WhenAny(processorTask, heartbeatTask).ConfigureAwait(false);
+                        await attempt.CancelAsync().ConfigureAwait(false);
+                        await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
                     }
-                    finally
+                    catch (OperationCanceledException exception) when (!stoppingToken.IsCancellationRequested)
                     {
-                        Metrics.OutboundChanges.Deregister();
+                        // Kill or one task completed: linkedToken canceled
+                        completionCancellation = exception;
+                    }
+
+                    // Both tasks completed, either normally (tasks catch OCE internally and
+                    // return) or via caught OCE above. Check why we stopped:
+                    if (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    // linkedToken was canceled (Kill) or completed unexpectedly, so restart.
+                    if (attempt.WasForceKilled)
+                    {
+                        // Not reported as an error: an injected fault the server recovers from by
+                        // restarting.
+                        _logger.LogWarning("WebSocket server force-killed. Restarting...");
+                    }
+                    else
+                    {
+                        // Nothing outside this loop reports its failures. The captured cancellation
+                        // is normally null, because neither task surfaces the one raised above to
+                        // stop its sibling.
+                        var error = new InvalidOperationException(
+                            "WebSocket server processing completed unexpectedly.", completionCancellation);
+
+                        Metrics.ReportError(error);
+                        _logger.LogWarning(error, "WebSocket server processing completed unexpectedly. Restarting...");
                     }
                 }
                 finally
