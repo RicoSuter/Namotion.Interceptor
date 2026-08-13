@@ -36,13 +36,18 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         var transaction = SubjectTransaction.Current;
-        if (transaction is { IsCommitting: false } &&
+        // A disposed transaction is treated as no transaction: its pending-changes dictionary is back in the
+        // pool and may already belong to another live transaction, so probing it would read a buffer that a
+        // different transaction mutates under a different lock. The ambient slot can still point at one
+        // because a captured ExecutionContext (for example an Rx scheduler thread created inside a
+        // transaction) keeps replaying the flow it was captured from.
+        if (transaction is { IsCommitting: false, IsDisposed: false } &&
             transaction.TryGetPendingValue<TProperty>(context.Property, out var pendingValue))
         {
             return pendingValue;
         }
 
-        return next(ref context);
+        return next(ref context); // No transaction, disposed, committing, or nothing pending: Normal flow
     }
 
     /// <inheritdoc />
@@ -57,7 +62,11 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         var transaction = SubjectTransaction.Current;
-        if (transaction is { IsCommitting: false } && !context.Property.Metadata.IsDerived)
+        // A disposed transaction is treated as no transaction: its pending-changes dictionary is back in the
+        // pool and may already belong to another live transaction. The ambient slot can still point at one
+        // because a captured ExecutionContext (for example an Rx scheduler thread created inside a
+        // transaction) keeps replaying the flow it was captured from.
+        if (transaction is { IsCommitting: false, IsDisposed: false } && !context.Property.Metadata.IsDerived)
         {
             // Validate context binding
             var subjectInterceptor = context.Property.Subject.Context.TryGetService<SubjectTransactionInterceptor>();
@@ -85,7 +94,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return; // Captured, interceptor chain stops here
         }
 
-        next(ref context); // No transaction, derived, or committing: Normal flow
+        next(ref context); // No transaction, disposed, derived, or committing: Normal flow
     }
 
     private sealed class LockReleaser(SemaphoreSlim semaphore) : IDisposable

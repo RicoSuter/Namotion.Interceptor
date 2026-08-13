@@ -74,6 +74,11 @@ public sealed class SubjectTransaction : IDisposable
     internal bool IsCommitting => _isCommitting;
 
     /// <summary>
+    /// Gets a value indicating whether the transaction has been disposed.
+    /// </summary>
+    internal bool IsDisposed => Volatile.Read(ref _isDisposed) != 0;
+
+    /// <summary>
     /// Gets the interceptor this transaction is bound to (for cross-context validation).
     /// </summary>
     internal SubjectTransactionInterceptor Interceptor { get; }
@@ -91,13 +96,16 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Tries to read a pending value for the given property.
-    /// Returns false if the transaction is committing or no pending value exists.
+    /// Returns false if no pending value exists.
     /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
+    /// <exception cref="ObjectDisposedException">Thrown if the transaction was disposed concurrently (TOCTOU race).</exception>
     internal bool TryGetPendingValue<TProperty>(PropertyReference property, out TProperty value)
     {
         lock (_pendingChangesLock)
         {
             ThrowIfCommittingConcurrently();
+            ThrowIfDisposedConcurrently();
 
             if (_pendingChanges.TryGetValue(property, out var change))
             {
@@ -116,6 +124,7 @@ public sealed class SubjectTransaction : IDisposable
     /// subsequent writes preserve the original old value (last write wins).
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
+    /// <exception cref="ObjectDisposedException">Thrown if the transaction was disposed concurrently (TOCTOU race).</exception>
     internal void CaptureChange<TProperty>(
         PropertyReference property,
         ChangeOrigin origin,
@@ -127,6 +136,7 @@ public sealed class SubjectTransaction : IDisposable
         lock (_pendingChangesLock)
         {
             ThrowIfCommittingConcurrently();
+            ThrowIfDisposedConcurrently();
 
             var isFirstWrite = !_pendingChanges.TryGetValue(property, out var existingChange);
             _pendingChanges[property] = SubjectPropertyChange.Create(
@@ -136,6 +146,26 @@ public sealed class SubjectTransaction : IDisposable
                 receivedTimestamp: receivedTimestamp,
                 isFirstWrite ? currentValue : existingChange.GetOldValue<TProperty>(),
                 newValue);
+        }
+    }
+
+    /// <summary>
+    /// Guards the last window between the interceptor's disposed check and the pending-changes access itself.
+    /// The check must stay inside <see cref="_pendingChangesLock"/>: Dispose sets the flag before it takes the
+    /// lock and returns the dictionary to the pool only after releasing it, so a flag read taken under the lock
+    /// can never see a live transaction and then touch a buffer another transaction already rented.
+    /// Throwing is deliberate: reaching here means a read or write raced a Dispose on another flow, and
+    /// silently corrupting or tearing against an unrelated transaction's pending changes is far worse than a
+    /// visible exception.
+    /// </summary>
+    private void ThrowIfDisposedConcurrently()
+    {
+        if (Volatile.Read(ref _isDisposed) != 0)
+        {
+            throw new ObjectDisposedException(
+                nameof(SubjectTransaction),
+                "The transaction was disposed while one of its properties was being read or captured. " +
+                "Begin, use, commit, and dispose a transaction within the same async flow.");
         }
     }
 
