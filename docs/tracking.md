@@ -161,9 +161,17 @@ using var handle = person.SubscribeToProperty(
 
 `property.GetInlineChangeObservable()` exposes one property's changes as an `IObservable<SubjectPropertyChange>`, and each subscriber installs its own underlying subscription. It carries the inline contract above exactly rather than a safer one: delivery is on the writing thread, possibly concurrent, and a throwing handler propagates back into the setter. The context-level `GetPropertyChangeObservable()` reschedules onto a scheduler by default and is not the same thing.
 
-**Notifications are not serialized, so the sequence violates the Rx grammar.** Concurrent writers to one property raise `OnNext` concurrently on one observer, while Rx operators assume serialized notifications and most stateful sinks keep their state unguarded. Apply `.Synchronize()` before any stateful operator, including `Take`, `Skip`, `Scan`, `DistinctUntilChanged` and `Buffer` by count: skipping it corrupts rarely rather than never, an unsynchronized `Take(1)` fed by four writer threads having forwarded more than one item in 1 round out of 2000.
+**If more than one thread can write the property, call `.Synchronize()` before any operator.** Delivery is inline on the writing thread, so concurrent writers raise `OnNext` concurrently, and stateful operators such as `Take`, `Skip`, `Scan`, `DistinctUntilChanged` and `Buffer` by count keep their state unguarded and can then drop or duplicate items. It corrupts rarely rather than never, which is what makes it hard to catch: an unsynchronized `Take(1)` fed by four writer threads forwarded more than one item in 1 round out of 2000. A property only ever written by one thread needs nothing, and neither does a bare `Subscribe` with no operators, since only operators keep state.
 
-**Adding any operator changes what a throwing handler does.** Operators wrap the observer in the auto-detaching decorator the bare subscribe deliberately avoids, so the first handler exception tears the subscription down silently instead of propagating to the writer. A handler composed over this observable must not throw at all.
+```csharp
+using var handle = property
+    .GetInlineChangeObservable()
+    .Synchronize()
+    .DistinctUntilChanged(change => change.GetNewValue<double>())
+    .Subscribe(change => cache.Store(change.GetNewValue<double>()));
+```
+
+**A handler composed over this must not throw.** Operators wrap the observer in an auto-detaching decorator that a bare `Subscribe` avoids, so the first exception ends the subscription silently rather than propagating to the writer.
 
 ### Concurrency and Delivery
 
