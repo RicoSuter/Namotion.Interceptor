@@ -30,21 +30,8 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
 
     private LifecycleInterceptor? _lifecycleInterceptor;
     private volatile OpcUaStandardServer? _server;
-    private volatile RunAttempt? _currentAttempt;
+    private volatile ConnectorRunAttempt? _currentAttempt;
     private int _consecutiveFailures;
-
-    /// <summary>
-    /// One loop iteration's cancellation and its kill flag, held together so a kill can only be
-    /// honoured for the attempt whose token source it actually cancelled. A flag on the server itself
-    /// stays set when the kill arrives after that attempt has torn down, and the next attempt then
-    /// reads a kill that never reached it.
-    /// </summary>
-    private sealed class RunAttempt(CancellationTokenSource cancellation)
-    {
-        public readonly CancellationTokenSource Cancellation = cancellation;
-
-        public volatile bool WasForceKilled;
-    }
 
     internal ThroughputCounter IncomingThroughput { get; }
 
@@ -80,18 +67,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         var attempt = _currentAttempt;
         if (attempt is not null)
         {
-            // Marked before the cancel, so the loop cannot reach its kill check ahead of this write,
-            // and unmarked again when the token source turns out to be disposed: the loop is then
-            // between attempts and this kill reached nothing.
-            attempt.WasForceKilled = true;
-            try
-            {
-                await attempt.Cancellation.CancelAsync().ConfigureAwait(false);
-            }
-            catch (ObjectDisposedException)
-            {
-                attempt.WasForceKilled = false;
-            }
+            await attempt.ForceKillAsync().ConfigureAwait(false);
         }
     }
 
@@ -268,9 +244,9 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            var attempt = new RunAttempt(CancellationTokenSource.CreateLinkedTokenSource(stoppingToken));
+            var attempt = new ConnectorRunAttempt(stoppingToken);
             _currentAttempt = attempt;
-            var linkedToken = attempt.Cancellation.Token;
+            var linkedToken = attempt.Token;
 
             var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
 
@@ -401,7 +377,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                     try { server.Dispose(); }
                     catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA server."); }
 
-                    attempt.Cancellation.Dispose();
+                    attempt.Dispose();
                 }
             }
         }

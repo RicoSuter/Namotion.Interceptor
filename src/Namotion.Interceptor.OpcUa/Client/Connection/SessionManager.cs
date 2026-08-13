@@ -181,7 +181,20 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Gets the read-after-write manager for scheduling reads after writes.
     /// </summary>
-    internal ReadAfterWriteManager? ReadAfterWriteManager { get; private set; }
+    internal ReadAfterWriteManager? ReadAfterWriteManager { get; }
+
+    /// <summary>
+    /// Gets the diagnostics view over <see cref="PollingManager"/>, or <c>null</c> when the polling
+    /// fallback is off. Built here so the client's diagnostics can hand it out without allocating one
+    /// per read, and bound to this manager's polling manager for its whole lifetime.
+    /// </summary>
+    internal PollingDiagnostics? PollingDiagnostics { get; }
+
+    /// <summary>
+    /// Gets the diagnostics view over <see cref="ReadAfterWriteManager"/>, or <c>null</c> when
+    /// read-after-write is off. Built here for the same reason as <see cref="PollingDiagnostics"/>.
+    /// </summary>
+    internal ReadAfterWriteDiagnostics? ReadAfterWriteDiagnostics { get; }
 
     // The two metrics objects belong to the source, which outlives this manager: it is rebuilt on
     // every connect attempt, and counters created here would rebase with it.
@@ -205,6 +218,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 source, sessionManager: this,
                 propertyWriter, _configuration, pollingMetrics, _logger);
 
+            PollingDiagnostics = new PollingDiagnostics(PollingManager);
+
             PollingManager.Start();
         }
 
@@ -216,6 +231,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 configuration,
                 readAfterWriteMetrics,
                 logger);
+
+            ReadAfterWriteDiagnostics = new ReadAfterWriteDiagnostics(ReadAfterWriteManager);
         }
 
         SubscriptionManager = new SubscriptionManager(source, propertyWriter, PollingManager, ReadAfterWriteManager, configuration, logger);

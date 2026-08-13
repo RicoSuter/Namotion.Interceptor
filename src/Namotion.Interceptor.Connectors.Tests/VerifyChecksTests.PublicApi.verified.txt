@@ -29,6 +29,15 @@ namespace Namotion.Interceptor.Connectors
         public void Dispose() { }
         public System.Threading.Tasks.Task ProcessAsync(System.Threading.CancellationToken cancellationToken) { }
     }
+    public sealed class ConnectorRunAttempt : System.IDisposable
+    {
+        public ConnectorRunAttempt(System.Threading.CancellationToken stoppingToken) { }
+        public System.Threading.CancellationToken Token { get; }
+        public bool WasForceKilled { get; }
+        public System.Threading.Tasks.Task CancelAsync() { }
+        public void Dispose() { }
+        public System.Threading.Tasks.Task ForceKillAsync() { }
+    }
     public class DefaultSubjectFactory : Namotion.Interceptor.Connectors.ISubjectFactory
     {
         public DefaultSubjectFactory() { }

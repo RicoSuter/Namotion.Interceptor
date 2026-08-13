@@ -55,7 +55,7 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     /// <summary>
     /// Gets the number of active OPC UA subscriptions.
     /// </summary>
-    public int SubscriptionCount => ActiveSessionManager?.Subscriptions.Count ?? 0;
+    public int SubscriptionCount => ActiveSessionManager?.SubscriptionManager.SubscriptionCount ?? 0;
 
     /// <summary>
     /// Gets the number of monitored items across all subscriptions.
@@ -78,14 +78,7 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     /// by the source and survive that, so they reappear at their previous values once a session
     /// exists again.
     /// </remarks>
-    public PollingDiagnostics? Polling
-    {
-        get
-        {
-            var pollingManager = ActiveSessionManager?.PollingManager;
-            return pollingManager is not null ? new PollingDiagnostics(pollingManager) : null;
-        }
-    }
+    public PollingDiagnostics? Polling => ActiveSessionManager?.PollingDiagnostics;
 
     /// <summary>
     /// Gets read-after-write diagnostics, or <c>null</c> when read-after-write is off, no session has
@@ -95,14 +88,7 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     /// Null between connect attempts for the same reason as <see cref="Polling"/>, and its totals
     /// survive the same way.
     /// </remarks>
-    public ReadAfterWriteDiagnostics? ReadAfterWrite
-    {
-        get
-        {
-            var manager = ActiveSessionManager?.ReadAfterWriteManager;
-            return manager is not null ? new ReadAfterWriteDiagnostics(manager) : null;
-        }
-    }
+    public ReadAfterWriteDiagnostics? ReadAfterWrite => ActiveSessionManager?.ReadAfterWriteDiagnostics;
 }
 
 /// <summary>

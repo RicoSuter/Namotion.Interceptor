@@ -43,22 +43,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
     private readonly ClientSequenceTracker _sequenceTracker = new();
-    private volatile RunAttempt? _currentAttempt;
+    private volatile ConnectorRunAttempt? _currentAttempt;
     private int _disposed;
-
-    /// <summary>
-    /// One monitor iteration's cancellation and its kill flag, held together so a kill can only be
-    /// honoured for the iteration whose token source it actually cancelled. A flag on the source itself
-    /// stays set when the kill arrives after that iteration has ended, and the next one then reads a
-    /// kill that never reached it: its own cancellation is logged as an injected fault and reconnected
-    /// from with nothing recorded.
-    /// </summary>
-    private sealed class RunAttempt(CancellationTokenSource cancellation)
-    {
-        public readonly CancellationTokenSource Cancellation = cancellation;
-
-        public volatile bool WasForceKilled;
-    }
 
     /// <inheritdoc />
     public override IInterceptorSubject RootSubject => _subject;
@@ -578,18 +564,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                 var attempt = _currentAttempt;
                 if (attempt is not null)
                 {
-                    // Marked before the cancel, so the loop cannot reach its kill clause ahead of this
-                    // write, and unmarked again when the token source turns out to be disposed: the loop
-                    // is then between iterations and this kill reached nothing.
-                    attempt.WasForceKilled = true;
-                    try
-                    {
-                        await attempt.Cancellation.CancelAsync().ConfigureAwait(false);
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        attempt.WasForceKilled = false;
-                    }
+                    await attempt.ForceKillAsync().ConfigureAwait(false);
                 }
                 break;
 
@@ -616,9 +591,9 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            var attempt = new RunAttempt(CancellationTokenSource.CreateLinkedTokenSource(stoppingToken));
+            var attempt = new ConnectorRunAttempt(stoppingToken);
             _currentAttempt = attempt;
-            var linkedToken = attempt.Cancellation.Token;
+            var linkedToken = attempt.Token;
 
             try
             {
@@ -694,7 +669,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                 // Released before the token source is disposed, so a kill arriving from here on finds
                 // no iteration rather than a disposed one.
                 _currentAttempt = null;
-                attempt.Cancellation.Dispose();
+                attempt.Dispose();
             }
         }
     }

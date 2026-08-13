@@ -59,20 +59,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
     private int _disposed;
     private int _isListening;
     private MqttServer? _mqttServer;
-    private volatile RunAttempt? _currentAttempt;
-
-    /// <summary>
-    /// One loop iteration's cancellation and its kill flag, held together so a kill can only be
-    /// honoured for the attempt whose token source it actually cancelled. A flag on the server itself
-    /// stays set when the kill arrives after that attempt has torn down, and the next attempt then
-    /// reads a kill that never reached it.
-    /// </summary>
-    private sealed class RunAttempt(CancellationTokenSource cancellation)
-    {
-        public readonly CancellationTokenSource Cancellation = cancellation;
-
-        public volatile bool WasForceKilled;
-    }
+    private volatile ConnectorRunAttempt? _currentAttempt;
 
     /// <inheritdoc cref="SubjectConnectorBase.Diagnostics" />
     public override MqttServerDiagnostics Diagnostics { get; }
@@ -134,18 +121,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                 var attempt = _currentAttempt;
                 if (attempt is not null)
                 {
-                    // Marked before the cancel, so the loop cannot reach its kill check ahead of this
-                    // write, and unmarked again when the token source turns out to be disposed: the
-                    // loop is then between attempts and this kill reached nothing.
-                    attempt.WasForceKilled = true;
-                    try
-                    {
-                        await attempt.Cancellation.CancelAsync().ConfigureAwait(false);
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        attempt.WasForceKilled = false;
-                    }
+                    await attempt.ForceKillAsync().ConfigureAwait(false);
                 }
                 break;
 
@@ -203,9 +179,9 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            var attempt = new RunAttempt(CancellationTokenSource.CreateLinkedTokenSource(stoppingToken));
+            var attempt = new ConnectorRunAttempt(stoppingToken);
             _currentAttempt = attempt;
-            var linkedToken = attempt.Cancellation.Token;
+            var linkedToken = attempt.Token;
 
             try
             {
@@ -294,7 +270,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
             finally
             {
                 _currentAttempt = null;
-                attempt.Cancellation.Dispose();
+                attempt.Dispose();
             }
         }
     }

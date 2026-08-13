@@ -57,6 +57,12 @@ internal class SubscriptionManager : IAsyncDisposable
     public IReadOnlyCollection<Subscription> Subscriptions => (IReadOnlyCollection<Subscription>)_subscriptions.Keys;
 
     /// <summary>
+    /// Gets how many subscriptions are currently held. Counting through <see cref="Subscriptions"/>
+    /// would copy every key into a new collection, which a diagnostics read must not do.
+    /// </summary>
+    public int SubscriptionCount => _subscriptions.Count;
+
+    /// <summary>
     /// Gets the current monitored items (thread-safe dictionary).
     /// </summary>
     public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;

@@ -30,20 +30,7 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
 
     private WebApplication? _app;
     private int _disposed;
-    private volatile RunAttempt? _currentAttempt;
-
-    /// <summary>
-    /// One loop iteration's cancellation and its kill flag, held together so a kill can only be
-    /// honoured for the attempt whose token source it actually cancelled. A flag on the server itself
-    /// stays set when the kill arrives after that attempt has torn down, and the next attempt then
-    /// reads a kill that never reached it.
-    /// </summary>
-    private sealed class RunAttempt(CancellationTokenSource cancellation)
-    {
-        public readonly CancellationTokenSource Cancellation = cancellation;
-
-        public volatile bool WasForceKilled;
-    }
+    private volatile ConnectorRunAttempt? _currentAttempt;
 
     /// <inheritdoc />
     public override IInterceptorSubject RootSubject { get; }
@@ -86,18 +73,7 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                 var attempt = _currentAttempt;
                 if (attempt is not null)
                 {
-                    // Marked before the cancel, so the loop cannot reach its kill check ahead of this
-                    // write, and unmarked again when the token source turns out to be disposed: the
-                    // loop is then between attempts and this kill reached nothing.
-                    attempt.WasForceKilled = true;
-                    try
-                    {
-                        await attempt.Cancellation.CancelAsync().ConfigureAwait(false);
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        attempt.WasForceKilled = false;
-                    }
+                    await attempt.ForceKillAsync().ConfigureAwait(false);
                 }
                 break;
 
@@ -115,9 +91,9 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var attempt = new RunAttempt(CancellationTokenSource.CreateLinkedTokenSource(stoppingToken));
+            var attempt = new ConnectorRunAttempt(stoppingToken);
             _currentAttempt = attempt;
-            var linkedToken = attempt.Cancellation.Token;
+            var linkedToken = attempt.Token;
 
             // Set by the catch below only, which is where a listener that cannot start or bind lands.
             // A force-kill and a processing layer that ended without throwing both restart at once: the
@@ -164,7 +140,7 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                         {
                             // When either task completes, cancel the other to prevent blocking forever.
                             await Task.WhenAny(processorTask, heartbeatTask).ConfigureAwait(false);
-                            await attempt.Cancellation.CancelAsync().ConfigureAwait(false);
+                            await attempt.CancelAsync().ConfigureAwait(false);
                             await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
                         }
                         catch (OperationCanceledException exception) when (!stoppingToken.IsCancellationRequested)
@@ -284,7 +260,7 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
             finally
             {
                 _currentAttempt = null;
-                attempt.Cancellation.Dispose();
+                attempt.Dispose();
             }
 
             // After the teardown above, so the port is free rather than held for the whole delay.
