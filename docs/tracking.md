@@ -26,6 +26,16 @@ You can also enable features individually for more granular control.
 
 All property change notifications flow through a single `PropertyChangeInterceptor`, registered with `WithPropertyChangeSubscriptions()` (also included in `WithFullPropertyTracking()`). The interceptor exposes three channels over one shared write path: the Rx observable, the high-performance queue, and per-property subscriptions. Enable it once and pick whichever channel fits the consumer.
 
+| API | Use it for | Delivered on | Section |
+|---|---|---|---|
+| `context.GetPropertyChangeObservable()` | Rx composition and UI binding over the whole model | a scheduler, by default | [Property Change Observable](#property-change-observable-rx-based) |
+| `context.CreatePropertyChangeQueueSubscription()` | high throughput and source synchronization | your own consumer thread | [Property Change Queue](#property-change-queue-high-performance) |
+| `property.SubscribeInline(callback)` | one property, cheapest possible | the writing thread, inside the write | [Per-Property Subscriptions](#per-property-subscriptions) |
+| `property.GetInlineChangeObservable()` | one property, with Rx operators | the writing thread, inside the write | [Composing with Rx](#composing-with-rx) |
+| `property.Subscribe(callback, scheduler, onError)` | one property whose observer is slow, blocking or may throw | the scheduler | [Scheduled delivery](#scheduled-delivery) |
+
+The contract they share, per channel and across channels, is in [Delivery Guarantees](#delivery-guarantees).
+
 ### Property Change Observable (Rx-based)
 
 The observable channel uses Reactive Extensions (Rx) and is ideal for UI scenarios, complex query composition, and when you need rich operator support:
@@ -157,6 +167,8 @@ using var handle = person.SubscribeToProperty(
 
 **Dormancy is not symmetric with disposal**: detaching the subject stops acceptance but not the drain, so a change accepted before the detach is still delivered afterwards, carrying a subject that has already left the registry. Disposal instead drops whatever is still queued.
 
+**Disposal allocates rather than releases**: it clears the queue through `ConcurrentQueue.Clear()`, which installs a fresh segment instead of dropping the old one, so disposal allocates about 5,312 bytes and a disposed handle that is still referenced keeps roughly 5.3 KB alive. Drop the handle, do not merely dispose it.
+
 #### Composing with Rx
 
 `property.GetInlineChangeObservable()` exposes one property's changes as an `IObservable<SubjectPropertyChange>`, and each subscriber installs its own underlying subscription. It keeps the inline part of the contract above rather than a safer one: delivery is on the writing thread, and a throwing handler propagates back into the setter. The context-level `GetPropertyChangeObservable()` reschedules onto a scheduler by default and is not the same thing.
@@ -165,30 +177,22 @@ using var handle = person.SubscribeToProperty(
 
 **A handler composed over this must not throw.** Operators wrap the observer in an auto-detaching decorator that a bare `Subscribe` avoids, so the first exception ends the subscription silently rather than propagating to the writer.
 
-### Concurrency and Delivery
-
-Dispatch starts on the writing thread, outside the subject lock, and shares one contract. The per-property listeners and the queue run inline there; `GetPropertyChangeObservable()` pushes there too but reschedules its subscribers onto its scheduler by default (unless you pass `ImmediateScheduler.Instance`).
-
-- **Lifecycle runs first** (with `WithLifecycle()`, included in `WithFullPropertyTracking()`): for subject-typed writes, notifications dispatch after attach/detach reconciliation, so at callback time the subject graph and registry already reflect the write (barring a concurrent overwrite or a concurrent detach of the parent). A subject assigned to a property is attached, and writes a consumer makes to it are themselves tracked. Removals are the reverse: the departing subject is already detached, so writes to it from a callback are stored but not tracked, which is intended. One consequence for custom handlers: an `ILifecycleHandler` that writes properties while attaching emits those changes before the structural change that introduced the subject.
-- **Ordering**: under concurrent writes to the same property, notifications may arrive out of commit order. If you need the current value, re-read the property rather than relying on the delivered new value: `change.GetCurrentValue<TValue>()` does this for you, reading the property now instead of returning the value captured when the change was created, without needing to keep a separately typed reference to the subject. `GetOldValue<TValue>()` is the value the setter observed when it started, including when the subscription raced the write. It is not necessarily the value immediately preceding the commit, so under concurrency delivered old and new pairs may not chain.
-- **Per-property observers are not serialized**: an `IPropertyChangeObserver` or `PropertyChangeCallback` may be invoked concurrently on multiple threads and must be thread-safe, fast, non-blocking, and must not throw. Wrap failing work in a try-catch internally. (The context-level observable is serialized through `Subject.Synchronize()`, the per-property `GetInlineChangeObservable()` per subscriber, and the queue is single-consumer per subscription.) The [scheduled overloads](#scheduled-delivery) serialize per subscription instead.
-- **Throwing synchronous observers suppress later deliveries**: each interceptor dispatches its queue first, then its Rx observable, then any per-property listeners it resolved. With aggregated contexts, the innermost interceptor resolves the per-property listeners, so they may run before outer contexts' queue and Rx channels. An exception from any synchronous observer propagates out of the write and prevents later deliveries in that order; queue items already enqueued remain available. Keep synchronous observers exception-free. The exception surfaces from the setter after the value was committed and nothing is rolled back; the property keeps the new value. For scheduler-based Rx observers, delivery means the change was accepted by the channel, not that the callback has already run. The [scheduled overloads](#scheduled-delivery) are exempt: the observer's exception is reported to `onError` and never reaches the setter.
-- **A derived recalculation publishes the stabilized value**: the change carries the value the recalculation committed rather than a fresh read of the getter. The getter therefore runs once per recalculation instead of twice, a throwing getter does not suppresses the notification, and an interceptor that rewrites `NewValue` on that path now changes what is published.
-- **Transactions replay on commit**: with `WithTransactions()`, writes captured inside a transaction do not notify during capture. They replay through the interceptor on commit and notifications fire then. If the transaction is rolled back (disposed without commit), the changes are discarded, no notifications fire, and the property keeps its pre-transaction value. If a best-effort commit partially applies and then reverts, listeners observe the apply-and-revert pair, so a consumer such as a watchdog or dirty flag must not treat the revert as a user change.
-
 ### Delivery Guarantees
+
+Dispatch starts on the writing thread, outside the subject lock, and from there every channel shares one contract.
 
 Every committed write carries a `SubjectPropertyChange.Revision`: a counter that is monotonic **per subject** over committed writes, so two changes to the *same* subject are ordered by comparing it, the higher revision committed later. Revisions of *different* subjects are **not** comparable, and a change constructed outside a terminal write carries `0`, which orders against nothing.
 
-The revision exists because arrival order can differ from commit order. Dispatch happens after the commit and outside the subject lock, so under concurrent writers a change that committed later can reach a consumer first. A consumer that has to converge on the current value compares `Revision` and keeps the higher one, or re-reads the property.
+The revision exists because arrival order can differ from commit order: dispatch happens after the commit, so under concurrent writers a change that committed later can reach a consumer first. A consumer that has to converge on the current value compares `Revision` and keeps the higher one, or re-reads the property.
 
-| Channel | Exactly-once | Order | Consumer runs on |
-|---|---|---|---|
-| Per-property callback | conditional (a) | arrival | writer thread |
-| Observable | conditional (a) | arrival | writer thread |
-| Pull queue | conditional (a) | arrival | consumer thread |
-| `ChangeQueueProcessor`, buffer > 0 | no, latest-state-wins | arrival of survivors; per-property newest within a flush (b) | processor thread |
-| Scheduled per-property callback | conditional (a), (c) | arrival | scheduler thread |
+| Channel | Exactly-once | Order | Consumer runs on | Serialized |
+|---|---|---|---|---|
+| Per-property callback (`SubscribeInline`) | conditional (a) | arrival | writer thread | no, concurrent writers re-enter it |
+| Per-property observable (`GetInlineChangeObservable`) | conditional (a) | arrival | writer thread | per subscriber |
+| Scheduled per-property callback (`Subscribe`) | conditional (a), (c) | arrival | scheduler thread | per subscription, not per observer instance |
+| Observable (`GetPropertyChangeObservable`) | conditional (a) | arrival | scheduler thread, writer thread with `ImmediateScheduler` | yes, through `Subject.Synchronize()` |
+| Pull queue | conditional (a) | arrival | consumer thread | single consumer by contract |
+| `ChangeQueueProcessor`, buffer > 0 | no, latest-state-wins | arrival of survivors; per-property newest within a flush (b) | processor thread | one flush at a time |
 
 (a) A throwing lifecycle handler or a throwing earlier observer suppresses delivery for the rest of that write's consumers, so delivery is exactly-once only while those no-throw contracts hold.
 
@@ -196,7 +200,27 @@ The revision exists because arrival order can differ from commit order. Dispatch
 
 (c) Disposal and a scheduler fault each clear the queue, dropping accepted but undelivered changes, and a `Schedule` call whose work item never runs strands what is queued behind it. The pull queue keeps its buffered items drainable after disposal.
 
-Note what the old value is and is not, on every channel. Revisions decide *which* change's old value survives a collapse, not that it is the value the property held at the preceding revision: the old value is captured by the generated setter at the call site, outside the subject lock, so under concurrent writers it can be a value that was already superseded. The new value is exact, the old value is a best-effort diff baseline. Compare `Revision` or re-read the property if you need more than that.
+An observer on an unserialized channel may be invoked concurrently on multiple threads and must be thread-safe, fast, non-blocking, and must not throw; wrap failing work in a try-catch internally.
+
+**Measured cost**, on an Apple M4 Max, .NET 9.0.10 arm64. Timings are not quoted because the machine could not be pinned and the idle baseline measured bimodal, so only the allocation figures are reliable enough to publish.
+
+| Per-property channel | Per write | Per delivery | Held per live subscription |
+|---|---|---|---|
+| `SubscribeInline` | none | none | about 172 bytes |
+| `GetInlineChangeObservable` | none | none, plus one lock taken | about 172 bytes |
+| Scheduled `Subscribe` | about 34 bytes | about 160 bytes while the observer keeps up, effectively none once a backlog forms | about 5,607 bytes |
+
+An empty `ConcurrentQueue<SubjectPropertyChange>` is about 5,376 bytes on its own, because the change struct is 144 bytes and the initial segment holds 32 slots. That is about 96 percent of a scheduled subscription's footprint, so a thousand scheduled subscriptions cost roughly 5.35 MB against 0.16 MB for a thousand inline ones.
+
+Rules that hold across every channel:
+
+- **Lifecycle runs first** (with `WithLifecycle()`, included in `WithFullPropertyTracking()`): for subject-typed writes, notifications dispatch after attach/detach reconciliation, so at callback time the subject graph and registry already reflect the write (barring a concurrent overwrite or a concurrent detach of the parent). A subject assigned to a property is attached, and writes a consumer makes to it are themselves tracked. Removals are the reverse: the departing subject is already detached, so writes to it from a callback are stored but not tracked, which is intended. One consequence for custom handlers: an `ILifecycleHandler` that writes properties while attaching emits those changes before the structural change that introduced the subject.
+- **Ordering**: notifications may arrive out of commit order, as above. If you need the current value, re-read the property rather than relying on the delivered new value: `change.GetCurrentValue<TValue>()` does this for you, reading the property now instead of returning the value captured when the change was created, without needing to keep a separately typed reference to the subject.
+- **Throwing synchronous observers suppress later deliveries**: each interceptor dispatches its queue first, then its Rx observable, then any per-property listeners it resolved. With aggregated contexts, the innermost interceptor resolves the per-property listeners, so they may run before outer contexts' queue and Rx channels. An exception from any synchronous observer propagates out of the write and prevents later deliveries in that order; queue items already enqueued remain available. Keep synchronous observers exception-free. The exception surfaces from the setter after the value was committed and nothing is rolled back; the property keeps the new value. For scheduler-based Rx observers, delivery means the change was accepted by the channel, not that the callback has already run. The [scheduled overloads](#scheduled-delivery) are exempt: the observer's exception is reported to `onError` and never reaches the setter.
+- **A derived recalculation publishes the stabilized value**: the change carries the value the recalculation committed rather than a fresh read of the getter. The getter therefore runs once per recalculation instead of twice, a throwing getter does not suppresses the notification, and an interceptor that rewrites `NewValue` on that path now changes what is published.
+- **Transactions replay on commit**: with `WithTransactions()`, writes captured inside a transaction do not notify during capture. They replay through the interceptor on commit and notifications fire then. If the transaction is rolled back (disposed without commit), the changes are discarded, no notifications fire, and the property keeps its pre-transaction value. If a best-effort commit partially applies and then reverts, listeners observe the apply-and-revert pair, so a consumer such as a watchdog or dirty flag must not treat the revert as a user change.
+
+Note what the old value is and is not, on every channel. Revisions decide *which* change's old value survives a collapse, not that it is the value the property held at the preceding revision: the old value is what the generated setter observed at the call site, outside the subject lock, including when the subscription raced the write, so under concurrent writers it can be a value that was already superseded and delivered old and new pairs may not chain. The new value is exact, the old value is a best-effort diff baseline. Compare `Revision` or re-read the property if you need more than that.
 
 ## Property Value Equality Check
 
