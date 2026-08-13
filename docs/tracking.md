@@ -123,16 +123,20 @@ while (subscription.TryDequeue(out var change, cancellationToken))
 
 ### Per-Property Subscriptions
 
-When you only care about a single property on a single subject, subscribe to that property directly instead of filtering the whole stream. Two entry points are available:
+When you only care about a single property on a single subject, subscribe to that property directly instead of filtering the whole stream. Decide the delivery first. `SubscribeInline` runs your callback on the writing thread inside the write, which is the cheapest option and the right one when the callback is quick, thread-safe and cannot throw. [Scheduled delivery](#scheduled-delivery) moves the callback off the writer instead, for anything that does I/O, may block or may throw. Inline is shown first because it is what most per-property observers need and costs roughly a thirtieth of the memory per subscription, which decides the matter once you subscribe to thousands of properties.
+
+Each form takes either an `IPropertyChangeObserver` or a `PropertyChangeCallback`, and both receive the change by `in` reference.
 
 ```csharp
-// Strongly typed, via a direct property selector on the subject:
+// Strongly typed, via a direct property selector on the subject. Inline means this callback runs on
+// whichever thread wrote the property, before the setter returns, and possibly on several at once, so it
+// must be quick, thread-safe, and must not throw: an exception here propagates out of the setter.
 using var handle = person.SubscribeToPropertyInline(x => x.FirstName, (in SubjectPropertyChange change) =>
 {
     Console.WriteLine($"FirstName is now '{change.GetNewValue<object?>()}'.");
 });
 
-// Or via a PropertyReference and an IPropertyChangeObserver or callback:
+// Or via a PropertyReference, when the property is chosen at runtime rather than by a selector:
 var property = new PropertyReference(person, nameof(Person.FirstName));
 using var handle2 = property.SubscribeInline((in SubjectPropertyChange change) => { /* ... */ });
 ```
