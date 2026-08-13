@@ -9,10 +9,8 @@ public class ChangeQueueProcessorCapacityTests
     [Fact]
     public void WhenMaxQueueDepthIsZeroOnTheBufferedPath_ThenConstructionThrowsWithBothRemedies()
     {
-        // Arrange
-        // A caller asking for a zero bound is usually asking for no buffering, and the throw lands
-        // inside a connector's retry loop, which catches it and tries again, so the message is all they
-        // get: it has to point at the unbounded queue and at the path that buffers nothing.
+        // Arrange: the throw lands inside a connector's retry loop, which catches it and tries again,
+        // so the message is all the caller gets and has to name both remedies.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var subject = new Person(context);
         using var source = new TestSubjectSource(subject, context, NullLogger.Instance);
@@ -37,10 +35,8 @@ public class ChangeQueueProcessorCapacityTests
     [Fact]
     public void WhenMaxQueueDepthIsZeroOnTheImmediatePath_ThenConstructionSucceeds()
     {
-        // Arrange
-        // The second remedy the message above names has to be one the caller can actually take: the
-        // immediate path writes each change as it is dequeued and never fills the queue the bound
-        // applies to, so the bound is not read there and the same pair of arguments is accepted.
+        // Arrange: the immediate path never fills the queue the bound applies to, so the remedy the
+        // message above names is one a caller can actually take.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var subject = new Person(context);
         using var source = new TestSubjectSource(subject, context, NullLogger.Instance);

@@ -137,8 +137,7 @@ public class QueueMetricsTests
         // Act
         var reader = Task.Run(() =>
         {
-            // Only this task writes observed/decreased while it runs; the main thread only reads
-            // decreased below, after awaiting this task, and that await is what establishes the
+            // Only this task writes observed and decreased, and the await below establishes the
             // happens-before ordering, so plain reads and writes are enough here.
             while (!Volatile.Read(ref stop))
             {
@@ -157,11 +156,9 @@ public class QueueMetricsTests
             var live = 0L;
             metrics.Register(() => 0, () => live, capacity: 10);
 
-            // Advance across several values while the reader is concurrently polling, instead of
-            // jumping straight to the final count, so the reader has an actual chance to observe a
-            // decrease if the handover were broken. Volatile.Write keeps the JIT from collapsing
-            // these stores into one, which would quietly undo the widening and make the test
-            // non-deterministic.
+            // Stepping instead of jumping to the final count widens the window in which a broken
+            // handover shows up as a decrease. Volatile.Write keeps the JIT from collapsing the
+            // stores into one, which would undo that widening.
             for (var step = 1; step <= 4; step++)
             {
                 Volatile.Write(ref live, step);
@@ -207,10 +204,8 @@ public class QueueMetricsTests
         metrics.Reset();
         Assert.Equal(0, diagnostics.TotalDropped);
 
-        // Act
-
-        // Three more drops arrive on the still-live first provider after the reset, then it is
-        // handed over to a second provider through the normal Deregister/Register cycle.
+        // Act: three more drops arrive on the still-live first provider after the reset, then it is
+        // handed over through the normal Deregister/Register cycle.
         first = 8;
         metrics.Deregister();
         var second = 0L;
@@ -243,10 +238,8 @@ public class QueueMetricsTests
     [Fact]
     public void WhenRegisterIsCalledWhileARegistrationIsLive_ThenTheMessageNamesTheBuffer()
     {
-        // Arrange
-        // The failure surfaces from inside a connector's retry loop, which catches it, reports it and
-        // tries again, so the message is all an operator gets: it has to say which of the connector's
-        // three buffers is involved.
+        // Arrange: the failure surfaces from inside a connector's retry loop, which catches it and
+        // tries again, so the message is all an operator gets.
         var metrics = new SourceMetrics();
         metrics.OutboundRetries.Register(() => 0, dropped: null, capacity: 10);
 
@@ -269,10 +262,8 @@ public class QueueMetricsTests
         metrics.Reset();
         Assert.Equal(0, diagnostics.TotalDropped);
 
-        // Act
-
-        // The still-live provider starts throwing instead of being handed over, so Reset's negated
-        // accumulator has nothing to be cancelled by.
+        // Act: the provider starts throwing instead of being handed over, so Reset's negated
+        // accumulator is left uncancelled.
         shouldThrow = true;
 
         // Assert

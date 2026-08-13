@@ -30,10 +30,9 @@ public class SourceMetrics : ConnectorMetrics
     /// nothing reports 0.
     /// </summary>
     /// <remarks>
-    /// The delegate must return a non-negative count, must not throw, and must not take a lock owned
-    /// by this library, because a diagnostics read can happen while a monitor holds its own lock. A
-    /// throwing delegate is treated as reporting 0 rather than letting the exception escape a
-    /// diagnostics read.
+    /// The delegate must return a non-negative count, must not throw (a throwing delegate is treated
+    /// as reporting 0) and must not take a lock owned by this library, because a diagnostics read can
+    /// happen while a monitor holds its own lock.
     /// </remarks>
     public void RegisterClaimedProperties(Func<int> count)
     {

@@ -52,12 +52,8 @@ public class ConnectorMetrics
     /// <remarks>
     /// Deliberately not idempotent. Called once per <c>ExecuteAsync</c> entry, so a host stop and
     /// start moves the epoch while a transport reconnect inside the connector's own loop does not.
-    /// <para>
-    /// One connector instance is meant to run once. Driving start, stop and start again by hand can
-    /// have the previous run's <see cref="MarkStopped"/> land after the new run's
-    /// <see cref="MarkStarted"/>, which re-latches the fresh epoch and makes every
-    /// <see cref="MarkOperational"/> in it a no-op; use a new instance per run.
-    /// </para>
+    /// Use a new instance per run: restarting the same one by hand can let the previous run's
+    /// <see cref="MarkStopped"/> land after the new <see cref="MarkStarted"/> and latch the fresh epoch.
     /// </remarks>
     public void MarkStarted()
     {
@@ -76,11 +72,9 @@ public class ConnectorMetrics
     /// Enrolls metrics the connector owns outside this object into the <see cref="MarkStarted"/> reset.
     /// </summary>
     /// <remarks>
-    /// Register before the connector starts, and never once per reconnect. There is no deregistration
-    /// counterpart, so a per-reconnect registration would grow the list without bound and reset the
-    /// same instance once per registration. A resettable enrolled after <see cref="MarkStarted"/> also
-    /// carries its counts from before the epoch into it, which breaks the rule that a <c>Total</c>
-    /// counts only since the connector's start time.
+    /// Register once before the connector starts, never per reconnect: there is no deregistration
+    /// counterpart, and a resettable enrolled after <see cref="MarkStarted"/> carries its pre-epoch
+    /// counts into the new epoch.
     /// </remarks>
     public void RegisterResettable(IResettableMetrics metrics)
     {
@@ -105,16 +99,15 @@ public class ConnectorMetrics
     /// until the next <see cref="MarkStarted"/>.
     /// </summary>
     /// <remarks>
-    /// Liveness transitions are raised from wherever a connector detects them, which for the OPC UA
-    /// client is off the pump thread. Without a terminal rule such a transition can land after the
-    /// pump's own exit and resurrect a stopped connector. Mirrors
-    /// <see cref="Monitoring.SourceState.Stopped"/>, which is terminal for the same reason.
+    /// Terminal because a liveness transition detected off the pump thread can otherwise land after
+    /// the pump has exited and resurrect a stopped connector, as for
+    /// <see cref="Monitoring.SourceState.Stopped"/>.
     /// </remarks>
     public void MarkStopped() => SetOperational(false, terminal: true);
 
     /// <summary>
-    /// Records the most recent failure. Sticky: it survives recovery, because a cleared error erases
-    /// the only evidence a transient fault ever happened.
+    /// Records the most recent failure. Sticky: it survives recovery and is cleared only by the next
+    /// <see cref="MarkStarted"/>.
     /// </summary>
     public void ReportError(Exception error)
     {
@@ -147,9 +140,8 @@ public class ConnectorMetrics
 
     private protected virtual void ResetTotals() => OutboundChanges.Reset();
 
-    // Only the latch is cleared. The operational flag is already false whenever a connector re-enters
-    // its loop, because ExecuteAsync marks stopped on the way out, and the transition timestamp is
-    // left alone so the pair keeps reading as "down since T" rather than inventing a new transition.
+    // Only the latch is cleared: the transition timestamp is left alone so the pair keeps reading as
+    // "down since T" rather than inventing a new transition.
     private void ResetLiveness()
     {
         SpinWait spin = default;
@@ -161,11 +153,8 @@ public class ConnectorMetrics
                 return;
             }
 
-            // Compare-exchange rather than a blind Interlocked.Exchange, so this shares the discipline
-            // every other write to the field follows: an exchange would overwrite whatever a
-            // concurrent transition had just written. Reference equality for the same reason as in
-            // SetOperational below: Liveness is a record, so == is value equality and would read a
-            // genuinely failed exchange as success.
+            // Reference equality, not Liveness's record-generated value equality: a failed exchange
+            // can hand back a value-equal instance, which == would read as success.
             var updated = current with { IsStopped = false };
             if (ReferenceEquals(Interlocked.CompareExchange(ref _liveness, updated, current), current))
             {
@@ -195,23 +184,16 @@ public class ConnectorMetrics
                 return;
             }
 
-            // The flag and its timestamp are swapped as one value, so every read of the record is
-            // internally consistent and the latch stays implementable without a lock. The timestamp
-            // moves only when the flag does, so latching the terminal bit on a connector that was
-            // never operational does not invent a transition.
-            //
-            // ticks is sampled before the loop, so a thread preempted between that sample and its
-            // successful exchange would otherwise stamp a moment older than a transition another
-            // thread already recorded, and the timestamp would move backwards. Clamping to the
-            // snapshot being replaced keeps it monotonic.
+            // The timestamp moves only when the flag does, so latching the terminal bit on a connector
+            // that was never operational does not invent a transition. ticks is sampled before the
+            // loop, so it is clamped to the snapshot being replaced: a thread preempted between the
+            // sample and its exchange would otherwise move the timestamp backwards.
             var updated = current.IsOperational == isOperational
                 ? current with { IsStopped = stopped }
                 : new Liveness(isOperational, Math.Max(ticks, current.ChangeTicks), stopped);
 
-            // Reference equality, not Liveness's record-generated value equality:
-            // Interlocked.CompareExchange compares by reference, so a genuinely failed exchange can
-            // hand back a different instance that happens to be value-equal to the one this loop read,
-            // and an == check would read that failure as success and silently drop the update.
+            // Reference equality, not Liveness's record-generated value equality: a failed exchange
+            // can hand back a value-equal instance, which == would read as success.
             if (ReferenceEquals(Interlocked.CompareExchange(ref _liveness, updated, current), current))
             {
                 return;

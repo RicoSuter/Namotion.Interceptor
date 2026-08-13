@@ -32,10 +32,9 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     private readonly Lock _stateLock = new();
 
-    // The state and its two timestamps are swapped as one value. Held in separate fields, a reader can
-    // see the new state beside the previous timestamp and report a stale duration that never happened.
-    // Carrying LastSynchronizedAt here is also what satisfies its interface contract that the stamp is
-    // visible before State becomes Stopped: they are published by the same write.
+    // The state and its two timestamps are swapped as one value: in separate fields a reader can see
+    // the new state beside the previous timestamp, and LastSynchronizedAt has to be visible before
+    // State becomes Stopped.
     private sealed record SourceStateSnapshot(
         SourceState State, DateTimeOffset ChangeTime, DateTimeOffset? LastSynchronizedAt);
 
@@ -60,7 +59,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     }
 
     // A constructor initializer cannot reference this, so the metrics instance is threaded through
-    // here: it has to reach both base(...) and the narrowed Metrics property as the same object.
+    // here to reach both base(...) and the narrowed Metrics property as the same object.
     private SubjectSourceBase(
         IInterceptorSubjectContext context,
         ILogger logger,
@@ -82,8 +81,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         // disabled, and those connect/reconnect-window writes are dropped rather than reconciled.
         if (writeRetryQueueSize > 0)
         {
-            // Through the local rather than the property, so the depth provider neither captures a
-            // half-constructed this nor needs a null-forgiving read of a nullable property.
             var writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger, metrics.OutboundRetries);
             WriteRetryQueue = writeRetryQueue;
 
@@ -106,13 +103,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// Gets the write side of this source's diagnostics, narrowed to <see cref="SourceMetrics"/>.
     /// </summary>
     /// <remarks>
-    /// A derived source must not register on <see cref="Diagnostics.ConnectorMetrics.OutboundChanges"/>
-    /// or on <see cref="SourceMetrics.OutboundRetries"/> and
-    /// <see cref="SourceMetrics.InboundBuffer"/>: this base owns all three, and re-registers the
-    /// outbound change queue on every connect attempt. A second live registration makes that
-    /// <see cref="Diagnostics.QueueMetrics.Register"/> throw, which the retry loop catches and reports
-    /// before trying again and throwing again, so the source never connects. The servers register their
-    /// own processor because they own their metrics outright; a source does not.
+    /// A derived source must not register on <see cref="Diagnostics.ConnectorMetrics.OutboundChanges"/>,
+    /// <see cref="SourceMetrics.OutboundRetries"/> or <see cref="SourceMetrics.InboundBuffer"/>: this
+    /// base owns all three, and a second live registration makes
+    /// <see cref="Diagnostics.QueueMetrics.Register"/> throw.
     /// </remarks>
     protected new SourceMetrics Metrics { get; }
 
@@ -223,11 +217,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     }
 
     /// <inheritdoc />
-    /// <remarks>
-    /// The base class stamps the start epoch, records a fault and forces liveness false around this.
-    /// The per-attempt failures the retry loop below swallows never reach it, so they are reported
-    /// explicitly.
-    /// </remarks>
     protected sealed override async Task RunAsync(CancellationToken stoppingToken)
     {
         // Inside the try, so the finally below still publishes Stopped when startup fails. Outside it, a
@@ -308,10 +297,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         maxQueueDepth: null,
                         logger: _logger);
 
-                    // Registered after construction and released in the finally below, so the retry
-                    // loop's next attempt can register its own processor: a second Register while one
-                    // is still live throws. The using above still disposes the processor if Register
-                    // itself throws.
+                    // Released in the finally below so the retry loop's next attempt can register its
+                    // own processor: a second Register while one is still live throws.
                     Metrics.OutboundChanges.Register(
                         () => processor.QueueDepth, () => processor.DropCount, capacity: null);
                     try
@@ -320,9 +307,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     }
                     finally
                     {
-                        // Runs before the using disposes the processor, so no reader can call into a
-                        // disposed one. This narrows the race rather than closing it, which is safe
-                        // only because the processor's queue and drop count survive its disposal.
+                        // Narrows rather than closes the race with a concurrent reader, which is safe
+                        // only because the processor's queue depth and drop count survive its disposal.
                         Metrics.OutboundChanges.Deregister();
                     }
                 }
@@ -333,11 +319,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                 catch (Exception ex)
                 {
                     // The base class only sees exceptions that leave RunAsync, and this loop swallows
-                    // every per-attempt failure. Without this, a source that can never connect would
-                    // report no error at all. A failure the stop itself caused is left unrecorded: the
-                    // clause above only covers the cancellation, not the arbitrary exception a
-                    // connection torn down mid-connect raises, and recording that would overwrite the
-                    // genuine fault for good.
+                    // every per-attempt failure, so a source that can never connect would otherwise
+                    // report no error at all.
                     if (!IsExpectedShutdown(stoppingToken))
                     {
                         Metrics.ReportError(ex);
@@ -361,8 +344,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     {
         if (WriteRetryQueue is null)
         {
-            // Without a retry queue there is nowhere to park a failed write, so it is discarded.
-            // Attributed to OutboundRetries, which reports capacity 0 in this configuration.
+            // Discards are attributed to OutboundRetries, which reports capacity 0 here.
             try
             {
                 var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
@@ -375,16 +357,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             }
             catch (OperationCanceledException)
             {
-                // Unreachable today: WriteChangesInBatchesAsync reports cancellation as a failed result,
-                // which the shutdown filter above excludes from the loss accounting. Kept so a future
-                // write path that throws instead is not counted by the catch-all below.
+                // Ahead of the catch-all below, so a cancellation is never counted as a dropped write.
                 throw;
             }
             catch (Exception e)
             {
-                // Defensive: WriteChangesInBatchesAsync turns a throwing source into a failed
-                // WriteResult, so nothing reaches here today. Counted anyway, because a write that
-                // escapes as an exception is still a write this source has thrown away.
                 Metrics.OutboundRetries.AddDropped(changes.Length);
                 _logger.LogError(e, "Failed to write changes to source.");
             }
@@ -425,18 +402,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// Whether a failure is nothing more than the host stopping while the work was in flight.
     /// </summary>
     /// <remarks>
-    /// Decided by the token rather than by the exception type, because a stop tears down connections
-    /// and in-flight requests and the failure that produces can be any exception, while
+    /// Decided by the token rather than by the exception type, because a stop tears down connections and
+    /// the failure that produces can be any exception, while
     /// <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/> reports even the cancellation
     /// itself as a failed <see cref="WriteResult"/> rather than throwing it.
-    /// <para>
-    /// Two paths need it. Unfiltered, every graceful stop that caught a write in flight would add the
-    /// whole batch to <see cref="Diagnostics.QueueDiagnostics.TotalDropped"/>, and an operator who sees
-    /// that counter jump at every restart learns to ignore it; and the retry loop would record the
-    /// teardown as this source's last error over the genuine fault that made it fail, which is sticky
-    /// and cannot be cleared because a stopped source does not start again. Matches the decision in
-    /// <see cref="SubjectConnectorBase.ExecuteAsync"/>: an expected shutdown is not a fault.
-    /// </para>
     /// </remarks>
     private static bool IsExpectedShutdown(CancellationToken cancellationToken) =>
         cancellationToken.IsCancellationRequested;
@@ -466,12 +435,9 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     internal void DrainOwnedWritesToRetryQueue(PropertyChangeQueueSubscription subscription)
     {
         // No retry queue: still drain the subscription to empty it, but there is nothing to reconcile.
-        // Deliberately uncounted. The subscription carries every committed change in the process,
-        // including other sources' properties and this source's own inbound applies, so counting the
-        // discards honestly means running the same ownership filter the branch below runs, per change,
-        // on a path that exists only when the retry queue is disabled and that has nothing to do with
-        // the result. The cost buys a number that changes no decision: the configuration itself is what
-        // says these writes are being thrown away.
+        // The discards are deliberately uncounted: the subscription carries every committed change in
+        // the process, so attributing them would mean running the ownership filter of the branch below
+        // per change, on a path that exists only when the retry queue is disabled.
         if (WriteRetryQueue is null)
         {
             while (subscription.TryDequeueImmediate(out _))
@@ -569,9 +535,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
         var restored = 0;
         var sent = 0;
-        // Superseded is counted apart from dropped and failed because only those two are added to
-        // OutboundRetries.TotalDropped: reporting them as one number leaves an operator correlating the
-        // log with that counter looking at two figures that disagree.
+        // Counted apart from dropped and failed, because only those two are added to
+        // OutboundRetries.TotalDropped.
         var superseded = 0;
         var dropped = 0;
         var failed = 0;
@@ -586,7 +551,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                 if (!ChangeDeliveryFilter.IsCurrent(in change, DeliveryRule))
                 {
                     // A later local commit supersedes it, and that commit's change is delivered in its
-                    // place. Deliberately not counted as dropped: nothing is lost.
+                    // place.
                     superseded++;
                     continue;
                 }
@@ -718,9 +683,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
             var now = DateTimeOffset.UtcNow;
 
-            // Stamped only on the way into Synchronized and never cleared, so it answers "did a good
-            // period ever begin" for a source that has since stopped. ChangeTime answers the other
-            // question, when the current state began.
+            // Never cleared, so it still answers whether a good period ever began.
             var lastSynchronizedAt = newState == SourceState.Synchronized ? now : current.LastSynchronizedAt;
 
             Volatile.Write(ref _stateSnapshot, new SourceStateSnapshot(newState, now, lastSynchronizedAt));
@@ -752,10 +715,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     public override void Dispose()
     {
         // Publish the final Stopped while still registered, so a dispose without a stop is not silent.
-        // Deliberately before base.Dispose forces liveness false, which leaves a sub-microsecond window
-        // where a reader sees Stopped beside IsOperational true. The reverse order has an equally small
-        // window and loses the property this ordering buys: publishing Stopped while still registered is
-        // what makes a dispose-without-stop reach monitors at all.
         TransitionStateTo(SourceState.Stopped);
 
         // Take-and-clear in one step, so a concurrent StartAsync unwinding through its own local

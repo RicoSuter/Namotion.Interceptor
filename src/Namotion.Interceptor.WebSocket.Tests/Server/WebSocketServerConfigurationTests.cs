@@ -165,9 +165,8 @@ public class WebSocketServerConfigurationTests
     [Fact]
     public void WhenHeartbeatIntervalIsPositiveButBelowTheMinimum_ThenValidateThrows()
     {
-        // Arrange
-        // A heartbeat is broadcast to every connected client, so a sub-second interval floods the
-        // connections rather than probing them. Zero stays valid and means disabled.
+        // Arrange - a heartbeat is broadcast to every connected client, so a sub-second interval
+        // floods the connections rather than probing them.
         var configuration = new WebSocketServerConfiguration { HeartbeatInterval = TimeSpan.FromMilliseconds(500) };
 
         // Act & Assert

@@ -5,11 +5,6 @@ namespace Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 /// <summary>
 /// Thread-safe metrics for read-after-write operations.
 /// </summary>
-/// <remarks>
-/// Owned by the client source rather than by <c>ReadAfterWriteManager</c>, which is rebuilt on every
-/// connect attempt including failed ones. Held there, these totals would sit near zero during a
-/// reconnect storm, which is exactly when they matter.
-/// </remarks>
 internal sealed class ReadAfterWriteMetrics : IResettableMetrics
 {
     private long _scheduled;

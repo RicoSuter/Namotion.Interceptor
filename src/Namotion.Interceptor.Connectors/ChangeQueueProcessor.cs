@@ -82,10 +82,8 @@ public class ChangeQueueProcessor : IDisposable
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
     /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
     /// the first flush, where it would end delivery for this processor's lifetime. Also thrown when
-    /// <paramref name="maxQueueDepth"/> is zero or negative on the buffered path, since a bound has to
-    /// leave room for at least one change: pass null for an unbounded queue, or a
-    /// <paramref name="bufferTime"/> of zero for the immediate path, which buffers nothing and where
-    /// the bound is neither read nor validated.</exception>
+    /// <paramref name="maxQueueDepth"/> is zero or negative and <paramref name="bufferTime"/> is
+    /// greater than zero, since a bound has to leave room for at least one change.</exception>
     public ChangeQueueProcessor(
         object? source,
         IInterceptorSubjectContext context,
@@ -156,10 +154,8 @@ public class ChangeQueueProcessor : IDisposable
         }
     }
 
-    // Only on the buffered path, so that the remedy the message names is one the caller can actually
-    // take: a buffer time of zero writes each change as it is dequeued and never fills the queue this
-    // bounds, so the bound is not read there and rejecting it would leave the message pointing at a
-    // combination that throws just the same.
+    // Only on the buffered path: a buffer time of zero writes each change as it is dequeued and never
+    // fills the queue this bounds, so the bound is not read there.
     private static void ValidateMaxQueueDepth(int? maxQueueDepth, TimeSpan bufferTime)
     {
         if (maxQueueDepth is <= 0 && bufferTime > TimeSpan.Zero)

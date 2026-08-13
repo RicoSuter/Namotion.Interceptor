@@ -8,18 +8,12 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// <remarks>
 /// <see cref="ConnectorDiagnostics.IsOperational"/> means the client has a live session with its
 /// subscriptions set up. It stays false for the whole address space browse and subscription
-/// creation, which on a large server takes minutes. Which step raises it depends on how the session
-/// came about: the first health check tick on an initial connect, the completed subscription
-/// transfer on an SDK reconnect, and the completed state reload on a manual reconnect. It drops
-/// whenever the session is lost, killed or torn down, and whenever a connect attempt ends.
-/// <para>
-/// True does not mean the model is in sync, and the two are not ordered against each other: the
-/// initial value read can run either side of the rise on an initial connect, and on a manual
-/// reconnect the reload always finishes first. While that read runs the source state is
-/// <see cref="Namotion.Interceptor.Connectors.Monitoring.SourceState.Synchronizing"/>. Read the two
-/// together to tell a network outage from a connected client still loading. See
+/// creation, which on a large server takes minutes, and drops whenever the session is lost, killed
+/// or torn down. True does not mean the model is in sync: while the initial value read runs the
+/// source state is
+/// <see cref="Namotion.Interceptor.Connectors.Monitoring.SourceState.Synchronizing"/>, so read the
+/// two together to tell a network outage from a connected client still loading. See
 /// docs/connectors-monitoring.md.
-/// </para>
 /// </remarks>
 public sealed class OpcUaClientDiagnostics : SourceDiagnostics
 {
@@ -33,17 +27,15 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     }
 
     /// <summary>
-    /// Gets the session manager every block below reads through, or <c>null</c> once it has been
+    /// Gets the session manager every member below reads through, or <c>null</c> once it has been
     /// disposed. The source keeps its field pointing at the manager of the attempt that just ended,
-    /// so without this check the blocks would report the subscriptions, polling items and pending
-    /// reads of a session that is already gone for the whole retry delay.
+    /// so without this check the members would report a session that is already gone.
     /// </summary>
     private Connection.SessionManager? ActiveSessionManager =>
         _source.SessionManager is { IsDisposed: false } sessionManager ? sessionManager : null;
 
     /// <summary>
-    /// Gets a value indicating whether the client is currently attempting to reconnect. A distinct
-    /// sub-state of not being operational, not a second spelling of it.
+    /// Gets a value indicating whether the client is currently attempting to reconnect.
     /// </summary>
     public bool IsReconnecting => ActiveSessionManager?.IsReconnecting ?? false;
 
@@ -72,11 +64,8 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     /// set up yet, or the client is between connect attempts.
     /// </summary>
     /// <remarks>
-    /// This reads through the session manager and stops seeing it the moment that manager is
-    /// disposed, which every way out of a connect attempt does, so the block is <c>null</c> for the
-    /// whole retry delay rather than only before the first session. The underlying totals are owned
-    /// by the source and survive that, so they reappear at their previous values once a session
-    /// exists again.
+    /// The underlying totals are owned by the source rather than by the session, so they reappear at
+    /// their previous values once a session exists again.
     /// </remarks>
     public PollingDiagnostics? Polling => ActiveSessionManager?.PollingDiagnostics;
 
@@ -85,17 +74,15 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     /// been set up yet, or the client is between connect attempts.
     /// </summary>
     /// <remarks>
-    /// Null between connect attempts for the same reason as <see cref="Polling"/>, and its totals
-    /// survive the same way.
+    /// Its totals survive between attempts in the same way as <see cref="Polling"/>.
     /// </remarks>
     public ReadAfterWriteDiagnostics? ReadAfterWrite => ActiveSessionManager?.ReadAfterWriteDiagnostics;
 }
 
 /// <summary>
 /// The client's reconnection history. Every counter is monotonic since
-/// <see cref="ConnectorDiagnostics.StartTime"/>. <see cref="LastConnectionTime"/> is not a counter
-/// and deliberately survives the epoch reset, because it records a discrete past event rather than
-/// an amount accumulated during the run.
+/// <see cref="ConnectorDiagnostics.StartTime"/>, while <see cref="LastConnectionTime"/> deliberately
+/// survives the epoch reset because it records a past event rather than an accumulated amount.
 /// </summary>
 public sealed class ReconnectDiagnostics
 {
@@ -107,9 +94,7 @@ public sealed class ReconnectDiagnostics
     }
 
     /// <summary>
-    /// Gets when the client last established a session, or <c>null</c> if it never has. Records a
-    /// discrete past event and survives the disconnection that follows it, which is what the
-    /// <c>Last</c> prefix means here.
+    /// Gets when the client last established a session, or <c>null</c> if it never has.
     /// </summary>
     public DateTimeOffset? LastConnectionTime => _metrics.LastConnectedAt;
 
@@ -185,9 +170,7 @@ public sealed class PollingDiagnostics
     public bool IsCircuitBreakerOpen => _pollingManager.IsCircuitOpen;
 
     /// <summary>
-    /// Gets whether the polling loop is currently running. This is a sub-component's own state, not
-    /// a second spelling of <see cref="ConnectorDiagnostics.IsOperational"/>, which describes the
-    /// connector as a whole.
+    /// Gets whether the polling loop is currently running.
     /// </summary>
     public bool IsRunning => _pollingManager.IsRunning;
 }
@@ -195,10 +178,6 @@ public sealed class PollingDiagnostics
 /// <summary>
 /// The verification reads issued after an outbound write to a discrete property.
 /// </summary>
-/// <remarks>
-/// Every counter here describes a read that follows a write. The block name contains both words, so
-/// each member names its noun to keep a failed verification read from reading as a failed write.
-/// </remarks>
 public sealed class ReadAfterWriteDiagnostics
 {
     private readonly ReadAfterWrite.ReadAfterWriteManager _manager;

@@ -9,15 +9,13 @@ using static Namotion.Interceptor.OpcUa.Tests.Client.ClientSourceTestFactory;
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
 /// <summary>
-/// Covers what the OPC UA client reports about itself before and around a session, which is
-/// everything the diagnostics surface answers without a server on the other end.
+/// Covers what the OPC UA client reports about itself without a server on the other end.
 /// </summary>
 public class OpcUaClientDiagnosticsTests
 {
     /// <summary>
     /// A compile-level pin of the member tree plus the defaults a fresh <c>SourceMetrics</c> and a
-    /// null session manager report, not behavioural coverage: nothing here can fail while the members
-    /// exist and none of them throws on a client that has no session.
+    /// null session manager report, not behavioural coverage.
     /// </summary>
     [Fact]
     public async Task WhenNeverConnected_ThenEveryGetterAnswersWithoutThrowing()
@@ -89,14 +87,9 @@ public class OpcUaClientDiagnosticsTests
     }
 
     /// <summary>
-    /// Runs the real client rather than a metrics instance of its own, so it fails if the retry loop
-    /// stops writing to the shared metrics. A diagnostics view built over a second
-    /// <see cref="SourceMetrics"/> would keep reporting no error at all, which is what this reads back.
+    /// Runs the real client rather than a <see cref="SourceMetrics"/> instance of its own, so it
+    /// fails if the retry loop stops writing to the shared metrics.
     /// </summary>
-    /// <remarks>
-    /// Left in the unit suite rather than tagged Integration: the connect is refused on the first
-    /// loopback packet, so it needs no server, writes nothing to disk, and costs milliseconds.
-    /// </remarks>
     [Fact]
     public async Task WhenTheClientCannotConnectAndLaterRecovers_ThenLastErrorSurvives()
     {
@@ -115,8 +108,8 @@ public class OpcUaClientDiagnosticsTests
                 timeout: TimeSpan.FromSeconds(60),
                 message: "A client that cannot reach its server should report the failure.");
 
-            // The recorded failure is the connect itself, not something the configuration rejected
-            // before the client ever reached the wire.
+            // The recorded failure is the connect itself, not a configuration the client rejected
+            // before it reached the wire.
             var error = source.Diagnostics.LastError;
             Assert.Contains("Failed to discover OPC UA endpoints", error!.Message);
 
@@ -149,8 +142,6 @@ public class OpcUaClientDiagnosticsTests
         // Assert
         Assert.True(claimed);
         Assert.Equal(1, whileClaimed);
-
-        // And it falls again, because it is a gauge rather than a counter.
         Assert.Equal(0, afterRelease);
     }
 
@@ -194,7 +185,7 @@ public class OpcUaClientDiagnosticsTests
     /// <summary>
     /// Spins until the wall clock reports a new tick, so a timestamp stamped after this call cannot
     /// land on the same value as one stamped before it. A condition rather than a fixed delay,
-    /// because the clock's resolution differs per platform and is coarse on Windows.
+    /// because the clock resolution is coarse on Windows.
     /// </summary>
     private static void WaitForClockTick()
     {

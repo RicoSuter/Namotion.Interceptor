@@ -1,14 +1,11 @@
 namespace Namotion.Interceptor.Connectors.Tests;
 
-/// <summary>
-/// Helper methods for tests whose assertions depend on the resolution of the wall clock.
-/// </summary>
 internal static class ClockTestHelpers
 {
     /// <summary>
     /// Spins until the wall clock reports a new tick, so a timestamp stamped after this call cannot
-    /// land on the same value as one stamped before it. A condition rather than a fixed delay, because
-    /// the clock's resolution differs per platform and is coarse on Windows.
+    /// land on the same value as one stamped before it. A condition rather than a fixed delay,
+    /// because the clock's resolution differs per platform and is coarse on Windows.
     /// </summary>
     internal static void WaitForClockTick()
     {

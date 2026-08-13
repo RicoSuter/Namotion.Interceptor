@@ -17,8 +17,8 @@ public interface ISubjectConnector
     /// Gets what this connector reports about the transport it drives.
     /// </summary>
     /// <remarks>
-    /// Answers "what is the transport doing". Whether the model can be trusted is a separate question
-    /// answered by <see cref="ISubjectSource.State"/>.
+    /// Whether the model can be trusted is a separate question, answered by
+    /// <see cref="ISubjectSource.State"/>.
     /// </remarks>
     ConnectorDiagnostics Diagnostics { get; }
 }

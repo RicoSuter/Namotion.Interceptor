@@ -14,9 +14,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
 /// <summary>
 /// Covers where the OPC UA client raises and drops its liveness latch. The latch moves only when
-/// something calls for it, so every path that takes the session away owes a lowering call, and a
-/// missing one leaves the client claiming to serve a session it no longer has until some later timer
-/// happens to correct it.
+/// something calls for it, so every path that takes the session away owes a lowering call.
 /// </summary>
 [Trait("Category", "Integration")]
 public class OpcUaClientLivenessTests
@@ -30,8 +28,8 @@ public class OpcUaClientLivenessTests
 
     /// <summary>
     /// The connect attempt reaches the health check loop, which raises liveness, and only then fails
-    /// in the initial state load. The retry loop records that failure but touches no liveness, so the
-    /// listen lifetime's own teardown is the only thing that can drop it.
+    /// in the initial state load. The retry loop touches no liveness, so the listen lifetime's own
+    /// teardown is the only thing that can drop it.
     /// </summary>
     [Fact]
     public async Task WhenTheAttemptFailsAfterTheSessionIsUp_ThenLivenessDropsWithTheAttempt()
@@ -54,8 +52,8 @@ public class OpcUaClientLivenessTests
         using var loggerFactory = CreateClientLoggerFactory(logger);
         var root = new TestRoot(CreateClientContext());
 
-        // Parks the load in the converter until the arming below, so the failure it goes on to cause
-        // lands on a client that is already reporting itself as serving.
+        // Parks the load in the converter until the arming below, so the failure it causes lands on a
+        // client that is already reporting itself as serving.
         using var converter = new PoisonedLoadConverter(waitForArming: TimeSpan.FromSeconds(15));
 
         var configuration = CreateClientConfiguration(
@@ -103,8 +101,7 @@ public class OpcUaClientLivenessTests
     /// <summary>
     /// The SDK's own reconnect raises liveness the moment the subscription transfer completes, and
     /// the full state sync that transfer schedules runs on the next health check tick. A sync that
-    /// fails clears the session, so the tick running it owes the drop: nothing looks at liveness
-    /// again until the tick after it, a whole health check interval later.
+    /// fails clears the session, so the tick running it owes the drop.
     /// </summary>
     [Fact]
     public async Task WhenTheStateSyncAfterAnSdkReconnectFails_ThenLivenessDropsWithTheClearedSession()
@@ -136,14 +133,13 @@ public class OpcUaClientLivenessTests
             loggerFactory,
             converter,
 
-            // Wide enough that the rise asserted below cannot be a health check tick's, that the tick
-            // running the failed sync is the one the drop is asserted against, and that reconnection
-            // stall detection (two ticks) cannot take the recovery away from the SDK.
+            // Wide enough that the rise asserted below cannot be a health check tick's, and that
+            // reconnection stall detection (two ticks) cannot take the recovery away from the SDK.
             healthCheckInterval: TimeSpan.FromSeconds(60),
 
             // The outage has to be detected while the server is still down, so the SDK's first
-            // reconnect attempt fails and every attempt after it recreates the session instead of
-            // reactivating the old one. Recreating is what carries the subscriptions across.
+            // reconnect attempt fails and every attempt after it recreates the session, which is what
+            // carries the subscriptions across.
             keepAliveInterval: TimeSpan.FromSeconds(1));
 
         await using var source = new OpcUaSubjectClientSource(
@@ -162,10 +158,9 @@ public class OpcUaClientLivenessTests
                 timeout: TimeSpan.FromSeconds(60),
                 message: "The first health check tick should report the session as operational");
 
-            // Act - a restart rather than a transport disconnect. A disconnect leaves the session
-            // valid on the server, so the SDK reactivates that same session and the client abandons
-            // the preserved one instead of transferring it. A restart invalidates it, which makes the
-            // SDK replace the session and carry the subscriptions across to the new one.
+            // Act - a restart rather than a transport disconnect: a disconnect leaves the session
+            // valid on the server, so the SDK reactivates it instead of replacing it and carrying the
+            // subscriptions across.
             converter.Arm();
             await server.RestartAsync();
 
@@ -181,8 +176,6 @@ public class OpcUaClientLivenessTests
                 timeout: TimeSpan.FromSeconds(30),
                 message: "The completed subscription transfer should raise liveness again");
 
-            // And taken back by the tick that runs the failed full state sync, which clears the
-            // session the rise was standing on.
             await AsyncTestHelpers.WaitUntilAsync(
                 () => !source.Diagnostics.IsOperational,
                 timeout: TimeSpan.FromSeconds(75),
@@ -236,8 +229,8 @@ public class OpcUaClientLivenessTests
 
         try
         {
-            // Waited out rather than killed mid-load, so a load that fails on the missing session
-            // cannot be what tears the attempt down and drops liveness for its own reasons.
+            // Waited out rather than killed mid-load, so a load failing on the missing session cannot
+            // be what tears the attempt down and drops liveness.
             await source.StartAsync(CancellationToken.None);
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.State == SourceState.Synchronized,
@@ -252,8 +245,8 @@ public class OpcUaClientLivenessTests
             // Act
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
 
-            // Assert - the kill clears the session before it returns, so liveness has to be gone with
-            // it rather than a health check interval later.
+            // Assert - the kill clears the session before it returns, so liveness is already gone
+            // rather than dropping a health check interval later.
             Assert.False(source.Diagnostics.IsOperational);
         }
         finally
@@ -309,25 +302,21 @@ public class OpcUaClientLivenessTests
     };
 
     /// <summary>
-    /// Hands one property a value of the wrong CLR type once armed, which makes the state load that
-    /// converts it throw where it writes the read values into the model.
+    /// Hands one property a value of the wrong CLR type once armed, which makes the state load throw
+    /// where it writes the read values into the model. Deliberately never throws itself: the
+    /// subscription callback converts through the same instance and swallows its own failures, so a
+    /// throwing converter would fail there instead of failing the load.
     /// </summary>
-    /// <remarks>
-    /// Deliberately never throws itself. The subscription callback converts through the same instance
-    /// on the SDK's publish thread, and the writes it makes swallow their own failures, so a throwing
-    /// converter would fail there instead of failing the load.
-    /// </remarks>
     private sealed class PoisonedLoadConverter : OpcUaValueConverter, IDisposable
     {
         private readonly ManualResetEventSlim _armed = new(false);
         private readonly TimeSpan _waitForArming;
-        private int _poisonWasHandedOut; // 0 = false, 1 = true (written from the load and callback threads)
+        private int _poisonWasHandedOut; // written from the load and the callback threads
 
         /// <param name="waitForArming">
         /// How long a conversion of the poisoned property parks waiting to be armed. Zero converts
         /// normally until <see cref="Arm"/> lands; a positive value holds the load there, which is
-        /// what makes it fail on a client that already reports itself as serving. Bounded either way,
-        /// so an assumption that stops holding fails the assertions rather than hanging the run.
+        /// what makes it fail on a client that already reports itself as serving.
         /// </param>
         internal PoisonedLoadConverter(TimeSpan waitForArming)
         {
@@ -335,8 +324,7 @@ public class OpcUaClientLivenessTests
         }
 
         /// <summary>
-        /// Gets whether the poison was handed out at least once, which is what tells a failed load
-        /// caused by this converter from one caused by something else.
+        /// Tells a failed load caused by this converter from one caused by something else.
         /// </summary>
         internal bool PoisonWasHandedOut => Volatile.Read(ref _poisonWasHandedOut) == 1;
 

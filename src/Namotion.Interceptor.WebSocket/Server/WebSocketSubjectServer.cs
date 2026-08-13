@@ -14,14 +14,13 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// Standalone WebSocket server that exposes subject updates to connected clients.
 /// Uses Kestrel for cross-platform support without elevation.
 /// On Kill, restarts both the HTTP listener and the processing layer (matching real crash behavior).
-/// A Kill that arrives while the server is between attempts, such as during the restart backoff, has
-/// no attempt to cancel and is dropped: the call returns successfully having done nothing.
+/// A Kill that arrives between attempts, such as during the restart backoff, has no attempt to cancel
+/// and does nothing.
 /// For embedding in an existing ASP.NET app, use MapWebSocketSubjectHandler extension instead.
 /// </summary>
 public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncDisposable
 {
-    // Matches the MQTT broker's restart delay. Without it a listener that cannot bind rebuilds and
-    // rebinds Kestrel in a tight loop.
+    // Matches the MQTT broker's restart delay.
     private static readonly TimeSpan RestartBackoff = TimeSpan.FromSeconds(5);
 
     private readonly WebSocketSubjectHandler _handler;
@@ -67,9 +66,8 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
         switch (faultType)
         {
             case FaultType.Kill:
-                // With no current attempt the loop is between attempts, so there is nothing to kill and
-                // nothing is signalled back: the teardown and the backoff this fault stands for have
-                // already happened or are already under way.
+                // No current attempt means the loop is between attempts, where the teardown and backoff
+                // this fault stands for are already under way.
                 var attempt = _currentAttempt;
                 if (attempt is not null)
                 {
@@ -95,11 +93,8 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
             _currentAttempt = attempt;
             var linkedToken = attempt.Token;
 
-            // Set by the catch below only, which is where a listener that cannot start or bind lands.
-            // A force-kill and a processing layer that ended without throwing both restart at once: the
-            // trade is a few seconds of downtime against no throttle at all, and neither of those two
-            // repeats fast enough to need one. A processing layer that faults does back off, because
-            // its exception reaches that catch like any other.
+            // Set by the catch below only: a force-kill and a processing layer that ended without
+            // throwing both restart at once, because neither repeats fast enough to need a throttle.
             var restartBackoff = TimeSpan.Zero;
 
             try
@@ -118,23 +113,17 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                     using var changeQueueProcessor = _handler.CreateChangeQueueProcessor(_logger);
                     try
                     {
-                        // Registered inside the try whose finally releases it, so the next restart can
-                        // register its own processor: a second Register while one is still live throws.
-                        // A Register that throws has registered nothing, so what the finally then
-                        // releases is the foreign registration that was already live, which is how this
-                        // attempt's failure still leaves the next one able to register. The embedded
-                        // mode's own processor deliberately does not register, so it cannot wire itself
-                        // into this server's metrics.
+                        // Deregistered in the finally below so the next restart can register its own
+                        // processor: a second Register while one is still live throws.
                         Metrics.OutboundChanges.Register(
                             () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
 
                         var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);
                         var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedToken);
 
-                        // The filter below cannot be narrowed to the force-kill the way the OPC UA and
-                        // MQTT servers narrow theirs, because cancelling the attempt makes a
-                        // cancellation the normal exit path here. The exception is kept instead and
-                        // judged below, where an unexpected completion is actually identified.
+                        // Cancelling the attempt makes a cancellation the normal exit path here, so the
+                        // filter below cannot be narrowed to the force-kill and the exception is kept
+                        // and judged afterwards instead.
                         OperationCanceledException? completionCancellation = null;
                         try
                         {
@@ -159,25 +148,15 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                         // linkedToken was canceled (Kill) or completed unexpectedly, so restart.
                         if (attempt.WasForceKilled)
                         {
-                            // Deliberately not reported through ReportError: it is an injected fault the
-                            // server recovers from by restarting, and handling it here is also what
-                            // keeps it from reaching the base class, which would record a cancellation
-                            // the stopping token did not cause as a genuine fault.
+                            // Not reported as an error: an injected fault the server recovers from by
+                            // restarting.
                             _logger.LogWarning("WebSocket server force-killed. Restarting...");
                         }
                         else
                         {
-                            // Neither the host stopping nor an injected fault, so the processing layer
-                            // ended on its own. The loop restarts instead of leaving RunAsync, so the
-                            // base class never sees it and without this the server would restart with
-                            // nothing explaining why.
-                            //
-                            // Neither task surfaces the cancellation raised above to stop the sibling:
-                            // the change processor returns because its dequeue reports the cancellation
-                            // rather than throwing it, and the heartbeat loop swallows its own. So on
-                            // this path the captured value is normally null and the recorded error
-                            // carries no inner exception. It is kept for the case where one of them does
-                            // throw, where it names the cancellation that ended the layer.
+                            // Nothing outside this loop reports its failures. The captured cancellation
+                            // is normally null, because neither task surfaces the one raised above to
+                            // stop its sibling.
                             var error = new InvalidOperationException(
                                 "WebSocket server processing completed unexpectedly.", completionCancellation);
 
@@ -187,19 +166,14 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                     }
                     finally
                     {
-                        // Runs before the using disposes the processor, so no reader can call into a
-                        // disposed one. Deregistering with nothing live is a no-op fold.
                         Metrics.OutboundChanges.Deregister();
                     }
                 }
                 finally
                 {
-                    // Inside the try the catches below guard, like the MQTT broker's teardown: disposing
-                    // the WebApplication disposes its whole service provider, and a singleton that
-                    // throws on disposal would otherwise leave RunAsync and end the connector.
-                    //
-                    // First in the teardown, so a throw further down cannot leave a server that has
-                    // stopped accepting connections reporting that it is serving.
+                    // Inside the try the catches below guard: disposing the WebApplication disposes its
+                    // whole service provider, and a singleton that throws on disposal would otherwise
+                    // leave RunAsync and end the connector.
                     Metrics.MarkNotOperational();
 
                     await _handler.CloseAllConnectionsAsync().ConfigureAwait(false);
@@ -207,9 +181,8 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                     var app = _app;
                     if (app is not null)
                     {
-                        // Cleared before the teardown rather than after it, so a dispose that throws
-                        // cannot leave a half-torn-down app reachable for the next iteration to
-                        // overwrite. The local keeps the disposal below reachable.
+                        // Cleared before the teardown, so a dispose that throws cannot leave a
+                        // half-torn-down app reachable for the next iteration.
                         _app = null;
 
                         try
@@ -229,9 +202,8 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                         }
                         finally
                         {
-                            // In a finally, because a stop that fails for any other reason must not
-                            // skip the disposal: the app still holds the listening port, the field no
-                            // longer points at it, and every later bind would fail.
+                            // In a finally, because a stop that fails must not skip the disposal: the
+                            // app still holds the listening port and every later bind would fail.
                             await app.DisposeAsync().ConfigureAwait(false);
                         }
                     }
@@ -243,12 +215,9 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
             }
             catch (Exception ex)
             {
-                // The base class only sees exceptions that leave RunAsync, and this loop swallows every
-                // per-attempt failure. Without this, a server whose listener can never bind reports no
-                // error. A failure the stop itself caused is left unrecorded: the clause above only
-                // covers the cancellation, not the arbitrary exception a socket torn down mid-stop
-                // raises, and recording that would overwrite the genuine fault for good, because
-                // LastError is sticky and a stopped server does not start again.
+                // Nothing outside this loop reports its failures, but a stop tears the listener down
+                // with an arbitrary exception rather than a cancellation, so only the stopping token
+                // tells a shutdown apart from a genuine fault.
                 if (!stoppingToken.IsCancellationRequested)
                 {
                     Metrics.ReportError(ex);
@@ -273,7 +242,7 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
                     // The delay sits outside every catch above, so a stop landing here would otherwise
-                    // leave RunAsync as a cancellation and end the hosted service task canceled.
+                    // leave RunAsync as a cancellation.
                     break;
                 }
             }

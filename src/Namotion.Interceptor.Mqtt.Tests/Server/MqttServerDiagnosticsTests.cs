@@ -6,9 +6,8 @@ using Namotion.Interceptor.Tracking;
 namespace Namotion.Interceptor.Mqtt.Tests.Server;
 
 /// <summary>
-/// Pins the wiring between the broker and the diagnostics it publishes: that the diagnostics read the
-/// metrics the connector itself writes to, and that a broker which has never listened says so. The
-/// liveness transitions themselves need a bound port and are covered by
+/// Pins that the diagnostics read the metrics the connector itself writes to, and that a broker which
+/// has never listened says so. The liveness transitions need a bound port and are covered by
 /// <see cref="MqttServerLivenessTests"/>.
 /// </summary>
 public class MqttServerDiagnosticsTests
@@ -34,10 +33,6 @@ public class MqttServerDiagnosticsTests
         Assert.Null(diagnostics.Throughput.OutgoingPerSecond);
     }
 
-    /// <summary>
-    /// A diagnostics view built over a second <see cref="Connectors.Diagnostics.ConnectorMetrics"/>
-    /// would keep reporting no error at all, which is what this reads back.
-    /// </summary>
     [Fact]
     public async Task WhenTheBindAddressCannotBeParsed_ThenTheFailureReachesTheServerDiagnostics()
     {

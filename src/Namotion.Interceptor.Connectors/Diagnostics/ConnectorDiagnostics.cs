@@ -4,11 +4,11 @@ namespace Namotion.Interceptor.Connectors.Diagnostics;
 /// What a connector reports about the transport it drives. Read-only, lock-free, and no getter throws.
 /// </summary>
 /// <remarks>
-/// This answers "what is the transport doing". Whether the model can be trusted is a separate
-/// question answered by <see cref="ISubjectSource.State"/>, which describes the inbound direction
-/// only. Read them together to tell a network outage from a connected source still loading: the
-/// first is <see cref="IsOperational"/> false, the second is <see cref="IsOperational"/> true with a
-/// state of <see cref="Monitoring.SourceState.Synchronizing"/>. See docs/connectors-monitoring.md.
+/// This answers what the transport is doing. Whether the model can be trusted is a separate question
+/// answered by <see cref="ISubjectSource.State"/>, so read them together: a network outage is
+/// <see cref="IsOperational"/> false, while a connected source still loading is
+/// <see cref="IsOperational"/> true with a state of
+/// <see cref="Monitoring.SourceState.Synchronizing"/>. See docs/connectors-monitoring.md.
 /// </remarks>
 public class ConnectorDiagnostics
 {

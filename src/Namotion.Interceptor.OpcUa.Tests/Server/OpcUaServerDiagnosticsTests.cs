@@ -8,17 +8,15 @@ using Opc.Ua.Configuration;
 namespace Namotion.Interceptor.OpcUa.Tests.Server;
 
 /// <summary>
-/// Pins the wiring between the server and the diagnostics it publishes: that the diagnostics read the
-/// metrics the connector itself writes to, and that a server which has never served says so. The
-/// liveness transitions themselves need a running transport and are covered by
+/// Pins that the diagnostics read the metrics the connector itself writes to, and that a server which
+/// has never served says so. The liveness transitions need a running transport and are covered by
 /// <see cref="Integration.OpcUaServerLivenessTests"/>.
 /// </summary>
 public class OpcUaServerDiagnosticsTests
 {
     /// <summary>
     /// A compile-level pin of the member tree rather than behavioural coverage: every value asserted
-    /// here is what a fresh <c>ConnectorMetrics</c> reports, so this fails only if a member moves or
-    /// changes type. The transitions are covered by <see cref="Integration.OpcUaServerLivenessTests"/>.
+    /// here is what a fresh <c>ConnectorMetrics</c> reports.
     /// </summary>
     [Fact]
     public void WhenNeverStarted_ThenTheServerReportsNotOperational()
@@ -48,18 +46,16 @@ public class OpcUaServerDiagnosticsTests
         var throughput = server.Diagnostics.Throughput;
 
         // Assert
-        // A null rate means "this connector does not measure the direction", so it would mean the two
-        // counters the read and write paths feed never reached the metrics the diagnostics read. The
-        // rates themselves are 0.0 here: this server has never run, so nothing has been counted.
+        // A null rate means the connector does not measure that direction, so this pins both counters
+        // to the metrics the diagnostics read.
         Assert.NotNull(throughput.IncomingPerSecond);
         Assert.NotNull(throughput.OutgoingPerSecond);
     }
 
     /// <summary>
     /// The application instance is built outside the restart loop's own try, so a failure there leaves
-    /// the pump rather than being retried. It is the cheapest reachable failure and pins that the
-    /// diagnostics read the connector's own metrics: a diagnostics view built over a second
-    /// <c>ConnectorMetrics</c> would keep reporting no error at all.
+    /// the pump rather than being retried. It is the cheapest reachable failure that pins the
+    /// diagnostics to the connector's own metrics.
     /// </summary>
     [Fact]
     public async Task WhenTheServerCannotBuildItsApplication_ThenTheFailureReachesItsOwnDiagnostics()
@@ -80,13 +76,8 @@ public class OpcUaServerDiagnosticsTests
     /// <summary>
     /// The restart loop builds a new change queue processor per attempt and registers it against a
     /// QueueMetrics that permits one live registration at a time, so a missing release would make the
-    /// second attempt fail on the registration rather than on the transport. Read back through
-    /// <c>LastError</c>, which is the only place that distinguishes the two.
-    /// <para>
-    /// Tagged as an integration test because it drives the server's real exponential backoff and its
-    /// certificate store path, so it costs seconds of wall clock and its duration depends on the
-    /// backoff jitter.
-    /// </para>
+    /// second attempt fail on the registration rather than on the transport. <c>LastError</c> is the
+    /// only place that distinguishes the two.
     /// </summary>
     [Trait("Category", "Integration")]
     [Fact]

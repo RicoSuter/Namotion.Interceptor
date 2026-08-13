@@ -61,9 +61,8 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         // For a multi-connection server, all fault types are treated as force-kill.
         // There's no meaningful "soft disconnect" when the server has multiple clients.
         //
-        // With no current attempt the loop is between attempts, so there is nothing to kill and
-        // nothing is signalled back: the teardown and the backoff this fault stands for have already
-        // happened or are already under way.
+        // No current attempt means the loop is between attempts, where the teardown and backoff this
+        // fault stands for are already under way.
         var attempt = _currentAttempt;
         if (attempt is not null)
         {
@@ -95,9 +94,8 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     {
     }
 
-    // A constructor initializer cannot reference this, so the counters are created here and threaded
-    // through: the same two instances have to reach both base(...) and the properties the write paths
-    // feed.
+    // The counters are threaded through because the same two instances have to reach both base(...)
+    // and the properties the write paths feed, and a constructor initializer cannot reference this.
     private OpcUaSubjectServer(
         IInterceptorSubject subject,
         OpcUaServerConfiguration configuration,
@@ -267,9 +265,8 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                     // and not lost in the gap between node creation and processing start.
                     using var changeQueueProcessor = CreateChangeQueueProcessor();
 
-                    // Registered after construction and released in the finally below, so the next
-                    // restart can register its own processor: a second Register while one is still live
-                    // throws. The using above still disposes the processor if Register itself throws.
+                    // Deregistered in the finally below so the next restart can register its own
+                    // processor: a second Register while one is still live throws.
                     Metrics.OutboundChanges.Register(
                         () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
                     try
@@ -279,18 +276,14 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
 
                         _consecutiveFailures = 0;
 
-                        // StartTime is the connector's own start epoch and must not move on an internal
-                        // restart, so the serving window is reported through liveness instead. LastError is
-                        // deliberately not cleared here: clearing it on recovery would erase the only
-                        // evidence of a transient fault.
+                        // LastError is deliberately left in place: clearing it on recovery would erase
+                        // the only evidence of a transient fault.
                         Metrics.MarkOperational();
 
                         await changeQueueProcessor.ProcessAsync(linkedToken);
                     }
                     finally
                     {
-                        // Runs before the using disposes the processor, so no reader can call into a
-                        // disposed one.
                         Metrics.OutboundChanges.Deregister();
                     }
                 }
@@ -305,24 +298,16 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 // Normal shutdown takes priority over force-kill (checked first intentionally).
-                // If both the stopping token and this attempt's kill flag are set, we exit cleanly
-                // rather than restart.
             }
             catch (OperationCanceledException) when (attempt.WasForceKilled)
             {
-                // Force-kill: CTS was cancelled by KillAsync. Deliberately not reported through
-                // ReportError: it is an injected fault the server recovers from by restarting, and
-                // catching it here is also what keeps it from reaching the base class, which would
-                // record a cancellation the stopping token did not cause as a genuine fault.
+                // Not reported as an error: an injected fault the server recovers from by restarting.
                 _logger.LogWarning("OPC UA server force-killed. Restarting...");
             }
             catch (Exception ex)
             {
-                // A failure the stop itself caused is an expected shutdown rather than a fault: the
-                // first clause above only covers the cancellation, not the arbitrary exception a server
-                // torn down mid-stop raises, and recording that would overwrite the genuine fault for
-                // good, because LastError is sticky and a stopped server does not start again. Counting
-                // it would also leave ConsecutiveFailures blaming a start that never failed.
+                // A stop tears the server down with an arbitrary exception rather than a cancellation,
+                // so only the stopping token tells a shutdown apart from a genuine fault.
                 if (stoppingToken.IsCancellationRequested)
                 {
                     return;
@@ -330,8 +315,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
 
                 _consecutiveFailures++;
 
-                // The base class only sees exceptions that leave RunAsync, and this loop swallows every
-                // per-attempt failure. Without this, a server that can never start reports no error.
+                // Nothing outside this loop reports its failures.
                 Metrics.ReportError(ex);
                 _logger.LogError(ex, "Failed to start OPC UA server (attempt {Attempt}).", _consecutiveFailures);
 
@@ -370,8 +354,8 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                 }
                 finally
                 {
-                    // Released before the token source is disposed, so a kill arriving from here on
-                    // finds no attempt rather than a disposed one.
+                    // Released before the attempt is disposed, so a kill arriving from here on finds no
+                    // attempt rather than a disposed one.
                     _currentAttempt = null;
 
                     try { server.Dispose(); }

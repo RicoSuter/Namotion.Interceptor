@@ -55,8 +55,8 @@ internal sealed class ReconnectionMetrics : IResettableMetrics
 
     /// <inheritdoc />
     /// <remarks>
-    /// <see cref="LastConnectedAt"/> is deliberately preserved: it records a discrete past event and
-    /// survives the state it describes, which is what its <c>Last</c> prefix means.
+    /// <see cref="LastConnectedAt"/> is deliberately preserved: it records a past event rather than
+    /// an amount accumulated during the run.
     /// </remarks>
     public void Reset()
     {

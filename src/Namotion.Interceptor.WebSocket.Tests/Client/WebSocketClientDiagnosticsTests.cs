@@ -13,10 +13,9 @@ using Xunit.Abstractions;
 namespace Namotion.Interceptor.WebSocket.Tests.Client;
 
 /// <summary>
-/// Pins the wiring between the client and the diagnostics it publishes: that the claimed-property
-/// gauge is pointed at the client's own ownership manager, and that a client which has never
-/// connected says so. The liveness transitions themselves need a server and are covered by
-/// <see cref="WebSocketClientLivenessTests"/>.
+/// Pins that the claimed-property gauge is pointed at the client's own ownership manager, and that a
+/// client which has never connected says so. The liveness transitions need a server and are covered
+/// by <see cref="WebSocketClientLivenessTests"/>.
 /// </summary>
 public class WebSocketClientDiagnosticsTests
 {
@@ -28,10 +27,9 @@ public class WebSocketClientDiagnosticsTests
     }
 
     /// <summary>
-    /// A compile-level pin of the member tree plus the defaults a fresh <c>SourceMetrics</c> reports,
-    /// not behavioural coverage: nothing here can fail while the members exist. Its value is that
-    /// the two throughput rates stay <c>null</c> rather than being wired to a counter this connector
-    /// does not feed, which would report a misleading zero.
+    /// A compile-level pin of the member tree plus the defaults a fresh <c>SourceMetrics</c> reports.
+    /// Its value is that the two throughput rates stay <c>null</c> rather than being wired to a
+    /// counter this connector does not feed, which would report a misleading zero.
     /// </summary>
     [Fact]
     public async Task WhenNeverConnected_ThenTheSourceReportsNotOperationalAndNoThroughput()
@@ -70,16 +68,13 @@ public class WebSocketClientDiagnosticsTests
         // Assert
         Assert.True(claimed);
         Assert.Equal(1, whileClaimed);
-
-        // And it falls again, because it is a gauge rather than a counter.
         Assert.Equal(0, afterRelease);
     }
 
     /// <summary>
     /// The reconnect loop lives in the listen lifetime, outside the try in
     /// <c>SubjectSourceBase.RunAsync</c> that records per-attempt failures, so the client has to
-    /// report these itself. Without that, a server that stays down leaves <c>IsOperational</c> false
-    /// beside a <c>LastError</c> of <c>null</c> for the whole outage.
+    /// report these itself.
     /// </summary>
     [Trait("Category", "Integration")]
     [Fact]

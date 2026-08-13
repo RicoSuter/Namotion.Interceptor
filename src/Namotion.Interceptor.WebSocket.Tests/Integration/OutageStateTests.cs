@@ -82,8 +82,6 @@ public class OutageStateTests
                 timeout: TimeSpan.FromSeconds(15),
                 message: "Source should report Synchronizing during the outage");
 
-            // The timestamp now records when the state last moved, so losing synchronization has to
-            // advance it past the moment the initial sync completed.
             var outageDetectedAt = source.StateChangeTime;
             Assert.True(outageDetectedAt > firstSynchronizedAt,
                 "Losing synchronization should have moved StateChangeTime past the initial sync.");
@@ -93,9 +91,8 @@ public class OutageStateTests
                 timeout: TimeSpan.FromSeconds(30),
                 message: "Source should recover to Synchronized after reconnecting");
 
-            // Against the outage moment, not the initial sync: the assertion above already pinned that
-            // the timestamp passed firstSynchronizedAt, and it only ever advances, so comparing against
-            // it again could not fail.
+            // Against the outage moment, not the initial sync: the timestamp only ever advances, so
+            // comparing against firstSynchronizedAt again could not fail.
             Assert.True(source.StateChangeTime > outageDetectedAt,
                 "Recovering should have moved StateChangeTime past the moment the outage was detected.");
         }

@@ -16,8 +16,7 @@ namespace Namotion.Interceptor.Mqtt.Tests.Server;
 /// <summary>
 /// The broker owns its own restart loop, so nothing outside it can tell whether it is listening. These
 /// pin the transitions the loop is responsible for, and that a restart can register its own outbound
-/// change queue: the metrics permit one live registration at a time, so an unreleased one would leave
-/// the restarted broker stuck failing rather than listening.
+/// change queue: the metrics permit one live registration at a time.
 /// </summary>
 [Trait("Category", "Integration")]
 public partial class MqttServerLivenessTests

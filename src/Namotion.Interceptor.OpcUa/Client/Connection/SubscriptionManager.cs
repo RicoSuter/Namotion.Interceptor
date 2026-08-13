@@ -58,7 +58,7 @@ internal class SubscriptionManager : IAsyncDisposable
 
     /// <summary>
     /// Gets how many subscriptions are currently held. Counting through <see cref="Subscriptions"/>
-    /// would copy every key into a new collection, which a diagnostics read must not do.
+    /// would allocate, because the underlying concurrent dictionary snapshots its keys.
     /// </summary>
     public int SubscriptionCount => _subscriptions.Count;
 

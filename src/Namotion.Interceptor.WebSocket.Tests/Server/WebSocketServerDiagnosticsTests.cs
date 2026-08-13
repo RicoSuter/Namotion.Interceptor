@@ -10,16 +10,14 @@ namespace Namotion.Interceptor.WebSocket.Tests.Server;
 /// <summary>
 /// Pins that a server which has never listened says so, and that the standalone server reports its two
 /// transport numbers through its own diagnostics rather than only through the handler it wraps. The
-/// liveness transitions themselves need a bound port and are covered by
+/// liveness transitions need a bound port and are covered by
 /// <see cref="WebSocketServerLivenessTests"/>.
 /// </summary>
 public class WebSocketServerDiagnosticsTests
 {
     /// <summary>
     /// A compile-level pin of the member tree rather than behavioural coverage: every value asserted
-    /// here is what a fresh <c>ConnectorMetrics</c> and an idle handler report, so this fails only if a
-    /// member moves or changes type. The transitions are covered by
-    /// <see cref="WebSocketServerLivenessTests"/>.
+    /// here is what a fresh <c>ConnectorMetrics</c> and an idle handler report.
     /// </summary>
     [Fact]
     public void WhenNeverStarted_ThenTheServerReportsNotOperational()

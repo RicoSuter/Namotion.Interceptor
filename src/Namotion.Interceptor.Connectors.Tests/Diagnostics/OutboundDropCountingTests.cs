@@ -10,8 +10,8 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Connectors.Tests.Diagnostics;
 
 /// <summary>
-/// Pins that every outbound path which discards a write reports it, and that the three connector
-/// buffers report their depth and their bound.
+/// Pins that every outbound path which discards a write counts it, and that the connector buffers
+/// report their depth and their bound.
 /// </summary>
 public class OutboundDropCountingTests
 {
@@ -35,14 +35,13 @@ public class OutboundDropCountingTests
     [Fact]
     public async Task WhenAQueuedWriteHasNoSetter_ThenItIsCountedAsDropped()
     {
-        // Arrange: a write parked on a derived (getter-only) property, which the reconcile can neither
-        // restore nor recognize as already current.
+        // Arrange: a write parked on a getter-only property, which the reconcile can neither restore
+        // nor recognize as already current.
         var context = InterceptorSubjectContext.Create().WithRegistry().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         using var source = new TestSubjectSource(person, context, NullLogger.Instance);
 
-        // Pins that this exercises the no-setter branch: without the guard, a FullName missing from the
-        // property table would throw out of the reconcile and be counted by the catch instead.
+        // Pins the no-setter branch, so the drop below cannot come from the catch beside it.
         Assert.Null(new PropertyReference(person, nameof(Person.FullName)).Metadata.SetValue);
 
         source.WriteRetryQueue!.Enqueue(new[]
@@ -60,7 +59,7 @@ public class OutboundDropCountingTests
     [Fact]
     public async Task WhenReconcileThrowsForAChange_ThenItIsCountedAsDropped()
     {
-        // Arrange: a parked write whose restore throws, because the device rejects the value.
+        // Arrange: a parked write whose restore throws.
         var context = InterceptorSubjectContext.Create().WithRegistry().WithPropertyChangeSubscriptions();
         var device = new ThrowingDevice(context)
         {
@@ -70,8 +69,7 @@ public class OutboundDropCountingTests
 
         using var source = new TestSubjectSource(device, context, NullLogger.Instance);
 
-        // Pins that the restore is attempted at all, so the catch is reached through a throwing setter
-        // rather than through the no-setter branch next to it.
+        // Pins that a setter exists, so the drop below comes from the catch and not the no-setter branch.
         Assert.NotNull(new PropertyReference(device, nameof(ThrowingDevice.PropertyA)).Metadata.SetValue);
 
         source.WriteRetryQueue!.Enqueue(new[]
@@ -129,8 +127,8 @@ public class OutboundDropCountingTests
         await source.StartAsync(CancellationToken.None);
         try
         {
-            // The probe is re-written on each poll because writes captured before the connected phase
-            // are drained rather than written, so a single write proves nothing about the pump.
+            // Re-written on each poll because writes captured before the connected phase are drained
+            // rather than written, so a single write proves nothing about the pump.
             var probeValue = 0;
             await AsyncTestHelpers.WaitUntilAsync(() =>
             {
@@ -164,10 +162,9 @@ public class OutboundDropCountingTests
     }
 
     /// <summary>
-    /// A graceful stop that catches a write in flight is not a loss the operator can act on, and
+    /// A graceful stop that catches a write in flight is not a loss an operator can act on, and
     /// <c>WriteChangesInBatchesAsync</c> reports that cancellation as a failed result rather than
-    /// throwing it. Counted, the drop counter would jump at every restart until an operator learns to
-    /// ignore it.
+    /// throwing it.
     /// </summary>
     [Fact]
     public async Task WhenAWriteIsCancelledByTheStop_ThenItIsNotCountedAsDropped()
@@ -194,8 +191,8 @@ public class OutboundDropCountingTests
 
         await source.StartAsync(CancellationToken.None);
 
-        // The probe is re-written on each poll because writes captured before the connected phase are
-        // drained rather than written.
+        // Re-written on each poll because writes captured before the connected phase are drained
+        // rather than written.
         var probeValue = 0;
         await AsyncTestHelpers.WaitUntilAsync(() =>
         {
@@ -213,8 +210,7 @@ public class OutboundDropCountingTests
     [Fact]
     public void WhenTheDisabledQueueDrainRuns_ThenNothingIsCounted()
     {
-        // Arrange: a source configured without a retry queue, and a change on a property this source
-        // does not own, which the unfiltered drain discards.
+        // Arrange: no retry queue, and a change on a property this source does not own.
         var context = InterceptorSubjectContext.Create().WithRegistry().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         using var source = new TestSubjectSource(person, context, NullLogger.Instance, writeRetryQueueSize: 0);
@@ -258,9 +254,8 @@ public class OutboundDropCountingTests
     [Fact]
     public async Task WhenTheProcessorIsRecreated_ThenTheAccumulatedDropCountSurvives()
     {
-        // Arrange: a bounded processor registered against the metrics, dropping into it, then handed
-        // over. The in-repo connectors all pass maxQueueDepth: null, so this drives QueueMetrics and
-        // ChangeQueueProcessor directly rather than through a source.
+        // Arrange: the in-repo connectors all pass maxQueueDepth: null, so this drives QueueMetrics
+        // and ChangeQueueProcessor directly rather than through a source.
         var metrics = new SourceMetrics();
         var diagnostics = new SourceDiagnostics(metrics);
         var context = InterceptorSubjectContext.Create().WithRegistry().WithPropertyChangeSubscriptions();
@@ -298,10 +293,8 @@ public class OutboundDropCountingTests
             await WaitForBufferedOutboundChangeAsync(source, person);
 
             // Assert
-            // The depth comes first because it is the only read that tells a live registration from no
-            // registration at all: an unregistered QueueMetrics reports a null capacity too, so the
-            // capacity below only means "registered as unbounded" once the depth has proven the
-            // registration is live.
+            // An unregistered QueueMetrics reports a null capacity too, so the capacity below only
+            // means "registered as unbounded" once the depth has proven the registration is live.
             Assert.True(source.Diagnostics.OutboundChanges.Depth > 0);
             Assert.Null(source.Diagnostics.OutboundChanges.Capacity);
         }
@@ -326,8 +319,8 @@ public class OutboundDropCountingTests
         await source.StopAsync(CancellationToken.None);
 
         // Assert
-        // Nothing drains the processor's queue on the way out, so its count is still non-zero. A
-        // non-zero depth here would therefore mean the depth provider outlived the processor.
+        // Nothing drains the processor's queue on the way out, so a non-zero depth here would mean
+        // the depth provider outlived the processor.
         Assert.Equal(0, source.Diagnostics.OutboundChanges.Depth);
     }
 
@@ -349,16 +342,19 @@ public class OutboundDropCountingTests
         await source.StartAsync(CancellationToken.None);
         try
         {
-            // Act
+            // Act: the observed depth is captured, because the retry loop can drain the queue again
+            // before the assertion reads it.
             var probeValue = 0;
+            var observedDepth = 0;
             await AsyncTestHelpers.WaitUntilAsync(() =>
             {
                 person.FirstName = "v" + probeValue++;
-                return source.Diagnostics.OutboundRetries.Depth > 0;
+                observedDepth = source.Diagnostics.OutboundRetries.Depth;
+                return observedDepth > 0;
             }, message: "Parked writes were not reported by the registered depth provider.");
 
             // Assert
-            Assert.True(source.Diagnostics.OutboundRetries.Depth > 0);
+            Assert.True(observedDepth > 0);
             Assert.Equal(1000, source.Diagnostics.OutboundRetries.Capacity);
         }
         finally
@@ -368,8 +364,8 @@ public class OutboundDropCountingTests
     }
 
     /// <summary>
-    /// A source whose buffer time outlasts the test, so a change captured by the connected phase stays
-    /// in the processor's queue instead of being flushed away before the depth can be read.
+    /// A source whose buffer time outlasts the test, so a captured change stays in the processor's
+    /// queue instead of being flushed away before the depth can be read.
     /// </summary>
     private static TestSubjectSource CreateSourceWithStalledOutboundQueue(
         Person person, IInterceptorSubjectContext context)
@@ -383,8 +379,8 @@ public class OutboundDropCountingTests
 
     private static Task WaitForBufferedOutboundChangeAsync(TestSubjectSource source, Person person)
     {
-        // The probe is re-written on each poll because writes captured before the connected phase are
-        // parked in the retry queue rather than buffered by the processor.
+        // Re-written on each poll because writes captured before the connected phase are parked in
+        // the retry queue rather than buffered by the processor.
         var probeValue = 0;
         return AsyncTestHelpers.WaitUntilAsync(() =>
         {
@@ -395,9 +391,9 @@ public class OutboundDropCountingTests
 
     private static ChangeQueueProcessor CreateBoundedProcessor(IInterceptorSubjectContext context, int maxQueueDepth)
     {
-        // A buffer time far longer than the test, so nothing flushes the queue and every change past
-        // the bound overflows deterministically. The source sentinel is a non-null object no change can
-        // carry as its origin: with null, every local change would match the echo check and be skipped.
+        // The long buffer time keeps anything from flushing the queue, so every change past the bound
+        // overflows. The source sentinel must be non-null, or every local change would match the echo
+        // check and be skipped.
         return new ChangeQueueProcessor(
             source: new object(),
             context,
@@ -410,16 +406,16 @@ public class OutboundDropCountingTests
     }
 
     /// <summary>
-    /// Commits <see cref="OverflowChangeCount"/> changes into a processor bounded at 1, so it drops all
-    /// but the newest. Each change is on its own property and carries a value the model has not held
-    /// before, so none supersedes another and the resulting drop count is exact rather than racy.
+    /// Commits <see cref="OverflowChangeCount"/> changes into a processor bounded at 1. Each change is
+    /// on its own property and carries a value the model has not held before, so none supersedes
+    /// another and the resulting drop count is exact rather than racy.
     /// </summary>
     private static async Task OverflowAsync(ChangeQueueProcessor processor, Person person, string tag)
     {
         using var cancellation = new CancellationTokenSource();
 
-        // Started before the writes: ProcessAsync snapshots what was already queued and drops whatever
-        // the model has moved past, so writes made first would not all reach the bounded queue.
+        // Started before the writes: ProcessAsync drops whatever the model has already moved past, so
+        // earlier writes would not all reach the bounded queue.
         var processing = processor.ProcessAsync(cancellation.Token);
 
         person.FirstName = "a" + tag;

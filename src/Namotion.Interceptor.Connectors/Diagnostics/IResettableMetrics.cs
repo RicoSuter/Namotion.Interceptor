@@ -5,10 +5,10 @@ namespace Namotion.Interceptor.Connectors.Diagnostics;
 /// must still take part in the counter reset performed by <c>ConnectorMetrics.MarkStarted</c>.
 /// </summary>
 /// <remarks>
-/// Metrics are hoisted out of short-lived components so their totals survive a reconnect. That is
-/// what makes the counters honest, and it is also why they cannot be reached by resetting
-/// <c>ConnectorMetrics</c> alone. Register them with <c>ConnectorMetrics.RegisterResettable</c> so
-/// the epoch stays consistent across every <c>Total</c> counter a connector reports.
+/// Metrics are hoisted out of short-lived components so their totals survive a reconnect, which is
+/// why resetting <c>ConnectorMetrics</c> alone cannot reach them. Register them with
+/// <c>ConnectorMetrics.RegisterResettable</c> to keep the epoch consistent across every
+/// <c>Total</c> counter a connector reports.
 /// </remarks>
 public interface IResettableMetrics
 {

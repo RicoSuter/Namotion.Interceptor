@@ -94,9 +94,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     public bool IsReconnecting => Volatile.Read(ref _isReconnecting) == 1;
 
     /// <summary>
-    /// Gets a value indicating whether this manager has been disposed. Every way out of a connect
-    /// attempt disposes it while the source keeps its field pointing here, so this is what tells a
-    /// reader that everything reachable through it describes a session that is already gone.
+    /// Gets a value indicating whether this manager has been disposed. The source keeps its field
+    /// pointing here afterwards, so everything reachable through it then describes a session that is
+    /// already gone.
     /// </summary>
     internal bool IsDisposed => Volatile.Read(ref _disposed) == 1;
 
@@ -106,20 +106,12 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// </summary>
     /// <remarks>
     /// The read and the report are one step under <c>_reconnectingLock</c>, which
-    /// <see cref="OnKeepAlive"/>, <see cref="OnReconnectComplete"/> and
-    /// <see cref="SetReconnecting"/> also take. Without that, a caller can read a connected session,
-    /// be preempted while OnKeepAlive drops liveness and sets the reconnecting flag, and then raise
-    /// liveness from its stale read, leaving the client reporting itself as reconnecting and
-    /// operational at once until the reconnection resolves.
-    /// <para>
-    /// The lock is not a leaf: work inside it reaches the property writer's lock through
-    /// <c>StartBuffering</c> and the source's state lock through <c>ReportConnectionLost</c>, which
-    /// raises <c>StateChanged</c> to user handlers from inside itself. What keeps it deadlock-free is
-    /// the reverse direction, and that is the invariant an edit has to preserve: nothing takes
+    /// <see cref="OnKeepAlive"/>, <see cref="OnReconnectComplete"/> and <see cref="SetReconnecting"/>
+    /// also take, so a stale read cannot raise liveness after OnKeepAlive dropped it and leave the
+    /// client reporting itself as reconnecting and operational at once. That lock is not a leaf, so
+    /// the invariant an edit has to preserve is the reverse direction: nothing takes
     /// <c>_reconnectingLock</c> while holding the property writer's lock, the source's state lock or
-    /// a source monitor's lock. The lock is private to this class and no diagnostics getter reaches
-    /// it, so a reader can never block on it either.
-    /// </para>
+    /// a source monitor's lock.
     /// </remarks>
     internal void ReportLivenessFromSessionState()
     {
@@ -149,11 +141,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// reconnection is still in progress.
     /// </summary>
     /// <remarks>
-    /// Under <c>_reconnectingLock</c> so the flag cannot move while
-    /// <see cref="ReportLivenessFromSessionState"/> reads it and reports from it, which would
-    /// otherwise hold only because both run on the single health check loop thread. Callers must
-    /// therefore hold none of the locks named in that method's remarks. The interlocked write stays,
-    /// because <see cref="IsReconnecting"/> reads the flag without the lock.
+    /// Takes <c>_reconnectingLock</c>, so callers must hold none of the locks named in the remarks on
+    /// <see cref="ReportLivenessFromSessionState"/>. The interlocked write stays because
+    /// <see cref="IsReconnecting"/> reads the flag without the lock.
     /// </remarks>
     internal void SetReconnecting(bool value)
     {
@@ -185,19 +175,16 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Gets the diagnostics view over <see cref="PollingManager"/>, or <c>null</c> when the polling
-    /// fallback is off. Built here so the client's diagnostics can hand it out without allocating one
-    /// per read, and bound to this manager's polling manager for its whole lifetime.
+    /// fallback is off. Built once here so a diagnostics read does not allocate.
     /// </summary>
     internal PollingDiagnostics? PollingDiagnostics { get; }
 
     /// <summary>
     /// Gets the diagnostics view over <see cref="ReadAfterWriteManager"/>, or <c>null</c> when
-    /// read-after-write is off. Built here for the same reason as <see cref="PollingDiagnostics"/>.
+    /// read-after-write is off.
     /// </summary>
     internal ReadAfterWriteDiagnostics? ReadAfterWriteDiagnostics { get; }
 
-    // The two metrics objects belong to the source, which outlives this manager: it is rebuilt on
-    // every connect attempt, and counters created here would rebase with it.
     public SessionManager(
         OpcUaSubjectClientSource source,
         SubjectPropertyWriter propertyWriter,
@@ -529,13 +516,11 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
                 Interlocked.Exchange(ref _isReconnecting, 0);
 
-                // Subscription notifications resume the moment the transfer succeeds, so liveness has
-                // to rise here. The only other rise on this path is the health check loop's, which runs
-                // at most once per SubscriptionHealthCheckInterval and only after a full state sync, so
-                // without this the connector reports itself down for seconds while values update.
-                // After the reconnecting flag was cleared above, so no reader sees the connector
-                // reported as operational and reconnecting at once, and through IsConnected rather than
-                // the branch's own knowledge, because the session can have dropped again since.
+                // Notifications resume as soon as the transfer succeeds, and the only other rise on
+                // this path is the health check loop's, so without this the connector reports itself
+                // down for seconds while values update. Must stay after the reconnecting flag was
+                // cleared above, and is guarded by IsConnected rather than the branch's own knowledge
+                // because the session can have dropped again since.
                 if (transferSucceeded && IsConnected)
                 {
                     _source.NotifySessionHealthy();

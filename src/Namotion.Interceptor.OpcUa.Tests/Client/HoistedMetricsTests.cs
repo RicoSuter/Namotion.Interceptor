@@ -106,7 +106,7 @@ public class HoistedMetricsTests
     public async Task WhenTheConnectorStartsANewEpoch_ThenTheHoistedCountersAreReset()
     {
         // Arrange - without property tracking the pump fails its configuration guard immediately,
-        // which is the shortest path through MarkStarted that needs no server.
+        // which starts an epoch without needing a server.
         await using var source = CreateClientSource(withPropertyTracking: false);
         source.PollingMetrics.RecordRead();
         source.ReadAfterWriteMetrics.RecordScheduled();

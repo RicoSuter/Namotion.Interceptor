@@ -233,10 +233,8 @@ public class SourceStateTests
                 Assert.NotEqual(SourceState.Synchronized, ordered[afterStop].NewState);
             }
 
-            // Stopped is terminal, so both timestamps observed synchronously inside the handler at
-            // the moment Stopped was published must equal their values after every racing thread has
-            // finished: nothing can still be updating them once Stopped has been raised. They ride
-            // the same snapshot, so a weakened lock would show up in either.
+            // Stopped is terminal, so both timestamps observed inside the handler at the moment
+            // Stopped was published must equal their values after every racing thread has finished.
             // Not asserted non-null: the stopping thread can win the barrier before the hammer ever
             // reaches Synchronized, so a null here is a legal outcome of the race.
             Assert.Equal(stateChangeTimeWhenStopped, source.StateChangeTime);

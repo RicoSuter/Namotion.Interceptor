@@ -54,8 +54,7 @@ public class WebSocketServerConfiguration
     public TimeSpan HelloTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// The smallest heartbeat interval that can be configured. A heartbeat is broadcast to every
-    /// connected client, so a sub-second interval floods the connections rather than probing them.
+    /// The smallest heartbeat interval that can be configured.
     /// </summary>
     public static readonly TimeSpan MinimumHeartbeatInterval = TimeSpan.FromSeconds(1);
 
@@ -64,12 +63,6 @@ public class WebSocketServerConfiguration
     /// Set to TimeSpan.Zero to disable heartbeats, otherwise at least
     /// <see cref="MinimumHeartbeatInterval"/>.
     /// </summary>
-    /// <remarks>
-    /// Disabling heartbeats stops the broadcasts, not the loop:
-    /// <see cref="WebSocketSubjectHandler.RunHeartbeatLoopAsync"/> runs until its token is cancelled
-    /// either way, because the server races it against the change processor and treats either one
-    /// finishing as a reason to restart.
-    /// </remarks>
     public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>

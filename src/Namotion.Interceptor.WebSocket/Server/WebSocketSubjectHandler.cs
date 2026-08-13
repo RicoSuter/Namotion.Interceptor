@@ -41,10 +41,8 @@ public sealed class WebSocketSubjectHandler
     /// Gets the number of currently connected WebSocket clients.
     /// </summary>
     /// <remarks>
-    /// For embedded mode, where the handler is resolved from the container and there is no server to
-    /// ask. With the standalone server, read
-    /// <see cref="WebSocketServerDiagnostics.ConnectionCount"/> instead, which reports this number
-    /// alongside the rest of that server's diagnostics.
+    /// For embedded mode. With the standalone server, read
+    /// <see cref="WebSocketServerDiagnostics.ConnectionCount"/> instead.
     /// </remarks>
     public int ConnectionCount => Volatile.Read(ref _connectionCount);
 
@@ -52,10 +50,8 @@ public sealed class WebSocketSubjectHandler
     /// Gets the sequence number most recently assigned to an outgoing message.
     /// </summary>
     /// <remarks>
-    /// For embedded mode, where the handler is resolved from the container and there is no server to
-    /// ask. With the standalone server, read
-    /// <see cref="WebSocketServerDiagnostics.CurrentSequence"/> instead, which reports this number
-    /// alongside the rest of that server's diagnostics.
+    /// For embedded mode. With the standalone server, read
+    /// <see cref="WebSocketServerDiagnostics.CurrentSequence"/> instead.
     /// </remarks>
     public long CurrentSequence => Volatile.Read(ref _sequence);
 
@@ -297,21 +293,17 @@ public sealed class WebSocketSubjectHandler
     /// <paramref name="cancellationToken"/> is cancelled.
     /// </summary>
     /// <remarks>
-    /// The returned task runs until cancellation in both branches, including the one where heartbeats
-    /// are disabled, so it never completes on its own. Callers race it against the change processor
-    /// with <see cref="Task.WhenAny(Task, Task)"/> and treat either one finishing as a reason to tear
-    /// the server down and restart it, which a task that returned as soon as heartbeats were disabled
-    /// would trigger in a tight loop. Pass a token that is cancelled when the caller stops; a token
-    /// that is never cancelled never lets this task complete.
+    /// The returned task never completes on its own, not even when heartbeats are disabled, because
+    /// callers race it against the change processor and treat either one finishing as a reason to
+    /// restart the server. Pass a token that is cancelled when the caller stops.
     /// </remarks>
     /// <param name="cancellationToken">Cancelled to end the loop.</param>
-    /// <returns>The task.</returns>
     public async Task RunHeartbeatLoopAsync(CancellationToken cancellationToken)
     {
         var interval = _configuration.HeartbeatInterval;
         if (interval <= TimeSpan.Zero)
         {
-            // Heartbeats are disabled, but this must not complete, for the reason on the remarks above.
+            // Heartbeats are disabled, but this must not complete, for the reason in the remarks above.
             try
             {
                 await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);

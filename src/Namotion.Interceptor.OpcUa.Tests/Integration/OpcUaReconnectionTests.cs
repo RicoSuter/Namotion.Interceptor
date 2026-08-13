@@ -31,9 +31,9 @@ public class OpcUaReconnectionTests
         config.ReconnectInterval = TimeSpan.FromSeconds(2); // Try reconnecting frequently
     };
 
-    // Config that isolates the SDK reconnect path. The health check loop is the only other place that
-    // raises liveness, and it ticks once when the client starts and then once per interval, so an
-    // interval far longer than the whole test leaves the reconnect completion as the only candidate.
+    // Isolates the SDK reconnect path: the health check loop is the only other place that raises
+    // liveness, so an interval far longer than the whole test leaves the reconnect completion as the
+    // only candidate.
     private static readonly Action<OpcUaClientConfiguration> HealthCheckSuppressedConfig = config =>
     {
         config.SessionTimeout = TimeSpan.FromSeconds(30);
@@ -107,10 +107,9 @@ public class OpcUaReconnectionTests
             client.Source.CurrentSessionChanged += OnSessionChanged;
             try
             {
-                // LastError is sticky for the whole epoch and is cleared only when the connector
-                // starts, so a connect attempt that failed once and succeeded on retry leaves it
-                // populated. Captured as a baseline rather than asserted null, so what follows can
-                // claim what it actually means: nothing failed after the connection was established.
+                // LastError is sticky for the whole epoch, so a connect attempt that failed once and
+                // succeeded on retry leaves it populated. Captured as a baseline instead, so what
+                // follows means nothing failed after the connection was established.
                 var errorAfterConnecting = client.Source!.Diagnostics.LastError;
 
                 // Verify initial sync
@@ -161,9 +160,8 @@ public class OpcUaReconnectionTests
                 // After a healthy reconnect the connector is connected again with a live session.
                 // Waited for rather than asserted outright: liveness is edge-driven, and which edge
                 // raises it depends on which reconnect path ran. Bounded at four health check
-                // intervals (5s each here): every path raises it either when the reconnect completes
-                // or on the next health check, so a bound that allows many intervals would no longer
-                // tell a working seam from a nearly broken one.
+                // intervals (5s each here), so a rise that arrived late enough to be worthless
+                // still fails.
                 await AsyncTestHelpers.WaitUntilAsync(
                     () => client.Source!.Diagnostics.IsOperational,
                     timeout: TimeSpan.FromSeconds(20),
@@ -260,9 +258,9 @@ public class OpcUaReconnectionTests
     [Fact]
     public async Task WhenTheSdkTransfersItsSubscriptions_ThenLivenessRisesWithoutWaitingForTheNextHealthCheck()
     {
-        // A server restart makes the SDK's reconnect handler recreate the session and carry the
-        // subscriptions across, after which notifications flow again. Reporting the connector as down
-        // until the next health check would show an operator "disconnected" while values update.
+        // A server restart makes the SDK recreate the session and carry the subscriptions across, so
+        // reporting the connector as down until the next health check would show an operator
+        // "disconnected" while values update.
 
         OpcUaTestServer<TestRoot>? server = null;
         OpcUaTestClient<TestRoot>? client = null;
@@ -289,10 +287,9 @@ public class OpcUaReconnectionTests
 
             await server.RestartAsync();
 
-            // Assert - the health check loop cannot be what raises this: it ticked once when the client
-            // started and its next tick is five minutes out, long after this test has finished. The
-            // bound is deliberately far below that interval and not merely inside it, so a rise that
-            // arrived late enough to be worthless still fails.
+            // Assert - the health check loop cannot be what raises this: its next tick is five minutes
+            // out. The bound is far below that, so a rise that arrived late enough to be worthless
+            // still fails.
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Source!.Diagnostics.IsOperational,
                 timeout: TimeSpan.FromSeconds(30),

@@ -33,7 +33,6 @@ public sealed class TestSubjectSource : SubjectSourceBase
 
     public Func<SubjectPropertyWriter, CancellationToken, Task<IAsyncDisposable?>>? StartListeningOverride { get; init; }
 
-    /// <summary>Makes every connect attempt fail with this exception, like an unreachable server.</summary>
     public Exception? StartListeningFailure { get; init; }
 
     public Func<CancellationToken, Task<Action?>>? LoadInitialStateOverride { get; init; }

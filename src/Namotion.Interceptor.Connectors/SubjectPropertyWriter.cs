@@ -37,10 +37,9 @@ public sealed class SubjectPropertyWriter
     /// <param name="logger">The logger.</param>
     /// <param name="inboundBuffer">
     /// Where this writer reports the depth of its buffer and the updates a superseded load throws
-    /// away, or <c>null</c> for a writer whose buffer nothing observes. The instance must have no
-    /// live registration: this constructor registers on it and never deregisters, so it cannot be
-    /// shared with a second writer. A derived source must not pass its own
-    /// <c>SourceMetrics.InboundBuffer</c>, which <see cref="SubjectSourceBase"/> has already
+    /// away, or <c>null</c> for a writer whose buffer nothing observes. The instance must have no live
+    /// registration: this constructor registers on it and never deregisters, so a derived source must
+    /// not pass the <c>SourceMetrics.InboundBuffer</c> that <see cref="SubjectSourceBase"/> has already
     /// registered for the writer it owns.
     /// </param>
     /// <exception cref="InvalidOperationException">
@@ -57,8 +56,7 @@ public sealed class SubjectPropertyWriter
         _logger = logger;
         _inboundBuffer = inboundBuffer;
 
-        // Unbounded: the buffer holds whatever arrives while the initial state loads. Never
-        // deregistered, because the writer and its buffer live as long as the source does.
+        // Never deregistered: the writer and its buffer live as long as the source does.
         _inboundBuffer?.Register(() => BufferedUpdateCount, dropped: null, capacity: null);
     }
 
@@ -66,10 +64,9 @@ public sealed class SubjectPropertyWriter
     /// Gets how many inbound updates are currently buffered while the initial state loads.
     /// </summary>
     /// <remarks>
-    /// Maintained under the writer's own lock, which every mutation of the buffer already holds, and
-    /// read without taking it. A lock-taking getter would close an ABBA cycle:
-    /// <see cref="StartBuffering"/> holds this lock while transitioning the source's state, which
-    /// reaches registered monitors synchronously.
+    /// Maintained under the writer's own lock and read without taking it: a lock-taking getter would
+    /// close an ABBA cycle, since <see cref="StartBuffering"/> holds that lock while transitioning the
+    /// source's state, which reaches registered monitors synchronously.
     /// </remarks>
     public int BufferedUpdateCount => Volatile.Read(ref _bufferedUpdateCount);
 
@@ -82,9 +79,8 @@ public sealed class SubjectPropertyWriter
     {
         lock (_lock)
         {
-            // Replacing the list discards whatever the previous attempt buffered. Deliberate rather
-            // than data loss: a superseded snapshot must not be applied. Counted because it is the
-            // only signal of how often initial loads are being superseded, which is reconnect thrash.
+            // The replaced list is a superseded snapshot that must not be applied. Counted anyway,
+            // because it is the only signal of how often initial loads are being superseded.
             _inboundBuffer?.AddDropped(_updates?.Count ?? 0);
 
             _updates = [];

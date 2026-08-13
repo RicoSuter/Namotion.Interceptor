@@ -40,9 +40,8 @@ public class SubjectSourceDiagnosticsTests
         var throughConnector = ((ISubjectConnector)source).Diagnostics;
 
         // Assert
-        // ISubjectSource narrows the member to SourceDiagnostics, so the two interfaces are separate
-        // slots that both have to land on the source's single view. A source wired up with a second
-        // diagnostics object would report empty buffers through one of them.
+        // ISubjectSource narrows the member, so the two interfaces are separate slots that both have
+        // to land on the source's single view: a second view would report empty buffers.
         Assert.Same(source.Diagnostics, throughSource);
         Assert.Same(source.Diagnostics, throughConnector);
     }
@@ -69,9 +68,8 @@ public class SubjectSourceDiagnosticsTests
     [Fact]
     public async Task WhenAConnectAttemptFails_ThenTheErrorIsRecordedWithoutTheSourceStopping()
     {
-        // Arrange
-        // A retry time far longer than the test's own wait keeps the source parked in the backoff after
-        // the single failure, so the state asserted below is the one that failure left behind.
+        // Arrange: the long retry time keeps the source parked in the backoff after the single
+        // failure, so the state asserted below is the one that failure left behind.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
         var subject = new Person(context);
         using var source = new TestSubjectSource(subject, context, NullLogger.Instance, retryTime: TimeSpan.FromMinutes(1))
@@ -94,11 +92,9 @@ public class SubjectSourceDiagnosticsTests
     [Fact]
     public async Task WhenTheStopTearsDownAConnectAttempt_ThenTheTeardownFailureIsNotRecorded()
     {
-        // Arrange
-        // A connect that fails with something other than the cancellation once the stop reaches it,
-        // which is what a torn-down transport raises. Recorded, it would replace the genuine fault of a
-        // source that had already failed, and that error is sticky and can never be cleared because a
-        // stopped source does not start again.
+        // Arrange: a connect that fails with something other than the cancellation once the stop
+        // reaches it, like a torn-down transport. Recorded, it would replace the genuine fault of a
+        // source that had already failed, and a stopped source never clears that sticky error.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
         var subject = new Person(context);
         var connecting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

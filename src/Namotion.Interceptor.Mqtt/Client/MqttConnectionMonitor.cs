@@ -21,13 +21,9 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
     private readonly Func<CancellationToken, Task> _onReconnected;
     private readonly Func<Task> _onDisconnected;
 
-    // Every failure below is swallowed so the monitor can back off and try again, and the monitor
-    // runs inside the source's listen lifetime, outside the try in SubjectSourceBase.RunAsync that
-    // records per-attempt failures. Without this callback a broker that stays down would be reported
-    // as not operational with no error at all. Failures the stop itself caused are deliberately not
-    // passed on: tearing an MQTT channel down mid-stop raises an MqttCommunicationException wrapping
-    // the cancellation rather than the cancellation itself, and reporting that would overwrite the
-    // genuine fault for good, because LastError is sticky and a stopped source does not start again.
+    // Nothing outside this monitor reports its failures, but a stop tears the channel down with an
+    // MqttCommunicationException wrapping the cancellation rather than the cancellation itself, so
+    // only the token tells a shutdown apart from a genuine fault.
     private readonly Action<Exception> _onError;
 
     private readonly SemaphoreSlim _reconnectSignal = new(0, 1);

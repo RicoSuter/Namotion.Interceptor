@@ -6,11 +6,6 @@ namespace Namotion.Interceptor.OpcUa.Client.Polling;
 /// Thread-safe metrics collection for polling operations.
 /// All operations use interlocked operations for thread-safety.
 /// </summary>
-/// <remarks>
-/// Owned by the client source rather than by <c>PollingManager</c>, which is rebuilt on every connect
-/// attempt including failed ones. Held there, these totals would sit near zero during a reconnect
-/// storm, which is exactly when they matter.
-/// </remarks>
 internal sealed class PollingMetrics : IResettableMetrics
 {
     private long _totalReads;
@@ -76,8 +71,8 @@ internal sealed class PollingMetrics : IResettableMetrics
     /// </summary>
     /// <remarks>
     /// Counted here rather than read from the breaker, which is rebuilt with every session and would
-    /// therefore rebase this counter on every connect attempt. The breaker still owns <c>IsOpen</c>,
-    /// which must start closed on a fresh connection.
+    /// rebase the counter. The breaker still owns <c>IsOpen</c>, which must start closed on a fresh
+    /// connection.
     /// </remarks>
     public long CircuitBreakerTrips => Interlocked.Read(ref _circuitBreakerTrips);
 

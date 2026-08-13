@@ -338,8 +338,7 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     /// snapshot rather than an atomic instant: a source visited early can stop before the walk ends,
     /// leaving the result one grade better than the truth. That is indistinguishable from completing
     /// an instant earlier. It cannot err the other way for a SubjectSourceBase, which publishes its
-    /// state and its LastSynchronizedAt as one snapshot, so a source read as Stopped here carries the
-    /// timestamp that belongs with that state rather than the one preceding it.
+    /// state and its LastSynchronizedAt as one snapshot.
     /// </remarks>
     private bool IsBranchSynchronized(IInterceptorSubject anchor, out SourceSynchronizationResult result)
     {
@@ -364,9 +363,7 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
             var state = source.State;
 
             // Returns before any timestamp is read, which is what keeps an implementation that
-            // reports Synchronized without stamping one from being read as a failure. The timestamp
-            // only decides between the two downgrades below, so a source that is synchronized right
-            // now needs none.
+            // reports Synchronized without stamping one from being read as a failure.
             if (state == SourceState.Synchronized)
             {
                 continue;

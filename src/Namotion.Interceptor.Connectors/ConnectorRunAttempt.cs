@@ -7,15 +7,13 @@ namespace Namotion.Interceptor.Connectors;
 /// </summary>
 /// <remarks>
 /// The flag belongs to the iteration rather than to the connector because a kill can arrive after the
-/// iteration it was meant for has already torn down. A connector-level flag stays set across that
-/// boundary, and the next iteration then reads a kill that never reached it and swallows a genuine
-/// fault as an injected one. Keeping the flag here means only the iteration whose token source was
-/// actually cancelled can read itself as killed.
+/// iteration it was meant for has torn down: a connector-level flag would stay set across that
+/// boundary and let the next iteration swallow a genuine fault as an injected one.
 /// <para>
 /// A loop creates one attempt per iteration, runs its work under <see cref="Token"/>, and disposes it
 /// in a <c>finally</c>. The connector publishes the current attempt in a <c>volatile</c> field so that
 /// <see cref="IFaultInjectable.InjectFaultAsync"/> can reach it, and clears that field before the
-/// disposal so a kill arriving from then on finds no attempt rather than a disposed one.
+/// disposal so a later kill finds no attempt rather than a disposed one.
 /// </para>
 /// </remarks>
 public sealed class ConnectorRunAttempt : IDisposable
@@ -66,8 +64,7 @@ public sealed class ConnectorRunAttempt : IDisposable
     }
 
     /// <summary>
-    /// Cancels this attempt without marking it as force-killed, for a loop that ends its own iteration,
-    /// such as one stopping a sibling task once the first of them has completed.
+    /// Cancels this attempt without marking it as force-killed, for a loop that ends its own iteration.
     /// </summary>
     public Task CancelAsync() => _cancellation.CancelAsync();
 

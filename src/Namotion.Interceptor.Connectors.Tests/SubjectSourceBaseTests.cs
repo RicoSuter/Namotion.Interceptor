@@ -1669,24 +1669,19 @@ public class SubjectSourceBaseTests
     public void WhenSubjectSourceBaseDeclaresStateAndItsTimestamp_ThenBothReadTheSameSnapshotField()
     {
         // Arrange
-        // A caller reading State and StateChangeTime separately can always be preempted between the
-        // two, so the property this pins is narrower: each individual read is internally consistent,
-        // because both getters dereference one immutable snapshot. Split back into two fields, a
-        // single read of StateChangeTime could report the previous transition's moment beside the new
-        // state, which is a stale duration that never happened. No dynamic test can force that: the
-        // wall clock is far coarser than the window between the two writes and many transitions share
-        // one tick, so a torn pair is indistinguishable from a legal one by its timestamp alone. Same
-        // shape as the lock-free getter pinned above, so the same static-scan technique.
+        // Both getters dereference one immutable snapshot, so each individual read is internally
+        // consistent. Split back into two fields, a read of StateChangeTime could report the previous
+        // transition's moment beside the new state, and no dynamic test can force that: the wall
+        // clock is far coarser than the window between the two writes, so a torn pair is
+        // indistinguishable from a legal one. Hence the static scan, like the getter pinned above.
         var source = File.ReadAllText(GetSubjectSourceBaseFilePath());
 
         // Act
         var stateProperty = ExtractExpressionBodiedMember(source, "public SourceState State =>");
         var stateChangeTimeProperty = ExtractExpressionBodiedMember(source, "public DateTimeOffset StateChangeTime =>");
 
-        // Located rather than hard-coded, like the sibling scans above: a rename that keeps both
-        // getters on one snapshot field preserves the invariant, and without this the assertions below
-        // would fail with a raw string-contains diff that reads as a broken invariant rather than a
-        // moved field.
+        // Located rather than sliced blind, like the sibling scans above: without this a renamed field
+        // fails as a raw string-contains diff that reads as a broken invariant rather than a move.
         const string snapshotFieldDeclaration = "private SourceStateSnapshot _stateSnapshot";
         Assert.True(source.Contains(snapshotFieldDeclaration, StringComparison.Ordinal),
             $"'{snapshotFieldDeclaration}' not found; this scan needs updating");

@@ -7,9 +7,9 @@ namespace Namotion.Interceptor.OpcUa.Server;
 /// </summary>
 /// <remarks>
 /// <see cref="ConnectorDiagnostics.IsOperational"/> means the server has started and is accepting
-/// client connections. Pair it with <see cref="ConnectorDiagnostics.OperationalChangeTime"/> to read
-/// how long the current run has been serving: that timestamp moves on every internal restart, where
-/// <see cref="ConnectorDiagnostics.StartTime"/> marks the hosted service's own start and does not.
+/// client connections. <see cref="ConnectorDiagnostics.OperationalChangeTime"/> moves on every
+/// internal restart, where <see cref="ConnectorDiagnostics.StartTime"/> marks the hosted service's
+/// own start and does not.
 /// </remarks>
 public sealed class OpcUaServerDiagnostics : ConnectorDiagnostics
 {
@@ -27,8 +27,7 @@ public sealed class OpcUaServerDiagnostics : ConnectorDiagnostics
     public int ActiveSessionCount => _server.ActiveSessionCount;
 
     /// <summary>
-    /// Gets the number of consecutive startup failures. A gauge that resets on a successful start,
-    /// which is why it carries no <c>Total</c> prefix.
+    /// Gets the number of consecutive startup failures, reset on a successful start.
     /// </summary>
     public int ConsecutiveFailures => _server.ConsecutiveFailures;
 }

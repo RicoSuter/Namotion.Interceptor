@@ -39,8 +39,7 @@ internal sealed class WriteRetryQueue : IDisposable
     /// </summary>
     public int PendingWriteCount => Volatile.Read(ref _count);
 
-    // metrics is required rather than optional so a new construction site cannot silently start
-    // dropping writes that nothing counts.
+    // Metrics is required rather than optional, so no construction site can drop writes uncounted.
     public WriteRetryQueue(int maxQueueSize, ILogger logger, QueueMetrics metrics)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(maxQueueSize);
@@ -60,8 +59,6 @@ internal sealed class WriteRetryQueue : IDisposable
     {
         if (_maxQueueSize is 0)
         {
-            // Counted like every other discard here. Metrics is a required constructor parameter so that
-            // no construction site can drop uncounted, and this path drops the whole batch.
             _metrics.AddDropped(changes.Length);
             _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes.", changes.Length);
             return;

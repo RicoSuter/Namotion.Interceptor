@@ -4,14 +4,13 @@ namespace Namotion.Interceptor.Connectors.Diagnostics;
 /// Read-only view over a connector's change throughput, averaged over the last 60 seconds.
 /// </summary>
 /// <remarks>
-/// Direction is stated once, from the subject tree's point of view, and means the same thing for
-/// clients and servers: incoming is changes flowing into the subject tree, outgoing is changes
-/// flowing out of it. For a client source, incoming is what the external system pushed; for a
-/// server, incoming is what a connected client wrote.
+/// Direction is from the subject tree's point of view and means the same for clients and servers:
+/// for a client source, incoming is what the external system pushed; for a server, incoming is what
+/// a connected client wrote.
 /// <para>
 /// A <c>null</c> rate means the connector does not measure that direction, which is decided at
-/// construction and never changes. It is distinct from a rate of <c>0.0</c>, which means the
-/// connector measures the direction and nothing is flowing.
+/// construction and never changes. A rate of <c>0.0</c> means the direction is measured and nothing
+/// is flowing.
 /// </para>
 /// </remarks>
 public sealed class ThroughputDiagnostics

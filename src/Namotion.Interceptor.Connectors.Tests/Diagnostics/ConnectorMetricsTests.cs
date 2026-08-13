@@ -46,8 +46,8 @@ public class ConnectorMetricsTests
         var first = diagnostics.OperationalChangeTime;
 
         // Act
-        // The tick is what makes this a test: without it both calls sample the same coarse clock
-        // value, so it would pass even if the no-op guard were replaced by a fresh stamp.
+        // Without the tick both calls sample the same coarse clock value, so this would pass even
+        // without the no-op guard.
         ClockTestHelpers.WaitForClockTick();
         metrics.MarkOperational();
 
@@ -201,8 +201,8 @@ public class ConnectorMetricsTests
         Assert.Equal(0, diagnostics.OutboundRetries.TotalDropped);
         Assert.Equal(0, diagnostics.InboundBuffer.TotalDropped);
 
-        // Once per MarkStarted, including the one in the arrange: the epoch is deliberately not
-        // idempotent, so every call resets the hoisted metrics too.
+        // Once per MarkStarted, including the one in the arrange: the epoch reset is deliberately not
+        // idempotent.
         Assert.Equal(2, hoisted.ResetCount);
     }
 
@@ -301,8 +301,8 @@ public class ConnectorMetricsTests
         metrics.MarkOperational();
 
         // Act
-        // Both threads flip the liveness: a stale timestamp can only be stamped by a writer that lost
-        // the race to another writer, so a reader beside a single writer would never observe one.
+        // Both threads flip the liveness: only a writer that lost the race to another writer can
+        // stamp a stale timestamp.
         var flipper = Task.Run(() =>
         {
             while (!Volatile.Read(ref stop))
@@ -319,11 +319,9 @@ public class ConnectorMetricsTests
             metrics.MarkNotOperational();
             metrics.MarkOperational();
 
-            // What the record guarantees is that each individual read is internally consistent and
-            // that the timestamp only ever moves forward. It does not make IsOperational and
-            // OperationalChangeTime one atomic pair: they are two separate reads of two separate
-            // snapshots, so a reader that needs a coherent flag-and-timestamp pair cannot get it by
-            // reading both properties.
+            // The guarantee is per read: each read is internally consistent and the timestamp only
+            // moves forward. IsOperational and OperationalChangeTime are two separate snapshots, so
+            // reading both never yields one coherent pair.
             var changeTime = diagnostics.OperationalChangeTime;
             if (changeTime < previous)
             {
@@ -344,10 +342,8 @@ public class ConnectorMetricsTests
         // Assert
         Assert.False(movedBackwards);
 
-        // Deterministic backstops, so the flag above cannot pass vacuously. A null timestamp compares
-        // false against everything, so a getter that stopped stamping would leave the flag false while
-        // the test observed nothing. Both counts are exact: every iteration reads a stamped timestamp,
-        // and both threads end their loop on MarkOperational.
+        // Backstops, so the assertion above cannot pass vacuously: a null timestamp compares false
+        // against everything, so a getter that stopped stamping would leave the flag false too.
         Assert.Equal(100_000, stampedReads);
         Assert.True(diagnostics.IsOperational);
     }

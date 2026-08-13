@@ -350,9 +350,7 @@ public class SubjectPropertyWriterTests
     [Fact]
     public async Task WhenASupersededLoadIsDiscarded_ThenTheSurvivingBufferStaysCounted()
     {
-        // Arrange
-        // The superseded path returns before touching the buffer, so the newer cycle's updates are
-        // still buffered and must still be counted.
+        // Arrange: the superseded load returns before touching the buffer the newer cycle filled.
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
 

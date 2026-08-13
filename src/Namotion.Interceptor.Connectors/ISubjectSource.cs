@@ -62,16 +62,11 @@ public interface ISubjectSource : ISubjectConnector
     SourceState State { get; }
 
     /// <summary>
-    /// Gets when <see cref="State"/> last changed. Stamped at construction, so it is always
-    /// meaningful. Read with <see cref="State"/> it answers both questions an operator asks:
-    /// <c>Synchronized</c> plus T reads as in sync since T, <c>Synchronizing</c> plus T reads as
-    /// stale since T.
+    /// Gets when <see cref="State"/> last changed. Stamped at construction, so it is always meaningful.
     /// </summary>
     /// <remarks>
-    /// Distinct from <see cref="LastSynchronizedAt"/>, which records whether a good period ever
-    /// began rather than when the current one did. Neither can answer the other's question: this one
-    /// cannot say whether the source was ever synchronized, and that one cannot say when
-    /// synchronization was lost.
+    /// Distinct from <see cref="LastSynchronizedAt"/>, which records whether a good period ever began
+    /// rather than when the current one did.
     /// </remarks>
     DateTimeOffset StateChangeTime { get; }
 
@@ -85,11 +80,8 @@ public interface ISubjectSource : ISubjectConnector
     /// visible before <see cref="State"/> becomes <see cref="SourceState.Stopped"/>, or every branch
     /// it participates in reports <see cref="SourceSynchronizationResult.Incomplete"/> once it stops.
     /// Only a stopped source's value is read, so <c>null</c> while synchronized costs nothing.
-    /// <para>
-    /// Because it is stamped only on the transition into <see cref="SourceState.Synchronized"/>, it
-    /// cannot say when synchronization was lost: a source that synchronized a week ago and dropped
-    /// an hour ago reports the week. Use <see cref="StateChangeTime"/> for that.
-    /// </para>
+    /// Stamped only on the transition into <see cref="SourceState.Synchronized"/>, so it cannot say
+    /// when synchronization was lost; <see cref="StateChangeTime"/> answers that.
     /// </remarks>
     DateTimeOffset? LastSynchronizedAt { get; }
 

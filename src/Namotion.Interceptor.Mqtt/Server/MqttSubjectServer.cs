@@ -115,9 +115,8 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         switch (faultType)
         {
             case FaultType.Kill:
-                // With no current attempt the loop is between attempts, so there is nothing to kill and
-                // nothing is signalled back: the teardown and the backoff this fault stands for have
-                // already happened or are already under way.
+                // No current attempt means the loop is between attempts, where the teardown and backoff
+                // this fault stands for are already under way.
                 var attempt = _currentAttempt;
                 if (attempt is not null)
                 {
@@ -195,9 +194,8 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                 {
                     using var changeQueueProcessor = CreateChangeQueueProcessor();
 
-                    // Registered after construction and released in the finally below, so the next
-                    // restart can register its own processor: a second Register while one is still live
-                    // throws. The using above still disposes the processor if Register itself throws.
+                    // Deregistered in the finally below so the next restart can register its own
+                    // processor: a second Register while one is still live throws.
                     Metrics.OutboundChanges.Register(
                         () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
                     try
@@ -206,8 +204,6 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                     }
                     finally
                     {
-                        // Runs before the using disposes the processor, so no reader can call into a
-                        // disposed one.
                         Metrics.OutboundChanges.Deregister();
                     }
                 }
@@ -220,51 +216,34 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                // Defensive, like the clause below: reached with liveness still true when the teardown
-                // above threw before its own write ran. _isListening is deliberately left alone, so a
-                // broker whose stop failed is stopped again from DisposeAsync.
+                // _isListening is deliberately left as it is, so a broker whose stop failed is stopped
+                // again from DisposeAsync.
                 Metrics.MarkNotOperational();
                 return;
             }
             catch (OperationCanceledException) when (attempt.WasForceKilled)
             {
-                // Deliberately not reported through ReportError: it is an injected fault the broker
-                // recovers from by restarting, and catching it here is also what keeps it from reaching
-                // the base class, which would record a cancellation the stopping token did not cause as
-                // a genuine fault. Liveness is forced false because the loop continues from here: a
-                // teardown that threw before its own write would otherwise leave the broker reporting
-                // that it is serving across the whole restart window.
+                // Not reported as an error: an injected fault the broker recovers from by restarting.
                 Metrics.MarkNotOperational();
                 _logger.LogWarning("MQTT server force-killed. Restarting...");
             }
             catch (Exception ex)
             {
-                // Reached when the broker fails to start, or when the teardown above throws before its
-                // own liveness write runs.
                 Volatile.Write(ref _isListening, 0);
                 Metrics.MarkNotOperational();
 
-                // A failure the stop itself caused is an expected shutdown rather than a fault: the
-                // first clause above only covers the cancellation, not the arbitrary exception a broker
-                // torn down mid-stop raises, and recording that would overwrite the genuine fault for
-                // good, because LastError is sticky and a stopped broker does not start again. A
-                // disposal is the same stop seen earlier: it stops and disposes the broker before it
-                // cancels the stopping token, so what a running attempt sees is an ObjectDisposedException.
+                // A stop or a disposal tears the broker down with an arbitrary exception rather than a
+                // cancellation, so only these two flags tell a shutdown apart from a genuine fault:
+                // DisposeAsync stops and disposes the broker before it cancels the stopping token.
                 if (stoppingToken.IsCancellationRequested || Volatile.Read(ref _disposed) == 1)
                 {
                     return;
                 }
 
-                // The base class only sees exceptions that leave RunAsync, and this loop swallows every
-                // per-attempt failure. Without this, a broker that can never bind reports no error. A
-                // cancellation that neither the stopping token nor a force-kill caused reaches here
-                // like any other failure and is treated as one: it is a genuine fault, and a broker
-                // that stops serving with nothing explaining why is worse than one that keeps trying.
+                // Nothing outside this loop reports its failures.
                 Metrics.ReportError(ex);
                 _logger.LogError(ex, "Error in MQTT server.");
 
-                // On the stopping token this leaves RunAsync as a cancellation, which the base class
-                // recognises as a shutdown rather than recording it.
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
             }
             finally
@@ -701,8 +680,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         _propertyToTopic.Clear();
         _pathToProperty.Clear();
 
-        // Liveness is not touched here: Dispose below forces it false terminally, which is stronger
-        // than a MarkNotOperational a disposed connector could still recover from.
+        // Liveness is left to Dispose below, which latches it false terminally.
         Volatile.Write(ref _isListening, 0);
 
         _shutdownCts.Dispose();

@@ -6,10 +6,8 @@ namespace Namotion.Interceptor.Connectors.Diagnostics;
 /// </summary>
 /// <remarks>
 /// All state lives in a single immutable snapshot swapped with <see cref="Interlocked"/>, so a
-/// reader sees the accumulated count and the live provider that belongs with it. Holding them in
-/// separate fields cannot be lock-free, monotonic and free of double counting at the same time:
-/// reading the accumulator before the provider lets the total decrease across a handover, and
-/// reading them the other way round counts the same drops twice.
+/// reader sees the accumulated count and the live provider that belongs with it. Splitting them into
+/// separate fields cannot be lock-free, monotonic and free of double counting at the same time.
 /// </remarks>
 public sealed class QueueMetrics
 {
@@ -23,10 +21,9 @@ public sealed class QueueMetrics
     /// Initializes a new instance of the <see cref="QueueMetrics"/> class.
     /// </summary>
     /// <param name="name">
-    /// Which buffer this instance describes, for example <c>OutboundChanges</c>. Named so the
-    /// registration failure below says which of a connector's buffers it is about. The three a
-    /// connector gets from <see cref="ConnectorMetrics"/> and <see cref="SourceMetrics"/> are named
-    /// for you; pass one only when constructing an instance directly.
+    /// Which buffer this instance describes, for example <c>OutboundChanges</c>, used in the
+    /// registration failure message. The instances exposed by <see cref="ConnectorMetrics"/> and
+    /// <see cref="SourceMetrics"/> are already named; pass one only when constructing directly.
     /// </param>
     public QueueMetrics(string name = "queue")
     {
@@ -40,17 +37,15 @@ public sealed class QueueMetrics
     /// <see cref="Deregister"/> before another can be made.
     /// </summary>
     /// <remarks>
-    /// Neither delegate may throw; a throwing delegate is treated as reporting zero rather than
-    /// letting the exception escape a diagnostics read. Neither delegate may take a lock owned by
-    /// this library either, because a diagnostics read can happen while a monitor holds its own lock.
+    /// Neither delegate may throw (a throwing delegate is treated as reporting zero) and neither may
+    /// take a lock owned by this library, because a diagnostics read can happen while a monitor holds
+    /// its own lock.
     /// </remarks>
     /// <param name="depth">Reads the buffer's current item count.</param>
     /// <param name="dropped">
     /// Reads the buffer's own drop counter, or <c>null</c> for a buffer that has none and reports
-    /// through <see cref="AddDropped"/> instead. Passing <c>() =&gt; 0</c> instead of <c>null</c>
-    /// would work but invites a later implementer to add a counter that then double counts. Must be
-    /// non-decreasing: both <see cref="Reset"/> and the fold on handover rely on that to keep
-    /// <see cref="TotalDropped"/> from decreasing.
+    /// through <see cref="AddDropped"/> instead. Must be non-decreasing: both <see cref="Reset"/> and
+    /// the fold on handover rely on that to keep <see cref="TotalDropped"/> from decreasing.
     /// </param>
     /// <param name="capacity">The buffer's bound, or <c>null</c> if it is unbounded.</param>
     /// <exception cref="InvalidOperationException">
@@ -60,13 +55,8 @@ public sealed class QueueMetrics
     {
         ArgumentNullException.ThrowIfNull(depth);
 
-        // Checked before the Swap loop, not inside the update delegate, so it cannot fire from within
-        // a CAS retry: a live registration means someone forgot to call Deregister, not a race to
-        // resolve by retrying.
         if (Volatile.Read(ref _snapshot).Depth is not null)
         {
-            // Names the buffer, because this fires from inside a connector's own retry loop, which
-            // catches it, reports it and tries again, so the message is all an operator gets.
             throw new InvalidOperationException(
                 $"A registration is already live on the '{_name}' queue metrics. Call Deregister before registering again.");
         }
@@ -80,10 +70,9 @@ public sealed class QueueMetrics
     /// </summary>
     /// <remarks>
     /// The buffer must have stopped producing before this runs: any drop that lands between the fold
-    /// and the compare-exchange is lost. Clearing the providers first narrows the race with a
-    /// concurrent reader rather than closing it: a reader can hold a non-null provider and be
-    /// preempted. That is safe only because <see cref="ChangeQueueProcessor"/> keeps its queue and
-    /// drop count alive through <see cref="ChangeQueueProcessor.Dispose"/>.
+    /// and the compare-exchange is lost. A concurrent reader can still be holding a provider that has
+    /// just been cleared, which is safe only because <see cref="ChangeQueueProcessor"/> keeps its
+    /// queue and drop count alive through <see cref="ChangeQueueProcessor.Dispose"/>.
     /// </remarks>
     public void Deregister()
     {
@@ -120,16 +109,12 @@ public sealed class QueueMetrics
         {
             var snapshot = Volatile.Read(ref _snapshot);
 
-            // Reset stores a negative Accumulated and relies on the same provider adding that count
-            // back on the next read. If that provider then throws, SafeInvokeDropped returns 0 and
-            // the sum would surface as negative; clamp so a throwing provider can never produce a
-            // negative total.
+            // Reset stores a negative Accumulated that the same provider adds back on the next read,
+            // so clamp: a provider that throws reports 0 and would surface the sum as negative.
             return Math.Max(0, snapshot.Accumulated + SafeInvokeDropped(snapshot.Dropped));
         }
     }
 
-    // A registered provider must not throw (see Register), but diagnostics reads must not throw
-    // regardless: a throwing delegate is treated as reporting zero for that field.
     private static int SafeInvokeDepth(Func<int>? depth)
     {
         if (depth is null)
@@ -166,15 +151,8 @@ public sealed class QueueMetrics
 
     private void Swap<TState>(TState state, Func<Snapshot, TState, Snapshot> update)
     {
-        // Compare-exchange rather than a blind exchange: every caller here is a read-modify-write and
-        // drops arrive off the pump thread, so an exchange would lose increments.
-        //
-        // The success check below must use reference equality, not Snapshot's record-generated value
-        // equality: Interlocked.CompareExchange itself always compares by reference at the hardware
-        // level, but a concurrent Register/Deregister cycle can produce a new Snapshot instance that
-        // is value-equal to the one this loop already read. A value-equality check on the returned
-        // "previous" snapshot would then read a genuine CAS failure as success and silently drop this
-        // update.
+        // Reference equality, not Snapshot's record-generated value equality: a Register/Deregister
+        // cycle can produce a value-equal instance, so == would read a failed exchange as success.
         SpinWait spin = default;
         while (true)
         {

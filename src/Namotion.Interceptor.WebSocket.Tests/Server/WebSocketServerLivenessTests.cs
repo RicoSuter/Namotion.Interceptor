@@ -17,8 +17,7 @@ namespace Namotion.Interceptor.WebSocket.Tests.Server;
 /// <summary>
 /// The server owns its own restart loop, so nothing outside it can tell whether the listener is up.
 /// These pin the transitions the loop is responsible for, and that a restart can register its own
-/// outbound change queue: the metrics permit one live registration at a time, so an unreleased one
-/// would leave the restarted server stuck failing rather than listening.
+/// outbound change queue: the metrics permit one live registration at a time.
 /// </summary>
 [Trait("Category", "Integration")]
 public class WebSocketServerLivenessTests
@@ -111,11 +110,9 @@ public class WebSocketServerLivenessTests
                       server.Diagnostics.OperationalChangeTime != firstOperationalTime,
                 message: "The server should report operational again after restarting.");
 
-            // An injected fault is not a fault of the transport, so a kill the attempt recognises is
-            // not recorded, while one it failed to recognise is recorded as a processing layer that
-            // ended on its own. Scoped to that error rather than asserting no error at all, because the
-            // restart rebinds the same port immediately and a bind failure the loop absorbs by backing
-            // off belongs in LastError by design.
+            // Only this one error is ruled out rather than every error: the restart rebinds the same
+            // port immediately, and a bind failure the loop absorbs by backing off belongs in
+            // LastError by design.
             Assert.False(
                 server.Diagnostics.LastError is InvalidOperationException,
                 "The kill was recorded as a processing layer that ended on its own.");
@@ -130,8 +127,7 @@ public class WebSocketServerLivenessTests
     public async Task WhenTheListenerCannotBind_ThenTheFailureIsReported()
     {
         // Arrange: the port is already taken, so the server fails inside the loop, which swallows the
-        // exception rather than letting the base class see it. Only safe to run now that the loop
-        // backs off between restarts; without that it spins on rebuilding and rebinding Kestrel.
+        // exception rather than letting the base class see it.
         using var occupied = new TcpListener(IPAddress.Loopback, 0);
         occupied.Start();
         var occupiedPort = ((IPEndPoint)occupied.LocalEndpoint).Port;
@@ -158,10 +154,9 @@ public class WebSocketServerLivenessTests
     [Fact]
     public async Task WhenTheServerIsStoppedDuringItsRestartBackoff_ThenTheHostedTaskCompletes()
     {
-        // Arrange: the same occupied port as above, so the server fails to bind, records the failure
-        // and spends the next few seconds in its backoff, which is where the stop below lands. The
-        // delay sits outside every catch around the attempt, so a stop reaching it has one clause of
-        // its own between the cancellation and the hosted task ending canceled.
+        // Arrange: the same occupied port as above, so the server fails to bind and spends the next
+        // few seconds in its backoff, which is where the stop below lands. That delay sits outside
+        // every catch around the attempt, so cancelling there needs a clause of its own.
         using var occupied = new TcpListener(IPAddress.Loopback, 0);
         occupied.Start();
         var occupiedPort = ((IPEndPoint)occupied.LocalEndpoint).Port;

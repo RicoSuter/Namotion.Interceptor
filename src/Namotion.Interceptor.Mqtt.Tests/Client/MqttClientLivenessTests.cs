@@ -16,8 +16,8 @@ namespace Namotion.Interceptor.Mqtt.Tests.Client;
 
 /// <summary>
 /// The client reports liveness from three places the broker drives: the initial connect, the
-/// broker's disconnect event, and the connection monitor's own reconnect. Nothing outside the client
-/// can observe those, so these pin them against a real broker.
+/// broker's disconnect event, and the connection monitor's own reconnect. None of them is observable
+/// without a real broker.
 /// </summary>
 [Trait("Category", "Integration")]
 public partial class MqttClientLivenessTests

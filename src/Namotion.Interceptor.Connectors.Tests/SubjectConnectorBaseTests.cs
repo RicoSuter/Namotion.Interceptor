@@ -33,8 +33,8 @@ public class SubjectConnectorBaseTests
         // Act
         connector.Release();
 
-        // Awaiting the execute task rather than polling: ExecuteAsync's finally has run by the time
-        // that task completes, so the liveness this asserts on is already settled.
+        // Awaited rather than polled: the finally has run once the execute task completes, so the
+        // liveness asserted below is settled.
         await Assert.ThrowsAsync<InvalidOperationException>(() => connector.ExecuteTask!);
 
         // Assert
@@ -138,9 +138,8 @@ public class SubjectConnectorBaseTests
     [Fact]
     public async Task WhenARegisteredResettableThrowsOnStart_ThenTheErrorIsRecordedAndTheConnectorIsNotOperational()
     {
-        // Arrange
-        // Both RegisterResettable and IResettableMetrics are public, so a third-party Reset that throws
-        // is reachable. It faults the connector like any other failure and has to be treated like one.
+        // Arrange: RegisterResettable and IResettableMetrics are public, so a third-party Reset that
+        // throws is reachable.
         var failure = new InvalidOperationException("reset failed");
         using var connector = new TestConnector();
         connector.RegisterResettable(new ThrowingResettableMetrics(failure));
@@ -167,9 +166,8 @@ public class SubjectConnectorBaseTests
         var throughInterface = ((ISubjectConnector)connector).Diagnostics;
 
         // Assert
-        // The base declares the member as ConnectorDiagnostics and derived connectors narrow it with a
-        // covariant override, so the interface has to land on that same override rather than on a
-        // second diagnostics view reading metrics nobody writes to.
+        // Derived connectors narrow the member with a covariant override, and the interface has to
+        // land on that same override rather than on a view reading metrics nobody writes to.
         Assert.Same(connector.Diagnostics, throughInterface);
     }
 
@@ -217,10 +215,8 @@ public class SubjectConnectorBaseTests
         {
             if (FaultBeforeBackoff is not null)
             {
-                // Mirrors a connector that records its own connect failure and then backs off inside
-                // its own catch block. The backoff never elapses, so the only way out is the stopping
-                // token, which throws the cancellation out of RunAsync past the clause that would
-                // otherwise have swallowed it.
+                // Mirrors a connector that records its connect failure and then backs off inside its
+                // own catch block. The backoff never elapses, so the only way out is the stopping token.
                 _metrics.ReportError(FaultBeforeBackoff);
                 await Task.Delay(Timeout.Infinite, stoppingToken);
             }
@@ -230,11 +226,9 @@ public class SubjectConnectorBaseTests
                 await _gate.Task;
             }
 
-            // Faulting only once the gate opens keeps the failure asynchronous, which is the case the
-            // base class exists for. BackgroundService.StartAsync hands its execute task back to the
-            // caller when that task has already completed, so a RunAsync that faults before the check
-            // surfaces the exception from StartAsync instead of from the running connector, and the
-            // check races the fault so neither outcome can be asserted reliably.
+            // Faulting only once the gate opens keeps the failure asynchronous: BackgroundService
+            // surfaces an execute task that has already faulted from StartAsync instead, which would
+            // move the throw away from the running connector.
             if (Fault is not null)
             {
                 throw Fault;

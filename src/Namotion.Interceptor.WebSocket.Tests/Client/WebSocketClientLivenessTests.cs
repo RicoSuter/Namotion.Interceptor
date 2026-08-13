@@ -15,8 +15,7 @@ namespace Namotion.Interceptor.WebSocket.Tests.Client;
 
 /// <summary>
 /// The client reports liveness from two places: the accepted handshake and the exit of the receive
-/// loop that the handshake starts. Nothing outside the client can observe either, so these pin them
-/// against a real server.
+/// loop that the handshake starts. Neither is observable without a real server.
 /// </summary>
 [Trait("Category", "Integration")]
 public class WebSocketClientLivenessTests

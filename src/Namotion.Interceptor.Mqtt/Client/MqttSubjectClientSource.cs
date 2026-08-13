@@ -150,7 +150,6 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
     private async Task RunMonitorWithKillRestartAsync(MqttConnectionMonitor connectionMonitor, CancellationToken stoppingToken)
     {
-        // The outer loop re-enters MonitorConnectionAsync after a Kill cancels the current iteration.
         // stoppingToken (from the lifetime) breaks out for good on host shutdown
         // or when the listen lifetime is disposed by the base retry path.
         while (!stoppingToken.IsCancellationRequested)
@@ -173,8 +172,8 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             }
             finally
             {
-                // Released before the token source is disposed, so a kill arriving from here on finds
-                // no iteration rather than a disposed one.
+                // Released before the attempt is disposed, so a kill arriving from here on finds no
+                // attempt rather than a disposed one.
                 _currentAttempt = null;
                 attempt.Dispose();
             }
@@ -183,9 +182,8 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
     private async ValueTask DisposeMqttConnectionAsync(IMqttClient? client, MqttConnectionMonitor? connectionMonitor)
     {
-        // The single teardown seam for a connected client, reached both from the failed-startup catch
-        // above and from the listen lifetime. The disconnect below cannot report it: the event handler
-        // is detached first, so OnDisconnectedAsync never runs for a teardown.
+        // The disconnect below cannot report this: the event handler is detached first, so
+        // OnDisconnectedAsync never runs for a teardown.
         Metrics.MarkNotOperational();
 
         if (connectionMonitor is not null)
@@ -539,9 +537,8 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
     private Task OnDisconnectedAsync(MqttClientDisconnectedEventArgs e)
     {
-        // Before the disposal guard below: disposal sets the flag first and only latches the terminal
-        // liveness state at the end, so returning early here would leave the window in between
-        // reporting a disconnected client as serving.
+        // Before the disposal guard below, which would otherwise return early and leave a disconnected
+        // client reporting that it is serving until disposal latches the terminal state.
         Metrics.MarkNotOperational();
 
         if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
@@ -564,8 +561,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         }
 
         // Last, because the connection monitor treats a throw from anywhere above as a failed
-        // reconnect and tries again: a client that has reconnected but could not resubscribe is not
-        // serving anything.
+        // reconnect: a client that could not resubscribe is not serving anything.
         Metrics.MarkOperational();
     }
 
@@ -575,8 +571,8 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         switch (faultType)
         {
             case FaultType.Kill:
-                // With no current iteration the loop is between iterations, so there is nothing to kill
-                // and nothing is signalled back: the restart this fault stands for is already under way.
+                // No current attempt means the loop is between iterations, where the restart this fault
+                // stands for is already under way.
                 var attempt = _currentAttempt;
                 if (attempt is not null)
                 {

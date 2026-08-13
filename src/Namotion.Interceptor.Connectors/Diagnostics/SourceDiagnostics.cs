@@ -21,8 +21,7 @@ public class SourceDiagnostics : ConnectorDiagnostics
 
     /// <summary>
     /// Gets how many properties this source currently owns. A gauge, not a counter: it rises as the
-    /// source claims properties and falls as subjects detach. The individual claims and releases are
-    /// on the source monitoring event stream.
+    /// source claims properties and falls as subjects detach.
     /// </summary>
     public int ClaimedPropertyCount => _metrics.ClaimedPropertyCount;
 
@@ -32,16 +31,10 @@ public class SourceDiagnostics : ConnectorDiagnostics
     /// </summary>
     /// <remarks>
     /// When the source is configured without a retry queue this block reports a capacity of 0 and a
-    /// depth of 0, while <see cref="QueueDiagnostics.TotalDropped"/> still rises: without a queue,
-    /// failed writes are discarded directly and are attributed here.
-    /// <para>
-    /// In that configuration the total is a floor rather than the whole loss. The larger loss path is
-    /// the connect-window drain, which discards every captured write because without a queue there is
-    /// nothing to park them in, and which is deliberately uncounted: the drain is unfiltered, so
-    /// counting only this source's share of it costs an ownership check per change on a path that runs
-    /// only when the queue is disabled, and the configuration already says those writes are being
-    /// thrown away.
-    /// </para>
+    /// depth of 0, while <see cref="QueueDiagnostics.TotalDropped"/> still rises: failed writes are
+    /// then discarded directly and are attributed here. In that configuration the total is a floor
+    /// rather than the whole loss, because the connect-window drain discards captured writes without
+    /// counting them.
     /// </remarks>
     public QueueDiagnostics OutboundRetries { get; }
 
@@ -52,8 +45,7 @@ public class SourceDiagnostics : ConnectorDiagnostics
     /// <remarks>
     /// <see cref="QueueDiagnostics.TotalDropped"/> here counts buffered updates thrown away when a
     /// connect attempt was abandoned before its load completed. Those discards are deliberate rather
-    /// than data loss, because applying a superseded snapshot would be wrong. The number is useful
-    /// as the only signal of how often initial loads are being superseded, which is reconnect thrash.
+    /// than data loss, and a rising total signals reconnect thrash.
     /// </remarks>
     public QueueDiagnostics InboundBuffer { get; }
 }

@@ -15,7 +15,7 @@ internal static class ClientSourceTestFactory
 {
     /// <param name="withPropertyTracking">
     /// <c>false</c> leaves the context without a <c>PropertyChangeInterceptor</c>, which makes the
-    /// pump fail its configuration guard on the first attempt. That is the only way to reach
+    /// pump fail its configuration guard on the first attempt, the only way to reach
     /// <c>ConnectorMetrics.MarkStarted</c> without a server.
     /// </param>
     /// <param name="configuration">The client configuration, or <c>null</c> for the default one.</param>
@@ -41,8 +41,7 @@ internal static class ClientSourceTestFactory
         string serverUrl = "opc.tcp://localhost:4840",
         string certificateStoreBasePath = "pki") => new()
     {
-        // Not dialled by default: most of these tests never start a connect attempt that gets as far
-        // as the wire. The ones that do pass a port nothing is listening on.
+        // Not dialled by default: the tests that reach the wire pass a port nothing is listening on.
         ServerUrl = serverUrl,
         CertificateStoreBasePath = certificateStoreBasePath,
         TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),

@@ -45,8 +45,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     internal ReconnectionMetrics ReconnectionMetrics { get; } = new();
 
     // Owned here rather than by SessionManager, which is rebuilt on every connect attempt including
-    // failed ones. Without this the Total counters they feed would sit near zero during a reconnect
-    // storm, which is exactly when they matter.
+    // failed ones, so the totals they feed survive a reconnect storm.
     internal PollingMetrics PollingMetrics { get; } = new();
 
     internal ReadAfterWriteMetrics ReadAfterWriteMetrics { get; } = new();
@@ -57,8 +56,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     /// <summary>
     /// Forwards to the protected ReportConnectionLost transition seam for SessionManager, which
     /// holds this concrete source type but is not part of its inheritance hierarchy and so cannot
-    /// call the protected member directly. Also drops liveness, because a lost connection is the
-    /// connector no longer serving.
+    /// call the protected member directly.
     /// </summary>
     internal void NotifyConnectionLost()
     {
@@ -68,8 +66,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     /// <summary>
     /// Forwards a healthy-session report from <c>SessionManager</c> and the health check loop, which
-    /// live outside this class's inheritance hierarchy and so cannot reach the protected metrics
-    /// directly. Same pattern as <see cref="NotifyConnectionLost"/>.
+    /// cannot reach the protected metrics directly. Same pattern as
+    /// <see cref="NotifyConnectionLost"/>.
     /// </summary>
     internal void NotifySessionHealthy() => Metrics.MarkOperational();
 
@@ -78,12 +76,10 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     /// not report a connection loss.
     /// </summary>
     /// <remarks>
-    /// The state transition and the writer generation bump that <see cref="NotifyConnectionLost"/>
-    /// also performs are left to the caller. A caller that performs neither leaves
-    /// <see cref="ISubjectSource.State"/> where it was, so the source can read
+    /// Unlike <see cref="NotifyConnectionLost"/> this leaves the state transition and the writer
+    /// generation bump to the caller, so a caller that does neither can leave the source reading
     /// <see cref="Namotion.Interceptor.Connectors.Monitoring.SourceState.Synchronized"/> beside a
-    /// client reporting itself as not operational until a reconnection or a later health check tick
-    /// moves the state.
+    /// client reporting itself as not operational.
     /// </remarks>
     internal void NotifySessionNotHealthy() => Metrics.MarkNotOperational();
 
@@ -104,9 +100,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     {
     }
 
-    // A constructor initializer cannot reference this, so the counters are created here and threaded
-    // through: the same two instances have to reach both base(...) and the properties the read and
-    // write paths feed.
+    // A constructor initializer cannot reference this, so the counters are created by the caller and
+    // threaded through: the same two instances have to reach both base(...) and the properties.
     private OpcUaSubjectClientSource(
         IInterceptorSubject subject,
         OpcUaClientConfiguration configuration,
@@ -166,9 +161,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     {
         Reset();
 
-        // A connect attempt is by definition not yet serving. Without this a previous attempt that
-        // reached the health loop before its initial load failed would keep reporting as operational
-        // for the whole retry delay.
+        // Without this, a previous attempt that reached the health loop before its initial load
+        // failed would keep reporting as operational for the whole retry delay.
         Metrics.MarkNotOperational();
 
         _propertyWriter = propertyWriter;
@@ -224,15 +218,11 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                     try { await sessionManagerForLifetime.DisposeAsync().ConfigureAwait(false); }
                     catch (Exception ex) { _logger.LogWarning(ex, "OPC UA session manager threw during listen-lifetime disposal."); }
 
-                    // The lifetime is disposed on every way out of this attempt, including a failure
-                    // that happens after this method returned (the initial load, the retry queue
-                    // reconcile or the change processor). The retry loop records that failure but
-                    // touches no liveness, so without this the client keeps reporting itself as
-                    // serving for the whole retry delay with its session already gone. After the
-                    // disposal, which latches the manager's disposed flag: an OnReconnectComplete
-                    // still in flight on a pool thread would otherwise observe a transferred,
-                    // connected session and raise liveness again behind this call, and that stale
-                    // rise would then stand for the whole retry delay.
+                    // Reached on every way out of this attempt, including a failure raised after this
+                    // method returned, which the retry loop records without touching liveness. Must
+                    // stay after the disposal that latches the manager's disposed flag: an
+                    // OnReconnectComplete still in flight would otherwise raise liveness again behind
+                    // this call, and that stale rise would stand for the whole retry delay.
                     Metrics.MarkNotOperational();
                 });
         }
@@ -241,10 +231,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             await CleanupSessionManagerAsync().ConfigureAwait(false);
             throw;
         }
-        catch (Exception)
+        catch
         {
-            // Deliberately not reported here: this rethrows into SubjectSourceBase.RunAsync, whose
-            // retry loop records the same exception, so reporting it twice would be redundant.
             await CleanupSessionManagerAsync().ConfigureAwait(false);
             throw;
         }
@@ -435,11 +423,10 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
         await sessionManager.PerformFullStateSyncIfNeededAsync(cancellationToken).ConfigureAwait(false);
 
-        // Re-read rather than inherited from the caller's snapshot: the full state sync above clears
-        // the session when it fails, and the rise it left standing after an SDK transfer would then
-        // report a client with no session as serving. Ahead of the two network-touching steps below
-        // rather than after them, so a throw in either cannot skip this tick's liveness report and
-        // leave a client that is genuinely serving subscription data reporting itself as down.
+        // Re-read rather than taken from the caller's snapshot, because the full state sync above
+        // clears the session when it fails. Kept ahead of the network-touching steps below, so a
+        // throw in either cannot skip this tick's report and leave a client that is genuinely
+        // serving subscription data reporting itself as down.
         sessionManager.ReportLivenessFromSessionState();
 
         if (sessionManager.SubscriptionManager.HasStoppedPublishing)
@@ -594,13 +581,10 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         }
         catch (Exception ex)
         {
-            // A failure the stop itself caused is an expected shutdown rather than a fault. The clause
-            // above declines it, because the source the kill cancels is a child of the stopping token
-            // and a stop cancels both, so what lands here is the cancellation a session, a lock wait or
-            // an initial load raises on the way down. Recording it would overwrite the genuine fault
-            // for good, because LastError is sticky and a stopped source does not start again, and
-            // would leave TotalFailed blaming a reconnection that did not fail. Counted as abandoned
-            // instead, so every started attempt still resolves into exactly one outcome.
+            // A stop cancels both this token and the kill source, so what lands here during shutdown
+            // is the cancellation a session, a lock wait or an initial load raises on the way down
+            // rather than a genuine fault. Counted as abandoned instead of failed, so it neither
+            // overwrites the sticky last error nor leaves an attempt without an outcome.
             if (cancellationToken.IsCancellationRequested)
             {
                 ReconnectionMetrics.RecordAbandoned();
@@ -627,10 +611,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             _reconnectCts = null;
         }
 
-        // After the finally cleared the reconnecting flag, so no reader sees the connector reported as
-        // operational and reconnecting at once. Reached only when the reconnection succeeded: both
-        // catch clauses above rethrow. Through the guarded report rather than a bare rise, because a
-        // keep-alive can already have failed on the new session by now.
+        // Must stay after the finally cleared the reconnecting flag, so no reader sees the connector
+        // reported as operational and reconnecting at once.
         sessionManager.ReportLivenessFromSessionState();
     }
 
@@ -732,11 +714,9 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 // No manual reconnection in progress, so clear the session directly.
                 await sessionManager.ClearSessionAsync(CancellationToken.None).ConfigureAwait(false);
 
-                // Liveness is dropped here rather than left to the next health check, a whole
-                // SubscriptionHealthCheckInterval away: the session is gone, so the client is no
-                // longer serving. After the clear rather than before it, because the clear waits for
-                // the reconnection lock and an SDK reconnect completing while it waits would raise
-                // liveness again on the very session the clear is about to take away.
+                // After the clear rather than before it, because the clear waits for the reconnection
+                // lock and an SDK reconnect completing while it waits would raise liveness again on
+                // the very session the clear is about to take away.
                 Metrics.MarkNotOperational();
 
                 // If ReconnectSessionAsync started between our _reconnectCts check and ClearSessionAsync,

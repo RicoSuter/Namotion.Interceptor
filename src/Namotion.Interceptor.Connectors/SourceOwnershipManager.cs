@@ -71,10 +71,8 @@ public class SourceOwnershipManager : IDisposable
     /// Gets how many properties this source currently owns.
     /// </summary>
     /// <remarks>
-    /// Maintained rather than derived: <see cref="Properties"/> copies the whole set under the lock,
-    /// so counting through it would allocate an array the size of the claim set on every read, and
-    /// this is read by a metrics scrape. Recomputed at each mutation site, all of which already hold
-    /// the lock, so the value is exact at each write and needs no increment arithmetic.
+    /// Maintained rather than derived from <see cref="Properties"/>, which copies the whole set on
+    /// every read. Recomputed at each mutation site, all of which already hold the lock.
     /// </remarks>
     public int Count => Volatile.Read(ref _count);
 

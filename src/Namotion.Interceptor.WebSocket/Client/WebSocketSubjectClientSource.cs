@@ -276,9 +276,6 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         {
             if (!receiveLoopStarted)
             {
-                // The receive loop's own exit is what normally drops liveness, so a connection torn
-                // down before it ever ran has to drop it here. A no-op when the handshake never got
-                // as far as raising it.
                 Metrics.MarkNotOperational();
 
                 // Dispose the socket to avoid holding resources during backoff delay
@@ -525,9 +522,6 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
         finally
         {
-            // Every way out of the loop above lands here: a close frame, a sequence or heartbeat gap,
-            // a socket error, a receive timeout, too many consecutive errors, cancellation from
-            // teardown or force-kill, and a socket that is no longer open.
             Metrics.MarkNotOperational();
 
             ArrayPool<byte>.Shared.Return(buffer);
@@ -558,9 +552,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         switch (faultType)
         {
             case FaultType.Kill:
-                // With no current iteration the loop is between iterations, so there is nothing to kill
-                // and nothing is signalled back: the teardown and the reconnection this fault stands for
-                // are already under way.
+                // No current attempt means the loop is between iterations, where the teardown and
+                // reconnection this fault stands for are already under way.
                 var attempt = _currentAttempt;
                 if (attempt is not null)
                 {
@@ -650,13 +643,9 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             }
             catch (Exception ex)
             {
-                // This loop runs inside the listen lifetime, outside the try in
-                // SubjectSourceBase.RunAsync that records per-attempt failures, so nothing else
-                // reports what happens here. A failure the stop itself caused is left unrecorded: the
-                // clause above only took the cancellation, not the WebSocketException or
-                // ObjectDisposedException a socket torn down mid-stop raises, and recording that would
-                // overwrite the genuine fault for good, because LastError is sticky and a stopped
-                // source does not start again.
+                // Nothing outside this loop reports its failures, but a stop tears the socket down with
+                // a WebSocketException or ObjectDisposedException rather than a cancellation, so only
+                // the stopping token tells a shutdown apart from a genuine fault.
                 if (!stoppingToken.IsCancellationRequested)
                 {
                     Metrics.ReportError(ex);
@@ -666,8 +655,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             }
             finally
             {
-                // Released before the token source is disposed, so a kill arriving from here on finds
-                // no iteration rather than a disposed one.
+                // Released before the attempt is disposed, so a kill arriving from here on finds no
+                // attempt rather than a disposed one.
                 _currentAttempt = null;
                 attempt.Dispose();
             }
@@ -697,13 +686,9 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
         catch (Exception ex)
         {
-            // Swallowed here so the monitor can back off and try again, which means the base class
-            // never sees it. Without this, a server that stays down leaves LastError null for the
-            // whole outage, beside an IsOperational of false. A failure the stop itself caused is left
-            // unrecorded: the clause above only took the cancellation, not the WebSocketException or
-            // ObjectDisposedException a connect torn down mid-stop raises, and recording that would
-            // overwrite the genuine fault for good, because LastError is sticky and a stopped source
-            // does not start again.
+            // A stop tears the socket down with a WebSocketException or ObjectDisposedException rather
+            // than a cancellation, so only the stopping token tells a shutdown apart from a genuine
+            // fault, which LastError keeps for good.
             if (!stoppingToken.IsCancellationRequested)
             {
                 Metrics.ReportError(ex);

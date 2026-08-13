@@ -10,18 +10,16 @@ using Namotion.Interceptor.Tracking;
 namespace Namotion.Interceptor.Mqtt.Tests.Client;
 
 /// <summary>
-/// Pins the wiring between the client and the diagnostics it publishes: that the claimed-property
-/// gauge is pointed at the client's own ownership manager, and that a client which has never
-/// connected says so. The liveness transitions themselves need a broker and are covered by
-/// <see cref="MqttClientLivenessTests"/>.
+/// Pins that the claimed-property gauge is pointed at the client's own ownership manager, and that a
+/// client which has never connected says so. The liveness transitions need a broker and are covered
+/// by <see cref="MqttClientLivenessTests"/>.
 /// </summary>
 public class MqttClientDiagnosticsTests
 {
     /// <summary>
-    /// A compile-level pin of the member tree plus the defaults a fresh <c>SourceMetrics</c> reports,
-    /// not behavioural coverage: nothing here can fail while the members exist. Its value is that
-    /// the two throughput rates stay <c>null</c> rather than being wired to a counter this connector
-    /// does not feed, which would report a misleading zero.
+    /// A compile-level pin of the member tree plus the defaults a fresh <c>SourceMetrics</c> reports.
+    /// Its value is that the two throughput rates stay <c>null</c> rather than being wired to a
+    /// counter this connector does not feed, which would report a misleading zero.
     /// </summary>
     [Fact]
     public async Task WhenNeverConnected_ThenTheSourceReportsNotOperationalAndNoThroughput()
@@ -61,16 +59,13 @@ public class MqttClientDiagnosticsTests
         // Assert
         Assert.True(claimed);
         Assert.Equal(1, whileClaimed);
-
-        // And it falls again, because it is a gauge rather than a counter.
         Assert.Equal(0, afterRelease);
     }
 
     /// <summary>
     /// The connection monitor runs inside the listen lifetime, outside the try in
     /// <c>SubjectSourceBase.RunAsync</c> that records per-attempt failures, so the monitor has to
-    /// report these itself. Without that, a broker that stays down leaves <c>IsOperational</c> false
-    /// beside a <c>LastError</c> of <c>null</c> for the whole outage.
+    /// report these itself.
     /// </summary>
     [Trait("Category", "Integration")]
     [Fact]
@@ -133,8 +128,7 @@ public class MqttClientDiagnosticsTests
             new MqttClientConfiguration
             {
                 // The broker binds IPv4 only, so dialling it by name would let the client spend its
-                // connect timeout on the IPv6 loopback first. Nothing but the reconnect test starts
-                // a connect attempt at all.
+                // connect timeout on the IPv6 loopback first.
                 BrokerHost = "127.0.0.1",
                 BrokerPort = brokerPort ?? 1883,
                 ReconnectDelay = TimeSpan.FromMilliseconds(200),

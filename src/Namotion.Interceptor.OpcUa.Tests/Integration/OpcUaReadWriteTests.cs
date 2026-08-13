@@ -24,17 +24,15 @@ public class OpcUaReadWriteTests : SharedServerTestBase
         var clientArea = Client!.Root!.ReadWrite.BasicSync;
         var diagnostics = Client!.Source!.Diagnostics;
 
-        // Assert - on a healthy connection the new diagnostic surface must be populated:
+        // Assert - on a healthy connection the diagnostics must be populated:
         // session/server live and Name is bound on both sides.
         Assert.NotNull(Client.Source);
         Assert.NotNull(Client.Source.CurrentSession);
         Assert.NotNull(ServerFixture.Server.CurrentServer);
 
-        // LastError is sticky for the whole epoch and is cleared only when the connector starts, so a
-        // transient failure on the shared fixture's first connect attempt would still be readable here
-        // and asserting it is null would fail every test in this class. What this test can honestly
-        // claim is that nothing failed after the connection was established, which is the baseline
-        // below compared against the same reference at the end.
+        // LastError is sticky for the whole epoch, so a transient failure on the shared fixture's
+        // first connect attempt would still be readable here. Captured as a baseline instead, so the
+        // assertion at the end means nothing failed after the connection was established.
         var errorBeforeExercise = diagnostics.LastError;
 
         // Each side owns its own subject tree, so the lookup must use that side's property reference.

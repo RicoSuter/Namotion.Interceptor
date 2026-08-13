@@ -20,8 +20,7 @@ public sealed class QueueDiagnostics
     /// Approximate: it is read while producers and consumers are running.
     /// </summary>
     /// <remarks>
-    /// Takes no lock owned by this library, so it cannot participate in a lock-ordering cycle. It is
-    /// not free, though: the change queue's count is a segment walk over a
+    /// Not free: the change queue's count is a segment walk over a
     /// <see cref="System.Collections.Concurrent.ConcurrentQueue{T}"/>, which briefly takes that
     /// queue's own internal lock once the queue spans several segments. Sample this rather than
     /// polling it tightly.

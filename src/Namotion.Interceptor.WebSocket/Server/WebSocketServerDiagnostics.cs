@@ -25,9 +25,8 @@ public sealed class WebSocketServerDiagnostics : ConnectorDiagnostics
     public int ConnectionCount => _server.ConnectionCount;
 
     /// <summary>
-    /// Gets the sequence number most recently assigned to an outgoing message. A monotonic position
-    /// in the message stream rather than a count of events, which is why it carries no <c>Total</c>
-    /// prefix.
+    /// Gets the sequence number most recently assigned to an outgoing message, a monotonic position
+    /// in the message stream rather than a count of events.
     /// </summary>
     public long CurrentSequence => _server.CurrentSequence;
 }
