@@ -149,7 +149,7 @@ using var handle = person.SubscribeToProperty(
 
 **Serialized per subscription, not per observer**: the observer of one subscription is never re-entered and needs no synchronization of its own, even across scheduler threads, but one shared across several subscriptions is still invoked concurrently, and a blocking observer starves every other subscription on its scheduler.
 
-**The queue is unbounded**, with no backpressure and no overflow policy: a writer faster than the observer grows it without limit, and `ScheduledPropertySubscription.PendingCount` is what makes that backlog observable.
+**The queue is unbounded**, with no backpressure and no overflow policy: a writer faster than the observer grows it without limit, and reading `handle.PendingCount` on the returned subscription is what makes that backlog observable.
 
 **Synchronous schedulers are rejected**: `ImmediateScheduler.Instance` and `CurrentThreadScheduler.Instance` throw `ArgumentException`, because draining inside the setter is not inline delivery; use `property.SubscribeInline(callback)` for that.
 
