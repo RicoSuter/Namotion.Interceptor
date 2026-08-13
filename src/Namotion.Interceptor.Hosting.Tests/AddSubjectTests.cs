@@ -18,7 +18,7 @@ public class AddSubjectTests
         // Arrange - the context attach starts it and AddHostedService started it again: two starts,
         // a second execute task and an orphaned token source.
         var builder = Host.CreateApplicationBuilder();
-        var context = CreateContext(builder);
+        var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
         builder.Services.AddSubject<PersonWithBackgroundService>();
 
@@ -45,7 +45,7 @@ public class AddSubjectTests
         // Arrange - the generator emits the (IInterceptorSubjectContext) constructor only when the
         // first declared constructor is parameterless, so this shape used to get no context at all.
         var builder = Host.CreateApplicationBuilder();
-        var context = CreateContext(builder);
+        var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
         builder.Services.AddSubject<SubjectWithDependencies>();
 
@@ -100,7 +100,7 @@ public class AddSubjectTests
         // Arrange - a caller who built the subject themselves and registers AddSubject to start it is a
         // different case from calling AddSubject twice, and the guard must not catch it.
         var builder = Host.CreateApplicationBuilder();
-        var context = CreateContext(builder);
+        var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
         builder.Services.AddSingleton(new SubjectWithDependencies(NullLogger<SubjectWithDependencies>.Instance));
 
@@ -117,7 +117,7 @@ public class AddSubjectTests
         // Arrange - the second call cannot take effect: the singleton registration is a TryAdd, so its
         // configure and contextResolver would be dropped while reading as a working registration.
         var builder = Host.CreateApplicationBuilder();
-        var context = CreateContext(builder);
+        var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
         builder.Services.AddSubject<SubjectWithDependencies>();
 
@@ -169,7 +169,7 @@ public class AddSubjectTests
         // after it would race that start with nothing between them but the handler's start delay.
         // Holding configure open makes the ordering observable instead of timing dependent.
         var builder = Host.CreateApplicationBuilder();
-        var context = CreateContext(builder);
+        var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
 
         using var configureEntered = new ManualResetEventSlim();
@@ -215,7 +215,7 @@ public class AddSubjectTests
         // Arrange - the constructor consumes the context argument and drops it, so the attach the
         // generated constructor would have done never happens and only the unconditional one does.
         var builder = Host.CreateApplicationBuilder();
-        var context = CreateContext(builder);
+        var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
         builder.Services.AddSubject<SubjectIgnoringContextParameter>();
 
@@ -246,7 +246,7 @@ public class AddSubjectTests
         // for the no-context shape asserts the same ordering; without it a configure held open past
         // the handler's start delay is observed by StartAsync as an unconfigured subject.
         var builder = Host.CreateApplicationBuilder();
-        var context = CreateContext(builder);
+        var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
 
         using var configureEntered = new ManualResetEventSlim();
@@ -295,7 +295,7 @@ public class AddSubjectTests
         // Arrange - nothing resolves the singleton, so the activation is the only thing that can
         // construct it, and construction is what attaches it.
         var builder = Host.CreateApplicationBuilder();
-        var context = CreateContext(builder);
+        var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
 
         Person? constructedSubject = null;
@@ -320,7 +320,7 @@ public class AddSubjectTests
         }
     }
 
-    private static IInterceptorSubjectContext CreateContext(HostApplicationBuilder builder)
+    private static IInterceptorSubjectContext CreateContextWithRegistry(HostApplicationBuilder builder)
         => InterceptorSubjectContext
             .Create()
             .WithContextInheritance()

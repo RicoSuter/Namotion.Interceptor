@@ -1271,5 +1271,4 @@ public class HostedServiceHandlerRaceTests
         subjectTarget.TransitionGate = null;
         return (child, created, release);
     }
-
 }

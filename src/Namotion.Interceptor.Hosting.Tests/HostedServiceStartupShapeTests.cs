@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Hosting.Tests;
 
