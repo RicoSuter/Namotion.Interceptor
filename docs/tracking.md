@@ -26,13 +26,13 @@ You can also enable features individually for more granular control.
 
 All property change notifications flow through a single `PropertyChangeInterceptor`, registered with `WithPropertyChangeSubscriptions()` (also included in `WithFullPropertyTracking()`). The interceptor exposes three channels over one shared write path: the Rx observable, the high-performance queue, and per-property subscriptions. Enable it once and pick whichever channel fits the consumer.
 
-| API | Use it for | Delivered on | Section |
-|---|---|---|---|
-| `context.GetPropertyChangeObservable()` | Rx composition and UI binding over the whole model | a scheduler, by default | [Property Change Observable](#property-change-observable-rx-based) |
-| `context.CreatePropertyChangeQueueSubscription()` | high throughput and source synchronization | your own consumer thread | [Property Change Queue](#property-change-queue-high-performance) |
-| `property.SubscribeInline(callback)` | one property, cheapest possible | the writing thread, inside the write | [Per-Property Subscriptions](#per-property-subscriptions) |
-| `property.GetInlineChangeObservable()` | one property, with Rx operators | the writing thread, inside the write | [Composing with Rx](#composing-with-rx) |
-| `property.Subscribe(callback, scheduler, onError)` | one property whose observer is slow, blocking or may throw | the scheduler | [Scheduled delivery](#scheduled-delivery) |
+| API | Use it for | Delivered on | Serialized | Section |
+|---|---|---|---|---|
+| `context.GetPropertyChangeObservable()` | Rx composition and UI binding over the whole model | a scheduler, by default | yes | [Property Change Observable](#property-change-observable-rx-based) |
+| `context.CreatePropertyChangeQueueSubscription()` | high throughput and source synchronization | your own consumer thread | one consumer per subscription | [Property Change Queue](#property-change-queue-high-performance) |
+| `property.SubscribeInline(callback)` | one property, cheapest possible | the writing thread, inside the write | no, your callback must be thread-safe | [Per-Property Subscriptions](#per-property-subscriptions) |
+| `property.GetInlineChangeObservable()` | one property, with Rx operators | the writing thread, inside the write | per subscriber | [Composing with Rx](#composing-with-rx) |
+| `property.Subscribe(callback, scheduler, onError)` | one property whose observer is slow, blocking or may throw | the scheduler | per subscription, not per observer | [Scheduled delivery](#scheduled-delivery) |
 
 The contract they share, per channel and across channels, is in [Delivery Guarantees](#delivery-guarantees).
 
@@ -45,7 +45,11 @@ var context = InterceptorSubjectContext
     .Create()
     .WithPropertyChangeSubscriptions();
 
-context
+// Delivery is rescheduled onto Scheduler.Default, so the setter returns before the handler runs and the
+// handler cannot assume the value is still current. Pass ImmediateScheduler.Instance for inline delivery.
+// The handler must not throw: an exception escapes the scheduler work item and terminates the process.
+// Dispose when done, because every write pays this channel's synchronization lock while a subscriber lives.
+using var subscription = context
     .GetPropertyChangeObservable()
     .Subscribe(change =>
     {
