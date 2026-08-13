@@ -42,8 +42,20 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
     private volatile MqttConnectionMonitor? _connectionMonitor;
 
     private int _disposed;
-    private volatile bool _isForceKill;
-    private volatile CancellationTokenSource? _forceKillCts;
+    private volatile RunAttempt? _currentAttempt;
+
+    /// <summary>
+    /// One monitor iteration's cancellation and its kill flag, held together so a kill can only be
+    /// honoured for the iteration whose token source it actually cancelled. A flag on the source itself
+    /// stays set when the kill arrives after that iteration has ended, and the next one then reads a
+    /// kill that never reached it, restarting the monitor over a cancellation nothing injected.
+    /// </summary>
+    private sealed class RunAttempt(CancellationTokenSource cancellation)
+    {
+        public readonly CancellationTokenSource Cancellation = cancellation;
+
+        public volatile bool WasForceKilled;
+    }
 
     public MqttSubjectClientSource(
         IInterceptorSubject subject,
@@ -151,15 +163,14 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
     private async Task RunMonitorWithKillRestartAsync(MqttConnectionMonitor connectionMonitor, CancellationToken stoppingToken)
     {
-        // Preserves the previous ExecuteAsync kill-restart loop: the outer loop
-        // re-enters MonitorConnectionAsync after a Kill cancels _forceKillCts.
+        // The outer loop re-enters MonitorConnectionAsync after a Kill cancels the current iteration.
         // stoppingToken (from the lifetime) breaks out for good on host shutdown
         // or when the listen lifetime is disposed by the base retry path.
         while (!stoppingToken.IsCancellationRequested)
         {
-            var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            _forceKillCts = cts;
-            var linkedToken = cts.Token;
+            var attempt = new RunAttempt(CancellationTokenSource.CreateLinkedTokenSource(stoppingToken));
+            _currentAttempt = attempt;
+            var linkedToken = attempt.Cancellation.Token;
 
             try
             {
@@ -169,15 +180,16 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             {
                 break;
             }
-            catch (OperationCanceledException) when (_isForceKill)
+            catch (OperationCanceledException) when (attempt.WasForceKilled)
             {
                 _logger.LogWarning("MQTT client force-killed. Restarting...");
             }
             finally
             {
-                _isForceKill = false;
-                _forceKillCts = null;
-                cts.Dispose();
+                // Released before the token source is disposed, so a kill arriving from here on finds
+                // no iteration rather than a disposed one.
+                _currentAttempt = null;
+                attempt.Cancellation.Dispose();
             }
         }
     }
@@ -215,8 +227,6 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         _client = null;
         _connectionMonitor = null;
         _propertyWriter = null;
-        _isForceKill = false;
-        _forceKillCts = null;
     }
 
     /// <inheritdoc />
@@ -578,9 +588,24 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         switch (faultType)
         {
             case FaultType.Kill:
-                _isForceKill = true;
-                try { _forceKillCts?.Cancel(); }
-                catch (ObjectDisposedException) { /* CTS disposed between loop iterations */ }
+                // With no current iteration the loop is between iterations, so there is nothing to kill
+                // and nothing is signalled back: the restart this fault stands for is already under way.
+                var attempt = _currentAttempt;
+                if (attempt is not null)
+                {
+                    // Marked before the cancel, so the loop cannot reach its kill clause ahead of this
+                    // write, and unmarked again when the token source turns out to be disposed: the loop
+                    // is then between iterations and this kill reached nothing.
+                    attempt.WasForceKilled = true;
+                    try
+                    {
+                        await attempt.Cancellation.CancelAsync().ConfigureAwait(false);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        attempt.WasForceKilled = false;
+                    }
+                }
                 break;
 
             case FaultType.Disconnect:

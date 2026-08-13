@@ -677,8 +677,16 @@ public sealed class MySubjectServer : SubjectConnectorBase
             }
             catch (Exception exception)
             {
-                // Swallowed failures never reach the base class, so report them here.
-                Metrics.ReportError(exception);
+                // Swallowed failures never reach the base class, so report them here. A failure the
+                // stop itself caused is left unrecorded: the clause above only covers the
+                // cancellation, not the arbitrary exception a transport torn down mid-stop raises,
+                // and recording that would overwrite the genuine fault for good, because LastError is
+                // sticky and a stopped connector does not start again.
+                if (!stoppingToken.IsCancellationRequested)
+                {
+                    Metrics.ReportError(exception);
+                }
+
                 await Task.Delay(RetryDelay, stoppingToken);
             }
         }
@@ -702,7 +710,7 @@ What a server author must implement:
 - `Diagnostics`, narrowed to the connector's own sealed type via a covariant override, so callers reach the protocol-specific numbers without a cast.
 - `RunAsync`, the protocol work. It runs until cancellation, and a cancellation caused by the stopping token must not be turned into a fault: either return, as the sample does, or let the exception leave, which the base recognises and does not record.
 - Handing the diagnostics view the same metrics object the base holds, by constructing it from the inherited `Metrics` property rather than from a second instance. A view built over its own `ConnectorMetrics` compiles and then reports nothing.
-- Every failure the connector's own loop swallows: the base only sees what escapes `RunAsync`, so a retry loop that catches its own failures has to call `ReportError` itself, and move liveness with `MarkOperational` and `MarkNotOperational` around the serving window. One class of failure stays out of reach: `ChangeQueueProcessor` logs and swallows everything the write handler raises, on the buffered path, on the immediate path and inside the flush task, so a write that fails on the way out of the connector never reaches `LastError` however the loop is written.
+- Every failure the connector's own loop swallows: the base only sees what escapes `RunAsync`, so a retry loop that catches its own failures has to call `ReportError` itself, and move liveness with `MarkOperational` and `MarkNotOperational` around the serving window. Guard that report on the stopping token, as the sample does: a cancellation filter alone does not cover the arbitrary exception a transport torn down mid-stop raises, and recording that replaces the genuine fault for good, because `LastError` is sticky and a stopped connector does not start again. One class of failure stays out of reach: `ChangeQueueProcessor` logs and swallows everything the write handler raises, on the buffered path, on the immediate path and inside the flush task, so a write that fails on the way out of the connector never reaches `LastError` however the loop is written.
 - Wiring the outbound change queue into diagnostics, so `Diagnostics.OutboundChanges` reports the processor the server actually publishes through.
 
 A connector whose transport work runs in a task the loop does not await, such as a client's reconnect monitor, is outside `RunAsync` too, and has to report its own failures for the same reason.

@@ -43,9 +43,22 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
     private readonly ClientSequenceTracker _sequenceTracker = new();
-    private volatile bool _isForceKill;
-    private volatile CancellationTokenSource? _forceKillCts;
+    private volatile RunAttempt? _currentAttempt;
     private int _disposed;
+
+    /// <summary>
+    /// One monitor iteration's cancellation and its kill flag, held together so a kill can only be
+    /// honoured for the iteration whose token source it actually cancelled. A flag on the source itself
+    /// stays set when the kill arrives after that iteration has ended, and the next one then reads a
+    /// kill that never reached it: its own cancellation is logged as an injected fault and reconnected
+    /// from with nothing recorded.
+    /// </summary>
+    private sealed class RunAttempt(CancellationTokenSource cancellation)
+    {
+        public readonly CancellationTokenSource Cancellation = cancellation;
+
+        public volatile bool WasForceKilled;
+    }
 
     /// <inheritdoc />
     public override IInterceptorSubject RootSubject => _subject;
@@ -554,14 +567,30 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     }
 
     /// <inheritdoc />
-    Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
+    async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
     {
         switch (faultType)
         {
             case FaultType.Kill:
-                _isForceKill = true;
-                try { _forceKillCts?.Cancel(); }
-                catch (ObjectDisposedException) { /* CTS disposed between loop iterations */ }
+                // With no current iteration the loop is between iterations, so there is nothing to kill
+                // and nothing is signalled back: the teardown and the reconnection this fault stands for
+                // are already under way.
+                var attempt = _currentAttempt;
+                if (attempt is not null)
+                {
+                    // Marked before the cancel, so the loop cannot reach its kill clause ahead of this
+                    // write, and unmarked again when the token source turns out to be disposed: the loop
+                    // is then between iterations and this kill reached nothing.
+                    attempt.WasForceKilled = true;
+                    try
+                    {
+                        await attempt.Cancellation.CancelAsync().ConfigureAwait(false);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        attempt.WasForceKilled = false;
+                    }
+                }
                 break;
 
             case FaultType.Disconnect:
@@ -571,8 +600,6 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             default:
                 throw new ArgumentOutOfRangeException(nameof(faultType), faultType, null);
         }
-
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -589,9 +616,9 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            _forceKillCts = cts;
-            var linkedToken = cts.Token;
+            var attempt = new RunAttempt(CancellationTokenSource.CreateLinkedTokenSource(stoppingToken));
+            _currentAttempt = attempt;
+            var linkedToken = attempt.Cancellation.Token;
 
             try
             {
@@ -636,7 +663,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             {
                 break;
             }
-            catch (OperationCanceledException) when (_isForceKill)
+            catch (OperationCanceledException) when (attempt.WasForceKilled)
             {
                 _logger.LogWarning("WebSocket client force-killed. Restarting...");
                 _webSocket?.Abort();
@@ -664,9 +691,10 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             }
             finally
             {
-                _isForceKill = false;
-                _forceKillCts = null;
-                cts.Dispose();
+                // Released before the token source is disposed, so a kill arriving from here on finds
+                // no iteration rather than a disposed one.
+                _currentAttempt = null;
+                attempt.Cancellation.Dispose();
             }
         }
     }

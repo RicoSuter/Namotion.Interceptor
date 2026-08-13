@@ -594,9 +594,24 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         }
         catch (Exception ex)
         {
-            ReconnectionMetrics.RecordFailure();
-            Metrics.ReportError(ex);
-            _logger.LogError(ex, "Failed to restart session. Will retry on next health check.");
+            // A failure the stop itself caused is an expected shutdown rather than a fault. The clause
+            // above declines it, because the source the kill cancels is a child of the stopping token
+            // and a stop cancels both, so what lands here is the cancellation a session, a lock wait or
+            // an initial load raises on the way down. Recording it would overwrite the genuine fault
+            // for good, because LastError is sticky and a stopped source does not start again, and
+            // would leave TotalFailed blaming a reconnection that did not fail. Counted as abandoned
+            // instead, so every started attempt still resolves into exactly one outcome.
+            if (cancellationToken.IsCancellationRequested)
+            {
+                ReconnectionMetrics.RecordAbandoned();
+                _logger.LogInformation("Reconnection abandoned because the source is stopping.");
+            }
+            else
+            {
+                ReconnectionMetrics.RecordFailure();
+                Metrics.ReportError(ex);
+                _logger.LogError(ex, "Failed to restart session. Will retry on next health check.");
+            }
 
             // Clear the session so health check can trigger a new reconnection attempt
             await sessionManager.ClearSessionAsync(cancellationToken).ConfigureAwait(false);

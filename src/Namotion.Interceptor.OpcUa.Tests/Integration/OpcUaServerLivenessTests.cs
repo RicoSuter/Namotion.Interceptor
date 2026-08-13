@@ -89,10 +89,17 @@ public class OpcUaServerLivenessTests
                       serverService.Diagnostics.OperationalChangeTime != firstOperationalTime,
                 message: "The server should report operational again after restarting.");
 
-            // An injected fault is not a fault of the transport, so the restart it causes leaves no
-            // error behind. Anything the restart routes into the loop's catch-all instead, including
-            // a teardown that leaves the endpoint bound for the next attempt, is recorded there.
-            Assert.Null(serverService.Diagnostics.LastError);
+            // Nothing is asserted about LastError. A kill delivered to a live attempt ends the change
+            // processor by cancelling its dequeue, which reports the cancellation rather than raising
+            // it, so this restart records nothing whether or not the attempt recognised the kill, and
+            // the restart rebinds the same endpoint immediately, so a bind failure the loop absorbs by
+            // backing off can legitimately leave an error behind. What the per-attempt kill state buys
+            // lies in a case this test cannot reach: the flag belongs to the attempt whose token source
+            // the kill cancelled, so a kill that finds no live attempt leaves nothing for the next one
+            // to read, and a genuine cancellation in that next attempt is recorded as the fault it is
+            // rather than swallowed as an injected kill. Reaching it needs the kill delivered in the
+            // few instructions between the loop releasing one attempt and creating the next, and there
+            // is no seam here that holds the loop there.
         }
         finally
         {

@@ -144,9 +144,9 @@ public sealed class ReconnectDiagnostics
     public long TotalFailed => _metrics.Failed;
 
     /// <summary>
-    /// Gets the number of attempts that completed without an exception but produced an unusable
-    /// result: a null session, a failed transfer, a preserved session after a server restart, a
-    /// stall reset, or a kill cancellation.
+    /// Gets the number of attempts that ended without a usable session and without a fault: a null
+    /// session, a failed transfer, a preserved session after a server restart, a stall reset, or a
+    /// cancellation from a kill or from the source stopping.
     /// </summary>
     public long TotalAbandoned => _metrics.Abandoned;
 }

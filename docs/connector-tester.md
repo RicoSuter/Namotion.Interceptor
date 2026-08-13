@@ -88,11 +88,12 @@ A cycle **passes** when all participant snapshots match. It **fails** if the con
 Each connector implements `IFaultInjectable` (separate from the production `ISubjectConnector` interface) with a single `InjectFaultAsync(FaultType, CancellationToken)` method supporting two chaos modes:
 
 - **Kill** (`FaultType.Kill`): Hard kill. Stops the connector entirely. The background service loop auto-restarts.
-  - *OPC UA Server*: Cancels the current attempt's loop token and closes transport listeners (TCP RST to all clients) before shutting the server down and restarting. A kill that arrives while the loop is between attempts has no attempt to cancel and is dropped: the call returns successfully having done nothing.
+  - *OPC UA Server*: Cancels the current attempt's loop token and closes transport listeners (TCP RST to all clients) before shutting the server down and restarting. The backoff after a failed start runs inside the attempt, so a kill arriving during it is accepted and cancels a token whose work has already ended: it does nothing for as long as the backoff lasts, which after repeated failures is up to 32 seconds. Only a kill landing between one attempt being released and the next being created has nothing to cancel and is dropped, and that call returns successfully having done nothing.
   - *OPC UA Client*: Attempts graceful session close, then kills the transport channel. Health check detects missing session and triggers full reconnection.
-  - *MQTT*: Cancels the force-kill CTS, causing the processing loop to exit and restart.
-  - *WebSocket Server*: Cancels the force-kill CTS, triggering full teardown and rebuild of the Kestrel HTTP listener.
-  - *WebSocket Client*: Sets force-kill flag and cancels the force-kill CTS; the monitor loop catch block aborts the WebSocket and reconnects.
+  - *MQTT Server*: Cancels the current attempt's loop token, so the processing loop exits and the broker restarts. Its backoff after a failed start behaves like the OPC UA server's, over a fixed five seconds.
+  - *MQTT Client*: Cancels the current iteration's token, so the connection monitor exits and the loop re-enters it. A kill landing between iterations has none to cancel and is dropped, which for a client is the few instructions between one iteration ending and the next starting.
+  - *WebSocket Server*: Cancels the current attempt's loop token, triggering full teardown and rebuild of the Kestrel HTTP listener. The attempt is released before the five second backoff a failed attempt takes rather than after it, so a kill arriving anywhere in that window has no attempt to cancel and is dropped: the call returns successfully having done nothing.
+  - *WebSocket Client*: Cancels the current iteration's token; the monitor loop's kill clause aborts the WebSocket and reconnects. A kill landing between iterations is dropped the same way the MQTT client drops one, and the reconnect backoff runs inside the iteration, so a kill during it is honoured.
 
 - **Disconnect** (`FaultType.Disconnect`): Soft kill. Breaks the transport connection without stopping the connector. Lets the connector's built-in reconnection logic detect the failure and recover.
   - *OPC UA Server*: Delegates to Kill (no meaningful "soft disconnect" for a multi-connection server).
@@ -267,8 +268,8 @@ Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfigur
 
 | Scenario | Kill | Disconnect | Recovery Mechanism |
 |----------|------|------------|-------------------|
-| Abrupt server crash | Force-kill CTS cancelled, full Kestrel teardown and rebuild | All client connections closed | Background loop rebuilds HTTP listener and restarts |
-| Abrupt client crash | Force-kill CTS cancelled, WebSocket aborted, monitor loop reconnects | Socket aborted, receive loop exits | Monitor loop reconnects with exponential backoff |
+| Abrupt server crash | Current attempt cancelled, full Kestrel teardown and rebuild | All client connections closed | Background loop rebuilds HTTP listener and restarts |
+| Abrupt client crash | Current monitor iteration cancelled, WebSocket aborted, monitor loop reconnects | Socket aborted, receive loop exits | Monitor loop reconnects with exponential backoff |
 | Sequence gap detection | N/A | N/A | Client detects missed sequence number, exits receive loop, reconnects with full state via Welcome |
 | Heartbeat timeout | N/A | N/A | Receive timeout fires, client exits receive loop and reconnects |
 | Concurrent server + client chaos | Both engines run independently | Same | Each side recovers independently, Welcome handshake re-syncs state |
