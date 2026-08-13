@@ -5,9 +5,7 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
-/// <summary>
-/// Runs scheduled work only when the test pumps it, so an interleaving is chosen rather than raced for.
-/// </summary>
+// Runs scheduled work only when the test pumps it, so an interleaving is chosen rather than raced for.
 internal sealed class ControllableScheduler : IScheduler
 {
     private readonly object _gate = new();
@@ -40,7 +38,6 @@ internal sealed class ControllableScheduler : IScheduler
     public IDisposable Schedule<TState>(TState state, DateTimeOffset dueTime, Func<IScheduler, TState, IDisposable> action)
         => Schedule(state, action);
 
-    /// <summary>Runs at most one queued work item. Returns false when the queue was empty.</summary>
     public bool RunOne()
     {
         Action? work;
@@ -58,7 +55,7 @@ internal sealed class ControllableScheduler : IScheduler
         return true;
     }
 
-    /// <summary>Runs every item queued at entry, without following items those items queue.</summary>
+    // Runs every item queued at entry, without following items those items queue.
     public int RunAll()
     {
         int budget;
@@ -89,17 +86,14 @@ internal sealed class ControllableScheduler : IScheduler
         return ran;
     }
 
-    /// <summary>
-    /// Runs items, including ones scheduled by earlier items, until nothing is left or the budget below is
-    /// spent. The budget is what turns a drain that reschedules itself without making progress into a red
-    /// test instead of a hung test run, which is otherwise the only symptom such a regression has.
-    /// </summary>
+    // Runs items, including ones scheduled by earlier items. The budget turns a drain that reschedules itself
+    // without making progress into a red test instead of a hung test run, its only other symptom.
     public void RunUntilIdle()
     {
         // Eight full batches: far more work items than any test here queues, and still bounded. Naming
-        // ScheduledPropertySubscription for the batch size does not make this a per-property test file, so
+        // ScheduledPropertySubscription does not make this a per-property test file, so
         // PerPropertySubscriptionCollection membership does not apply: it holds no tests and subscribes to
-        // nothing.
+        // nothing. That exemption is what the marker scan in PerPropertySubscriptionConventionsTests reads.
         const int budget = ScheduledPropertySubscription.MaxBatch * 8;
 
         var ran = 0;
@@ -115,7 +109,7 @@ internal sealed class ControllableScheduler : IScheduler
     }
 }
 
-/// <summary>Reproduces a scheduler disposed before the subscription: Schedule throws on the writer thread.</summary>
+// Reproduces a scheduler disposed before the subscription: Schedule throws on the writer thread.
 internal sealed class ThrowingScheduler : IScheduler
 {
     public DateTimeOffset Now => DateTimeOffset.UtcNow;
@@ -130,10 +124,8 @@ internal sealed class ThrowingScheduler : IScheduler
         => throw new ObjectDisposedException(nameof(ThrowingScheduler));
 }
 
-/// <summary>
-/// Reproduces a scheduler disposed while a drain was already queued: Schedule succeeds and the work item
-/// never runs. This is the half of the scheduler-failure space the design cannot recover from.
-/// </summary>
+// Reproduces a scheduler disposed while a drain was already queued: Schedule succeeds and the work item never
+// runs, the half of the scheduler-failure space the design cannot recover from.
 internal sealed class BlackHoleScheduler : IScheduler
 {
     private int _scheduleCallCount;
@@ -155,10 +147,8 @@ internal sealed class BlackHoleScheduler : IScheduler
         => Schedule(state, action);
 }
 
-/// <summary>
-/// Wraps a scheduler and records anything that escapes a work item. On a real pool scheduler such an escape
-/// is unhandled and terminates the test host, so it can only be asserted by catching it here first.
-/// </summary>
+// Records anything that escapes a work item. On a real pool scheduler such an escape is unhandled and
+// terminates the test host, so it can only be asserted by catching it here first.
 internal sealed class RecordingScheduler(IScheduler inner) : IScheduler
 {
     private readonly List<Exception> _escaped = [];
@@ -180,8 +170,8 @@ internal sealed class RecordingScheduler(IScheduler inner) : IScheduler
         {
             try
             {
-                // The work item gets this wrapper, not the inner scheduler, so anything it schedules
-                // from inside itself is still counted and still has its exceptions recorded.
+                // The work item gets this wrapper, not the inner scheduler, so anything it schedules from
+                // inside itself is still counted and recorded.
                 return action(this, innerState);
             }
             catch (Exception exception)

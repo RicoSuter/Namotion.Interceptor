@@ -117,9 +117,9 @@ public class ScheduledPropertySubscriptionProtocolTests
         person.FirstName = "one";
         scheduler.RunUntilIdle();
 
-        // Assert: the write landed mid-batch, and the drain refreshed its snapshot rather than settling, so
-        // it spent the remaining budget on it. A failure here means the refresh is gone and every change a
-        // running batch accepts costs its own scheduler work item.
+        // Assert: the drain refreshed its snapshot rather than settling, so it spent the remaining budget on
+        // the mid-batch write. Without the refresh, every change a running batch accepts costs its own
+        // scheduler work item.
         Assert.Equal(["one", "two"], received);
         Assert.Equal(1, scheduler.ScheduleCallCount);
         Assert.Equal(0, subscription.WorkInProgressForTests);
@@ -163,7 +163,7 @@ public class ScheduledPropertySubscriptionProtocolTests
     [Fact]
     public void WhenTheObserverThrows_ThenTheCounterStillSettlesAndDeliveryContinues()
     {
-        // Arrange: an observer exception is caught, routed to onError and does not stop later deliveries.
+        // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var scheduler = new ControllableScheduler();
@@ -210,14 +210,13 @@ public class ScheduledPropertySubscriptionProtocolTests
         person.FirstName = "one";
         person.FirstName = "two";
 
-        // Precondition: both changes are queued and undelivered.
         Assert.Equal(2, subscription.PendingCount);
 
         // Act
         subscription.Dispose();
         scheduler.RunUntilIdle();
 
-        // Assert: dropped, and released rather than retained behind the handle.
+        // Assert
         Assert.Empty(received);
         Assert.Equal(0, subscription.PendingCount);
         Assert.Equal(0, PropertyChangeSubscriptions.ReadSubscriptionCount());
@@ -236,8 +235,7 @@ public class ScheduledPropertySubscriptionProtocolTests
         var subscription = new PropertyReference(person, nameof(Person.FirstName))
             .Subscribe((in SubjectPropertyChange change) => received.Add(change.GetNewValue<string?>()), scheduler);
 
-        // Precondition: the observer is held while the subscription is live, so the assertion below is not
-        // passing on a reference that was never there.
+        // Precondition, so the assertion below is not passing on a reference that was never there.
         Assert.False(subscription.IsObserverReleasedForTests);
 
         // Act
@@ -251,8 +249,7 @@ public class ScheduledPropertySubscriptionProtocolTests
     public void WhenTheObserverDisposesItsOwnSubscriptionMidBatch_ThenTheRestOfTheBatchIsDroppedAndNothingEscapes()
     {
         // Arrange: a self-disposing observer is the one dispose-against-delivery interleaving a test can pin
-        // deterministically. The recording wrapper is what makes an escape observable at all, since on a pool
-        // scheduler it would be unhandled and take the test host down instead of failing an assertion.
+        // deterministically.
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var inner = new ControllableScheduler();
@@ -338,7 +335,7 @@ public class ScheduledPropertySubscriptionProtocolTests
         healthy.Dispose();
         person.LastName = "one";
 
-        // Assert: disposal is a deliberate stop and stays false, and the fault is visible without onError.
+        // Assert
         Assert.False(healthy.IsFaulted);
         Assert.True(faulting.IsFaulted);
     }
@@ -365,8 +362,8 @@ public class ScheduledPropertySubscriptionProtocolTests
         // delivery for every other live subscription in the host.
         Assert.Equal(1, PropertyChangeSubscriptions.ReadSubscriptionCount());
 
-        // Releasing has to go through the upstream's own one-shot Dispose rather than decrementing the
-        // gate directly: only the former also drops the subject-stored listener entry.
+        // Releasing must go through the upstream's own one-shot Dispose rather than decrementing the gate
+        // directly: only the former also drops the subject-stored listener entry.
         Assert.False(new PropertyReference(person, nameof(Person.FirstName))
             .TryGetPropertyData(PropertyChangeSubscription.ListenersKey, out _));
     }
@@ -390,8 +387,8 @@ public class ScheduledPropertySubscriptionProtocolTests
         Assert.IsType<ObjectDisposedException>(Assert.Single(errors));
         Assert.Equal(0, PropertyChangeSubscriptions.ReadSubscriptionCount());
 
-        // Releasing has to go through the upstream's own one-shot Dispose rather than decrementing the
-        // gate directly: only the former also drops the subject-stored listener entry.
+        // The fault released the upstream itself rather than decrementing the gate directly, which is what
+        // also drops the subject-stored listener entry.
         Assert.False(new PropertyReference(person, nameof(Person.FirstName))
             .TryGetPropertyData(PropertyChangeSubscription.ListenersKey, out _));
     }
@@ -516,10 +513,9 @@ public class ScheduledPropertySubscriptionProtocolTests
     public void WhenTheWriterCarriesAmbientState_ThenTheObserverDoesNotSeeIt()
     {
         // Arrange: an unsuppressed ExecutionContext would let a delivery observe the writer's
-        // SubjectTransaction.Current and mutate a pooled, already-returned dictionary.
-        // This must run on a real scheduler. ControllableScheduler enqueues a bare closure and runs it
-        // inline on the pump thread, so it captures no ExecutionContext and would pass with the
-        // suppression removed, making the assertion vacuous.
+        // SubjectTransaction.Current and mutate a pooled, already-returned dictionary. This must run on a
+        // real scheduler: ControllableScheduler runs a bare closure inline on the pump thread, captures no
+        // ExecutionContext, and would pass with the suppression removed.
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var ambient = new AsyncLocal<string?>();
@@ -537,9 +533,6 @@ public class ScheduledPropertySubscriptionProtocolTests
 
         // Act
         ambient.Value = "writer-scope";
-
-        // The observer reads this ambient value back only if the writer's ExecutionContext flowed into the
-        // scheduled delivery, which is exactly what the suppression under test rules out.
         person.FirstName = "one";
 
         // Assert
@@ -579,11 +572,8 @@ public class ScheduledPropertySubscriptionProtocolTests
         Assert.Null(observedTransaction);
     }
 
-    /// <summary>
-    /// Detects re-entrancy from the observer side, which is where the promise is made: a delivery entering
-    /// <see cref="OnChange"/> while another has not left it raises the in-flight count above one and is
-    /// counted. Everything needed is inside the observer, so the subscription pays nothing for the check.
-    /// </summary>
+    // Detects re-entrancy from the observer side, which is where the promise is made: a delivery entering
+    // OnChange while another has not left it raises the in-flight count above one and is counted.
     private sealed class ReentrancyProbeObserver(CountdownEvent allDelivered) : IPropertyChangeObserver
     {
         private int _inFlight;

@@ -89,19 +89,15 @@ public static class PropertyChangeSubscriptionExtensions
     /// </summary>
     /// <remarks>
     /// Delivery keeps the contract of <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/>
-    /// exactly: inline, on the writing thread, possibly concurrent, and a throwing handler propagates
-    /// back into the setter. It is that channel wearing an <see cref="IObservable{T}"/>, not a safer one.
-    /// The context-level <c>GetPropertyChangeObservable</c> reschedules onto a scheduler by default and is
-    /// therefore not the same thing.
+    /// exactly, not a safer one: inline, on the writing thread, possibly concurrent, and a throwing handler
+    /// propagates back into the setter. The context-level <c>GetPropertyChangeObservable</c> reschedules onto
+    /// a scheduler by default and is therefore not the same thing.
     /// <para>
-    /// Notifications are not serialized, so this sequence violates the Rx grammar. OnNext is raised straight
+    /// Notifications are not serialized, so this sequence violates the Rx grammar: OnNext is raised straight
     /// from the writing thread, and concurrent writers to one property raise it concurrently on one observer.
-    /// <see cref="PropertyChangeInterceptor"/> wraps its context-level subject in <c>Subject.Synchronize</c>
-    /// precisely to be grammar-conformant; this sequence deliberately is not. Rx operators assume serialized
-    /// notifications and most stateful sinks are unlocked, so apply <c>.Synchronize()</c> before any stateful
-    /// operator, including <c>Take</c>, <c>Skip</c>, <c>Scan</c>, <c>DistinctUntilChanged</c> and
-    /// <c>Buffer</c> by count. Without it they corrupt rarely rather than never: an unsynchronized
-    /// <c>Take(1)</c> fed by four writer threads forwarded more than one item in 1 round out of 2000.
+    /// Apply <c>.Synchronize()</c> before any stateful operator, including <c>Take</c>, <c>Skip</c>,
+    /// <c>Scan</c>, <c>DistinctUntilChanged</c> and <c>Buffer</c> by count, whose sinks are unlocked and
+    /// corrupt rarely rather than never without it.
     /// </para>
     /// <para>
     /// Adding any operator also changes what a throwing handler does. Operators wrap the observer in the
@@ -110,27 +106,20 @@ public static class PropertyChangeSubscriptionExtensions
     /// composed over this sequence must therefore not throw at all.
     /// </para>
     /// <para>
-    /// Two further hazards when composing the off-thread hop by hand. <c>ObserveOn</c> dedicates a private
-    /// thread to each subscription when <c>Scheduler.AsLongRunning()</c> resolves an
-    /// <c>ISchedulerLongRunning</c>, which it does for both <c>Scheduler.Default</c> and
-    /// <c>TaskPoolScheduler</c> through their <c>IServiceProvider</c> implementation rather than a direct
-    /// cast, so composing it per property is unaffordable. That thread is taken on the first signal, not at
-    /// subscribe, so an idle property hides the cost. And an exception from the handler escapes the
-    /// <c>ObserveOn</c> sink into the scheduler, which does not catch it: on <c>Scheduler.Default</c> it goes
-    /// unhandled and terminates the process, and on <c>TaskPoolScheduler</c> it becomes an unobserved task
-    /// exception and the subscription stops delivering, so one bad change silently ends the stream. Prefer
-    /// the scheduler overloads of <c>Subscribe</c>, which have neither.
+    /// Composing the off-thread hop by hand costs more than the scheduler overloads of <c>Subscribe</c>:
+    /// <c>ObserveOn</c> dedicates a private thread to each subscription on both <c>Scheduler.Default</c> and
+    /// <c>TaskPoolScheduler</c>, and a handler exception escapes its sink into the scheduler, terminating the
+    /// process on the former and silently ending the stream on the latter.
     /// </para>
     /// <para>
     /// The sequence never completes and never signals OnError, so operators that wait for completion, such
-    /// as <c>ToTask</c> and <c>LastAsync</c>, never return. Because it never completes, nothing disposes the
-    /// subscription for you, and disposing what <c>Subscribe</c> returns is as mandatory as for
+    /// as <c>ToTask</c> and <c>LastAsync</c>, never return, and nothing disposes the subscription for you.
+    /// Disposing what <c>Subscribe</c> returns is as mandatory as for
     /// <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/>: a dropped handle keeps the
     /// observer receiving changes and permanently disables the process-wide idle write fast path, with no
     /// finalizer and no recovery.
     /// </para>
     /// </remarks>
-    /// <param name="property">The property to observe.</param>
     public static IObservable<SubjectPropertyChange> GetInlineChangeObservable(this PropertyReference property)
         => new InlineChangeObservable(property);
 
@@ -140,23 +129,18 @@ public static class PropertyChangeSubscriptionExtensions
     /// </summary>
     /// <remarks>
     /// Same ownership and dormancy contract as
-    /// <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/>, with four differences that follow
-    /// from delivery being scheduled. Within this subscription the observer is never re-entered, so it needs
-    /// no synchronization of its own; an observer, closure, or <paramref name="onError"/> delegate shared
-    /// across several subscriptions is still invoked concurrently. An exception from the observer cannot
-    /// reach the writer and is reported to <paramref name="onError"/>, leaving the subscription live. A
-    /// change still queued when the subscription is disposed is dropped, except one enqueued by a writer that
-    /// had already passed its own state check, which stays queued and keeps pinning its subject for as long
-    /// as the handle is reachable. And a change accepted before the
-    /// subject detaches is still delivered afterwards, which disposal is not: dormancy stops acceptance, not
-    /// the drain, so an observer that looks its subject up in the registry or resolves its path must handle a
-    /// subject that is no longer there.
+    /// <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/>, with three differences that
+    /// follow from delivery being scheduled. Within this subscription the observer is never re-entered, so it
+    /// needs no synchronization of its own; an observer, closure, or <paramref name="onError"/> delegate
+    /// shared across several subscriptions is still invoked concurrently. An exception from the observer
+    /// cannot reach the writer and is reported to <paramref name="onError"/>, leaving the subscription live.
+    /// And dormancy stops acceptance but not the drain, so a change accepted before the subject detaches is
+    /// still delivered afterwards, unlike disposal, which drops what is still queued; an observer that looks
+    /// its subject up in the registry or resolves its path must handle a subject that is no longer there.
     /// <para>
-    /// The isolation from the writer is one-way. This channel sits downstream of everyone else's throws: a
-    /// throwing lifecycle handler, or a throwing inline observer that ran earlier on the same write, unwinds
-    /// the write before the change is enqueued. The value stays committed to the model, this subscription
-    /// never hears about it, <paramref name="onError"/> stays silent and
-    /// <see cref="ScheduledPropertySubscription.PendingCount"/> reads zero.
+    /// The isolation from the writer is one-way. A throwing lifecycle handler, or a throwing inline observer
+    /// that ran earlier on the same write, unwinds it before the change is enqueued: the value stays committed
+    /// to the model, this subscription never hears about it and <paramref name="onError"/> stays silent.
     /// </para>
     /// <para>
     /// The queue is unbounded. A writer faster than the observer grows it without limit, and every buffered
@@ -164,9 +148,8 @@ public static class PropertyChangeSubscriptionExtensions
     /// the observer cheap enough for the drain to outrun the writer. Rate-limiting a hot property by composing
     /// <c>Sample</c> or <c>Throttle</c> over <see cref="GetInlineChangeObservable"/> is not the remedy: those
     /// operators deliver from a scheduler work item that does not catch a handler exception, so one throwing
-    /// handler terminates the process on <c>Scheduler.Default</c>. An observer
-    /// that writes the property it observes never drains, quietly, where the inline overload would
-    /// raise a StackOverflowException.
+    /// handler terminates the process on <c>Scheduler.Default</c>. An observer that writes the property it
+    /// observes never drains, quietly, where the inline overload would raise a StackOverflowException.
     /// </para>
     /// <para>
     /// The caller owns the scheduler and must dispose subscriptions before it. A schedule that throws is
@@ -174,13 +157,11 @@ public static class PropertyChangeSubscriptionExtensions
     /// <see cref="ScheduledPropertySubscription.IsFaulted"/> reports even when no handler was supplied; a
     /// schedule that succeeds and whose work item never runs cannot be detected, and that subscription goes
     /// quiet. Prefer <c>Scheduler.Default</c>, whose thread pool takes the execution context per work item, so
-    /// the suppression applied when scheduling is the whole story and no ambient state reaches the observer. A
-    /// scheduler that owns a thread, such as <c>EventLoopScheduler</c>, creates it on the first <c>Schedule</c>
-    /// and that thread keeps the <c>AsyncLocal</c> values ambient at its creation for life, which no
-    /// suppression can strip. Create such a scheduler outside any transaction scope: a worker thread born
-    /// inside one carries that transaction forever, so a property write the observer makes lands in a
-    /// transaction disposed long ago whose pending-change buffer has since been pooled and rented by a live
-    /// one. The write then vanishes from its own path and is committed by an unrelated transaction, with
+    /// the suppression applied when scheduling keeps all ambient state away from the observer. A scheduler
+    /// that owns a thread, such as <c>EventLoopScheduler</c>, instead keeps for life the <c>AsyncLocal</c>
+    /// values ambient when that thread was created, so create one outside any transaction scope: otherwise a
+    /// property write the observer makes joins a long-disposed transaction whose buffer has since been pooled
+    /// and rented out, vanishing from its own path and committing under an unrelated transaction, with
     /// nothing thrown and <paramref name="onError"/> silent.
     /// </para>
     /// </remarks>
@@ -253,18 +234,16 @@ public static class PropertyChangeSubscriptionExtensions
         Action<Exception>? onError = null)
         where TSubject : IInterceptorSubject
     {
-        // Wrapping first would bypass the observer null guard, since a wrapped null callback is a non-null
-        // observer, and the failure would surface on a writer thread at dispatch time instead.
+        // Wrapping first would bypass the observer null guard and fail on a writer thread at dispatch time.
         ArgumentNullException.ThrowIfNull(callback);
         return subject.SubscribeToProperty(propertySelector, new DelegateObserver(callback), scheduler, onError);
     }
 
     private static void ThrowIfSynchronous(IScheduler scheduler)
     {
-        // Only the two singletons are detectable. Any scheduler that runs actions inline has the same
-        // hazard, including DisableOptimizations wrappers over these, and cannot be rejected. Such a
-        // scheduler also turns the batch handoff into recursion instead of a yield, one stack frame per
-        // MaxBatch queued changes.
+        // Only the two singletons are detectable. Any other scheduler that runs actions inline, including a
+        // DisableOptimizations wrapper over these, has the same hazard and cannot be rejected: it also turns
+        // the batch handoff into recursion instead of a yield, one stack frame per MaxBatch queued changes.
         if (ReferenceEquals(scheduler, ImmediateScheduler.Instance)
             || ReferenceEquals(scheduler, CurrentThreadScheduler.Instance))
         {

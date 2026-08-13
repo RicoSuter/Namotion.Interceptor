@@ -9,8 +9,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 [Collection(PerPropertySubscriptionCollection.Name)]
 public class ScheduledPropertySubscriptionTests
 {
-    // Generous on purpose: a loaded machine must not fail these, and a real regression fails them by
-    // never reaching the awaited state at all rather than by being slow.
+    // Generous on purpose: a loaded machine must not fail these, and a real regression never reaches the
+    // awaited state at all rather than reaching it slowly.
     private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
 
     public ScheduledPropertySubscriptionTests() => PropertyChangeSubscriptions.ResetForTests();
@@ -64,7 +64,7 @@ public class ScheduledPropertySubscriptionTests
         var scheduler = new ControllableScheduler();
 
         // Act & Assert: a bare null is ambiguous between the observer and callback overloads, so each
-        // needs its own cast, exactly as the unscheduled guard test does.
+        // needs its own cast.
         Assert.Throws<ArgumentNullException>(() => property.Subscribe((IPropertyChangeObserver)null!, scheduler));
         Assert.Throws<ArgumentNullException>(() => property.Subscribe((PropertyChangeCallback)null!, scheduler));
         Assert.Throws<ArgumentNullException>(() => property.Subscribe((in SubjectPropertyChange _) => { }, null!));
@@ -84,9 +84,9 @@ public class ScheduledPropertySubscriptionTests
         var person = new Person(context);
         var property = new PropertyReference(person, nameof(Person.FirstName));
 
-        // Act & Assert: both spellings are reference-equal to the singletons. The typed overloads are
-        // asserted too, because they reject only by delegating, and a refactor reaching for the internal
-        // Create would drop that delegation without failing any other test.
+        // Act & Assert: both spellings are reference-equal to the singletons. The typed overloads reject
+        // only by delegating, so a refactor reaching for the internal Create would drop that delegation
+        // without failing any other test.
         Assert.Throws<ArgumentException>(() => property.Subscribe((in SubjectPropertyChange _) => { }, ImmediateScheduler.Instance));
         Assert.Throws<ArgumentException>(() => property.Subscribe((in SubjectPropertyChange _) => { }, Scheduler.Immediate));
         Assert.Throws<ArgumentException>(() => property.Subscribe((in SubjectPropertyChange _) => { }, CurrentThreadScheduler.Instance));
@@ -162,7 +162,7 @@ public class ScheduledPropertySubscriptionTests
         scheduler.RunUntilIdle();
 
         // Assert: the counter pins that the throwing observer really ran, so a drain delivering nothing
-        // cannot leave this green, and the failure cannot suppress another channel on the same write.
+        // cannot leave this green.
         Assert.Equal(1, scheduledDeliveries);
         Assert.Equal(["one"], inline);
     }
@@ -196,8 +196,8 @@ public class ScheduledPropertySubscriptionTests
     [Fact]
     public void WhenSubjectIsDetachedWithChangesQueued_ThenThoseChangesAreStillDelivered()
     {
-        // Arrange: dormancy stops acceptance, not the drain. This is the one place the scheduled path
-        // does not inherit the unscheduled semantics, and it is the opposite of disposal.
+        // Arrange: dormancy stops acceptance, not the drain, which is the one place the scheduled path
+        // does not inherit the inline semantics.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var parent = new Person(context);
         var child = new Person();
@@ -216,8 +216,8 @@ public class ScheduledPropertySubscriptionTests
         child.FirstName = "after-detach";
         scheduler.RunUntilIdle();
 
-        // Assert: both halves at once. The change accepted before the detach still drains, and the write
-        // after it is not accepted, so the test cannot pass with a detach that does nothing.
+        // Assert: the change accepted before the detach still drains and the write after it is not
+        // accepted, so the test cannot pass with a detach that does nothing.
         Assert.Equal(["one"], received);
     }
 
@@ -253,11 +253,9 @@ public class ScheduledPropertySubscriptionTests
     [Fact]
     public void WhenOneObserverIsSharedAcrossTwoSubscriptions_ThenItCanBeInvokedConcurrently()
     {
-        // Arrange: serialization is promised per subscription, not per observer instance, which is exactly
-        // what the docs say, so an observer shared across two subscriptions has to synchronize itself. The
-        // observer proves the promise by holding both deliveries inside OnChange at the same time, and both
-        // subscriptions run on the real thread pool so the concurrency is genuine. The two properties are
-        // different, so the subscriptions are independent of each other.
+        // Arrange: serialization is promised per subscription, not per observer instance, so an observer
+        // shared across two subscriptions has to synchronize itself. The probe proves that by holding both
+        // deliveries inside OnChange at once, on the real thread pool so the concurrency is genuine.
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         using var observer = new OverlapProbeObserver();
@@ -324,11 +322,8 @@ public class ScheduledPropertySubscriptionTests
         }
     }
 
-    /// <summary>
-    /// One instance shared by two subscriptions. Each delivery announces itself and then waits for the
-    /// other one, so <see cref="OverlapObserved"/> is true only if both were inside
-    /// <see cref="OnChange"/> at the same moment. Any lock serializing delivery makes that wait time out.
-    /// </summary>
+    // Each delivery announces itself and then waits for the other one, so OverlapObserved is true only if
+    // both were inside OnChange at the same moment. Any lock serializing delivery makes that wait time out.
     private sealed class OverlapProbeObserver : IPropertyChangeObserver, IDisposable
     {
         private const int ExpectedDeliveries = 2;
@@ -353,7 +348,7 @@ public class ScheduledPropertySubscriptionTests
             else if (!_bothArrived.Wait(WaitTimeout))
             {
                 // Serialized delivery lands here. Setting the gate keeps the next arrival from paying the
-                // timeout a second time, so the failure is reported once rather than compounding.
+                // timeout again.
                 _bothArrived.Set();
             }
 
