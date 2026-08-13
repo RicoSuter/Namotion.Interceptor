@@ -226,13 +226,15 @@ Everything below was measured on an Apple M4 Max running .NET 9.0.10 arm64, so r
 
 | Channel | Allocated per write | Allocated per delivery | Held per live subscription | Allocated per subscribe and dispose | Write time, inline = 1 |
 |---|---|---|---|---|---|
-| `GetPropertyChangeObservable()` | none | not measured | not measured | not measured | 1.2, measured with `ImmediateScheduler` |
+| `GetPropertyChangeObservable()` | not measured at its default, see below | not measured | not measured | not measured | not measured at its default, see below |
 | `CreatePropertyChangeQueueSubscription()` | none | not measured | not measured | not measured | 1.9, with a consumer draining |
 | `SubscribeInline` | none | in the write | about 172 bytes | 136 bytes | 1.0, the reference |
 | `GetInlineChangeObservable` | none | in the write, one lock taken | about 172 bytes | not measured | not measured |
 | `Subscribe` with a scheduler | about 34 bytes | 160 bytes keeping up, none under backlog | about 5,607 bytes | 10,912 bytes | 2.6 |
 
-The two context-level channels were measured on the write side only, and every write in the table is the same single-property write, so the factors compare channels rather than workloads. A property whose value is a reference type other than `string` builds its change through boxed holders and adds about 48 bytes per write, once per write no matter how many channels consume it.
+The context-level channels were measured on the write side only, and every write in the table is the same single-property write, so the factors compare channels rather than workloads. A property whose value is a reference type other than `string` builds its change through boxed holders and adds about 48 bytes per write, once per write no matter how many channels consume it.
+
+**Why the observable has no write figure.** The benchmark subscribes it with `ImmediateScheduler.Instance`, which is not its default and which takes a different code path: that scheduler skips `ObserveOn` entirely, so the measurement covers a synchronization lock and an inline handler and nothing else. At the default the write also enqueues into the `ObserveOn` sink and dispatches a scheduler work item, which is strictly more than the queue channel's enqueue and signal, so the observable's real write cost is above the queue's rather than below it. Publishing the `ImmediateScheduler` number here would invert that ordering, so it is left out until the default is measured.
 
 **Setup dominates, not steady state.** A `ConcurrentQueue<SubjectPropertyChange>` is about 5,376 bytes while empty, because the change struct is 144 bytes and the initial segment holds 32 slots, which is about 96 percent of what a scheduled subscription holds. A thousand scheduled subscriptions therefore cost roughly 5.35 MB against roughly 0.16 MB for a thousand inline ones. On a wide model that number, not the per-write cost, is what decides the channel, and it is invisible from per-write cost alone.
 
