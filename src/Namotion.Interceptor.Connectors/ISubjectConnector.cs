@@ -4,7 +4,7 @@ namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
 /// Base interface for components that connect subjects to external systems.
-/// Implemented by sources (inbound sync) and optionally by servers (outbound exposure).
+/// Implemented by sources (inbound sync) and by servers (outbound exposure).
 /// </summary>
 public interface ISubjectConnector
 {

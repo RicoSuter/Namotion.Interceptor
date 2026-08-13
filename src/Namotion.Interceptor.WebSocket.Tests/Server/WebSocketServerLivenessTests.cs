@@ -110,6 +110,11 @@ public class WebSocketServerLivenessTests
                 () => server.Diagnostics.IsOperational &&
                       server.Diagnostics.OperationalChangeTime != firstOperationalTime,
                 message: "The server should report operational again after restarting.");
+
+            // An injected fault is not a fault of the transport, so the restart it causes leaves no
+            // error behind. A kill the attempt failed to recognise would be recorded as a processing
+            // layer that ended on its own.
+            Assert.Null(server.Diagnostics.LastError);
         }
         finally
         {
@@ -144,6 +149,33 @@ public class WebSocketServerLivenessTests
         {
             await server.StopAsync(CancellationToken.None);
         }
+    }
+
+    [Fact]
+    public async Task WhenTheServerIsStoppedDuringItsRestartBackoff_ThenTheHostedTaskCompletes()
+    {
+        // Arrange: the same occupied port as above, so the server fails to bind, records the failure
+        // and spends the next few seconds in its backoff, which is where the stop below lands. The
+        // delay sits outside every catch around the attempt, so a stop reaching it has one clause of
+        // its own between the cancellation and the hosted task ending canceled.
+        using var occupied = new TcpListener(IPAddress.Loopback, 0);
+        occupied.Start();
+        var occupiedPort = ((IPEndPoint)occupied.LocalEndpoint).Port;
+
+        await using var server = CreateServer(occupiedPort);
+
+        await server.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => server.Diagnostics.LastError is not null,
+            message: "A server that cannot bind should report the failure before it backs off.");
+
+        // Act
+        await server.StopAsync(CancellationToken.None);
+
+        // Assert
+        var hostedTask = server.ExecuteTask;
+        Assert.NotNull(hostedTask);
+        Assert.Equal(TaskStatus.RanToCompletion, hostedTask.Status);
     }
 
     private static WebSocketSubjectServer CreateServer(int port, TimeSpan? bufferTime = null)

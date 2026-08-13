@@ -14,6 +14,8 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// Standalone WebSocket server that exposes subject updates to connected clients.
 /// Uses Kestrel for cross-platform support without elevation.
 /// On Kill, restarts both the HTTP listener and the processing layer (matching real crash behavior).
+/// A Kill that arrives while the server is between attempts, such as during the restart backoff, has
+/// no attempt to cancel and is dropped: the call returns successfully having done nothing.
 /// For embedding in an existing ASP.NET app, use MapWebSocketSubjectHandler extension instead.
 /// </summary>
 public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncDisposable
@@ -78,6 +80,9 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
         switch (faultType)
         {
             case FaultType.Kill:
+                // With no current attempt the loop is between attempts, so there is nothing to kill and
+                // nothing is signalled back: the teardown and the backoff this fault stands for have
+                // already happened or are already under way.
                 var attempt = _currentAttempt;
                 if (attempt is not null)
                 {
@@ -115,9 +120,10 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
             var linkedToken = attempt.Cancellation.Token;
 
             // Set by the catch below only, which is where a listener that cannot start or bind lands.
-            // A force-kill and a processing layer that ended on its own both restart at once: the
-            // listener is healthy in both cases, and holding the port for the backoff would disconnect
-            // every client to rebuild a layer that binds nothing.
+            // A force-kill and a processing layer that ended without throwing both restart at once: the
+            // trade is a few seconds of downtime against no throttle at all, and neither of those two
+            // repeats fast enough to need one. A processing layer that faults does back off, because
+            // its exception reaches that catch like any other.
             var restartBackoff = TimeSpan.Zero;
 
             try
@@ -137,10 +143,12 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                     try
                     {
                         // Registered inside the try whose finally releases it, so the next restart can
-                        // register its own processor: a second Register while one is still live throws,
-                        // and a registration made outside would never be released if it threw. The
-                        // embedded mode's own processor deliberately does not register, so it cannot
-                        // wire itself into this server's metrics.
+                        // register its own processor: a second Register while one is still live throws.
+                        // A Register that throws has registered nothing, so what the finally then
+                        // releases is the foreign registration that was already live, which is how this
+                        // attempt's failure still leaves the next one able to register. The embedded
+                        // mode's own processor deliberately does not register, so it cannot wire itself
+                        // into this server's metrics.
                         Metrics.OutboundChanges.Register(
                             () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
 
@@ -204,8 +212,7 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                     finally
                     {
                         // Runs before the using disposes the processor, so no reader can call into a
-                        // disposed one. Deregistering without a live registration is a no-op fold, so
-                        // this is also correct when the Register above threw.
+                        // disposed one. Deregistering with nothing live is a no-op fold.
                         Metrics.OutboundChanges.Deregister();
                     }
                 }
@@ -224,25 +231,33 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                     var app = _app;
                     if (app is not null)
                     {
-                        // Cleared before the teardown rather than after it, so a stop or a dispose that
-                        // throws cannot leave a half-torn-down app reachable for the next iteration to
-                        // overwrite.
+                        // Cleared before the teardown rather than after it, so a dispose that throws
+                        // cannot leave a half-torn-down app reachable for the next iteration to
+                        // overwrite. The local keeps the disposal below reachable.
                         _app = null;
 
-                        // Use a short timeout to avoid the default 30-second ASP.NET graceful
-                        // shutdown. Connections are already closed above, so Kestrel should stop
-                        // quickly. The timeout is just a safety net.
-                        using var shutdownCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
                         try
                         {
-                            await app.StopAsync(shutdownCts.Token).ConfigureAwait(false);
+                            // Use a short timeout to avoid the default 30-second ASP.NET graceful
+                            // shutdown. Connections are already closed above, so Kestrel should stop
+                            // quickly. The timeout is just a safety net.
+                            using var shutdownCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                            try
+                            {
+                                await app.StopAsync(shutdownCts.Token).ConfigureAwait(false);
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                // Shutdown timed out, so DisposeAsync will force-release the port.
+                            }
                         }
-                        catch (OperationCanceledException)
+                        finally
                         {
-                            // Shutdown timed out, so DisposeAsync will force-release the port.
+                            // In a finally, because a stop that fails for any other reason must not
+                            // skip the disposal: the app still holds the listening port, the field no
+                            // longer points at it, and every later bind would fail.
+                            await app.DisposeAsync().ConfigureAwait(false);
                         }
-
-                        await app.DisposeAsync().ConfigureAwait(false);
                     }
                 }
             }
@@ -254,8 +269,15 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
             {
                 // The base class only sees exceptions that leave RunAsync, and this loop swallows every
                 // per-attempt failure. Without this, a server whose listener can never bind reports no
-                // error.
-                Metrics.ReportError(ex);
+                // error. A failure the stop itself caused is left unrecorded: the clause above only
+                // covers the cancellation, not the arbitrary exception a socket torn down mid-stop
+                // raises, and recording that would overwrite the genuine fault for good, because
+                // LastError is sticky and a stopped server does not start again.
+                if (!stoppingToken.IsCancellationRequested)
+                {
+                    Metrics.ReportError(ex);
+                }
+
                 _logger.LogError(ex, "WebSocket server processing failed. Restarting...");
                 restartBackoff = RestartBackoff;
             }

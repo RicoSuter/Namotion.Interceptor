@@ -66,7 +66,7 @@ public class ChangeQueueProcessor : IDisposable
     /// <param name="propertyFilter">Filter to determine if a property change should be included.
     /// The <see cref="PropertyReference"/> may not have a registered property (e.g., when the subject
     /// is momentarily unregistered due to a concurrent structural mutation). Callers should handle
-    /// this case explicitly — typically by resolving via <c>TryGetRegisteredProperty()</c> and
+    /// this case explicitly, typically by resolving via <c>TryGetRegisteredProperty()</c> and
     /// returning <c>false</c> when null.</param>
     /// <param name="writeHandler">Handler to write batched changes.</param>
     /// <param name="deliveryRule">Which commits may supersede a change this processor is about to
@@ -82,9 +82,10 @@ public class ChangeQueueProcessor : IDisposable
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
     /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
     /// the first flush, where it would end delivery for this processor's lifetime. Also thrown when
-    /// <paramref name="maxQueueDepth"/> is zero or negative, since a bound has to leave room for at
-    /// least one change: pass null for an unbounded queue, or a <paramref name="bufferTime"/> of zero
-    /// for the immediate path, which buffers nothing.</exception>
+    /// <paramref name="maxQueueDepth"/> is zero or negative on the buffered path, since a bound has to
+    /// leave room for at least one change: pass null for an unbounded queue, or a
+    /// <paramref name="bufferTime"/> of zero for the immediate path, which buffers nothing and where
+    /// the bound is neither read nor validated.</exception>
     public ChangeQueueProcessor(
         object? source,
         IInterceptorSubjectContext context,
@@ -103,13 +104,7 @@ public class ChangeQueueProcessor : IDisposable
 
         try
         {
-            if (maxQueueDepth is <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(maxQueueDepth), maxQueueDepth,
-                    "A bounded change queue must have room for at least one change. Pass null for an unbounded " +
-                    "queue, or a buffer time of zero for the immediate path, which writes each change as it is " +
-                    "dequeued and buffers nothing.");
-            }
+            ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
 
             _maxQueueDepth = maxQueueDepth;
             _deliveryRule = ValidateRule(deliveryRule);
@@ -147,13 +142,7 @@ public class ChangeQueueProcessor : IDisposable
 
         try
         {
-            if (maxQueueDepth is <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(maxQueueDepth), maxQueueDepth,
-                    "A bounded change queue must have room for at least one change. Pass null for an unbounded " +
-                    "queue, or a buffer time of zero for the immediate path, which writes each change as it is " +
-                    "dequeued and buffers nothing.");
-            }
+            ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
 
             _maxQueueDepth = maxQueueDepth;
             _subscription = subscription;
@@ -164,6 +153,21 @@ public class ChangeQueueProcessor : IDisposable
         {
             _changeMerger.Dispose();
             throw;
+        }
+    }
+
+    // Only on the buffered path, so that the remedy the message names is one the caller can actually
+    // take: a buffer time of zero writes each change as it is dequeued and never fills the queue this
+    // bounds, so the bound is not read there and rejecting it would leave the message pointing at a
+    // combination that throws just the same.
+    private static void ValidateMaxQueueDepth(int? maxQueueDepth, TimeSpan bufferTime)
+    {
+        if (maxQueueDepth is <= 0 && bufferTime > TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxQueueDepth), maxQueueDepth,
+                "A bounded change queue must have room for at least one change. Pass null for an unbounded " +
+                "queue, or a buffer time of zero for the immediate path, which writes each change as it is " +
+                "dequeued and buffers nothing.");
         }
     }
 

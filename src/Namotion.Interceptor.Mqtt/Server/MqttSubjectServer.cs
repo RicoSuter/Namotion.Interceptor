@@ -59,8 +59,20 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
     private int _disposed;
     private int _isListening;
     private MqttServer? _mqttServer;
-    private volatile bool _isForceKill;
-    private volatile CancellationTokenSource? _forceKillCts;
+    private volatile RunAttempt? _currentAttempt;
+
+    /// <summary>
+    /// One loop iteration's cancellation and its kill flag, held together so a kill can only be
+    /// honoured for the attempt whose token source it actually cancelled. A flag on the server itself
+    /// stays set when the kill arrives after that attempt has torn down, and the next attempt then
+    /// reads a kill that never reached it.
+    /// </summary>
+    private sealed class RunAttempt(CancellationTokenSource cancellation)
+    {
+        public readonly CancellationTokenSource Cancellation = cancellation;
+
+        public volatile bool WasForceKilled;
+    }
 
     /// <inheritdoc cref="SubjectConnectorBase.Diagnostics" />
     public override MqttServerDiagnostics Diagnostics { get; }
@@ -116,9 +128,25 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         switch (faultType)
         {
             case FaultType.Kill:
-                _isForceKill = true;
-                try { _forceKillCts?.Cancel(); }
-                catch (ObjectDisposedException) { /* CTS disposed between loop iterations */ }
+                // With no current attempt the loop is between attempts, so there is nothing to kill and
+                // nothing is signalled back: the teardown and the backoff this fault stands for have
+                // already happened or are already under way.
+                var attempt = _currentAttempt;
+                if (attempt is not null)
+                {
+                    // Marked before the cancel, so the loop cannot reach its kill check ahead of this
+                    // write, and unmarked again when the token source turns out to be disposed: the
+                    // loop is then between attempts and this kill reached nothing.
+                    attempt.WasForceKilled = true;
+                    try
+                    {
+                        await attempt.Cancellation.CancelAsync().ConfigureAwait(false);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        attempt.WasForceKilled = false;
+                    }
+                }
                 break;
 
             case FaultType.Disconnect:
@@ -148,10 +176,6 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
     /// <inheritdoc />
     protected override async Task RunAsync(CancellationToken stoppingToken)
     {
-        // Captured once: the token stays usable after DisposeAsync has disposed its source, while
-        // reading the property again from inside a catch block would throw there.
-        var shutdownToken = _shutdownCts.Token;
-
         _lifecycleInterceptor = _context.TryGetLifecycleInterceptor();
         if (_lifecycleInterceptor is not null)
         {
@@ -179,9 +203,9 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            _forceKillCts = cts;
-            var linkedToken = cts.Token;
+            var attempt = new RunAttempt(CancellationTokenSource.CreateLinkedTokenSource(stoppingToken));
+            _currentAttempt = attempt;
+            var linkedToken = attempt.Cancellation.Token;
 
             try
             {
@@ -226,7 +250,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                 Metrics.MarkNotOperational();
                 return;
             }
-            catch (OperationCanceledException) when (_isForceKill)
+            catch (OperationCanceledException) when (attempt.WasForceKilled)
             {
                 // Deliberately not reported through ReportError: it is an injected fault the broker
                 // recovers from by restarting, and catching it here is also what keeps it from reaching
@@ -244,34 +268,33 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                 Volatile.Write(ref _isListening, 0);
                 Metrics.MarkNotOperational();
 
-                // A cancellation this broker's own shutdown produced is an expected stop rather than a
-                // fault, and recording it would leave a sticky LastError on a broker that shut down
-                // normally. Same policy the base class applies to the stopping token.
-                if (ex is OperationCanceledException cancellation && cancellation.CancellationToken == shutdownToken)
+                // A failure the stop itself caused is an expected shutdown rather than a fault: the
+                // first clause above only covers the cancellation, not the arbitrary exception a broker
+                // torn down mid-stop raises, and recording that would overwrite the genuine fault for
+                // good, because LastError is sticky and a stopped broker does not start again. A
+                // disposal is the same stop seen earlier: it stops and disposes the broker before it
+                // cancels the stopping token, so what a running attempt sees is an ObjectDisposedException.
+                if (stoppingToken.IsCancellationRequested || Volatile.Read(ref _disposed) == 1)
                 {
                     return;
                 }
 
                 // The base class only sees exceptions that leave RunAsync, and this loop swallows every
-                // per-attempt failure. Without this, a broker that can never bind reports no error.
-                // Recorded before the cancellation check below, because a cancellation that neither the
-                // stopping token, nor a force-kill, nor the shutdown above caused is a genuine fault,
-                // and leaving the pump on it with no error recorded is a broker that stops serving with
-                // nothing explaining why.
+                // per-attempt failure. Without this, a broker that can never bind reports no error. A
+                // cancellation that neither the stopping token nor a force-kill caused reaches here
+                // like any other failure and is treated as one: it is a genuine fault, and a broker
+                // that stops serving with nothing explaining why is worse than one that keeps trying.
                 Metrics.ReportError(ex);
                 _logger.LogError(ex, "Error in MQTT server.");
 
-                if (ex is TaskCanceledException)
-                {
-                    return;
-                }
-
+                // On the stopping token this leaves RunAsync as a cancellation, which the base class
+                // recognises as a shutdown rather than recording it.
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
             }
             finally
             {
-                _isForceKill = false;
-                cts.Dispose();
+                _currentAttempt = null;
+                attempt.Cancellation.Dispose();
             }
         }
     }

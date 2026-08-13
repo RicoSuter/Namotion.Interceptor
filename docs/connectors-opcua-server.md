@@ -267,7 +267,7 @@ This server measures both throughput directions, so `Throughput.IncomingPerSecon
 | `ActiveSessionCount` | Currently active client sessions. |
 | `ConsecutiveFailures` | Consecutive startup failures. A gauge that resets on a successful start, which is why it carries no `Total` prefix. See [Resilience](#resilience). |
 
-`LastError` is cleared by a restart of the hosted service, not by the server's own internal restart, so a non-null value means "a start or a change flush failed at some point during this run of the hosted service".
+`LastError` is cleared by a restart of the hosted service, not by the server's own internal restart, so a non-null value means "a start failed, or something escaped the change queue processor, at some point during this run of the hosted service". A failed write into the address space is not one of them: the change queue processor logs and swallows every exception its write handler raises, so those never reach `LastError` at all.
 
 ## Direct Server Access
 

@@ -650,8 +650,16 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             {
                 // This loop runs inside the listen lifetime, outside the try in
                 // SubjectSourceBase.RunAsync that records per-attempt failures, so nothing else
-                // reports what happens here. The clause above already took the shutdown cancellation.
-                Metrics.ReportError(ex);
+                // reports what happens here. A failure the stop itself caused is left unrecorded: the
+                // clause above only took the cancellation, not the WebSocketException or
+                // ObjectDisposedException a socket torn down mid-stop raises, and recording that would
+                // overwrite the genuine fault for good, because LastError is sticky and a stopped
+                // source does not start again.
+                if (!stoppingToken.IsCancellationRequested)
+                {
+                    Metrics.ReportError(ex);
+                }
+
                 _logger.LogError(ex, "Error in WebSocket connection monitoring");
             }
             finally
@@ -688,8 +696,16 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         {
             // Swallowed here so the monitor can back off and try again, which means the base class
             // never sees it. Without this, a server that stays down leaves LastError null for the
-            // whole outage, beside an IsOperational of false.
-            Metrics.ReportError(ex);
+            // whole outage, beside an IsOperational of false. A failure the stop itself caused is left
+            // unrecorded: the clause above only took the cancellation, not the WebSocketException or
+            // ObjectDisposedException a connect torn down mid-stop raises, and recording that would
+            // overwrite the genuine fault for good, because LastError is sticky and a stopped source
+            // does not start again.
+            if (!stoppingToken.IsCancellationRequested)
+            {
+                Metrics.ReportError(ex);
+            }
+
             _logger.LogError(ex, "Failed to reconnect to WebSocket server");
 
             if (_circuitBreaker is not null && _circuitBreaker.RecordFailure())
