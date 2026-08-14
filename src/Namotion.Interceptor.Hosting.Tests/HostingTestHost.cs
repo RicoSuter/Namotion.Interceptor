@@ -47,7 +47,7 @@ internal static class HostingTestHost
     /// </summary>
     public static async Task<(IHost Host, IInterceptorSubjectContext Context)> StartAsync()
     {
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
         var context = CreateContext(builder);
 
         var host = builder.Build();

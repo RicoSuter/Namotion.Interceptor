@@ -51,6 +51,15 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// </summary>
     internal Action? OwnershipTakenGate { get; set; }
 
+    /// <summary>
+    /// Test seam, invoked inside <see cref="LifecycleInterceptor.RunIfSubjectAttached"/>'s callback in
+    /// <see cref="MarkLiveIfAttached"/>, after the subject is known to be attached and before the
+    /// liveness write. Null in production, where the two are adjacent. Holding it holds the graph
+    /// mutation lock, which is the property it exists to make observable: a concurrent graph move
+    /// cannot land between the membership answer and the write.
+    /// </summary>
+    internal Action? LivenessWriteGate { get; set; }
+
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         // Invoked from inside LifecycleInterceptor's lock (_attachedSubjects). Everything here only
@@ -80,7 +89,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
 
         var subjectTarget = subject is IHostedService hostedService
-            ? subject.GetOrAddSubjectTarget(hostedService)
+            ? hostedService.GetOrAddSubjectTarget()
             : null;
 
         var attachments = subject.GetHostedServiceAttachments();
@@ -125,9 +134,15 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         //
         // The type test stands in for a second data lookup: only AttachSubject creates a subject
         // target and only for an IHostedService, so nothing else can have one.
-        var attachments = subject.GetHostedServiceAttachments();
+        //
+        // The fast path turns on "has this subject ever hosted anything", not on "does it host
+        // anything now". Those differ for a subject whose last attachment was detached while it stayed
+        // in the graph, and skipping the clear for that one leaves an entry behind that outlives its
+        // membership: a start already queued against the detached attachment then re-reads liveness in
+        // its body, finds it, and creates and starts an instance for a subject that has left the graph.
+        var everHosted = subject.TryGetHostedServiceAttachments(out var attachments);
         var subjectTarget = subject is IHostedService ? subject.TryGetSubjectTarget() : null;
-        if (subjectTarget is null && attachments.IsEmpty)
+        if (subjectTarget is null && !everHosted)
         {
             return;
         }
@@ -136,6 +151,13 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // one subject reachable from two hosting enabled contexts shares a single target with two
         // handlers, and both are live for it while only one of them owns it.
         _liveSubjects.TryRemove(subject, out _);
+
+        if (subjectTarget is null && attachments.IsEmpty)
+        {
+            // Hosted something once, hosts nothing now. Liveness is gone, and there is no target left
+            // to stop or release.
+            return;
+        }
 
         // Ownership is read here and only here. A handler stops what it owns and nothing else:
         // otherwise this detach stops and disposes an instance another handler created and is
@@ -548,21 +570,27 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// </summary>
     /// <remarks>
     /// The membership question goes to <see cref="LifecycleInterceptor"/>, which already maintains the
-    /// set, and it is asked here rather than at the reads because this is the only caller holding no
-    /// lock. The reads sit inside <see cref="HostedServiceTarget"/>'s chain lock, and a context detach
-    /// takes that chain lock while holding the lifecycle lock, so reading the lifecycle set from
-    /// inside the chain lock would close a deadlock cycle.
+    /// set, and the write happens inside its callback rather than after it. Reading membership and then
+    /// writing releases the lock in between, and a graph mutation landing in that gap makes the write
+    /// land on the opposite answer: an attach that wrote liveness has it removed again, so its service
+    /// never starts, or a detach that cleared it has it re-armed, so a service starts for a subject
+    /// that has left the graph.
+    /// <para>
+    /// Only the write needs that atomicity, not the ownership take that follows it. A detach landing
+    /// after this returns clears liveness itself, and the take reads liveness inside the target's chain
+    /// lock, so it refuses. Keeping the take outside also keeps this call site off the list of places
+    /// that run <see cref="IStartupCompletionDeferrer"/> under the graph lock.
+    /// </para>
     /// <para>
     /// Every interceptor reachable from the subject is asked, not just the first: a subject in two
     /// hosting enabled contexts is live for both handlers, and one interceptor not holding it says
-    /// nothing about the other.
+    /// nothing about the other. A handler can therefore be marked live on the strength of a graph it
+    /// does not itself serve; see the multi context note in
+    /// docs/design/hosting-service-ownership.md.
     /// </para>
     /// <para>
-    /// A subject none of them holds has its entry removed rather than left alone, and this is the only
-    /// place that removal happens. Detaching an attachment must not touch liveness, because a start
-    /// already appended re-reads it and would be cancelled retroactively, so a subject that loses its
-    /// last attachment while in the graph keeps an entry that its context detach then skips over. That
-    /// entry is stale, and reaching here is the only way it can be read for a new attachment.
+    /// Records and never removes. A stale entry cannot reach here, because a context detach clears
+    /// liveness for every subject that has ever hosted anything, so there is nothing to catch.
     /// </para>
     /// </remarks>
     internal void MarkLiveIfAttached(IInterceptorSubject subject)
@@ -573,21 +601,17 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
 
         var interceptors = subject.Context.GetServices<LifecycleInterceptor>();
-        var attached = false;
-        for (var index = 0; index < interceptors.Length && !attached; index++)
+        var recorded = false;
+        for (var index = 0; index < interceptors.Length && !recorded; index++)
         {
-            attached = interceptors[index].IsSubjectAttached(subject);
+            recorded = interceptors[index].RunIfSubjectAttached(subject, () =>
+            {
+                LivenessWriteGate?.Invoke();
+                _liveSubjects[subject] = 0;
+            });
         }
 
-        if (!attached)
-        {
-            _liveSubjects.TryRemove(subject, out _);
-            return;
-        }
-
-        _liveSubjects[subject] = 0;
-
-        if (_gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
+        if (recorded && _gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
         {
             // Re-read after the write, for the same reason AttachSubject re-reads after its own: an
             // entry that lands after the drain cleared the set roots the subject on a dead handler for

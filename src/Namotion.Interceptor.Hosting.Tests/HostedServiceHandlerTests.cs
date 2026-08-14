@@ -646,11 +646,11 @@ public class HostedServiceHandlerTests
         // chain lock before the lookup throws both away every time.
         var subject = (IInterceptorSubject)new CountingHostedSubject();
         var hostedService = (IHostedService)subject;
-        var first = subject.GetOrAddSubjectTarget(hostedService);
+        var first = hostedService.GetOrAddSubjectTarget();
 
         for (var i = 0; i < 100; i++)
         {
-            subject.GetOrAddSubjectTarget(hostedService);
+            hostedService.GetOrAddSubjectTarget();
         }
 
         // Act
@@ -658,7 +658,7 @@ public class HostedServiceHandlerTests
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var i = 0; i < 1000; i++)
         {
-            if (ReferenceEquals(first, subject.GetOrAddSubjectTarget(hostedService)))
+            if (ReferenceEquals(first, hostedService.GetOrAddSubjectTarget()))
             {
                 same++;
             }
@@ -1173,6 +1173,142 @@ public class HostedServiceHandlerTests
             parent.Child = null;
 
             // Assert
+            Assert.False(handler.IsLive(child));
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAnAttachmentIsDetachedAndTheSubjectLeavesBeforeItsQueuedStartRuns_ThenNothingIsCreated()
+    {
+        // Arrange - the host is built but never started, so the startup gate parks the queued start at
+        // a known point and the whole sequence is deterministic rather than a race. The subject hosts
+        // nothing by the time it leaves the graph, which is exactly the case a context detach must not
+        // treat as "nothing to clear": the start queued against the detached attachment re-reads
+        // liveness in its body and would otherwise find an entry that outlived the graph membership.
+        var builder = HostingTestHost.CreateBuilder();
+        var context = HostingTestHost.CreateContext(builder);
+        var host = builder.Build();
+
+        var parent = new Parent(context);
+        var child = new Person();
+        parent.Child = child;
+
+        var created = 0;
+        var attachment = child.AttachHostedService(() =>
+        {
+            Interlocked.Increment(ref created);
+            return new TrackedBackgroundService();
+        });
+
+        // Act
+        child.DetachHostedService(attachment);
+        parent.Child = null;
+
+        await host.StartAsync();
+        await ((IHostedServiceAttachmentTarget)attachment).Target.AppendAsync(() => Task.CompletedTask);
+
+        try
+        {
+            // Assert
+            Assert.Equal(0, Volatile.Read(ref created));
+            Assert.Null(attachment.Current);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenASubjectThatOnceHostedSomethingLeavesTheGraph_ThenItsLivenessIsCleared()
+    {
+        // Arrange - the retention side of the same fact. Liveness is recorded lazily, so a context
+        // detach could skip its clear for a subject that hosts nothing at that moment; an entry left
+        // behind roots the subject on the handler for the whole life of the host.
+        var (host, context) = await HostingTestHost.StartAsync();
+
+        try
+        {
+            var handler = context.TryGetService<HostedServiceHandler>()!;
+            var parent = new Parent(context);
+            var child = new Person();
+            parent.Child = child;
+
+            var attachment = child.AttachHostedService(() => new TrackedBackgroundService());
+            Assert.True(handler.IsLive(child));
+            child.DetachHostedService(attachment);
+
+            // Act
+            parent.Child = null;
+
+            // Assert
+            Assert.False(handler.IsLive(child));
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAnAttachmentRecordsLiveness_ThenAGraphMoveCannotLandBetweenTheCheckAndTheWrite()
+    {
+        // Arrange - the membership answer and the liveness write have to be one step. Split, a graph
+        // move landing between them makes the write land on the opposite answer: a detach that just
+        // cleared liveness has it re-armed, and a start then runs for a subject that has left the
+        // graph. The window is nanoseconds wide, so it is driven by a seam rather than by repetition:
+        // the seam sits where the write does, and holding it holds the graph mutation lock, so a
+        // concurrent move provably cannot proceed.
+        var (host, context) = await HostingTestHost.StartAsync();
+
+        try
+        {
+            var handler = context.TryGetService<HostedServiceHandler>()!;
+            var parent = new Parent(context);
+            var child = new Person();
+            parent.Child = child;
+
+            var seamReached = new ManualResetEventSlim(false);
+            var moveFinished = 0;
+            var moveBlocked = false;
+
+            var mover = new Thread(() =>
+            {
+                seamReached.Wait(TimeSpan.FromSeconds(30));
+                parent.Child = null;
+                Volatile.Write(ref moveFinished, 1);
+            });
+
+            handler.LivenessWriteGate = () =>
+            {
+                seamReached.Set();
+
+                // Recorded rather than asserted: this runs under the graph mutation lock, and throwing
+                // here unwinds out of a public attach with that lock held, which makes a failing run
+                // far noisier than the failure it reports.
+                moveBlocked = SpinWait.SpinUntil(
+                    () => (mover.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0,
+                    TimeSpan.FromSeconds(10));
+            };
+
+            mover.Start();
+
+            // Act
+            child.AttachHostedService(() => new TrackedBackgroundService());
+            mover.Join(TimeSpan.FromSeconds(30));
+
+            // Assert
+            Assert.True(
+                moveBlocked,
+                "The graph move ran while liveness was being written, so the membership answer and the write are not one step.");
+            Assert.Equal(1, Volatile.Read(ref moveFinished));
+
+            // The detach ran after the write, so it cleared the entry the write had just made. Liveness
+            // agreeing with membership is the invariant the atomicity exists to keep.
             Assert.False(handler.IsLive(child));
         }
         finally

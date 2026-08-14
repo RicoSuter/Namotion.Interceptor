@@ -26,6 +26,29 @@ public static class InterceptorHostingExtensions
     }
 
     /// <summary>
+    /// Reads the attachments and reports whether the subject has ever carried one, which stays true
+    /// after the last attachment has been detached.
+    /// </summary>
+    /// <remarks>
+    /// The distinction is what lets a context detach skip the liveness clear for the overwhelming
+    /// majority of subjects without ever skipping it for one that could still hold an entry.
+    /// <see cref="RemoveAttachment"/> stores null rather than removing the key, so the key outlives the
+    /// attachments themselves and this costs the same single lookup either way.
+    /// </remarks>
+    internal static bool TryGetHostedServiceAttachments(
+        this IInterceptorSubject subject, out ImmutableArray<IHostedServiceAttachment> attachments)
+    {
+        if (!subject.Data.TryGetValue((null, AttachmentsKey), out var value))
+        {
+            attachments = [];
+            return false;
+        }
+
+        attachments = value is ImmutableArray<IHostedServiceAttachment> stored ? stored : [];
+        return true;
+    }
+
+    /// <summary>
     /// Attaches a hosted service factory to the subject. The handler invokes the factory when the
     /// subject enters the graph, stops the instance when it leaves, and disposes it as well when it is
     /// disposable, so a re-attach yields a fresh instance. The factory must construct: a factory that
@@ -192,8 +215,19 @@ public static class InterceptorHostingExtensions
         return removed;
     }
 
-    internal static HostedServiceTarget GetOrAddSubjectTarget(this IInterceptorSubject subject, IHostedService hostedService)
+    /// <summary>
+    /// Gets the subject's own target, creating it on first use.
+    /// </summary>
+    /// <remarks>
+    /// Takes no separate service argument, so a subject target can only ever exist on a subject that is
+    /// itself an <see cref="IHostedService"/>. A context detach relies on that: it uses the type test in
+    /// place of a second data lookup, and a target stored on any other subject would never be stopped,
+    /// disposed or released.
+    /// </remarks>
+    internal static HostedServiceTarget GetOrAddSubjectTarget(this IHostedService hostedService)
     {
+        var subject = (IInterceptorSubject)hostedService;
+
         // Read first: every re-attach of a hosted subject goes through here, and constructing the
         // target and its chain lock ahead of the GetOrAdd throws both away again on all of them.
         if (subject.Data.TryGetValue((null, SubjectTargetKey), out var existing) && existing is HostedServiceTarget found)
