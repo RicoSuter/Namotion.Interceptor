@@ -34,7 +34,11 @@ public sealed class SubjectTransaction : IDisposable
     private static readonly ObjectPool<OrderedDictionary<PropertyReference, SubjectPropertyChange>> PendingChangesPool
         = new(() => new OrderedDictionary<PropertyReference, SubjectPropertyChange>(PropertyReference.Comparer));
 
-    private readonly OrderedDictionary<PropertyReference, SubjectPropertyChange> _pendingChanges = PendingChangesPool.Rent();
+    /// <summary>
+    /// Null once <see cref="Dispose"/> has returned the dictionary to the pool, so no accessor can reach a
+    /// buffer another transaction already rented. Every accessor reads it under <see cref="_pendingChangesLock"/>.
+    /// </summary>
+    private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _pendingChanges = PendingChangesPool.Rent();
     private readonly Lock _pendingChangesLock = new();
 
     private volatile bool _isCommitting;
@@ -85,29 +89,33 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Gets a snapshot of the pending changes as a read-only list, in insertion order.
+    /// A disposed transaction holds no pending changes and returns an empty list.
     /// </summary>
     public IReadOnlyList<SubjectPropertyChange> GetPendingChanges()
     {
         lock (_pendingChangesLock)
         {
+            if (_pendingChanges is null)
+            {
+                return [];
+            }
+
             return _pendingChanges.Values.ToList();
         }
     }
 
     /// <summary>
     /// Tries to read a pending value for the given property.
-    /// Returns false if no pending value exists.
+    /// Returns false if no pending value exists or the transaction has been disposed.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
-    /// <exception cref="ObjectDisposedException">Thrown if the transaction was disposed concurrently (TOCTOU race).</exception>
     internal bool TryGetPendingValue<TProperty>(PropertyReference property, out TProperty value)
     {
         lock (_pendingChangesLock)
         {
             ThrowIfCommittingConcurrently();
-            ThrowIfDisposedConcurrently();
 
-            if (_pendingChanges.TryGetValue(property, out var change))
+            if (_pendingChanges is not null && _pendingChanges.TryGetValue(property, out var change))
             {
                 value = change.GetNewValue<TProperty>();
                 return true;
@@ -138,7 +146,8 @@ public sealed class SubjectTransaction : IDisposable
             ThrowIfCommittingConcurrently();
             ThrowIfDisposedConcurrently();
 
-            var isFirstWrite = !_pendingChanges.TryGetValue(property, out var existingChange);
+            // Non-null once the disposed check above has passed: Dispose sets the flag before it nulls the field.
+            var isFirstWrite = !_pendingChanges!.TryGetValue(property, out var existingChange);
             _pendingChanges[property] = SubjectPropertyChange.Create(
                 property,
                 origin: origin,
@@ -150,13 +159,14 @@ public sealed class SubjectTransaction : IDisposable
     }
 
     /// <summary>
-    /// Guards the last window between the interceptor's disposed check and the pending-changes access itself.
+    /// Write-path-only backstop for the window between the interceptor's disposed check and the capture
+    /// itself, when another flow disposes the transaction in between. Reads need no guard: Dispose nulls
+    /// <see cref="_pendingChanges"/> under <see cref="_pendingChangesLock"/>, so a read finds nothing pending
+    /// and falls through to the model. A capture cannot fall through, because the interceptor already
+    /// finalized the write's origin and letting the terminal write run would finalize it a second time.
     /// The check must stay inside <see cref="_pendingChangesLock"/>: Dispose sets the flag before it takes the
     /// lock and returns the dictionary to the pool only after releasing it, so a flag read taken under the lock
     /// can never see a live transaction and then touch a buffer another transaction already rented.
-    /// Throwing is deliberate: reaching here means a read or write raced a Dispose on another flow, and
-    /// silently corrupting or tearing against an unrelated transaction's pending changes is far worse than a
-    /// visible exception.
     /// </summary>
     private void ThrowIfDisposedConcurrently()
     {
@@ -301,7 +311,9 @@ public sealed class SubjectTransaction : IDisposable
 
         lock (_pendingChangesLock)
         {
-            if (_pendingChanges.Count == 0)
+            // Null when a Dispose on another flow raced past the check above and already released the buffer:
+            // there is nothing left to commit either way.
+            if (_pendingChanges is null || _pendingChanges.Count == 0)
             {
                 _isCommitted = true;
                 return default;
@@ -579,7 +591,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            _pendingChanges.Clear();
+            _pendingChanges?.Clear();
         }
 
         _isCommitted = true;
@@ -671,7 +683,8 @@ public sealed class SubjectTransaction : IDisposable
         {
             // Rent the ArrayPool buffer BEFORE setting _isCommitting so an OOM in Rent leaves the
             // transaction reusable (the flag is never set, no cleanup is owed).
-            var changeCount = _pendingChanges.Count;
+            var pendingChanges = _pendingChanges;
+            var changeCount = pendingChanges?.Count ?? 0;
             var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
 
             // Set _isCommitting inside the lock to prevent concurrent writes from being
@@ -680,10 +693,13 @@ public sealed class SubjectTransaction : IDisposable
             // and returning the rented buffer.
             _isCommitting = true;
 
-            var index = 0;
-            foreach (var change in _pendingChanges.Values)
+            if (pendingChanges is not null)
             {
-                rentedArray[index++] = change;
+                var index = 0;
+                foreach (var change in pendingChanges.Values)
+                {
+                    rentedArray[index++] = change;
+                }
             }
 
             return (rentedArray, rentedArray.AsMemory(0, changeCount));
@@ -729,18 +745,27 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     public void Dispose()
     {
+        // Setting the flag BEFORE taking _pendingChangesLock is load-bearing for
+        // ThrowIfDisposedConcurrently: it reads the flag under that lock, so this ordering is what makes
+        // "flag not set" under the lock mean "the buffer is still ours".
         if (Interlocked.CompareExchange(ref _isDisposed, 1, 0) == 0)
         {
             Interlocked.Decrement(ref _activeTransactionCount);
 
-            bool committing;
+            OrderedDictionary<PropertyReference, SubjectPropertyChange>? pendingChangesToReturn = null;
             lock (_pendingChangesLock)
             {
-                _pendingChanges.Clear();
-                committing = _isCommitting;
-                if (committing)
+                _pendingChanges!.Clear();
+                if (_isCommitting)
                 {
                     _disposeRequestedDuringCommit = true;
+                }
+                else
+                {
+                    // Nulling under the lock is what makes every accessor see "nothing pending"
+                    // deterministically, instead of whatever the buffer's next owner puts in it.
+                    pendingChangesToReturn = _pendingChanges;
+                    _pendingChanges = null;
                 }
             }
 
@@ -752,12 +777,16 @@ public sealed class SubjectTransaction : IDisposable
             }
 
             // A commit in flight (reachable only by misuse: disposing without awaiting CommitAsync) still owns
-            // the pooled buffer and the exclusive lock, so skip both here: returning the buffer would corrupt
-            // another transaction's pending changes, and releasing the lock would drop mutual exclusion mid-apply.
-            // EndCommit releases the deferred lock once the commit completes; the buffer is left unpooled (GC'd).
-            if (!committing)
+            // the pooled buffer and the exclusive lock, so both are left alone above: returning the buffer would
+            // corrupt another transaction's pending changes, and releasing the lock would drop mutual exclusion
+            // mid-apply. EndCommit releases the deferred lock once the commit completes; the buffer stays
+            // unpooled (GC'd).
+            if (pendingChangesToReturn is not null)
             {
-                PendingChangesPool.Return(_pendingChanges);
+                // Returning only AFTER _pendingChangesLock is released is load-bearing for
+                // ThrowIfDisposedConcurrently: a capture holding the lock has already been rejected by the
+                // flag, so no capture can be inside the dictionary when it changes owner.
+                PendingChangesPool.Return(pendingChangesToReturn);
                 _lockReleaser?.Dispose(); // May be null for Optimistic transactions
             }
         }

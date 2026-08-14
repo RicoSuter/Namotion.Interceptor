@@ -168,7 +168,7 @@ using var handle = person.SubscribeToProperty(
 
 **Synchronous schedulers are rejected**: `ImmediateScheduler.Instance` and `CurrentThreadScheduler.Instance` throw `ArgumentException`; use `property.SubscribeInline(callback)` when you want the callback inside the write.
 
-**Ambient context does not flow to the observer**: the drain suppresses `ExecutionContext` flow, so the writer's `AsyncLocal` values, `Activity.Current` and logger scopes do not reach it; create a caller-owned scheduler such as an `EventLoopScheduler` outside any transaction scope, or property writes the observer makes vanish silently into the transaction that thread inherited for life.
+**Ambient context does not flow to the observer**: the drain suppresses `ExecutionContext` flow, so the writer's `AsyncLocal` values, `Activity.Current` and logger scopes do not reach it; create a caller-owned scheduler such as an `EventLoopScheduler` outside any transaction scope, or property writes the observer makes vanish silently into the transaction that thread inherited, for as long as that transaction is live.
 
 **Dormancy is not symmetric with disposal**: detaching the subject stops acceptance but not the drain, so a change accepted before the detach is still delivered afterwards, while disposal drops the whole queue.
 

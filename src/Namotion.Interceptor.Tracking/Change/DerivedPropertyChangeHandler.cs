@@ -164,9 +164,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         var usedByProperties = data.GetUsedByProperties();
         if (usedByProperties.Length > 0)
         {
-            // Suppress cascading recalculations during transaction capture (replayed on commit).
+            // Suppress cascading recalculations during transaction capture (replayed on commit). A disposed
+            // ambient transaction has no commit left to replay them on, and the write it inherited went
+            // straight to the model, so its cascade must run.
             if (SubjectTransaction.HasActiveTransaction &&
-                SubjectTransaction.Current is { IsCommitting: false })
+                SubjectTransaction.Current is { IsCommitting: false, IsDisposed: false })
             {
                 return;
             }

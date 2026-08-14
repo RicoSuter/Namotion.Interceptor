@@ -591,7 +591,7 @@ public class SubjectTransactionTests
         disposedTransaction.Dispose();
 
         // The second transaction keeps the process-wide active count above zero, so the interceptor does
-        // not take its no-transaction fast path, and it rents the pooled dictionary the first one returned.
+        // not take its no-transaction fast path.
         using var openTransaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.LastName = "Doe";
 
@@ -608,6 +608,37 @@ public class SubjectTransactionTests
         await openTransaction.CommitAsync(CancellationToken.None);
         Assert.Equal("New", person.FirstName);
         Assert.Equal("Doe", person.LastName);
+    }
+
+    [Fact]
+    public async Task WhenAmbientTransactionIsDisposedAndAnotherIsOpen_ThenDerivedPropertiesStillRecalculate()
+    {
+        // Arrange: same frozen-flow setup as the write test above. The write reaches the model, so its
+        // derived cascade has to run with it: the disposed transaction has no commit left to replay it on,
+        // so suppressing the cascade would drop the recalculation forever.
+        var context = CreateTransactionContext();
+        var person = new Person(context) { FirstName = "Old", LastName = "Doe" };
+
+        var disposedTransaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        var frozenFlow = ExecutionContext.Capture()
+            ?? throw new InvalidOperationException("Execution context flow must not be suppressed in this test.");
+        disposedTransaction.Dispose();
+
+        // Keeps the process-wide active count above zero, so the derived handler does not take its
+        // no-transaction fast path.
+        using var openTransaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+
+        var changedProperties = new List<string>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change => changedProperties.Add(change.Property.Name));
+
+        // Act
+        ExecutionContext.Run(frozenFlow, _ => person.FirstName = "New", null);
+
+        // Assert
+        Assert.Contains(nameof(Person.FirstName), changedProperties);
+        Assert.Contains(nameof(Person.FullName), changedProperties);
+        Assert.Contains(nameof(Person.FullNameWithPrefix), changedProperties);
     }
 
     [Fact]
@@ -648,8 +679,8 @@ public class SubjectTransactionTests
         disposedTransaction.Dispose();
 
         // The second transaction keeps the process-wide active count above zero, so the interceptor does not
-        // take its no-transaction fast path, and it rents the pooled dictionary the first one returned: the
-        // disposed transaction now aliases a buffer whose pending values belong to the open transaction.
+        // take its no-transaction fast path. Whether the pool hands it the dictionary the first transaction
+        // returned does not matter: Dispose nulled that transaction's reference to it.
         using var openTransaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "PendingInOpenTransaction";
 
@@ -660,12 +691,38 @@ public class SubjectTransactionTests
         // Assert: neither the disposed transaction's captured value nor the open transaction's pending value.
         Assert.Equal("Model", readThroughDisposedTransaction);
 
+        // The disposed transaction holds nothing to serve, whichever transaction owns the pooled dictionary.
+        Assert.Empty(disposedTransaction.GetPendingChanges());
+        Assert.False(disposedTransaction.TryGetPendingValue<string?>(
+            new PropertyReference(person, nameof(Person.FirstName)), out _));
+
         string? modelFirstName = null;
         await RunWithoutAsyncLocalFlowAsync(() => modelFirstName = person.FirstName);
         Assert.Equal("Model", modelFirstName);
 
         // The open transaction still masks reads in its own flow.
         Assert.Equal("PendingInOpenTransaction", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenCaptureChangeIsCalledDirectlyOnADisposedTransaction_ThenItThrowsObjectDisposed()
+    {
+        // Arrange: the interceptor never calls a disposed transaction, so this invokes the internal capture
+        // backstop directly rather than reproducing the cross-flow dispose race that is its only real caller.
+        var context = CreateTransactionContext();
+        var person = new Person(context);
+
+        var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        transaction.Dispose();
+
+        // Act & Assert
+        Assert.Throws<ObjectDisposedException>(() => transaction.CaptureChange(
+            new PropertyReference(person, nameof(Person.FirstName)),
+            default,
+            DateTimeOffset.UtcNow,
+            null,
+            "Old",
+            "New"));
     }
 
     /// <summary>
