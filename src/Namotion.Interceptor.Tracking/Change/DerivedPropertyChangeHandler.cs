@@ -3,7 +3,6 @@ using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
-using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
@@ -164,15 +163,9 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         var usedByProperties = data.GetUsedByProperties();
         if (usedByProperties.Length > 0)
         {
-            // Suppress only when the ambient transaction captured this write and will replay it on commit.
-            // Capture skips derived properties, and the ambient slot is process-wide while capture is
-            // per-context, so neither a derived write nor a transaction on another context has a commit to
-            // replay its cascade on. Membership rather than TryGetService, which throws on more than one,
-            // and an exception escaping a setter takes the process down.
-            if (SubjectTransaction.HasActiveTransaction &&
-                !context.Property.Metadata.IsDerived &&
-                SubjectTransaction.Current is { IsCommitting: false, IsDisposed: false } transaction &&
-                context.Property.Subject.Context.GetServices<SubjectTransactionInterceptor>().Contains(transaction.Interceptor))
+            // The value never reached the model, so there is nothing to cascade from. Transaction capture is
+            // the usual reason: it is terminal, and the commit replays the write with its cascade.
+            if (!context.IsWritten)
             {
                 return;
             }
