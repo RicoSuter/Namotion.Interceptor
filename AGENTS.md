@@ -26,12 +26,17 @@ Only run integration tests when changing connector implementations (OPC UA, MQTT
 - `dotnet test src/Namotion.Interceptor.OpcUa.Tests`
 - `dotnet test src/HomeBlaze/HomeBlaze.E2E.Tests`
 
+Risky connector work also needs the [Connector Tester](docs/connector-tester.md), which does not run in CI and takes hours. Agree any long-running verification, that and benchmarks alike, while planning the change rather than once the branch is ready, and confirm it ran before finalizing the pull request.
+
 ### Running Samples
 - `dotnet run --project src/Namotion.Interceptor.SampleConsole` - Run console sample
 - `dotnet run --project src/Extensions/Namotion.Interceptor.SampleBlazor` - Run Blazor sample
 
 ### Performance Testing
-- `dotnet run --project src/Namotion.Interceptor.Benchmark -c Release` - Run performance benchmarks
+- `pwsh scripts/benchmark.ps1 -Filter "*RegistryBenchmark*" -LaunchCount 3` - Compare against a base branch (`-Filter` takes several patterns)
+- `pwsh scripts/benchmark.ps1 -Filter "*RegistryBenchmark*" -LocalOnly` - Absolute numbers for the current tree
+
+Always read [Benchmarking](docs/benchmarking.md) before running or interpreting a benchmark.
 
 ## Architecture
 
@@ -117,7 +122,7 @@ The library has specialized support for:
 ## Performance Considerations
 
 - All interception logic generated at compile-time (no runtime reflection)
-- Dedicated benchmarking with BenchmarkDotNet
+- Dedicated benchmarking with BenchmarkDotNet, see [Benchmarking](docs/benchmarking.md) for how to run a comparison and how to read one
 - Recent performance optimizations focused on allocation reduction
 - Observable streams for efficient change propagation
 

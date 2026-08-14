@@ -293,23 +293,11 @@ public class GeneratorShapeBehaviorTests
         // round-trip through the interceptor chain like any other. "FirstName" is inherited
         // (not redeclared) from PersonBase, a separately [InterceptorSubject]-attributed class.
         //
-        // KNOWN GAP (pre-existing, not introduced by this branch, not fixed by it either): every
-        // [InterceptorSubject] class generates its own private "_context" field and its own
-        // explicit IInterceptorSubject.Context re-implementation (SubjectCodeGenerator.cs,
-        // EmitInterceptorSubjectImplementation, called unconditionally). Interface
-        // re-implementation means the derived class's Context wins for the whole object, so the
-        // constructor's AddFallbackContext(context) call only ever reaches Contractor's own field.
-        // PersonBase's own Context/_context is never touched, so PersonBase's own generated
-        // GetPropertyValue/SetPropertyValue see a permanently-null "_context" and take the
-        // no-interception fast path (SubjectCodeGenerator.cs, EmitHelperMethods) for any property
-        // it declares, regardless of the real context passed to the derived constructor. The
-        // value is still correct and PropertyChanged still fires (the setter calls
-        // RaisePropertyChanged directly, not through the interceptor chain), but read/write
-        // interceptors never observe the access. Confirmed to also affect the pre-existing
-        // Employee : PersonBase pair, so this is not specific to the differently-declared base
-        // list; it affects any multi-level [InterceptorSubject] hierarchy. Only "Agency" is
-        // asserted against the interceptors below; "FirstName" is asserted against value,
-        // PropertyChanged, and metadata/registry instead, which is what actually works today.
+        // Both properties are asserted against the interceptors. "FirstName" used to be asserted
+        // against value, PropertyChanged and the registry instead, because every subject in a
+        // hierarchy emitted its own _context and only the most derived one was ever populated, so
+        // base-declared properties took the no-interception fast path. The interception
+        // members now live once in the root, so a base-declared write is observable like any other.
         var readInterceptor = new RecordingReadInterceptor();
         var writeInterceptor = new RecordingWriteInterceptor();
         var context = InterceptorSubjectContext
@@ -334,6 +322,8 @@ public class GeneratorShapeBehaviorTests
         Assert.Equal("Acme", agency);
         Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "Agency" && Equals(write.Value, "Acme"));
         Assert.Contains(readInterceptor.Reads, read => read.PropertyName == "Agency" && Equals(read.Value, "Acme"));
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "FirstName" && Equals(write.Value, "Rico"));
+        Assert.Contains(readInterceptor.Reads, read => read.PropertyName == "FirstName" && Equals(read.Value, "Rico"));
         Assert.Equal(["FirstName", "Agency"], firedEvents);
 
         Assert.True(Contractor.DefaultProperties.ContainsKey("FirstName"));
@@ -407,37 +397,4 @@ public class GeneratorShapeBehaviorTests
         Assert.Equal(["Label"], firedEvents);
     }
 
-    private sealed class RecordingReadInterceptor : IReadInterceptor
-    {
-        public List<(string PropertyName, object? Value)> Reads { get; } = [];
-
-        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
-        {
-            var value = next(ref context);
-            Reads.Add((context.Property.Name, value));
-            return value;
-        }
-    }
-
-    private sealed class RecordingWriteInterceptor : IWriteInterceptor
-    {
-        public List<(string PropertyName, object? Value)> Writes { get; } = [];
-
-        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
-        {
-            Writes.Add((context.Property.Name, context.NewValue));
-            next(ref context);
-        }
-    }
-
-    private sealed class RecordingMethodInterceptor : IMethodInterceptor
-    {
-        public List<(string MethodName, object?[] Parameters)> Invocations { get; } = [];
-
-        public object? InvokeMethod(MethodInvocationContext context, InvokeMethodInterceptionDelegate next)
-        {
-            Invocations.Add((context.MethodName, context.Parameters));
-            return next(ref context);
-        }
-    }
 }

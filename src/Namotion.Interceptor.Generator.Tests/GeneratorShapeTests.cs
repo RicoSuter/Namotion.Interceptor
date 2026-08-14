@@ -81,7 +81,7 @@ namespace Repro
         // Arrange: properties, methods and interfaces are all collected across every partial
         // declaration, but the base class used to be read off the attributed declaration's base
         // list alone. Put ": BaseSubject" on the other half and the generated file lost the base
-        // entirely: it re-declared the INotifyPropertyChanged plumbing the base already provides,
+        // entirely: it re-declared the INotifyPropertyChanged members the base already provides,
         // and DefaultProperties shadowed the base's without concatenating it, so the subject
         // reported only its own properties.
         const string source = @"
