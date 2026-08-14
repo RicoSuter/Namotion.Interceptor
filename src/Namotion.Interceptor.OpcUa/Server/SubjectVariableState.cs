@@ -164,10 +164,11 @@ internal sealed class SubjectVariableState : BaseDataVariableState
         // The answer picks the status, never the value. The node already holds the model's value, so one
         // that answers wrong mis-reports the outcome and cannot move data. Bad is reserved for a model
         // that threw the write back, because a write it adjusted and a write a hook cancelled leave the
-        // same state behind and nothing here can separate them, and because write retries in this library
-        // are not gated by any status classifier: every Bad answer has a Namotion client re-send the value
-        // on every flush from then on, so a Bad answer for a write the model took stalls that client's
-        // write path for good.
+        // same state behind and nothing here can separate them, and because a Bad answer for a write the
+        // model took would have a Namotion client re-send the value from then on. That client does now
+        // classify which refusals are worth holding back rather than re-sending, and this code is
+        // deliberately not among them: what a model refuses is bound to the value, so holding it until
+        // the connection is replaced would defer the retry and then meet the same answer.
         //
         // Bad is BadOutOfRange because what was refused is the value, not the node, its type or its
         // access level, and a model that refuses a value now may take it once the rest of it moves, so no
