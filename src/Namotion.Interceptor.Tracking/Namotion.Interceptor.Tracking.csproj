@@ -7,7 +7,6 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <InternalsVisibleTo Include="Namotion.Interceptor.Registry" />
         <InternalsVisibleTo Include="Namotion.Interceptor.Tracking.Tests" />
         <InternalsVisibleTo Include="Namotion.Interceptor.Connectors.Tests" />
     </ItemGroup>

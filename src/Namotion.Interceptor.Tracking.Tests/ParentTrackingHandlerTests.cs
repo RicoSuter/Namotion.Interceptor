@@ -82,4 +82,26 @@ public class ParentTrackingHandlerTests
         var parents = mother.GetParents();
         Assert.Equal(2, parents.Length);
     }
+    [Fact]
+    public void WhenACollectionIsReorderedWithoutTheRegistry_ThenTheTrackedIndexMoves()
+    {
+        // Parent tracking keeps its own copy of each index, so it has to follow a reorder on its own,
+        // without the registry being registered.
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithParents();
+
+        var first = new Person { FirstName = "A" };
+        var second = new Person { FirstName = "B" };
+
+        var parent = new Person(context) { Children = [first, second] };
+
+        // Act
+        parent.Children = [second, first];
+
+        // Assert
+        Assert.Equal(1, first.GetParents().Single().Index);
+        Assert.Equal(0, second.GetParents().Single().Index);
+    }
 }

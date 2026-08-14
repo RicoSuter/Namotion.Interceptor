@@ -641,10 +641,11 @@ public class SubjectRegistryTests
     }
 
     [Fact]
-    public void WhenAStrandedChildKeepsAKeyAndTheValueBecomesACollection_ThenOrderingDoesNotThrow()
+    public void WhenAStrandedChildKeepsAKeyAndTheValueBecomesACollection_ThenItIsKeptAtTheEnd()
     {
-        // The stranded child still carries a key, so ordering the collection meets a mix of keys and
-        // positions. In-place mutation is unsupported, but it must not turn a write into an exception.
+        // The stranded child is in no value the refresh sees, so it has to survive the reordering rather
+        // than be dropped: its parent entry is only reachable for cleanup while it stays a child.
+        // In-place mutation is unsupported, but it must not turn a write into an exception either.
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
@@ -663,6 +664,12 @@ public class SubjectRegistryTests
 
         // Assert
         Assert.Null(exception);
+
+        var untypedProp = directory.TryGetRegisteredSubject()!
+            .TryGetProperty(nameof(PersonDirectory.Untyped))!;
+
+        Assert.Equal([kept, stranded], untypedProp.Children.Select(c => c.Subject));
+        Assert.Equal([0, "alpha"], untypedProp.Children.Select(c => c.Index));
     }
 
     [Fact]
@@ -832,5 +839,115 @@ public class SubjectRegistryTests
         Assert.Equal(0, child1.TryGetRegisteredSubject()!.Parents[0].Index);
         Assert.Equal(1, child2.TryGetRegisteredSubject()!.Parents[0].Index);
         Assert.Equal(2, child3.TryGetRegisteredSubject()!.Parents[0].Index); // updated from 1 to 2
+    }
+    [Fact]
+    public void WhenASubjectUnderTwoKeysIsRewrittenUnchanged_ThenItsIndexDoesNotMove()
+    {
+        // Attach records the first of the two keys, so a rewrite which changes nothing must not hand the
+        // subject the other one and move its path.
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithParents()
+            .WithRegistry();
+
+        var shared = new Person { FirstName = "X" };
+
+        var directory = new PersonDirectory(context)
+        {
+            PeopleByName = new Dictionary<string, Person> { ["alpha"] = shared, ["beta"] = shared }
+        };
+
+        var attachedIndex = shared.TryGetRegisteredSubject()!.Parents[0].Index;
+
+        // Act
+        directory.PeopleByName = new Dictionary<string, Person> { ["alpha"] = shared, ["beta"] = shared };
+
+        // Assert
+        Assert.Equal(attachedIndex, shared.TryGetRegisteredSubject()!.Parents[0].Index);
+        Assert.Equal(attachedIndex, shared.GetParents().Single().Index);
+    }
+
+    [Fact]
+    public void WhenACollectionHoldsTheSameSubjectTwice_ThenItKeepsTheFirstPosition()
+    {
+        // One child exists per subject, so only one of the two positions can be stored: the first, as
+        // attach records it.
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithParents()
+            .WithRegistry();
+
+        var first = new Person { FirstName = "A" };
+        var second = new Person { FirstName = "B" };
+
+        var person = new Person(context) { Children = [first, second] };
+
+        // Act
+        person.Children = [first, second, first];
+
+        // Assert
+        var childrenProp = person.TryGetRegisteredSubject()!
+            .TryGetProperty(nameof(Person.Children))!;
+
+        Assert.Equal(2, childrenProp.Children.Length);
+        Assert.Equal(0, childrenProp.Children[0].Index);
+        Assert.Same(first, childrenProp.Children[0].Subject);
+        Assert.Equal(0, first.GetParents().Single().Index);
+    }
+
+    [Fact]
+    public void WhenACollectionIsReordered_ThenTheChildrenFollowTheNewOrder()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var first = new Person { FirstName = "A" };
+        var second = new Person { FirstName = "B" };
+        var third = new Person { FirstName = "C" };
+
+        var person = new Person(context) { Children = [first, second, third] };
+
+        // Act
+        person.Children = [third, first, second];
+
+        // Assert
+        var childrenProp = person.TryGetRegisteredSubject()!
+            .TryGetProperty(nameof(Person.Children))!;
+
+        Assert.Equal([third, first, second], childrenProp.Children.Select(c => c.Subject));
+        Assert.Equal([0, 1, 2], childrenProp.Children.Select(c => c.Index));
+    }
+
+    [Fact]
+    public void WhenADictionaryIsRewrittenInAnotherOrder_ThenTheChildrenFollowIt()
+    {
+        // Keys identify dictionary children, so only their order changes here, which follows the value
+        // for every container kind alike.
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var alpha = new Person { FirstName = "A" };
+        var beta = new Person { FirstName = "B" };
+
+        var directory = new PersonDirectory(context)
+        {
+            PeopleByName = new Dictionary<string, Person> { ["alpha"] = alpha, ["beta"] = beta }
+        };
+
+        // Act
+        directory.PeopleByName = new Dictionary<string, Person> { ["beta"] = beta, ["alpha"] = alpha };
+
+        // Assert
+        var peopleProp = directory.TryGetRegisteredSubject()!
+            .TryGetProperty(nameof(PersonDirectory.PeopleByName))!;
+
+        Assert.Equal([beta, alpha], peopleProp.Children.Select(c => c.Subject));
+        Assert.Equal(["beta", "alpha"], peopleProp.Children.Select(c => c.Index));
     }
 }

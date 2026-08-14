@@ -1,6 +1,5 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors.Tests")]
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Registry")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tracking.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
 namespace Namotion.Interceptor.Tracking.Change
@@ -152,7 +151,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
     {
         void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
         void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
-        void RefreshCollectionProperty(Namotion.Interceptor.PropertyReference property, object? value);
+        void RefreshChildIndices(Namotion.Interceptor.PropertyReference property, System.ReadOnlySpan<Namotion.Interceptor.Tracking.Lifecycle.SubjectChildReference> children);
     }
     public class LifecycleInterceptor : Namotion.Interceptor.Interceptors.ILifecycleInterceptor, Namotion.Interceptor.Interceptors.IWriteInterceptor
     {
@@ -169,6 +168,13 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public static void DetachSubjectProperty(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.PropertyReference property) { }
         public static int GetReferenceCount(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor? TryGetLifecycleInterceptor(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
+    }
+    public readonly struct SubjectChildReference : System.IEquatable<Namotion.Interceptor.Tracking.Lifecycle.SubjectChildReference>
+    {
+        public SubjectChildReference(Namotion.Interceptor.IInterceptorSubject Subject, Namotion.Interceptor.PropertyReference Property, object? Index) { }
+        public object? Index { get; init; }
+        public Namotion.Interceptor.PropertyReference Property { get; init; }
+        public Namotion.Interceptor.IInterceptorSubject Subject { get; init; }
     }
     public readonly struct SubjectLifecycleChange
     {
@@ -192,7 +198,7 @@ namespace Namotion.Interceptor.Tracking.Parent
 {
     [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Lifecycle.ContextInheritanceHandler)})]
-    public class ParentTrackingHandler : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
+    public class ParentTrackingHandler : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
     {
         public ParentTrackingHandler() { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }

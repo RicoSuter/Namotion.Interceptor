@@ -29,10 +29,6 @@ public class PropertyAttributeInitializer : IPropertyLifecycleHandler
     {
     }
 
-    public void RefreshCollectionProperty(PropertyReference property, object? value)
-    {
-    }
-
     private static void InitializePropertyAttributes(RegisteredSubjectProperty property)
     {
         var hasState = false;

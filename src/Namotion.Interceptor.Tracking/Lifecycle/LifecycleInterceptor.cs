@@ -11,7 +11,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
 
     [ThreadStatic]
-    private static Stack<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
+    private static Stack<List<SubjectChildReference>>? _listPool;
 
     [ThreadStatic]
     private static Stack<HashSet<IInterceptorSubject>>? _subjectHashSetPool;
@@ -41,7 +41,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
                 foreach (var child in collectedSubjects)
                 {
-                    AttachToProperty(child.subject, subject.Context, child.property, child.index);
+                    AttachToProperty(child.Subject, subject.Context, child.Property, child.Index);
                 }
 
                 if (!_attachedSubjects.ContainsKey(subject))
@@ -67,7 +67,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
                 foreach (var child in collectedSubjects)
                 {
-                    DetachFromProperty(child.subject, subject.Context, child.property, child.index);
+                    DetachFromProperty(child.Subject, subject.Context, child.Property, child.Index);
                 }
 
                 DetachFromContext(subject, subject.Context);
@@ -212,7 +212,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         var isLastDetach = set.IsEmpty;
 
         // Collect children and clean up in a single pass over properties
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
+        List<SubjectChildReference>? children = null;
         if (isLastDetach)
         {
             _attachedSubjects.Remove(subject);
@@ -261,7 +261,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             foreach (var child in children)
             {
-                DetachFromProperty(child.subject, context, child.property, child.index);
+                DetachFromProperty(child.Subject, context, child.Property, child.Index);
             }
 
             ReturnList(children);
@@ -376,10 +376,16 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 // condition: a subject that attached or detached already carries its index from that event.
                 if (oldTouchedSubjects.Overlaps(newTouchedSubjects))
                 {
+                    var children = CollectionsMarshal.AsSpan(newCollectedSubjects);
                     var handlers = context.Property.Subject.Context.GetServices<IPropertyLifecycleHandler>();
                     for (var i = 0; i < handlers.Length; i++)
                     {
-                        handlers[i].RefreshCollectionProperty(context.Property, newValue);
+                        handlers[i].RefreshChildIndices(context.Property, children);
+                    }
+
+                    if (context.Property.Subject is IPropertyLifecycleHandler subjectHandler)
+                    {
+                        subjectHandler.RefreshChildIndices(context.Property, children);
                     }
                 }
             }
@@ -406,7 +412,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     }
 
     private void FindSubjectsInProperties(IInterceptorSubject subject,
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
+        List<SubjectChildReference> collectedSubjects,
         HashSet<IInterceptorSubject>? touchedSubjects,
         LastProcessedValuesMode lastProcessedValuesMode = LastProcessedValuesMode.None)
     {
@@ -439,7 +445,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void FindSubjectsInProperty(PropertyReference property,
         object? value,
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
+        List<SubjectChildReference> collectedSubjects,
         HashSet<IInterceptorSubject>? touchedSubjects)
     {
         // Hot paths (IDictionary, ICollection) come before string/IEnumerable so common
@@ -453,7 +459,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
             case IInterceptorSubject subject:
                 touchedSubjects?.Add(subject);
-                collectedSubjects.Add((subject, property, null));
+                collectedSubjects.Add(new SubjectChildReference(subject, property, null));
                 return;
 
             case IDictionary dictionary:
@@ -462,7 +468,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     if (entry.Value is IInterceptorSubject subjectItem)
                     {
                         touchedSubjects?.Add(subjectItem);
-                        collectedSubjects.Add((subjectItem, property, entry.Key));
+                        collectedSubjects.Add(new SubjectChildReference(subjectItem, property, entry.Key));
                     }
                 }
                 return;
@@ -475,7 +481,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     if (item is IInterceptorSubject subjectItem)
                     {
                         touchedSubjects?.Add(subjectItem);
-                        collectedSubjects.Add((subjectItem, property, i));
+                        collectedSubjects.Add(new SubjectChildReference(subjectItem, property, i));
                     }
                     i++;
                 }
@@ -495,7 +501,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                         if (SubjectLookup.TryGetSubjectFromKeyValuePair(item, out var key, out var subjectItem))
                         {
                             touchedSubjects?.Add(subjectItem);
-                            collectedSubjects.Add((subjectItem, property, key));
+                            collectedSubjects.Add(new SubjectChildReference(subjectItem, property, key));
                         }
                     }
                 }
@@ -507,7 +513,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                         if (item is IInterceptorSubject subjectItem)
                         {
                             touchedSubjects?.Add(subjectItem);
-                            collectedSubjects.Add((subjectItem, property, i));
+                            collectedSubjects.Add(new SubjectChildReference(subjectItem, property, i));
                         }
                         i++;
                     }
@@ -519,10 +525,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     #region  Performance
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static List<(IInterceptorSubject subject, PropertyReference property, object? index)> GetList()
+    private static List<SubjectChildReference> GetList()
     {
-        _listPool ??= new Stack<List<(IInterceptorSubject, PropertyReference, object?)>>();
-        return _listPool.Count > 0 ? _listPool.Pop() : new List<(IInterceptorSubject, PropertyReference, object?)>(8);
+        _listPool ??= new Stack<List<SubjectChildReference>>();
+        return _listPool.Count > 0 ? _listPool.Pop() : new List<SubjectChildReference>(8);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -533,10 +539,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ReturnList(List<(IInterceptorSubject, PropertyReference, object?)> list)
+    private static void ReturnList(List<SubjectChildReference> list)
     {
         list.Clear();
-        _listPool ??= new Stack<List<(IInterceptorSubject, PropertyReference, object?)>>();
+        _listPool ??= new Stack<List<SubjectChildReference>>();
         _listPool.Push(list);
     }
 

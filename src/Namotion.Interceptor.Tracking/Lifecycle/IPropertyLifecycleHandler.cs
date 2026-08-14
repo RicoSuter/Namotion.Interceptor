@@ -22,11 +22,16 @@ public interface IPropertyLifecycleHandler
 
     /// <summary>
     /// Called after a subject-container property write has been fully reconciled
-    /// (all detach/attach events processed) and at least one subject was retained.
-    /// Allows handlers to refresh child index metadata from the live value, whether
-    /// that is a collection position, a dictionary key, or no index at all.
+    /// (all detach/attach events processed) and at least one subject was retained,
+    /// so that handlers can refresh the index metadata of the retained children.
     /// </summary>
     /// <param name="property">The property reference.</param>
-    /// <param name="value">The current value of the property.</param>
-    void RefreshCollectionProperty(PropertyReference property, object? value) { }
+    /// <param name="children">
+    /// Every child subject the new value holds, in enumeration order, with the index it is now held at.
+    /// A subject held at several indices appears once per index; the first occurrence is the one attach
+    /// recorded, so handlers must apply it and ignore the rest.
+    /// The span is backed by a pooled buffer and is only valid for the duration of the call, so a handler
+    /// which keeps any of it must copy it. Being a ref struct, the span itself cannot be stored.
+    /// </param>
+    void RefreshChildIndices(PropertyReference property, ReadOnlySpan<SubjectChildReference> children) { }
 }

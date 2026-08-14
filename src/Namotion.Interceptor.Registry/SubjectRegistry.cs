@@ -262,7 +262,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     {
     }
 
-    void IPropertyLifecycleHandler.RefreshCollectionProperty(PropertyReference property, object? value)
+    void IPropertyLifecycleHandler.RefreshChildIndices(PropertyReference property, ReadOnlySpan<SubjectChildReference> children)
     {
         RegisteredSubjectProperty? registeredProperty;
         lock (_knownSubjects)
@@ -274,7 +274,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 
         // Call outside lock — RefreshChildIndices updates parent entries;
         // holding _knownSubjects would risk deadlock.
-        registeredProperty?.RefreshChildIndices(value, registry: this);
+        registeredProperty?.RefreshChildIndices(children, registry: this);
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

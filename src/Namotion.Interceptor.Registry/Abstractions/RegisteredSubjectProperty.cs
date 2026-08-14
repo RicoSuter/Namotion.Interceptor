@@ -1,9 +1,8 @@
-﻿using System.Collections;
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Parent;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
@@ -11,12 +10,6 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubjectProperty
 {
-    [ThreadStatic]
-    private static Dictionary<IInterceptorSubject, int>? _reusableCollectionPositions;
-
-    [ThreadStatic]
-    private static Dictionary<IInterceptorSubject, object?>? _reusableDictionaryKeys;
-
     private const byte ContainerKindUnresolved = 0;
     private const byte ContainerKindNone = 1;
     private const byte ContainerKindReference = 2;
@@ -412,239 +405,62 @@ public class RegisteredSubjectProperty
     }
 
     /// <summary>
-    /// Syncs children's indices and parent entries with the live collection or dictionary.
+    /// Syncs the children with the child subjects the property now holds: each child's index is updated
+    /// and the children are put in the given order, so that <see cref="Children"/> follows the live
+    /// collection or dictionary. Children the property no longer holds keep their relative order at the
+    /// end, where an unsupported in-place mutation can strand them.
     /// Must be called while LifecycleInterceptor's _attachedSubjects lock is held,
     /// because this method acquires _children then _knownSubjects, which is the inverse of
     /// HandleLifecycleChange's lock order. The outer _attachedSubjects lock serializes
     /// both paths and prevents deadlock.
     /// </summary>
-    /// <param name="value">The current collection or dictionary value (passed from caller to avoid re-reading through interceptors).</param>
+    /// <param name="children">The child subjects the property holds, with their indices, in the order the property holds them.</param>
     /// <param name="registry">The subject registry (passed from caller to avoid repeated service resolution per child).</param>
-    internal void RefreshChildIndices(object? value, ISubjectRegistry registry)
+    internal void RefreshChildIndices(ReadOnlySpan<SubjectChildReference> children, ISubjectRegistry registry)
     {
-        switch (ContainerKind)
+        lock (_children)
         {
-            case ContainerKindCollection:
-                RefreshCollectionPositions(value, registry);
-                return;
-
-            // Dictionary children are keyed, so reordering entries leaves their stored Index alone, but
-            // moving a retained subject to another key does change it.
-            case ContainerKindDictionary:
-                RefreshDictionaryKeys(value, registry);
-                return;
-
-            // Declared as object or as a plain interface, so it can hold a container too. The lifecycle
-            // interceptor derives these children's indices from the value, so this has to as well.
-            case ContainerKindReference:
-                switch (value)
+            var slot = 0;
+            foreach (var child in children)
+            {
+                var position = -1;
+                for (var i = slot; i < _children.Count; i++)
                 {
-                    // The interceptor keys a subject value as a whole, with a null index.
-                    case IInterceptorSubject:
-                    case IDictionary:
-                        RefreshDictionaryKeys(value, registry);
-                        return;
-
-                    case IEnumerable:
-                        RefreshCollectionPositions(value, registry);
-                        return;
+                    if (_children[i].Subject == child.Subject)
+                    {
+                        position = i;
+                        break;
+                    }
                 }
 
-                return;
-        }
-    }
-
-    private void RefreshCollectionPositions(object? value, ISubjectRegistry registry)
-    {
-        var collectionPositions = BuildCollectionPositions(value, _children.Count);
-        if (collectionPositions is null)
-            return;
-
-        try
-        {
-            lock (_children)
-            {
-
-            for (var i = 0; i < _children.Count; i++)
-            {
-                var child = _children[i];
-                if (!collectionPositions.TryGetValue(child.Subject, out var newIndex))
-                    continue;
-
-                // Compare unboxed to avoid allocating a boxed int when index hasn't changed
-                if (child.Index is int oldIndex && oldIndex == newIndex)
-                    continue;
-
-                var boxedNewIndex = (object)newIndex;
-                _children[i] = child with { Index = boxedNewIndex };
-
-                // child is a readonly record struct snapshot from before the update above,
-                // so child.Index still holds the old value, which is correct for the oldIndex parameter.
-                registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, child.Index, boxedNewIndex);
-
-                // The tracked parents are a second copy of the same index, read by GetParents and by the
-                // JSON path helpers, so they move together or the two disagree.
-                child.Subject.UpdateParentIndex(Reference, boxedNewIndex);
-            }
-
-                // Sort children to match live collection order. Indices that are not positions sort last
-                // instead of throwing: a child stranded by an unsupported in-place mutation can still carry
-                // a key from an earlier value.
-                _children.Sort(static (a, b) => (a.Index as int? ?? int.MaxValue).CompareTo(b.Index as int? ?? int.MaxValue));
-                _childrenCache = default;
-            }
-        }
-        finally
-        {
-            // Cleared so subjects can be GC'd, then handed back for the next refresh on this thread.
-            collectionPositions.Clear();
-            _reusableCollectionPositions = collectionPositions;
-        }
-    }
-
-    /// <summary>
-    /// Syncs children's keys and parent entries with the live dictionary. Unlike the collection path there is
-    /// no order to restore, so children are left in place. Same locking contract as
-    /// <see cref="RefreshChildIndices"/>.
-    /// </summary>
-    private void RefreshDictionaryKeys(object? dictionaryValue, ISubjectRegistry registry)
-    {
-        if (dictionaryValue is null)
-            return;
-
-        // Built outside the lock: it enumerates a caller-supplied dictionary, so holding _children here
-        // would run arbitrary enumeration code under it.
-        var dictionaryKeys = BuildDictionaryKeys(dictionaryValue);
-        try
-        {
-            lock (_children)
-            {
-                for (var i = 0; i < _children.Count; i++)
+                // Either a repeat of a subject already placed, so the first index wins as it does on attach,
+                // or a subject which an unsupported in-place mutation hid from the lifecycle interceptor.
+                if (position < 0)
                 {
-                    var child = _children[i];
-                    if (!dictionaryKeys.TryGetValue(child.Subject, out var newKey) || Equals(child.Index, newKey))
-                        continue;
+                    continue;
+                }
 
-                    _children[i] = child with { Index = newKey };
+                var existing = _children[position];
+                if (!Equals(existing.Index, child.Index))
+                {
+                    registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, existing.Index, child.Index);
+                    existing = existing with { Index = child.Index };
                     _childrenCache = default;
-
-                    // child still holds the old key here, which is what UpdateParentIndex expects.
-                    registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, child.Index, newKey);
-                    child.Subject.UpdateParentIndex(Reference, newKey);
                 }
+
+                if (position == slot)
+                {
+                    _children[slot] = existing;
+                }
+                else
+                {
+                    _children.RemoveAt(position);
+                    _children.Insert(slot, existing);
+                    _childrenCache = default;
+                }
+
+                slot++;
             }
         }
-        finally
-        {
-            // Cleared so subjects can be GC'd, then handed back for the next refresh on this thread.
-            dictionaryKeys.Clear();
-            _reusableDictionaryKeys = dictionaryKeys;
-        }
-    }
-
-    /// <summary>
-    /// Maps each subject in the dictionary to its current key, deriving keys as
-    /// <c>LifecycleInterceptor.FindSubjectsInProperty</c> does for a dictionary value, including null keys.
-    /// The last key wins, which differs from attach, where the first occurrence is the one recorded: it
-    /// matches the reverse detach loop, so the tracked parent entry is found by its exact key.
-    /// </summary>
-    private static Dictionary<IInterceptorSubject, object?> BuildDictionaryKeys(object value)
-    {
-        // Detached while in use, so a refresh re-entered from the enumeration below builds its own map
-        // instead of clearing this one.
-        var dictionaryKeys = _reusableDictionaryKeys ?? new Dictionary<IInterceptorSubject, object?>();
-        _reusableDictionaryKeys = null;
-        dictionaryKeys.Clear();
-
-        switch (value)
-        {
-            case IInterceptorSubject valueSubject:
-                dictionaryKeys[valueSubject] = null;
-                break;
-
-            case IDictionary dictionary:
-                foreach (DictionaryEntry entry in dictionary)
-                {
-                    if (entry.Value is IInterceptorSubject subject)
-                    {
-                        dictionaryKeys[subject] = entry.Key;
-                    }
-                }
-
-                break;
-
-            case IEnumerable enumerable:
-                // Read-only dictionaries that do not implement IDictionary enumerate key-value pairs.
-                foreach (var item in enumerable)
-                {
-                    if (item is not null && SubjectLookup.TryGetSubjectFromKeyValuePair(item, out var key, out var subject))
-                    {
-                        dictionaryKeys[subject] = key;
-                    }
-                }
-
-                break;
-        }
-
-        return dictionaryKeys;
-    }
-
-    /// <summary>
-    /// Maps each subject in the collection to its current position.
-    /// Uses IList indexed access when available; falls back to ICollection foreach,
-    /// then IEnumerable for read-only types that implement neither.
-    /// Reuses a ThreadStatic dictionary to avoid allocations.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Dictionary<IInterceptorSubject, int>? BuildCollectionPositions(object? value, int capacityHint)
-    {
-        if (value is null)
-            return null;
-
-        // Detached while in use, so a refresh re-entered from the enumeration below builds its own map
-        // instead of clearing this one.
-        var collectionPositions = _reusableCollectionPositions;
-        _reusableCollectionPositions = null;
-        collectionPositions?.Clear();
-
-        if (value is IList list)
-        {
-            for (var index = 0; index < list.Count; index++)
-            {
-                if (list[index] is IInterceptorSubject subject)
-                {
-                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint);
-                    collectionPositions[subject] = index;
-                }
-            }
-        }
-        else if (value is ICollection collection)
-        {
-            var index = 0;
-            foreach (var item in collection)
-            {
-                if (item is IInterceptorSubject subject)
-                {
-                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint);
-                    collectionPositions[subject] = index;
-                }
-                index++;
-            }
-        }
-        else if (value is IEnumerable enumerable and not string)
-        {
-            var index = 0;
-            foreach (var item in enumerable)
-            {
-                if (item is IInterceptorSubject subject)
-                {
-                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint);
-                    collectionPositions[subject] = index;
-                }
-                index++;
-            }
-        }
-
-        return collectionPositions;
     }
 }
