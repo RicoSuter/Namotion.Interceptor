@@ -82,6 +82,7 @@ public class ParentTrackingHandlerTests
         var parents = mother.GetParents();
         Assert.Equal(2, parents.Length);
     }
+
     [Fact]
     public void WhenACollectionIsReorderedWithoutTheRegistry_ThenTheTrackedIndexMoves()
     {

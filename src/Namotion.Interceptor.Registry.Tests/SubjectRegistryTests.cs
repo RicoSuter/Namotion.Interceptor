@@ -691,12 +691,19 @@ public class SubjectRegistryTests
             PeopleByName = new Dictionary<string, Person> { ["alpha"] = child, ["beta"] = other }
         };
 
+        var peopleProp = directory.TryGetRegisteredSubject()!
+            .TryGetProperty(nameof(PersonDirectory.PeopleByName))!;
+
+        // Fills the children snapshot, so a re-key which forgot to invalidate it would be caught below.
+        _ = peopleProp.Children;
+
         // Act
         directory.PeopleByName = new Dictionary<string, Person> { ["gamma"] = child, ["beta"] = other };
 
         // Assert
         Assert.Equal("gamma", child.TryGetRegisteredSubject()!.Parents[0].Index);
         Assert.Equal("gamma", child.GetParents().Single().Index);
+        Assert.Equal("gamma", peopleProp.Children.Single(c => c.Subject == child).Index);
     }
 
     [Fact]
@@ -840,6 +847,7 @@ public class SubjectRegistryTests
         Assert.Equal(1, child2.TryGetRegisteredSubject()!.Parents[0].Index);
         Assert.Equal(2, child3.TryGetRegisteredSubject()!.Parents[0].Index); // updated from 1 to 2
     }
+
     [Fact]
     public void WhenASubjectUnderTwoKeysIsRewrittenUnchanged_ThenItsIndexDoesNotMove()
     {
@@ -858,14 +866,14 @@ public class SubjectRegistryTests
             PeopleByName = new Dictionary<string, Person> { ["alpha"] = shared, ["beta"] = shared }
         };
 
-        var attachedIndex = shared.TryGetRegisteredSubject()!.Parents[0].Index;
+        Assert.Equal("alpha", shared.TryGetRegisteredSubject()!.Parents[0].Index);
 
         // Act
         directory.PeopleByName = new Dictionary<string, Person> { ["alpha"] = shared, ["beta"] = shared };
 
         // Assert
-        Assert.Equal(attachedIndex, shared.TryGetRegisteredSubject()!.Parents[0].Index);
-        Assert.Equal(attachedIndex, shared.GetParents().Single().Index);
+        Assert.Equal("alpha", shared.TryGetRegisteredSubject()!.Parents[0].Index);
+        Assert.Equal("alpha", shared.GetParents().Single().Index);
     }
 
     [Fact]
@@ -940,14 +948,50 @@ public class SubjectRegistryTests
             PeopleByName = new Dictionary<string, Person> { ["alpha"] = alpha, ["beta"] = beta }
         };
 
+        var reordered = new Dictionary<string, Person> { ["beta"] = beta, ["alpha"] = alpha };
+
         // Act
-        directory.PeopleByName = new Dictionary<string, Person> { ["beta"] = beta, ["alpha"] = alpha };
+        directory.PeopleByName = reordered;
 
         // Assert
         var peopleProp = directory.TryGetRegisteredSubject()!
             .TryGetProperty(nameof(PersonDirectory.PeopleByName))!;
 
-        Assert.Equal([beta, alpha], peopleProp.Children.Select(c => c.Subject));
-        Assert.Equal(["beta", "alpha"], peopleProp.Children.Select(c => c.Index));
+        // Read off the value rather than written out, because the contract is that the children follow the
+        // value's own enumeration order, whatever the dictionary implementation makes that.
+        Assert.Equal(reordered.Select(entry => (IInterceptorSubject)entry.Value), peopleProp.Children.Select(c => c.Subject));
+        Assert.Equal(reordered.Select(entry => (object?)entry.Key), peopleProp.Children.Select(c => c.Index));
+    }
+
+    [Fact]
+    public void WhenTheValueHoldsASubjectWhichWasNeverAttached_ThenItIsSkipped()
+    {
+        // In-place mutation hides an addition from the interceptor: the subject is in both the old and the new
+        // value, so neither the detach nor the attach loop touches it and no child exists for it. The refresh
+        // then meets an entry with nothing to update, which must not throw or invent a child.
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var attached = new Person { FirstName = "A" };
+        var hidden = new Person { FirstName = "B" };
+
+        var list = new List<Person> { attached };
+        var directory = new PersonDirectory(context) { Untyped = list };
+
+        list.Add(hidden);
+
+        // Act
+        var exception = Record.Exception(() => directory.Untyped = new List<Person> { attached, hidden });
+
+        // Assert
+        Assert.Null(exception);
+
+        var untypedProp = directory.TryGetRegisteredSubject()!
+            .TryGetProperty(nameof(PersonDirectory.Untyped))!;
+
+        Assert.Equal([attached], untypedProp.Children.Select(c => c.Subject));
+        Assert.Equal(0, untypedProp.Children.Single().Index);
     }
 }

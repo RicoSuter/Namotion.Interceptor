@@ -73,6 +73,7 @@ Both arms, full job, `-LaunchCount 3`, from one machine, for scoping only:
 | Scope | Both arms |
 |---|---|
 | `*RegistryBenchmark*` | about 30 minutes |
+| `*ChildIndexRefreshBenchmark*` | 28 rows per arm, not yet timed |
 | Whole suite | about 6 hours |
 
 `SubjectSourceBenchmark` measures in milliseconds per operation, and `ConstructThreeLevel` earns a `MultimodalDistribution` warning and so runs to its hundred iteration ceiling rather than the default fifteen, every launch. Between them they dominate a full run. Judge `ConstructThreeLevel` by allocations, its timing carrying a standard deviation around a quarter of its mean.

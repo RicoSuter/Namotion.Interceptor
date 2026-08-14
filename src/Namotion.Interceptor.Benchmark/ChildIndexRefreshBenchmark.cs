@@ -50,6 +50,7 @@ public class ChildIndexRefreshBenchmark
     private IReadOnlyDictionary<string, RefreshItem> _sameKeysA;
     private IReadOnlyDictionary<string, RefreshItem> _sameKeysB;
     private IReadOnlyDictionary<string, RefreshItem> _rekeyed;
+    private IReadOnlyDictionary<string, RefreshItem> _reversedKeys;
 
     private bool _flip;
 
@@ -105,18 +106,23 @@ public class ChildIndexRefreshBenchmark
         var sameKeysA = new Dictionary<string, RefreshItem>(Count);
         var sameKeysB = new Dictionary<string, RefreshItem>(Count);
         var rekeyed = new Dictionary<string, RefreshItem>(Count);
+        var reversedKeys = new Dictionary<string, RefreshItem>(Count);
         for (var i = 0; i < Count; i++)
         {
             sameKeysA["k" + i] = items[i];
             sameKeysB["k" + i] = items[i];
             rekeyed[i == 0 ? "moved" : "k" + i] = items[i];
+            reversedKeys["k" + (Count - 1 - i)] = items[Count - 1 - i];
         }
 
         _sameKeysA = sameKeysA;
         _sameKeysB = sameKeysB;
         _rekeyed = rekeyed;
+        _reversedKeys = reversedKeys;
 
-        _container = new RefreshContainer(context) { Items = _sameOrderA };
+        // Deliberately the B value: the first write of each case then differs by reference from what the
+        // property already holds, so no invocation is skipped by the reference-equality shortcut.
+        _container = new RefreshContainer(context) { Items = _sameOrderB };
     }
 
     /// <summary>Same children in the same order: the refresh finds nothing to move.</summary>
@@ -165,5 +171,17 @@ public class ChildIndexRefreshBenchmark
     {
         _flip = !_flip;
         _container.ItemsByKey = _flip ? _sameKeysA : _rekeyed;
+    }
+
+    /// <summary>
+    /// Same keys and same children, enumerated in the opposite order: no index changes at all, yet every child
+    /// has to move. The children of a dictionary were left in place before this refresh became shape-agnostic,
+    /// so this is the row where that regression, if any, shows up.
+    /// </summary>
+    [Benchmark]
+    public void ReorderDictionary()
+    {
+        _flip = !_flip;
+        _container.ItemsByKey = _flip ? _sameKeysA : _reversedKeys;
     }
 }

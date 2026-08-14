@@ -407,14 +407,14 @@ public class RegisteredSubjectProperty
     /// <summary>
     /// Syncs the children with the child subjects the property now holds: each child's index is updated
     /// and the children are put in the given order, so that <see cref="Children"/> follows the live
-    /// collection or dictionary. Children the property no longer holds keep their relative order at the
-    /// end, where an unsupported in-place mutation can strand them.
+    /// collection or dictionary, dictionaries included. Children the property no longer holds keep their
+    /// relative order at the end, where an unsupported in-place mutation can strand them.
     /// Must be called while LifecycleInterceptor's _attachedSubjects lock is held,
     /// because this method acquires _children then _knownSubjects, which is the inverse of
     /// HandleLifecycleChange's lock order. The outer _attachedSubjects lock serializes
     /// both paths and prevents deadlock.
     /// </summary>
-    /// <param name="children">The child subjects the property holds, with their indices, in the order the property holds them.</param>
+    /// <param name="children">The child subjects the property holds, with their indices, in the order the property holds them. Valid for the duration of the call only.</param>
     /// <param name="registry">The subject registry (passed from caller to avoid repeated service resolution per child).</param>
     internal void RefreshChildIndices(ReadOnlySpan<SubjectChildReference> children, ISubjectRegistry registry)
     {
