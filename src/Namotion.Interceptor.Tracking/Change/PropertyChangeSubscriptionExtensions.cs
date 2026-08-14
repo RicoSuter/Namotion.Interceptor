@@ -99,13 +99,17 @@ public static class PropertyChangeSubscriptionExtensions
     /// stateful operators such as <c>Take</c>, <c>Skip</c>, <c>Scan</c>, <c>DistinctUntilChanged</c> and
     /// <c>Buffer</c> by count compose safely over concurrent writers with no extra work. The handler runs
     /// under a per-subscription lock held across the call, so it must not block and must not take locks of
-    /// its own that a writer might hold.
+    /// its own that a writer might hold. That lock is the library's own, so two subscribers over this
+    /// observable whose handlers write into each other's properties deadlock; a handler that writes
+    /// properties belongs on <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/> or on
+    /// a scheduled <c>Subscribe</c> overload instead.
     /// </para>
     /// <para>
     /// Adding any operator also changes what a throwing handler does. Operators wrap the observer in the
-    /// auto-detaching decorator this type avoids, so the first handler exception stops propagating to the
-    /// writer with the subscription intact and instead tears the subscription down silently. A handler
-    /// composed over this sequence must therefore not throw at all.
+    /// auto-detaching decorator this type avoids, and that decorator disposes the subscription and then
+    /// rethrows, so the first handler exception both propagates to the writer and tears the subscription
+    /// down, leaving later writes neither delivered nor observable as failures. A handler composed over this
+    /// sequence must therefore not throw at all.
     /// </para>
     /// <para>
     /// Composing the off-thread hop by hand costs more than the scheduler overloads of <c>Subscribe</c>:
@@ -182,10 +186,10 @@ public static class PropertyChangeSubscriptionExtensions
     /// quiet. Prefer <c>Scheduler.Default</c>, whose thread pool takes the execution context per work item, so
     /// the suppression applied when scheduling keeps all ambient state away from the observer. A scheduler
     /// that owns a thread, such as <c>EventLoopScheduler</c>, instead keeps for life the <c>AsyncLocal</c>
-    /// values ambient when that thread was created, so create one outside any transaction scope: otherwise a
-    /// property write the observer makes joins a long-disposed transaction whose buffer has since been pooled
-    /// and rented out, vanishing from its own path and committing under an unrelated transaction, with
-    /// nothing thrown and <paramref name="onError"/> silent.
+    /// values ambient when that thread was created, so create one outside any transaction scope: for as long
+    /// as the transaction that thread inherited is live, a property write the observer makes is captured into
+    /// it rather than reaching the model, with nothing thrown and <paramref name="onError"/> silent. Once that
+    /// transaction is disposed the write falls through to the model as usual.
     /// </para>
     /// </remarks>
     /// <param name="property">The property to subscribe to.</param>

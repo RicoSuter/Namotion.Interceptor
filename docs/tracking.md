@@ -178,7 +178,9 @@ using var handle = person.SubscribeToProperty(
 
 **Notifications are serialized per subscriber**, so stateful operators such as `Take`, `Skip`, `Scan`, `DistinctUntilChanged` and `Buffer` by count are safe over concurrent writers without extra work.
 
-**A handler composed over this must not throw.** Once an operator is in the chain, the first exception ends the subscription silently instead of propagating to the writer.
+**A handler composed over this must not throw.** Once an operator is in the chain, the first exception propagates to the writer and tears the subscription down, so later writes are neither delivered nor observable as failures.
+
+**A handler that writes properties belongs elsewhere**: two subscribers over this observable whose handlers write into each other's properties deadlock, so use `SubscribeInline` or a [scheduled subscription](#scheduled-delivery) for that.
 
 ### Delivery Guarantees
 
@@ -215,11 +217,11 @@ Measured on one Apple M4 Max running .NET 9.0.10 arm64, so the byte figures hold
 
 | Channel | Allocated per write | Allocated per delivery | Held per live subscription | Allocated per subscribe and dispose | Write time, inline = 1 |
 |---|---|---|---|---|---|
-| `GetPropertyChangeObservable()` | none | none | about 5,672 bytes per additional subscriber, plus one dedicated dispatch thread each | 5,736 bytes | about 2.2 |
-| `CreatePropertyChangeQueueSubscription()` | none | none | about 5,496 bytes per additional subscription | 5,552 bytes | 1.9 |
-| `SubscribeInline` | none | in the write | about 172 bytes | 136 bytes | 1.0, the reference |
+| `GetPropertyChangeObservable()` | none | none | about 5,712 bytes per additional subscriber, plus one dedicated dispatch thread each | 5,712 bytes, plus about 4,020 on dispose in a thousand-consumer context | about 2.2 |
+| `CreatePropertyChangeQueueSubscription()` | none | none | about 5,536 bytes per additional subscription | 5,536 bytes, plus about 4,052 on dispose in a thousand-consumer context | 1.9 |
+| `SubscribeInline` | none | in the write | about 172 bytes | about 173 bytes | 1.0, the reference |
 | `GetInlineChangeObservable` | none | in the write, one lock taken | about 216 bytes | 248 bytes | 1.0 |
-| `Subscribe` with a scheduler | about 34 bytes | 160 bytes keeping up, none under backlog | about 5,607 bytes | 5,607 bytes | 2.6 |
+| `Subscribe` with a scheduler | 17 to 26 bytes across runs | 160 bytes keeping up, none under backlog | about 5,607 bytes | 5,607 bytes | 2.6 |
 
 **These compare one identical write, not equal workloads.** A context-level channel delivers every property's changes, so watching one property out of five hundred means paying for the other 499 as well, which is why 2.6 is usually the cheaper choice despite being the highest number in the column.
 

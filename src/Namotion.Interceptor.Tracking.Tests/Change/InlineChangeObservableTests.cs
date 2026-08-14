@@ -116,6 +116,34 @@ public class InlineChangeObservableTests
     }
 
     [Fact]
+    public void WhenComposedHandlerThrows_ThenItPropagatesToTheWriterAndTearsTheSubscriptionDown()
+    {
+        // Arrange: an operator wraps the handler in Rx's AutoDetachObserver, which disposes in a finally and
+        // then rethrows, so both halves happen. Take(5) cannot complete on its own within this test, leaving
+        // the throw as the only thing that can end the subscription.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        var deliveries = 0;
+
+        using var subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .GetInlineChangeObservable()
+            .Take(5)
+            .Subscribe(_ =>
+            {
+                deliveries++;
+                throw new InvalidOperationException("handler failed");
+            });
+
+        // Act & Assert: the exception reaches the writer,
+        Assert.Throws<InvalidOperationException>(() => person.FirstName = "one");
+
+        // and the subscription is gone, so a later write is neither delivered nor observable as a failure.
+        person.FirstName = "two";
+        Assert.Equal(1, deliveries);
+        Assert.Equal(0, PropertyChangeSubscriptions.ReadSubscriptionCount());
+    }
+
+    [Fact]
     public void WhenObserverIsNull_ThenThrowsAndCountStaysZero()
     {
         // Arrange
