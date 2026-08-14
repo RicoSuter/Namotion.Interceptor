@@ -862,6 +862,55 @@ public class WriteRetryQueueTests
         Assert.Equal(5, queue.PendingWriteCount);
     }
 
+    [Fact]
+    public async Task WhenOneFailureIsRefusedAndAnotherIsNot_ThenOnlyTheRefusedOneIsHeldBack()
+    {
+        // Arrange - the mixed answer, where the source refuses one property of a batch and fails the
+        // rest for some other reason. It is the branch that separates the two, and therefore the one
+        // that implements the promise that nothing is dropped, and every other test here refuses the
+        // whole batch, so it never ran.
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                var batch = changes.ToArray();
+                var refusedOnly = batch
+                    .Where(change => change.Property.Name == "Refused")
+                    .ToImmutableArray();
+
+                // Everything failed, but only one of them is refused for the connection.
+                return new ValueTask<WriteResult>(WriteResult
+                    .Failure(batch, new InvalidOperationException("Mixed"))
+                    .WithRefusedUntilReconnect(refusedOnly));
+            });
+
+        queue.Enqueue(new[]
+        {
+            CreateChange(CreateProperty("Refused"), 1, revision: 1),
+            CreateChange(CreateProperty("Retryable"), 2, revision: 2)
+        });
+
+        // Act
+        var flushed = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - the refused one is held out of the queue and the other is queued again, so the flush
+        // still reports failure because something is owed on this connection. Draining proves the split
+        // lost neither: a change named refused must not also be requeued, and one that was not named
+        // must not be held.
+        Assert.False(flushed);
+        Assert.Equal(1, queue.RefusedWriteCount);
+        Assert.Equal(1, queue.PendingWriteCount);
+
+        var drained = queue.DrainForLocalReapply()
+            .Select(change => change.Property.Name)
+            .OrderBy(name => name)
+            .ToArray();
+
+        Assert.Equal(new[] { "Refused", "Retryable" }, drained);
+    }
+
     private static PropertyReference CreateProperty(string name)
     {
         return new PropertyReference(new Mock<IInterceptorSubject>().Object, name);
