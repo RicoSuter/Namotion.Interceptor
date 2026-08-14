@@ -3,9 +3,10 @@ using Namotion.Interceptor.Tracking;
 namespace Namotion.Interceptor.Hosting.Tests.Models;
 
 /// <summary>
-/// A startup completion deferrer that throws from taking a hold, from releasing one, or both. The
-/// handler runs both halves inside a property write, so an exception escaping either one surfaces at
-/// an unrelated assignment; these switches are what make that observable.
+/// A startup completion deferrer that throws from taking a hold, from releasing one, or both. Taking
+/// runs inside a property write, so an escape there surfaces at an unrelated assignment; releasing
+/// runs in a transition body's finally, so an escape there strands every hold behind it and the host
+/// waits on a completion that never comes. These switches are what make both observable.
 /// </summary>
 public sealed class ThrowingStartupDeferrer : IStartupCompletionDeferrer
 {

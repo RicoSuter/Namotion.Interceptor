@@ -18,20 +18,22 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     // See docs/design/hosting-service-ownership.md#the-50-ms-delay.
     private const int TransitionDelayMilliseconds = 50;
 
-    private readonly Func<ILogger?> _loggerResolver;
     private readonly HostedServiceGate _gate = new();
     private readonly ConcurrentDictionary<HostedServiceTarget, IInterceptorSubject> _running = new();
     private readonly ConcurrentDictionary<IInterceptorSubject, byte> _liveSubjects = new();
     private readonly ConcurrentDictionary<Task, byte> _inFlightStops = new();
 
-    private ILogger? _logger;
+    /// <summary>
+    /// Set once, by the service provider factory that hands this handler to the host, on whichever
+    /// thread first resolves the hosted services. Volatile because the readers are transition threads
+    /// and attaching threads that have no ordering against that one, and a stale null here silently
+    /// drops the errors this logger exists to report.
+    /// </summary>
+    private volatile ILogger? _logger;
 
-    public HostedServiceHandler(Func<ILogger?> loggerResolver)
-    {
-        _loggerResolver = loggerResolver;
-    }
+    internal void SetLogger(ILogger logger) => _logger = logger;
 
-    private ILogger? Logger => _logger ??= _loggerResolver();
+    private ILogger? Logger => _logger;
 
     /// <summary>
     /// Test seam, awaited in <see cref="StopAsync"/> after the drain begins and before liveness is
@@ -67,6 +69,14 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// what the drain's read order turns into "always in at least one".
     /// </summary>
     internal Action? StopBookkeepingGate { get; set; }
+
+    /// <summary>
+    /// Test seam, awaited in <see cref="StopAsync"/> between the running set snapshot and the in flight
+    /// snapshot. Null in production. A whole stop appended while it is held lands between the two
+    /// reads, which is the interleaving their order exists for and the only one that tells the two
+    /// orders apart.
+    /// </summary>
+    internal Func<Task>? DrainSnapshotGate { get; set; }
 
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
@@ -247,14 +257,23 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             // guard: reading Running still here proves the drain had not begun when they landed, so its
             // snapshot covers this target. Any later read may already have been swept past.
             //
-            // Outside the chain lock only because a draining handler installs nothing, so no take of
-            // this handler's can be in flight for ReleaseOwnership to clobber, matching as it does on
-            // the handler rather than on the take. The liveness equivalent has no such guarantee and
+            // A stop rather than a plain removal from the running set, because the start appended just
+            // above may already be past every one of its guards: it read the gate as Running before
+            // BeginDraining and is committed to creating an instance. Deleting the entry then hides
+            // that instance from the drain's snapshot and nothing ever stops or disposes it. The stop
+            // is behind the start on the same chain, so it stops whatever the start creates, and
+            // AppendStop leaves the running set and joins the in flight set in the barrier's own order,
+            // so a drain reading either one still catches it.
+            AppendStop(subject, target, signal: null, waitFor: null, CancellationToken.None);
+
+            // Released after the stop is appended, never before, for the reason on the context detach
+            // path. Outside the chain lock only because a draining handler installs nothing, so no take
+            // of this handler's can be in flight for ReleaseOwnership to clobber, matching as it does
+            // on the handler rather than on the take. The liveness equivalent has no such guarantee and
             // lives inside the chain lock.
             //
             // Only an ownership this call installed. An earlier attach's may be running, and undoing
             // that one would pull it out of the set the drain is about to stop.
-            _running.TryRemove(target, out _);
             target.ReleaseOwnership(this);
         }
 
@@ -509,9 +528,10 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
         catch (Exception exception)
         {
-            // Here for the log, not for containment: this runs in a transition body, and the chain's own
-            // catch would swallow an escape from here anyway, silently. Every other guard in this file
-            // has an observable behaviour behind it; this one has only the report.
+            // Contains as well as reports, and the containment matters on one path: the cleanup dispose
+            // in RunStartAsync runs inside a catch that rethrows the start's own exception afterwards.
+            // An escape from here skips that rethrow, so the caller waiting on the attach is told the
+            // dispose failed and never learns why the start did.
             Logger?.LogError(exception, "Failed to dispose hosted service {Service}.", instance.ToString());
         }
     }
@@ -640,6 +660,11 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         _liveSubjects.Clear();
 
         var snapshot = _running.ToArray();
+
+        if (DrainSnapshotGate is { } drainSnapshotGate)
+        {
+            await drainSnapshotGate().ConfigureAwait(false);
+        }
 
         // Read after the running set, never before it, and that order is the barrier's other half.
         // AppendStop joins this set before it leaves the running one, so a target the snapshot above

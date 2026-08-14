@@ -9,9 +9,9 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- Every test here can block on a seam another thread has to release, so a bug that strands one
-             hangs the run. xUnit then names the test in the diagnostic output instead of leaving CI to
-             time out the whole job with nothing to point at. -->
+        <!-- The race tests block on seams another thread has to release, so a bug that strands one hangs
+             the run. xUnit then names the test in the diagnostic output instead of leaving CI to time
+             out the whole job with nothing to point at. It reports only; it does not fail or kill. -->
         <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 

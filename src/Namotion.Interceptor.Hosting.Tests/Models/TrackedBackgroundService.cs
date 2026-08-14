@@ -10,8 +10,9 @@ public sealed class TrackedBackgroundService : IHostedService, IAsyncDisposable
     public bool ThrowOnStart { get; init; }
 
     /// <summary>
-    /// Throws from <see cref="DisposeAsync"/>, which the handler runs inside a property write on the
-    /// detach path, so an exception escaping it surfaces at an unrelated assignment.
+    /// Throws from <see cref="DisposeAsync"/>. The handler disposes from a transition body, on the
+    /// stop path and on the cleanup after a failed start, and only the second of those is a path where
+    /// an escape is observable: it skips the rethrow that hands the caller the start's own exception.
     /// </summary>
     public bool ThrowOnDispose { get; init; }
 

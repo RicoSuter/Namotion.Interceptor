@@ -170,7 +170,7 @@ public class HostedServiceTargetTests
     {
         // Arrange - a re-attach arriving before the release must not read as "lost to another handler"
         var target = new HostedServiceTarget(factory: null, subject: null);
-        var handler = new HostedServiceHandler(() => null);
+        var handler = new HostedServiceHandler();
 
         // Act
         var first = target.TryTakeOwnership(handler, out var firstTaken);
@@ -189,8 +189,8 @@ public class HostedServiceTargetTests
     {
         // Arrange
         var target = new HostedServiceTarget(factory: null, subject: null);
-        var first = new HostedServiceHandler(() => null);
-        var second = new HostedServiceHandler(() => null);
+        var first = new HostedServiceHandler();
+        var second = new HostedServiceHandler();
         target.TryTakeOwnership(first, out _);
 
         // Act
@@ -206,8 +206,8 @@ public class HostedServiceTargetTests
     {
         // Arrange - release on context detach is what lets a subject move between contexts
         var target = new HostedServiceTarget(factory: null, subject: null);
-        var first = new HostedServiceHandler(() => null);
-        var second = new HostedServiceHandler(() => null);
+        var first = new HostedServiceHandler();
+        var second = new HostedServiceHandler();
         target.TryTakeOwnership(first, out _);
 
         // Act

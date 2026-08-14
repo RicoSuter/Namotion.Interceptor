@@ -357,12 +357,13 @@ public class AddSubjectTests
     }
 
     [Fact]
-    public async Task WhenTheContextResolverReturnsNullAndOneIsRegistered_ThenTheConstructorStillReceivesIt()
+    public async Task WhenTheContextResolverReturnsNullAndTheGeneratedConstructorTakesOne_ThenItIsStillAttached()
     {
         // Arrange - a null result means this method attaches nothing, and that is all it means. The
-        // subject is then built by ActivatorUtilities, which picks the constructor taking a context
-        // because dependency injection can supply one, and that constructor attaches it. Pinned
-        // because the opposite reading is the natural one and the parameter documentation now says so.
+        // subject is then built by ActivatorUtilities, which picks the generated constructor taking a
+        // context because dependency injection can supply one, and that constructor attaches it.
+        // Pinned because the opposite reading is the natural one, and because the shape below reaches
+        // the opposite outcome from the same call.
         var builder = HostingTestHost.CreateBuilder();
         var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
@@ -378,6 +379,40 @@ public class AddSubjectTests
 
             // Assert
             Assert.Contains(
+                context.GetService<ISubjectRegistry>().KnownSubjects,
+                known => ReferenceEquals(known.Key, subject));
+
+            Assert.Equal(1, subject.StartCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheContextResolverReturnsNullAndTheConstructorIgnoresTheContext_ThenItIsUnattached()
+    {
+        // Arrange - the same call as the test above, on the constructor shape the subject guidelines
+        // teach. It takes the context and discards it, so the attach this method performs is the only
+        // one there is, and a null result skips it. Two shapes, one call, opposite outcomes: that is
+        // the wart the parameter documentation now spells out rather than the two tests disagreeing.
+        var builder = HostingTestHost.CreateBuilder();
+        var context = CreateContextWithRegistry(builder);
+        builder.Services.AddSingleton(context);
+        builder.Services.AddSubject<SubjectIgnoringContextParameter>(contextResolver: _ => null);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            // Act
+            var subject = host.Services.GetRequiredService<SubjectIgnoringContextParameter>();
+
+            // Assert - unattached, and started by the activation rather than by the handler, which is
+            // what the fallback at that call site exists for.
+            Assert.DoesNotContain(
                 context.GetService<ISubjectRegistry>().KnownSubjects,
                 known => ReferenceEquals(known.Key, subject));
 
@@ -408,11 +443,14 @@ public class AddSubjectTests
             // Act
             var subject = host.Services.GetRequiredService<PersonWithBackgroundService>();
 
-            // Assert
+            // Assert - unattached in both senses: not in the registered context's graph, and its own
+            // context reaching no handler, which is what makes the activation the only thing that
+            // could have started it.
             Assert.DoesNotContain(
                 context.GetService<ISubjectRegistry>().KnownSubjects,
                 known => ReferenceEquals(known.Key, subject));
 
+            Assert.Null(((IInterceptorSubject)subject).Context.TryGetService<HostedServiceHandler>());
             Assert.Equal(1, subject.StartCount);
         }
         finally

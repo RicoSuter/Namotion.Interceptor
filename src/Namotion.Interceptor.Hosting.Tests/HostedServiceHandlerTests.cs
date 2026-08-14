@@ -611,7 +611,7 @@ public class HostedServiceHandlerTests
     {
         // Arrange - one context detach reaches this for every subject in the detaching graph, under
         // the lifecycle lock, and almost none of them host anything.
-        var handler = new HostedServiceHandler(() => null);
+        var handler = new HostedServiceHandler();
         var subject = (IInterceptorSubject)new Person();
         var change = new SubjectLifecycleChange
         {
@@ -1424,13 +1424,16 @@ public class HostedServiceHandlerTests
     {
         // Arrange - taking the holds is third party code on the attach path, and the attach runs inside
         // a property write, so an exception escaping it surfaces at an unrelated assignment. The
-        // throwing deferrer is first, so the holds already taken are the ones after it that must still
-        // be released; a loop that abandoned them would leave a host that never finishes starting.
+        // throwing deferrer sits between two working ones, so the guard has to do both halves: keep
+        // the hold already taken before it, and go on to take the one after it. Either failure leaves
+        // a host that never finishes starting.
         var builder = HostingTestHost.CreateBuilder();
         var context = HostingTestHost.CreateContext(builder);
 
         var throwing = new ThrowingStartupDeferrer { ThrowOnDefer = true };
+        var before = new CallbackStartupDeferrer();
         var working = new CallbackStartupDeferrer();
+        context.AddService<IStartupCompletionDeferrer>(before);
         context.AddService<IStartupCompletionDeferrer>(throwing);
         context.AddService<IStartupCompletionDeferrer>(working);
 
@@ -1453,7 +1456,9 @@ public class HostedServiceHandlerTests
             Assert.Null(attachment.Fault);
 
             Assert.Equal(1, throwing.Taken);
+            Assert.Equal(1, before.Taken);
             Assert.Equal(1, working.Taken);
+            Assert.Equal(0, before.Outstanding);
             Assert.Equal(0, working.Outstanding);
         }
         finally
@@ -1508,9 +1513,9 @@ public class HostedServiceHandlerTests
     public async Task WhenDisposingAnInstanceThrows_ThenTheDetachStillCompletesAndARepeatAttachStarts()
     {
         // Arrange - a factory instance whose disposal throws is still stopped, still counted as
-        // disposed once, and still leaves the subject able to host again. Behaviour, not a guard: the
-        // catch inside DisposeInstanceAsync exists for the log, and the chain's own catch would absorb
-        // an escape from it either way, which is why deleting that catch leaves this test green.
+        // disposed once, and still leaves the subject able to host again. The stop path is where the
+        // catch inside DisposeInstanceAsync only reports; the test below it covers the path where that
+        // catch also contains.
         await HostingTestHost.RunAsync(async context =>
         {
             var parent = new Parent(context);
@@ -1534,6 +1539,31 @@ public class HostedServiceHandlerTests
 
             Assert.True(second.Current is { IsStarted: true });
             Assert.Null(second.Fault);
+        });
+    }
+
+    [Fact]
+    public async Task WhenAFailedStartsCleanupDisposeAlsoThrows_ThenTheCallerStillGetsTheStartException()
+    {
+        // Arrange - a start that throws is cleaned up by disposing what it created, and that dispose
+        // runs inside a catch whose job is to rethrow the start's own exception afterwards. An escape
+        // from the dispose skips that rethrow, so the caller is handed the cleanup failure and never
+        // learns why the start failed, which is the exception they are actually waiting for.
+        await HostingTestHost.RunAsync(async context =>
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            parent.Child = child;
+
+            var instance = new TrackedBackgroundService { ThrowOnStart = true, ThrowOnDispose = true };
+
+            // Act
+            var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => child.AttachHostedServiceAsync(() => instance, CancellationToken.None));
+
+            // Assert
+            Assert.Equal("start failed", thrown.Message);
+            Assert.Equal(1, instance.DisposeCount);
         });
     }
 }
