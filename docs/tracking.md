@@ -166,15 +166,13 @@ using var handle = person.SubscribeToProperty(
 
 **Serialized per subscription, not per observer**: the observer of one subscription is never re-entered and needs no synchronization of its own, even across scheduler threads, but one shared across several subscriptions is still invoked concurrently, and a blocking observer starves every other subscription on its scheduler.
 
-**The queue is unbounded**, with no backpressure and no overflow policy: a writer faster than the observer grows it without limit, and `handle.PendingCount` is what makes that backlog observable.
+**The queue is unbounded**, with no backpressure and no overflow policy: a writer faster than the observer grows it without limit, and `handle.PendingCount` is what makes that backlog observable. Draining it back to zero does not give the memory back, because the queue keeps the largest segment it ever grew to, so the subscription costs its peak backlog rather than its current one from then on, until it is disposed.
 
 **Synchronous schedulers are rejected**: `ImmediateScheduler.Instance` and `CurrentThreadScheduler.Instance` throw `ArgumentException`; use `property.SubscribeInline(callback)` when you want the callback inside the write.
 
 **Ambient context does not flow to the observer**: the drain runs with `ExecutionContext` flow suppressed, so the writer's `AsyncLocal` values, `Activity.Current`, and logger scopes do not reach it. Create a long-lived caller-owned scheduler such as an `EventLoopScheduler` outside any transaction scope, or property writes the observer makes vanish silently into the transaction that thread inherited for life.
 
-**Dormancy is not symmetric with disposal**: detaching the subject stops acceptance but not the drain, so a change accepted before the detach is still delivered afterwards, carrying a subject that has already left the registry. Disposal instead drops whatever is still queued.
-
-**Disposal allocates rather than releases**: clearing the queue installs a fresh segment instead of dropping the old one, so a disposed handle that is still referenced keeps holding most of what the live subscription held. Drop the handle, do not merely dispose it; [Channel Cost](#channel-cost) has the figures.
+**Dormancy is not symmetric with disposal**: detaching the subject stops acceptance but not the drain, so a change accepted before the detach is still delivered afterwards, carrying a subject that has already left the registry. Disposal instead drops the whole queue, along with whatever was still in it.
 
 #### Composing with Rx
 
@@ -203,7 +201,7 @@ Every committed write carries a `SubjectPropertyChange.Revision`, a counter mono
 
 (b) Per property, a flush collapses to the newest commit in that batch, and collapsing also applies **across** flushes: a change whose revision the property has already moved past is dropped rather than emitted. Which commits count as having moved the property past it depends on the connector, via `ChangeDeliveryRule`; see [Change Batching and Merging](connectors.md#change-batching-and-merging).
 
-(c) Disposal and a scheduler fault each clear the queue, dropping accepted but undelivered changes, and a `Schedule` call whose work item never runs strands what is queued behind it. The pull queue keeps its buffered items drainable after disposal.
+(c) Disposal and a scheduler fault each drop the queue, discarding accepted but undelivered changes, and a `Schedule` call whose work item never runs strands what is queued behind it. The pull queue keeps its buffered items drainable after disposal.
 
 An observer on an unserialized channel may be invoked concurrently on multiple threads and must be thread-safe, fast, non-blocking, and must not throw; wrap failing work in a try-catch internally.
 
@@ -227,13 +225,13 @@ Measured on one Apple M4 Max running .NET 9.0.10 arm64, so read the figures as t
 | `CreatePropertyChangeQueueSubscription()` | none | none | about 5,496 bytes per additional subscription | 5,552 bytes | 1.9 |
 | `SubscribeInline` | none | in the write | about 172 bytes | 136 bytes | 1.0, the reference |
 | `GetInlineChangeObservable` | none | in the write, one lock taken | about 216 bytes | 248 bytes | 1.0 |
-| `Subscribe` with a scheduler | about 34 bytes | 160 bytes keeping up, none under backlog | about 5,607 bytes | 10,912 bytes | 2.6 |
+| `Subscribe` with a scheduler | about 34 bytes | 160 bytes keeping up, none under backlog | about 5,607 bytes | 5,607 bytes | 2.6 |
 
 **These compare one identical write, not equal workloads.** A context-level channel delivers every property's changes, so watching one property out of five hundred means paying for the other 499 as well. A per-property channel costs its factor only on the property you subscribed to, which is why 2.6 is usually the cheaper choice despite being the highest number in the column.
 
 **A dispatch thread per subscriber.** At its default scheduler, every subscriber to `GetPropertyChangeObservable()` holds a dedicated dispatch thread for as long as it lives: 50 subscribers were measured on 50 distinct threads, none from the thread pool, against 2 pool threads for 50 scheduled per-property subscriptions. That is what bounds how many consumers the channel supports.
 
-**Setup dominates, not steady state.** Almost all of a scheduled subscription's footprint is its empty `ConcurrentQueue<SubjectPropertyChange>`, about 5,376 bytes, so a thousand of them cost roughly 5.35 MB against roughly 0.16 MB for a thousand inline ones, and on a wide model that, not the per-write cost, decides the channel. The two context-level channels are per context, so their held figure is what one *more* consumer costs; the first also pays a one-time setup, about 9,976 bytes for the queue and 6,864 for the observable. The scheduled channel's subscribe-and-dispose figure is both halves added together, because [disposal allocates rather than releasing](#scheduled-delivery).
+**Setup dominates, not steady state.** Almost all of a scheduled subscription's footprint is its empty `ConcurrentQueue<SubjectPropertyChange>`, about 5,376 bytes, so a thousand of them cost roughly 5.35 MB against roughly 0.16 MB for a thousand inline ones, and on a wide model that, not the per-write cost, decides the channel. The two context-level channels are per context, so their held figure is what one *more* consumer costs; the first also pays a one-time setup, about 9,976 bytes for the queue and 6,864 for the observable. The scheduled channel's subscribe-and-dispose figure is its subscribe figure alone, because disposal drops the queue instead of clearing it: it allocates nothing, and a disposed handle that is still referenced holds little more than the object itself.
 
 **The default observable costs the writer a little more than the queue**, about 2.2 against 1.9, and bimodally: the write pays a wake-up only when the dispatch thread has caught up, so it falls back towards 1.9 whenever that thread is behind.
 

@@ -341,6 +341,36 @@ public class ScheduledPropertySubscriptionProtocolTests
     }
 
     [Fact]
+    public void WhenOnErrorHandlesASchedulerFaultAndDisposes_ThenIsFaultedIsAlreadyTrueAndStaysTrue()
+    {
+        // Arrange: the handler is the one place a consumer learns about a scheduler fault, and tearing the
+        // subscription down there is the natural reaction. Reporting before the transition makes IsFaulted
+        // read false inside the handler and lets that disposal win the CAS, which pins it false for good and
+        // leaves a supervisor polling the flag unaware that the subscription died.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        ScheduledPropertySubscription? subscription = null;
+        bool? faultedInsideHandler = null;
+
+        subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe(
+                (in SubjectPropertyChange _) => { },
+                new ThrowingScheduler(),
+                _ =>
+                {
+                    faultedInsideHandler = subscription!.IsFaulted;
+                    subscription.Dispose();
+                });
+
+        // Act
+        person.FirstName = "one";
+
+        // Assert
+        Assert.True(faultedInsideHandler, "the handler being told about the fault read IsFaulted as false");
+        Assert.True(subscription.IsFaulted);
+    }
+
+    [Fact]
     public void WhenDisposedTwice_ThenTheProcessWideCountIsDecrementedOnce()
     {
         // Arrange

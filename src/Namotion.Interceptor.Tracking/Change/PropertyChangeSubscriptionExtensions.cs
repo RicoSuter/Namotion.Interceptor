@@ -162,14 +162,16 @@ public static class PropertyChangeSubscriptionExtensions
     /// <para>
     /// The queue is unbounded. A writer faster than the observer grows it without limit, and every buffered
     /// change keeps its subject alive; watch <see cref="ScheduledPropertySubscription.PendingCount"/> and keep
-    /// the observer cheap enough for the drain to outrun the writer. Rate-limiting a hot property by composing
-    /// <c>Sample</c> or <c>Throttle</c> over <see cref="GetInlineChangeObservable"/> is not the remedy: those
-    /// operators deliver from a scheduler work item that does not catch a handler exception, so one throwing
-    /// handler terminates the process on <c>Scheduler.Default</c>. An observer that writes the property it
-    /// observes never drains: each delivery enqueues its own successor, so work items continue indefinitely
-    /// and <paramref name="onError"/> never fires. The batched handoff keeps that a yielding loop rather than
-    /// a held thread, so it degrades instead of starving, where the inline overload would raise a loud
-    /// StackOverflowException.
+    /// the observer cheap enough for the drain to outrun the writer. Draining a backlog does not give the
+    /// memory back, because the queue keeps the largest segment it ever grew to, so the subscription costs its
+    /// peak backlog rather than its current one from then on, until it is disposed. Rate-limiting a hot
+    /// property by composing <c>Sample</c> or <c>Throttle</c> over <see cref="GetInlineChangeObservable"/> is
+    /// not the remedy: those operators deliver from a scheduler work item that does not catch a handler
+    /// exception, so one throwing handler terminates the process on <c>Scheduler.Default</c>. An observer that
+    /// writes the property it observes never drains: each delivery enqueues its own successor, so work items
+    /// continue indefinitely and <paramref name="onError"/> never fires. The batched handoff keeps that a
+    /// yielding loop rather than a held thread, so it degrades instead of starving, where the inline overload
+    /// would raise a loud StackOverflowException.
     /// </para>
     /// <para>
     /// The caller owns the scheduler and must dispose subscriptions before it. A schedule that throws is

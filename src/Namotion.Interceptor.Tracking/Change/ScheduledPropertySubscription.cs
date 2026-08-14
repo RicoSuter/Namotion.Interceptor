@@ -22,19 +22,20 @@ public sealed class ScheduledPropertySubscription : IDisposable
     // either way, so accepted work is neither stranded nor drained twice at once.
     //
     // Dispose against enqueue: a writer already past its _state check can still enqueue and still schedule
-    // after Dispose returns. The settle's _state check alone stops the reschedule, and the _wip left behind
-    // gates nothing. The drain's in-loop _state re-check adds nothing to that and is only a harmless early
-    // exit: the transition clears the queue, so a drain running after it dequeues nothing, settles with
-    // processed == 0 and is suppressed by the settle's check anyway. Neither check stops the delivery: a
-    // drain whose Volatile.Read(ref _state) ran before the CAS proceeds to TryDequeue and can dequeue a
-    // change a late writer enqueued after the CAS, because that enqueue lands in the fresh segment
-    // _queue.Clear() installed. Only Deliver's _observer null guard stops it, fed by TransitionOutOfLive's
-    // Volatile.Write(ref _observer, null), a later statement than the CAS. So a change accepted after
-    // disposal began can still be delivered, bounded by Dispose not having returned yet.
+    // after Dispose returns. Such a change lands in the queue the transition detached, which PendingCount no
+    // longer reads and which becomes garbage with the last reference a racing writer or drain still holds.
+    // The settle's _state check alone stops the reschedule, and the _wip left behind gates nothing. The drain's in-loop _state re-check adds nothing to
+    // that and is only a harmless early exit: the transition drops the queue, so a drain running after it
+    // dequeues nothing, settles with processed == 0 and is suppressed by the settle's check anyway. Neither
+    // check stops the delivery of a change already queued: the drain reads _observer with no ordering against
+    // the CAS, so a change dequeued in the window between the CAS and TransitionOutOfLive's
+    // Volatile.Write(ref _observer, null) becoming visible is still delivered, and that null guard in Deliver
+    // is the only thing that closes the window.
     //
-    // Dispose against a mid-flight delivery: Deliver reads _observer and _onError into locals before use, and
-    // ScheduleDrain reads _onError and _scheduler the same way, so a transition that nulls them cannot
-    // null-reference work already running.
+    // Dispose against a mid-flight delivery: Deliver reads _observer into a local before use and ScheduleDrain
+    // reads _scheduler the same way, so a transition that nulls them cannot null-reference work already
+    // running. _onError is read into a local for a different reason: ReportError null-checks it, so a read
+    // taken too late drops the report rather than faulting.
     //
     // Fault against dispose: both go through the Interlocked.CompareExchange on _state out of Live, so
     // exactly one performs the release and the loser does nothing. The release runs through the upstream
@@ -42,8 +43,10 @@ public sealed class ScheduledPropertySubscription : IDisposable
     // makes a double decrement unreachable. That count gates a process-wide idle write fast path, so
     // reaching zero with live subscriptions elsewhere would silently stop per-property delivery host-wide.
     //
-    // A throwing ScheduleDrain against the counter: a Schedule call that succeeds and whose work item never
-    // runs leaves _wip positive with no further ScheduleDrain, which is unrecoverable and undetectable from
+    // A failing ScheduleDrain against the counter: a Schedule call that throws leaves _wip positive too, which
+    // is harmless because the catch faults the subscription and nothing gates on the counter afterwards. A
+    // Schedule call that succeeds and whose work item never runs leaves the same positive counter with the
+    // subscription still Live and no further ScheduleDrain, which is unrecoverable and undetectable from
     // here, and is why a caller must dispose its subscriptions before the scheduler they run on.
     //
     // A drain exit against the next drain entry: the settling Interlocked.Add, the next writer's
@@ -72,7 +75,9 @@ public sealed class ScheduledPropertySubscription : IDisposable
             return Disposable.Empty;
         };
 
-    private readonly ConcurrentQueue<SubjectPropertyChange> _queue = new();
+    // Nulled rather than cleared on the way out of Live: Clear installs a fresh segment instead of freeing
+    // anything, so a disposed handle parked in a DI container would keep holding what the live one held.
+    private ConcurrentQueue<SubjectPropertyChange>? _queue = new();
 
     private IPropertyChangeObserver? _observer;
     private Action<Exception>? _onError;
@@ -93,12 +98,12 @@ public sealed class ScheduledPropertySubscription : IDisposable
     /// Changes accepted but not yet dequeued, excluding one currently being delivered, and exact only when
     /// read from a quiescent state, for the same reason <see cref="PropertyChangeQueueSubscription.Count"/>
     /// is. The queue is unbounded, so this is how a consumer on a hot property observes a growing backlog
-    /// instead of discovering it through memory pressure. It is not guaranteed to reach zero once the
-    /// subscription is disposed or faulted, because a writer already past its state check can still enqueue
-    /// after the queue was cleared and nothing then dequeues it. A faulted subscription otherwise reads the
-    /// same zero a healthy idle one does, so use <see cref="IsFaulted"/> to tell those apart.
+    /// instead of discovering it through memory pressure. It reports the current backlog only: the queue
+    /// keeps the largest segment it ever grew to, so the subscription goes on holding its peak backlog after
+    /// this reads zero again, and only <see cref="Dispose"/> gives that memory back. A faulted subscription
+    /// reads the same zero a healthy idle one does, so use <see cref="IsFaulted"/> to tell those apart.
     /// </summary>
-    public int PendingCount => _queue.Count;
+    public int PendingCount => Volatile.Read(ref _queue)?.Count ?? 0;
 
     /// <summary>
     /// Whether a scheduler failure killed the subscription, which stops delivery and acceptance for good and
@@ -150,13 +155,22 @@ public sealed class ScheduledPropertySubscription : IDisposable
             return;
         }
 
+        // A transition out of Live drops the queue, and a writer already past the state check races it:
+        // reading null here skips the enqueue and the counter increment, and a stale non-null read lands the
+        // change in a detached queue that nothing drains and nothing keeps alive.
+        var queue = Volatile.Read(ref _queue);
+        if (queue is null)
+        {
+            return;
+        }
+
         // Enqueue before the increment: TryDequeue then cannot report empty while the counter is positive,
         // because ConcurrentQueue spins on a reserved-but-unpublished slot instead. Reversed, a drain can find
         // nothing and exit with processed == 0, so the settling Interlocked.Add(ref _wip, 0) returns the
         // counter unchanged and positive, _state is still Live, and the drain reschedules itself having made
         // no progress: a self-sustaining reschedule storm occupying a scheduler thread until the writer's
         // enqueue lands, not merely a wasted work item.
-        _queue.Enqueue(change);
+        queue.Enqueue(change);
         if (Interlocked.Increment(ref _wip) == 1)
         {
             ScheduleDrain();
@@ -189,7 +203,10 @@ public sealed class ScheduledPropertySubscription : IDisposable
                     return;
                 }
 
-                if (!_queue.TryDequeue(out var change))
+                // Read per iteration rather than hoisted, so a drain that outlives the transition sees the
+                // dropped queue and stops instead of holding it for the rest of the batch.
+                var queue = Volatile.Read(ref _queue);
+                if (queue is null || !queue.TryDequeue(out var change))
                 {
                     break;
                 }
@@ -209,10 +226,6 @@ public sealed class ScheduledPropertySubscription : IDisposable
 
     private void ScheduleDrain()
     {
-        // Captured before the try rather than read inside the catch: a winning Dispose nulls _onError, and a
-        // read that lands after that null-write would swallow the scheduler fault silently.
-        var onError = Volatile.Read(ref _onError);
-
         // A transition out of Live releases the scheduler too, and both callers can race one, so a null here
         // means the subscription is already gone and there is nothing left to drain for.
         var scheduler = Volatile.Read(ref _scheduler);
@@ -220,6 +233,11 @@ public sealed class ScheduledPropertySubscription : IDisposable
         {
             return;
         }
+
+        // Captured before the try rather than read inside the catch: the fault transition there nulls
+        // _onError itself, and a racing Dispose does the same, so a read taken in the catch would swallow the
+        // scheduler fault silently.
+        var onError = Volatile.Read(ref _onError);
 
         try
         {
@@ -245,24 +263,40 @@ public sealed class ScheduledPropertySubscription : IDisposable
         }
         catch (Exception exception)
         {
+            // Transition first, so IsFaulted already reads true inside the handler being told about the
+            // fault. Reported first, a handler that reacts by disposing, which is the natural reaction, wins
+            // the CAS and pins IsFaulted false for good, leaving a supervisor polling it none the wiser.
+            try
+            {
+                TransitionOutOfLive(Faulted);
+            }
+            catch
+            {
+                // Sealed like every other escape here: this runs inside a scheduler work item on the settle
+                // path, where an escape is unhandled and terminates the process, and on the writer thread
+                // otherwise, where it would reach the setter this channel exists to isolate. The report below
+                // still goes out.
+            }
+
             ReportError(onError, exception);
-            TransitionOutOfLive(Faulted);
         }
     }
 
     private void Deliver(in SubjectPropertyChange change)
     {
-        // Read into locals so a disposal racing this delivery cannot null-reference either, matching
-        // PropertyChangeSubscription.Dispatch. The handler is captured before the observer runs rather than
-        // inside the catch, for the same reason ScheduleDrain captures it: a stop-on-first-failure observer
-        // disposes its own subscription and then throws, which nulls the field itself, and a read taken
-        // afterwards would drop the exception it deliberately rethrew.
+        // Read into a local so a disposal racing this delivery cannot null-reference it, matching
+        // PropertyChangeSubscription.Dispatch.
         var observer = Volatile.Read(ref _observer);
-        var onError = Volatile.Read(ref _onError);
         if (observer is null)
         {
             return;
         }
+
+        // The handler is captured before the observer runs rather than inside the catch, for the same reason
+        // ScheduleDrain captures it: a stop-on-first-failure observer disposes its own subscription and then
+        // throws, which nulls the field itself, and a read taken afterwards would drop the exception it
+        // deliberately rethrew.
+        var onError = Volatile.Read(ref _onError);
 
         try
         {
@@ -306,25 +340,23 @@ public sealed class ScheduledPropertySubscription : IDisposable
         // thread, so a disposed handle still holding one keeps that thread reachable.
         Volatile.Write(ref _scheduler, null);
 
+        // Queued changes each pin a subject and its boxed values, and the queue holds on to the largest
+        // segment its backlog ever needed, so the whole queue goes rather than being cleared. Dropped before
+        // the release below, which is the only statement here that can throw.
+        Volatile.Write(ref _queue, null);
+
         // Releasing through the upstream's own one-shot Dispose is what makes the process-wide gate
         // decrement unreachable twice when a fault races a disposal.
         Interlocked.Exchange(ref _upstream, null)?.Dispose();
-
-        // Queued changes each pin a subject and its boxed values, and these handles get parked in DI
-        // containers, so they are released rather than retained.
-        _queue.Clear();
     }
 
     /// <summary>
     /// Stops delivery, releases the upstream subscription and the reference to the scheduler, so a parked
-    /// handle does not keep an <c>EventLoopScheduler</c> thread reachable, and drops the queued changes so
-    /// they stop pinning their subjects. A delivery already
-    /// running can finish after this returns, so an observer that touches state the caller owns and disposes
-    /// must tolerate a call arriving late, and a drain work item already queued on the scheduler is not
-    /// cancelled either; it runs and finds nothing left to deliver. A writer already past its state check can
-    /// still enqueue after the queue was cleared and nothing is guaranteed to dequeue such a change, so
-    /// <see cref="PendingCount"/> is not guaranteed to reach zero and those changes keep pinning their
-    /// subjects, bounded in number by the writers running concurrently with the disposal.
+    /// handle does not keep an <c>EventLoopScheduler</c> thread reachable, and drops the queue with whatever
+    /// was still in it, so those changes stop pinning their subjects and the segment its peak backlog grew to
+    /// goes with them. A delivery already running can finish after this returns, so an observer that touches
+    /// state the caller owns and disposes must tolerate a call arriving late, and a drain work item already
+    /// queued on the scheduler is not cancelled either; it runs and finds nothing left to deliver.
     /// </summary>
     public void Dispose() => TransitionOutOfLive(Disposed);
 
