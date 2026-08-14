@@ -10,7 +10,7 @@ public class WithHostedServicesTests
     public async Task WhenTwoContextsShareOneServiceCollection_ThenBothHandlersRun()
     {
         // Arrange
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
 
         var firstContext = HostingTestHost.CreateContext(builder);
 
@@ -43,7 +43,7 @@ public class WithHostedServicesTests
     {
         // Arrange - both contexts resolve their own handler and both see the subject's context attach,
         // so without a single owner per target the subject is started twice.
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
 
         var firstContext = HostingTestHost.CreateContext(builder);
 

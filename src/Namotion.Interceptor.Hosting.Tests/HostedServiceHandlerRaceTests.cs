@@ -81,7 +81,7 @@ public class HostedServiceHandlerRaceTests
         // running is reachable from nothing: a later context detach enumerates no attachment for it
         // and never stops it. Taking a startup hold is the only user code the attach path runs inside
         // that window, so the deferrer drives the interleaving rather than a delay.
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
 
         var context = HostingTestHost.CreateContext(builder);
 
@@ -133,7 +133,7 @@ public class HostedServiceHandlerRaceTests
     public async Task WhenAnAwaitedAttachmentIsDetachedBeforeItsStartIsAppended_ThenNothingIsStarted()
     {
         // Arrange - the same window on the awaiting overload, which appends through the same call.
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
 
         var context = HostingTestHost.CreateContext(builder);
 
@@ -188,7 +188,7 @@ public class HostedServiceHandlerRaceTests
         // the target before appending their stop, and each mark has to be pinned separately: the two
         // tests above drive the window through the synchronous overload only, so deleting the mark from
         // DetachHostedServiceAsync alone leaves them green.
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
 
         var context = HostingTestHost.CreateContext(builder);
 
@@ -343,6 +343,11 @@ public class HostedServiceHandlerRaceTests
         var child = new Person();
         parent.Child = child;
 
+        // Liveness is recorded when a subject gains its first target, not when it enters the graph, so
+        // the child has to host something before the drain or the window does not exist. The recording
+        // is synchronous inside this call, so whether this first service ever starts is irrelevant.
+        child.AttachHostedService(() => new TrackedBackgroundService());
+
         var handler = context.TryGetService<HostedServiceHandler>()!;
         var drainEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseDrain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -414,7 +419,7 @@ public class HostedServiceHandlerRaceTests
     {
         // Arrange - the host is not started, so the startup gate holds every start body at a known
         // point. That is what lets the detach provably overtake a start that is already queued.
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
 
         var context = HostingTestHost.CreateContext(builder);
 
@@ -477,7 +482,7 @@ public class HostedServiceHandlerRaceTests
         var (child, created, release) = await ArrangeDetachedSubjectWithTheDrainCompletedAsync();
         release.SetResult();
 
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
 
         var secondContext = HostingTestHost.CreateContext(builder);
 
@@ -843,7 +848,7 @@ public class HostedServiceHandlerRaceTests
         // hosting contexts raises one context attach per context and the OWNING handler sees both, so
         // it appends a second start for a target that is already running. That start skips its work
         // in the body, where the chain serializes the two, and owes the release from there.
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
 
         var firstContext = HostingTestHost.CreateContext(builder);
 
@@ -902,7 +907,7 @@ public class HostedServiceHandlerRaceTests
         // next handler over the same subject then loses the compare and exchange for good. Taking a
         // startup hold is the one piece of user code the attach path runs between the gate read and
         // the chain lock, so the deferrer drives the detach rather than a delay.
-        var firstBuilder = Host.CreateApplicationBuilder();
+        var firstBuilder = HostingTestHost.CreateBuilder();
 
         var firstContext = HostingTestHost.CreateContext(firstBuilder);
 
@@ -912,7 +917,7 @@ public class HostedServiceHandlerRaceTests
         var firstHost = firstBuilder.Build();
         await firstHost.StartAsync();
 
-        var secondBuilder = Host.CreateApplicationBuilder();
+        var secondBuilder = HostingTestHost.CreateBuilder();
 
         var secondContext = HostingTestHost.CreateContext(secondBuilder);
 
@@ -1046,6 +1051,11 @@ public class HostedServiceHandlerRaceTests
         var child = new Person();
         parent.Child = child;
 
+        // Liveness is recorded when a subject gains its first target, not when it enters the graph, so
+        // the child has to host something before the drain or the window does not exist. The recording
+        // is synchronous inside this call, so whether this first service ever starts is irrelevant.
+        child.AttachHostedService(() => new TrackedBackgroundService());
+
         var handler = context.TryGetService<HostedServiceHandler>()!;
         var drainEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseDrain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1075,7 +1085,9 @@ public class HostedServiceHandlerRaceTests
         // A stand-in for the live handler that takes over from a draining one. It only has to win the
         // compare and exchange, which is the one thing a target owned by a draining handler denies it.
         var liveHandler = new HostedServiceHandler(() => null);
-        var target = ((IHostedServiceAttachmentTarget)child.GetHostedServiceAttachments().Single()).Target;
+        // Last, not Single: the arrange added one to make the child live, and ImmutableArray.Add
+        // appends, so the one the act added is at the end.
+        var target = ((IHostedServiceAttachmentTarget)child.GetHostedServiceAttachments().Last()).Target;
         var claimed = target.TryTakeOwnership(liveHandler, out var ownershipTaken);
         target.ReleaseOwnership(liveHandler);
 
@@ -1209,7 +1221,7 @@ public class HostedServiceHandlerRaceTests
     private static async Task<(IHost Host, IInterceptorSubjectContext Context, CallbackStartupDeferrer Deferrer)>
         StartHostWithDeferrerAsync()
     {
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
 
         var context = HostingTestHost.CreateContext(builder);
 

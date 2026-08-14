@@ -30,6 +30,24 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// </summary>
     public event Action<SubjectLifecycleChange>? SubjectDetaching;
 
+    /// <summary>
+    /// Gets whether the subject is currently attached to this interceptor's object graph.
+    /// </summary>
+    /// <remarks>
+    /// Takes the lock that serializes graph mutation, so a caller must hold no lock that a graph
+    /// mutation can take while holding this one. An <see cref="ILifecycleHandler"/> is invoked from
+    /// inside that lock already and must not call this.
+    /// </remarks>
+    /// <param name="subject">The subject.</param>
+    /// <returns>True when the subject is in the object graph.</returns>
+    public bool IsSubjectAttached(IInterceptorSubject subject)
+    {
+        lock (_attachedSubjects)
+        {
+            return _attachedSubjects.ContainsKey(subject);
+        }
+    }
+
     public void AttachSubjectToContext(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();

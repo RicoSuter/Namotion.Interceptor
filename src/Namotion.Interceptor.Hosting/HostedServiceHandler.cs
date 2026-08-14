@@ -79,14 +79,30 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             return;
         }
 
-        _liveSubjects[subject] = 0;
+        var subjectTarget = subject is IHostedService hostedService
+            ? subject.GetOrAddSubjectTarget(hostedService)
+            : null;
 
-        if (subject is IHostedService hostedService)
+        var attachments = subject.GetHostedServiceAttachments();
+        if (subjectTarget is null && attachments.IsEmpty)
         {
-            TryTakeOwnershipAndStart(subject, subject.GetOrAddSubjectTarget(hostedService));
+            // The overwhelmingly common case, and the reason liveness is recorded here rather than for
+            // every subject entering the graph: this runs for every subject in an attaching graph and
+            // almost none of them host anything. Every reader of liveness holds a target when it
+            // reads, so a subject with no target has no reader. The one moment that is not true is a
+            // subject gaining its first target after it entered the graph, and MarkLiveIfAttached
+            // covers exactly that.
+            return;
         }
 
-        foreach (var attachment in subject.GetHostedServiceAttachments())
+        _liveSubjects[subject] = 0;
+
+        if (subjectTarget is not null)
+        {
+            TryTakeOwnershipAndStart(subject, subjectTarget);
+        }
+
+        foreach (var attachment in attachments)
         {
             TryTakeOwnershipAndStart(subject, ((IHostedServiceAttachmentTarget)attachment).Target);
         }
@@ -102,20 +118,24 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
     private void DetachSubject(IInterceptorSubject subject)
     {
-        // Liveness is per subject and cleared here, under the lifecycle lock. It cannot be per target,
-        // because the attaching path takes target ownership itself and would pass its own check.
-        _liveSubjects.TryRemove(subject, out _);
-
-        var subjectTarget = subject.TryGetSubjectTarget();
+        // The overwhelmingly common case: this runs for every subject in a detaching graph, and almost
+        // none of them host anything. Read before anything is allocated and before the liveness set is
+        // touched, because a completion source per subject is 1.76 MB of garbage per detach of a
+        // 20,000 subject graph, all of it produced under the lifecycle lock.
+        //
+        // The type test stands in for a second data lookup: only AttachSubject creates a subject
+        // target and only for an IHostedService, so nothing else can have one.
         var attachments = subject.GetHostedServiceAttachments();
+        var subjectTarget = subject is IHostedService ? subject.TryGetSubjectTarget() : null;
         if (subjectTarget is null && attachments.IsEmpty)
         {
-            // The overwhelmingly common case: this runs for every subject in a detaching graph, and
-            // almost none of them host anything. Read before anything is allocated, because a
-            // completion source per subject is 1.76 MB of garbage per detach of a 20,000 subject
-            // graph, all of it produced under the lifecycle lock.
             return;
         }
+
+        // Liveness is per subject and cleared here, under the lifecycle lock. It cannot be per target:
+        // one subject reachable from two hosting enabled contexts shares a single target with two
+        // handlers, and both are live for it while only one of them owns it.
+        _liveSubjects.TryRemove(subject, out _);
 
         // Ownership is read here and only here. A handler stops what it owns and nothing else:
         // otherwise this detach stops and disposes an instance another handler created and is
@@ -520,6 +540,61 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     }
 
     internal bool IsLive(IInterceptorSubject subject) => _liveSubjects.ContainsKey(subject);
+
+    /// <summary>
+    /// Records liveness for a subject that is already in the graph but hosted nothing when it entered,
+    /// so <c>AttachSubject</c> recorded none for it. Invoked when a subject gains a hosted service
+    /// attachment, which is the one moment the answer cannot be taken from a target.
+    /// </summary>
+    /// <remarks>
+    /// The membership question goes to <see cref="LifecycleInterceptor"/>, which already maintains the
+    /// set, and it is asked here rather than at the reads because this is the only caller holding no
+    /// lock. The reads sit inside <see cref="HostedServiceTarget"/>'s chain lock, and a context detach
+    /// takes that chain lock while holding the lifecycle lock, so reading the lifecycle set from
+    /// inside the chain lock would close a deadlock cycle.
+    /// <para>
+    /// Every interceptor reachable from the subject is asked, not just the first: a subject in two
+    /// hosting enabled contexts is live for both handlers, and one interceptor not holding it says
+    /// nothing about the other.
+    /// </para>
+    /// <para>
+    /// A subject none of them holds has its entry removed rather than left alone, and this is the only
+    /// place that removal happens. Detaching an attachment must not touch liveness, because a start
+    /// already appended re-reads it and would be cancelled retroactively, so a subject that loses its
+    /// last attachment while in the graph keeps an entry that its context detach then skips over. That
+    /// entry is stale, and reaching here is the only way it can be read for a new attachment.
+    /// </para>
+    /// </remarks>
+    internal void MarkLiveIfAttached(IInterceptorSubject subject)
+    {
+        if (_gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
+        {
+            return;
+        }
+
+        var interceptors = subject.Context.GetServices<LifecycleInterceptor>();
+        var attached = false;
+        for (var index = 0; index < interceptors.Length && !attached; index++)
+        {
+            attached = interceptors[index].IsSubjectAttached(subject);
+        }
+
+        if (!attached)
+        {
+            _liveSubjects.TryRemove(subject, out _);
+            return;
+        }
+
+        _liveSubjects[subject] = 0;
+
+        if (_gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
+        {
+            // Re-read after the write, for the same reason AttachSubject re-reads after its own: an
+            // entry that lands after the drain cleared the set roots the subject on a dead handler for
+            // the rest of that handler's life.
+            _liveSubjects.TryRemove(subject, out _);
+        }
+    }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Tracking;
 
@@ -10,6 +11,23 @@ namespace Namotion.Interceptor.Hosting.Tests;
 /// </summary>
 internal static class HostingTestHost
 {
+    /// <summary>
+    /// Creates the host builder every test in this suite builds on.
+    /// </summary>
+    /// <remarks>
+    /// Defaults are off because they watch appsettings.json for reloads, and this suite builds a host
+    /// per test and stops it without disposing it, so those watchers accumulate for the life of the
+    /// run until the operating system refuses another inotify instance and an unrelated test fails
+    /// inside host construction. Logging is the one default that has to come back, because the handler
+    /// registration resolves ILogger&lt;HostedServiceHandler&gt; as required.
+    /// </remarks>
+    public static HostApplicationBuilder CreateBuilder()
+    {
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
+        builder.Services.AddLogging();
+        return builder;
+    }
+
     /// <summary>
     /// Creates the context under test, with hosting wired into <paramref name="builder"/>'s services.
     /// </summary>

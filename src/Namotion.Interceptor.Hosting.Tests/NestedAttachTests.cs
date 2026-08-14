@@ -328,7 +328,7 @@ public class NestedAttachTests
     private static (IHost Host, IInterceptorSubjectContext Context, ChildCreatingLifecycleHandler Initializer)
         BuildHost(bool initializerRunsAheadOfTheHostingHandler)
     {
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
         var context = InterceptorSubjectContext
             .Create()
             .WithContextInheritance();
@@ -352,7 +352,7 @@ public class NestedAttachTests
     private static (IHost Host, IInterceptorSubjectContext Context, CallbackStartupDeferrer Deferrer)
         BuildHostWithDeferrer()
     {
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
         var context = HostingTestHost.CreateContext(builder);
 
         var deferrer = new CallbackStartupDeferrer();

@@ -37,13 +37,17 @@ public static class InterceptorHostingExtensions
         where T : class, IHostedService
     {
         var attachment = AddAttachment(subject, factory);
+        var handler = subject.Context.TryGetService<HostedServiceHandler>();
+
+        // Liveness before the take, because the take reads it: the attach path records only subjects
+        // that host something, so a subject that hosted nothing when it entered the graph has no entry
+        // and this is the moment it earns one.
+        handler?.MarkLiveIfAttached(subject);
 
         // The handler decides whether it may take the target: the liveness read, the ownership take
         // and the append have to be one step, and a caller cannot compose them without reopening the
         // window a concurrent context detach slips through.
-        subject.Context
-            .TryGetService<HostedServiceHandler>()
-            ?.TryTakeOwnershipAndStart(subject, attachment.Target);
+        handler?.TryTakeOwnershipAndStart(subject, attachment.Target);
 
         return attachment;
     }
@@ -66,6 +70,9 @@ public static class InterceptorHostingExtensions
         }
 
         handler.EnsureStarted();
+
+        // Liveness before the take, for the reason on the synchronous overload.
+        handler.MarkLiveIfAttached(subject);
 
         if (handler.TryTakeOwnershipAndStart(subject, attachment.Target) is { } start)
         {
@@ -177,6 +184,11 @@ public static class InterceptorHostingExtensions
                 return updated.Length > 0 ? updated : null;
             });
 
+        // Deliberately does not touch liveness. A start already appended re-reads liveness in its body,
+        // so clearing it here retroactively cancels a start that was ordered ahead of this detach,
+        // which is the ordering HostedServiceHandlerRaceTests pins. A subject that loses its last
+        // attachment keeps its entry until it gains another one, and MarkLiveIfAttached is where a
+        // stale entry is caught.
         return removed;
     }
 

@@ -345,14 +345,14 @@ public class HostedServiceHandlerTests
         // Arrange - two hosts, the second still running when the first has drained. The subject stays
         // attached to the drained handler's context, so the attach below really does resolve it and
         // the claim under test is reachable.
-        var firstBuilder = Host.CreateApplicationBuilder();
+        var firstBuilder = HostingTestHost.CreateBuilder();
 
         var firstContext = HostingTestHost.CreateContext(firstBuilder);
 
         var firstHost = firstBuilder.Build();
         await firstHost.StartAsync();
 
-        var secondBuilder = Host.CreateApplicationBuilder();
+        var secondBuilder = HostingTestHost.CreateBuilder();
 
         var secondContext = HostingTestHost.CreateContext(secondBuilder);
 
@@ -835,7 +835,7 @@ public class HostedServiceHandlerTests
         // migrated away from: a subject that detaches its own attachment from its own unwind waits on
         // a chain that is waiting on that unwind, and the host recovers only when ShutdownTimeout
         // expires, so the elapsed time is what tells the two apart.
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = ShutdownTimeout);
 
         var context = HostingTestHost.CreateContext(builder);
@@ -869,7 +869,7 @@ public class HostedServiceHandlerTests
         // Arrange - the stopping token reaches the instance, but a service that ignores it is what
         // the drain's own barrier has to bound. Untokened, the barrier waits for a stop that never
         // returns and the process never leaves StopAsync, whatever ShutdownTimeout says.
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = WedgedShutdownTimeout);
 
         var context = HostingTestHost.CreateContext(builder);
@@ -914,7 +914,7 @@ public class HostedServiceHandlerTests
         // attachment stop parks on it forever and wedges that chain against every later append. The
         // host is built but not started, so the startup gate holds both starts at a known point and
         // the graph moves below provably overtake them.
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = WedgedShutdownTimeout);
 
         var context = HostingTestHost.CreateContext(builder);
@@ -955,7 +955,7 @@ public class HostedServiceHandlerTests
         // Arrange - awaiting is an explicit request for the service to be running, so the awaiting
         // overloads open the startup gate themselves. Without that the start body parks on a gate
         // nothing is going to open, and the caller waits forever rather than getting an answer.
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
 
         var context = HostingTestHost.CreateContext(builder);
 
@@ -985,7 +985,7 @@ public class HostedServiceHandlerTests
     {
         // Arrange - the synchronous attach deliberately leaves the gate closed, which is what makes
         // the detach's own gate opening the only thing that can ever release its stop.
-        var builder = Host.CreateApplicationBuilder();
+        var builder = HostingTestHost.CreateBuilder();
 
         var context = HostingTestHost.CreateContext(builder);
 
@@ -1005,6 +1005,175 @@ public class HostedServiceHandlerTests
             // Assert - the stop is queued behind the start the attach appended, so both have run.
             Assert.True(detached);
             Assert.True(instance.IsDisposed);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenASubjectHostsNothing_ThenTheAttachRecordsNoLiveness()
+    {
+        // Arrange
+        var (host, context) = await HostingTestHost.StartAsync();
+
+        try
+        {
+            var handler = context.TryGetService<HostedServiceHandler>()!;
+
+            // Act
+            var parent = new Parent(context);
+            var child = new Person();
+            parent.Child = child;
+
+            // Assert - the fast path, and the whole reason a graph of subjects that host nothing costs
+            // nothing to attach. Every reader of liveness holds a target when it reads, so a subject
+            // with no target has no reader and needs no entry.
+            Assert.False(handler.IsLive(parent));
+            Assert.False(handler.IsLive(child));
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAnAttachmentIsAddedToASubjectAlreadyInTheGraph_ThenItStarts()
+    {
+        // Arrange - the subject hosted nothing when it entered, so the attach path recorded no
+        // liveness for it. The attachment has to establish liveness itself, or its start is refused
+        // for a subject that is in the graph the whole time.
+        var (host, context) = await HostingTestHost.StartAsync();
+
+        try
+        {
+            var handler = context.TryGetService<HostedServiceHandler>()!;
+            var parent = new Parent(context);
+            var child = new Person();
+            parent.Child = child;
+            Assert.False(handler.IsLive(child));
+
+            // Act
+            var attachment = child.AttachHostedService(() => new TrackedBackgroundService());
+
+            // Assert
+            await ((IHostedServiceAttachmentTarget)attachment).Target.AppendAsync(() => Task.CompletedTask);
+            Assert.True(handler.IsLive(child));
+            Assert.NotNull(attachment.Current);
+            Assert.True(attachment.Current!.IsStarted);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenASubjectLostItsLastAttachmentBeforeLeavingTheGraph_ThenALaterAttachmentStartsNothing()
+    {
+        // Arrange - the one way a liveness entry can outlive the graph membership it stands for.
+        // Detaching an attachment must not clear liveness, because a start already appended re-reads
+        // it, so a subject that loses its last attachment leaves the graph through the fast path and
+        // keeps its entry. Reading it for a new attachment is where that has to be caught. The subject
+        // is constructed with the context so its own context keeps resolving the handler after the
+        // detach and the attach really does reach it.
+        var (host, context) = await HostingTestHost.StartAsync();
+
+        try
+        {
+            var handler = context.TryGetService<HostedServiceHandler>()!;
+            var parent = new Parent(context);
+            var child = new Person(context);
+            parent.Child = child;
+
+            var first = child.AttachHostedService(() => new TrackedBackgroundService());
+            Assert.True(handler.IsLive(child));
+
+            child.DetachHostedService(first);
+            parent.Child = null;
+
+            var created = 0;
+
+            // Act
+            var attachment = child.AttachHostedService(() =>
+            {
+                Interlocked.Increment(ref created);
+                return new TrackedBackgroundService();
+            });
+
+            // Assert
+            await ((IHostedServiceAttachmentTarget)attachment).Target.AppendAsync(() => Task.CompletedTask);
+            Assert.Equal(0, Volatile.Read(ref created));
+            Assert.Null(attachment.Current);
+            Assert.False(handler.IsLive(child));
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAnAttachmentIsReplacedWhileTheSubjectStaysInTheGraph_ThenTheNewOneStarts()
+    {
+        // Arrange - the same subject crossing from hosting something to hosting nothing and back
+        // without ever leaving the graph, which is the sequence that decides whether liveness recorded
+        // lazily can be trusted a second time.
+        var (host, context) = await HostingTestHost.StartAsync();
+
+        try
+        {
+            var handler = context.TryGetService<HostedServiceHandler>()!;
+            var parent = new Parent(context);
+            var child = new Person();
+            parent.Child = child;
+
+            var first = child.AttachHostedService(() => new TrackedBackgroundService());
+            await ((IHostedServiceAttachmentTarget)first).Target.AppendAsync(() => Task.CompletedTask);
+            Assert.NotNull(first.Current);
+
+            child.DetachHostedService(first);
+
+            // Act
+            var second = child.AttachHostedService(() => new TrackedBackgroundService());
+
+            // Assert
+            await ((IHostedServiceAttachmentTarget)second).Target.AppendAsync(() => Task.CompletedTask);
+            Assert.True(handler.IsLive(child));
+            Assert.NotNull(second.Current);
+            Assert.True(second.Current!.IsStarted);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAHostedSubjectLeavesTheGraph_ThenItsLivenessIsCleared()
+    {
+        // Arrange - the detach side of lazy recording. The fast path must not swallow the clear for a
+        // subject that does host something, or a later attachment starts a service for a subject that
+        // has left the graph.
+        var (host, context) = await HostingTestHost.StartAsync();
+
+        try
+        {
+            var handler = context.TryGetService<HostedServiceHandler>()!;
+            var parent = new Parent(context);
+            var child = new Person(context);
+            parent.Child = child;
+
+            child.AttachHostedService(() => new TrackedBackgroundService());
+            Assert.True(handler.IsLive(child));
+
+            // Act
+            parent.Child = null;
+
+            // Assert
+            Assert.False(handler.IsLive(child));
         }
         finally
         {
