@@ -26,14 +26,10 @@ public static class InterceptorHostingExtensions
     /// after the last attachment has been detached.
     /// </summary>
     /// <remarks>
-    /// The distinction is what lets a context detach skip the liveness clear for the overwhelming
-    /// majority of subjects without ever skipping it for one that could still hold an entry.
-    /// <see cref="RemoveAttachment"/> stores null rather than removing the key, so the key outlives the
-    /// attachments themselves and this costs the same single lookup either way.
-    /// <para>
-    /// TryGetValue, not GetOrAdd: this runs for every subject on every context detach, under the
-    /// lifecycle lock, and GetOrAdd inserts a null entry into every subject's data bag just to read it.
-    /// </para>
+    /// Lets a context detach skip the liveness clear for almost every subject without skipping it for
+    /// one that could still hold an entry. <see cref="RemoveAttachment"/> stores null rather than
+    /// removing the key, so the key outlives the attachments. TryGetValue, not GetOrAdd, because this
+    /// runs for every subject on every detach and GetOrAdd would insert into every data bag to read it.
     /// </remarks>
     internal static bool TryGetHostedServiceAttachments(
         this IInterceptorSubject subject, out ImmutableArray<IHostedServiceAttachment> attachments)
@@ -175,9 +171,8 @@ public static class InterceptorHostingExtensions
     private static HostedServiceAttachment<T> AddAttachment<T>(IInterceptorSubject subject, Func<T> factory)
         where T : class, IHostedService
     {
-        // Built outside the update delegate: ConcurrentDictionary may invoke that delegate more than
-        // once and does not roll back its side effects, so constructing the record inside it could
-        // register a target that loses the compare-and-swap and is never seen again.
+        // Outside the update delegate, which may run more than once with no rollback: building the
+        // record inside it can register a target that loses the swap and is never seen again.
         var attachment = new HostedServiceAttachment<T>(new HostedServiceTarget(factory, subject: null));
 
         subject.Data.AddOrUpdate((null, AttachmentsKey),
@@ -193,10 +188,9 @@ public static class InterceptorHostingExtensions
     {
         var removed = false;
 
-        // Read before the update, because AddOrUpdate's add factory runs when the key is absent:
-        // detaching an attachment this subject never had would otherwise insert the key and make the
-        // subject report "has ever hosted" for the rest of its life, costing it the detach fast path
-        // forever. Nothing removes the key once present, so it cannot vanish between the two calls.
+        // AddOrUpdate's add factory runs when the key is absent, so detaching an attachment this
+        // subject never had would insert it and mark the subject "has ever hosted" for life, costing it
+        // the detach fast path. Nothing removes the key, so it cannot vanish between the two calls.
         if (!subject.Data.ContainsKey((null, AttachmentsKey)))
         {
             return false;
@@ -216,15 +210,9 @@ public static class InterceptorHostingExtensions
                 return updated.Length > 0 ? updated : null;
             });
 
-        // Deliberately does not touch liveness. A start already appended re-reads liveness in its body,
-        // so clearing it here retroactively cancels a start that was ordered ahead of this detach,
-        // which is the ordering HostedServiceHandlerRaceTests pins.
-        //
-        // The entry a subject keeps after losing its last attachment is therefore ended by its context
-        // detach, which is why that detach's fast path turns on whether the subject has ever hosted
-        // anything rather than on whether it hosts anything now. Nothing downstream catches it: an
-        // entry that outlives the subject's membership is read by the start body and creates an
-        // instance for a subject that has left the graph.
+        // Deliberately leaves liveness alone: clearing it here would retroactively cancel a start
+        // ordered ahead of this detach. The entry is ended by the context detach instead, which is why
+        // that fast path turns on "has ever hosted" rather than on "hosts now".
         return removed;
     }
 
@@ -232,25 +220,23 @@ public static class InterceptorHostingExtensions
     /// Gets the subject's own target, creating it on first use.
     /// </summary>
     /// <remarks>
-    /// Takes no separate service argument, so a subject target can only ever exist on a subject that is
-    /// itself an <see cref="IHostedService"/>. A context detach relies on that: it uses the type test in
-    /// place of a second data lookup, and a target stored on any other subject would never be stopped,
-    /// disposed or released.
+    /// Extends <see cref="IHostedService"/> rather than taking one, so a subject target cannot exist on
+    /// a subject that is not one. A context detach relies on that, using the type test in place of a
+    /// second data lookup.
     /// </remarks>
     internal static HostedServiceTarget GetOrAddSubjectTarget(this IHostedService hostedService)
     {
         var subject = (IInterceptorSubject)hostedService;
 
-        // Read first: every re-attach of a hosted subject goes through here, and constructing the
-        // target and its chain lock ahead of the GetOrAdd throws both away again on all of them.
+        // Read first: every re-attach comes through here, and building the target ahead of the
+        // GetOrAdd throws it away again on all of them.
         if (subject.Data.TryGetValue((null, SubjectTargetKey), out var existing) && existing is HostedServiceTarget found)
         {
             return found;
         }
 
-        // The value overload, not the factory one: a factory closing over the target is a display
-        // class the compiler allocates at the top of this method, so the fast path above would still
-        // allocate on every call. The target is already built here, so there is nothing to defer.
+        // The value overload: a factory closure is a display class allocated at the top of the method,
+        // so the fast path above would allocate on every call.
         var target = new HostedServiceTarget(factory: null, subject: hostedService);
         var stored = subject.Data.GetOrAdd((null, SubjectTargetKey), target);
         return stored as HostedServiceTarget ?? target;

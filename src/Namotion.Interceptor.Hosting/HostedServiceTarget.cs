@@ -3,9 +3,9 @@ using Microsoft.Extensions.Hosting;
 namespace Namotion.Interceptor.Hosting;
 
 /// <summary>
-/// One managed thing: either a subject that implements <see cref="IHostedService"/>, or a factory
-/// attachment. Owns a serialized transition chain so start, stop and dispose for this target never
-/// interleave, while transitions for unrelated targets run concurrently.
+/// One managed thing: a subject implementing <see cref="IHostedService"/>, or a factory attachment.
+/// Owns a serialized transition chain, so transitions for one target never interleave while
+/// transitions for unrelated targets run concurrently.
 /// </summary>
 internal sealed class HostedServiceTarget
 {
@@ -33,18 +33,13 @@ internal sealed class HostedServiceTarget
     /// <summary>True when the handler created the current instance, so it owns its disposal.</summary>
     public bool IsHandlerOwnedInstance => Factory is not null;
 
-    /// <summary>
-    /// Test seam, awaited at the top of every transition body. Null in production. Lets a test hold a
-    /// transition so ordering and race assertions do not depend on timing.
-    /// </summary>
+    /// <summary>Test seam, awaited at the top of every transition body. Null in production.</summary>
     internal Func<Task>? TransitionGate { get; set; }
 
     /// <summary>
-    /// Test seam, invoked inside the chain lock in <see cref="TryTakeOwnershipAndAppendAsync"/> after
-    /// the ownership take and before the append. Null in production, where the two statements it sits
-    /// between are adjacent. Synchronous rather than awaitable because the caller is holding the chain
-    /// lock. It holds the critical section open at the point a split would put its gap, which is the
-    /// only way an appender racing that gap becomes reachable from a test.
+    /// Test seam, invoked inside the chain lock between the take and the append. Null in production.
+    /// Holds the critical section open where a split would put its gap, which is the only way an
+    /// appender racing that gap is reachable from a test.
     /// </summary>
     internal Action? ChainLockGate { get; set; }
 
@@ -59,10 +54,8 @@ internal sealed class HostedServiceTarget
     public void SetFault(Exception? fault) => Volatile.Write(ref _fault, fault);
 
     /// <summary>
-    /// Marks the attachment this target belongs to as detached, which permanently refuses further
-    /// starts. Set under the chain lock, so it pairs with the read in
-    /// <see cref="TryTakeOwnershipAndAppendAsync"/>: a detach that marks here before appending its
-    /// stop leaves an appended start either refused outright or ordered ahead of that stop.
+    /// Permanently refuses further starts. Under the chain lock, so a detach that marks here before
+    /// appending its stop leaves an appended start either refused or ordered ahead of that stop.
     /// </summary>
     public void MarkDetached()
     {
@@ -73,11 +66,10 @@ internal sealed class HostedServiceTarget
     }
 
     /// <summary>
-    /// Records the instance the factory just produced and reports whether it differs from the one the
-    /// previous invocation produced. Only start bodies call this, and the chain serializes them, so the
-    /// field needs no synchronization of its own. It is never cleared, because the comparison has to
-    /// outlive the stop that disposed the instance it names or the repeat it exists to catch is exactly
-    /// the case it cannot see; the cost is one dead reference per attachment the application created.
+    /// Records the instance the factory produced and reports whether it differs from the previous one.
+    /// Unsynchronized because only start bodies call it and the chain serializes them. Never cleared:
+    /// the comparison has to outlive the stop that disposed the instance it names, or the repeat it
+    /// catches is exactly the case it would miss.
     /// </summary>
     public bool TryRecordFactoryInstance(IHostedService instance)
     {
@@ -91,10 +83,9 @@ internal sealed class HostedServiceTarget
     }
 
     /// <summary>
-    /// Takes ownership for the given handler. Finding this handler already installed counts as
-    /// success; only losing to a different handler returns false. <paramref name="ownershipTaken"/>
-    /// tells the two successes apart, which matters to a caller that may have to undo its own take
-    /// but must leave an earlier one alone.
+    /// Takes ownership. Finding this handler already installed is also success;
+    /// <paramref name="ownershipTaken"/> tells the two apart, which a caller that may undo its own take
+    /// but must leave an earlier one alone needs.
     /// </summary>
     public bool TryTakeOwnership(HostedServiceHandler handler, out bool ownershipTaken)
     {
@@ -107,8 +98,8 @@ internal sealed class HostedServiceTarget
         => Interlocked.CompareExchange(ref _owner, null, handler);
 
     /// <summary>
-    /// Appends a transition to this target's chain and returns a task that completes when it has run.
-    /// Appending never blocks and never runs the body, so callers may append while holding a lock.
+    /// Appends a transition and returns a task completing when it has run. Appending never blocks and
+    /// never runs the body, so callers may append while holding a lock.
     /// </summary>
     public Task AppendAsync(Func<Task> body)
     {
@@ -127,18 +118,15 @@ internal sealed class HostedServiceTarget
     /// undo: that one belongs to an earlier attach whose instance may still be running.
     /// </summary>
     /// <remarks>
-    /// The three steps have to be one critical section, and the liveness read has to be the one inside
-    /// it. A context detach clears liveness before it appends its stops, and it appends each stop under
-    /// this same lock, so the two orders are the only ones left: this call first, and the detach's stop
-    /// lands behind a start that then finds the subject dead and no-ops; or the detach's stop first, and
-    /// this call reads the cleared liveness and appends nothing. Splitting them lets a start land behind
-    /// an attachment stop that is waiting for the subject's own stop, which is waiting for the caller
-    /// that is awaiting this start, and that cycle never resolves.
+    /// One critical section, because a context detach clears liveness before appending its stops under
+    /// this same lock. That leaves two orders and no third: this call first, and the detach's stop lands
+    /// behind a start that finds the subject dead; or the stop first, and this call appends nothing.
+    /// Split them and a start lands behind an attachment stop waiting for the subject's stop, which
+    /// waits for the caller awaiting this start.
     /// <para>
-    /// The detached read is the same argument for an explicit detach, which clears no liveness: a
-    /// detach that removed the attachment between it being published and this call would otherwise
-    /// leave the start to run, and the instance it creates is reachable from nothing, because no
-    /// enumerable attachment remains for a later context detach to stop.
+    /// The detached read is the same argument for an explicit detach, which clears no liveness: without
+    /// it the start runs and creates an instance no later detach can reach, because the attachment it
+    /// would be enumerated from is gone.
     /// </para>
     /// </remarks>
     public Task? TryTakeOwnershipAndAppendAsync(
@@ -165,23 +153,16 @@ internal sealed class HostedServiceTarget
 
             if (!handler.IsLive(subject))
             {
-                // Read again, after the take and still inside this lock, because a context detach
-                // clears liveness, reads Owner and releases, and it does the last two outside this
-                // lock. A take that passed the read above and landed after that release is one the
-                // detach never saw and never releases: the target would stay owned and rooted on this
-                // handler until shutdown, and the next handler over the subject would lose the compare
-                // and exchange for good.
+                // A detach clears liveness, then reads Owner and releases, and it does the last two
+                // outside this lock. A take landing after that release is one the detach never saw and
+                // never releases, so the target stays owned and rooted here until shutdown.
                 //
-                // Undone here rather than after the lock, because ReleaseOwnership matches on the
-                // handler rather than on the take: outside the lock a re-attach can install a fresh
-                // ownership in between, and undoing then destroys that one instead, leaving a subject
-                // in the graph whose service never starts, or a running instance in no running set
-                // that shutdown never stops. Inside the lock no install can interleave, because every
-                // install takes it.
+                // Undone inside the lock, not after it: ReleaseOwnership matches on the handler, not on
+                // the take, so outside the lock a re-attach can install a fresh ownership that the undo
+                // then destroys. No install can interleave in here, because every install takes it.
                 //
-                // Only an ownership this call installed is released. Finding this handler already
-                // installed means an earlier take owns it, and the detach either has already released
-                // that one or is about to, having read Owner as non-null.
+                // Only an ownership this call installed. An earlier take's is the detach's to release,
+                // having read Owner as non-null.
                 if (ownershipTaken)
                 {
                     ReleaseOwnership(handler);

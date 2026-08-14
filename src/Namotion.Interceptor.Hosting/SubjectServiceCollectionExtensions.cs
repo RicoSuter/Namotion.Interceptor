@@ -15,23 +15,11 @@ public static class SubjectServiceCollectionExtensions
     /// the context has hosting enabled, the context starts it.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// One instance per type. A second call for the same type throws rather than silently dropping its
-    /// <paramref name="configure"/> and <paramref name="contextResolver"/>,
-    /// and if the caller already registered <typeparamref name="T"/> themselves, neither the context
-    /// nor <paramref name="configure"/> is applied.
-    /// </para>
-    /// <para>
-    /// <paramref name="configure"/> always runs before the attach this method performs, and the attach
-    /// is what makes a hosting enabled context start the subject. When that attach is the first one,
-    /// which is the case for a <typeparamref name="T"/> that has no context constructor and for one
-    /// that takes a context and ignores it, the subject is fully configured before anything can start
-    /// it and the assignments are neither intercepted nor tracked. When a generated context constructor
-    /// has already attached the subject, that attach cannot be reordered from here, so the assignments
-    /// are intercepted and tracked and they race the start it appended, exactly as they do for a hand
-    /// written <c>new MySubject(context) { Name = "x" }</c>. The three shapes are set out side by side
-    /// in docs/hosting.md.
-    /// </para>
+    /// One instance per type; a second call throws. <paramref name="configure"/> runs before the attach
+    /// this method performs, so a subject whose first attach is that one is fully configured before
+    /// anything can start it. A generated context constructor has already attached the subject, so there
+    /// its assignments race the start, as they do for <c>new MySubject(context) { Name = "x" }</c>. The
+    /// three constructor shapes are compared in docs/hosting.md.
     /// </remarks>
     /// <typeparam name="T">The subject type.</typeparam>
     /// <param name="services">The service collection.</param>
@@ -57,30 +45,19 @@ public static class SubjectServiceCollectionExtensions
                 ? contextResolver(serviceProvider)
                 : serviceProvider.GetService<IInterceptorSubjectContext>();
 
-            // The constructor branch exists only because ActivatorUtilities throws when no constructor
-            // can consume the extra argument. It confers no attachment advantage: the generated
-            // constructor is "C(IInterceptorSubjectContext context) : this()", so the attach happens
-            // after the parameterless constructor body either way.
-            //
-            // The decision is the factory itself rather than a reflection query, so the code that
-            // decides a context taking constructor is usable is the code that then uses it. A
-            // reflection query answers the looser question of whether any constructor mentions the
-            // type, which can be true of one ActivatorUtilities cannot call.
+            // The factory is the decision, not a reflection query: reflection answers the looser question
+            // of whether a constructor mentions the type, which can be true of one that cannot be called
+            // with it.
             var instance = context is not null && contextFactory is not null
                 ? (T)contextFactory(serviceProvider, [context])
                 : ActivatorUtilities.CreateInstance<T>(serviceProvider);
 
-            // Ordered ahead of the attach below, which is the only ordering this factory controls. For
-            // the generated constructor the subject is already attached and this changes nothing, but
-            // for the documented "MySubject(IInterceptorSubjectContext? context = null)" shape, which
-            // takes the context and never uses it, the attach below is the first one and running
-            // configure after it would start the subject half configured. The handler's start delay is
-            // not a synchronisation, so this ordering is what keeps a handler from starting the subject
-            // half configured.
+            // Before the attach, the only ordering this factory controls: for a shape whose first attach
+            // is the one below, configuring after it would let a handler start the subject half
+            // configured. The start delay is a mitigation, not a synchronisation.
             configure?.Invoke(instance);
 
-            // Unconditional and idempotent, so the constructor shape that takes the context and ignores
-            // it is attached rather than left out.
+            // Also for the shape that takes the context and ignores it, which is otherwise unattached.
             if (context is not null)
             {
                 instance.Context.AddFallbackContext(context);
@@ -95,10 +72,9 @@ public static class SubjectServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Throws when the same subject type is registered twice. The activation is the marker: it is
-    /// registered once per call, so finding one already there means this is a second call. Silently
-    /// keeping the first registration would drop this call's configure and context resolver, which
-    /// reads as a working registration and is not one.
+    /// Throws on a second registration of the same type. Keyed on the activation rather than on
+    /// <typeparamref name="T"/>, so a caller who registered the type themselves is not caught. Keeping
+    /// the first silently would drop this call's configure and resolver and still read as registered.
     /// </summary>
     private static void GuardDuplicateRegistration<T>(IServiceCollection services)
         where T : class, IInterceptorSubject
@@ -115,10 +91,8 @@ public static class SubjectServiceCollectionExtensions
     }
 
     /// <summary>
-    /// The factory for a constructor that takes the context, or null when the type has none that
-    /// <see cref="ActivatorUtilities"/> can call with one. There is no Try form of
-    /// <see cref="ActivatorUtilities.CreateFactory(Type, Type[])"/>, so the probe is a catch, but it
-    /// runs once per registration and it caches the constructor selection.
+    /// The factory for a constructor taking the context, or null when there is none. A catch because
+    /// there is no Try form; it runs once per registration.
     /// </summary>
     private static ObjectFactory? TryCreateContextFactory<T>()
     {

@@ -34,53 +34,39 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     private ILogger? Logger => _logger ??= _loggerResolver();
 
     /// <summary>
-    /// Test seam, awaited in <see cref="StopAsync"/> after the gate begins draining and after the
-    /// queued stops are snapshotted, but before liveness is cleared and before the running set is
-    /// snapshotted. Null in production, where the statements it sits between are adjacent. That
-    /// placement is what makes the drain window observable: a start appended while this is held sees
-    /// a draining gate and a still live subject, which is the interleaving the start body's gate
-    /// re-read exists for.
+    /// Test seam, awaited in <see cref="StopAsync"/> after the drain begins and before liveness is
+    /// cleared. Null in production. A start appended while it is held sees a draining gate and a still
+    /// live subject, which is the interleaving the start body's gate re-read exists for.
     /// </summary>
     internal Func<Task>? DrainGate { get; set; }
 
     /// <summary>
-    /// Test seam, invoked in <see cref="TryTakeOwnershipAndStart"/> after the ownership take and the
-    /// running set entry have landed and before the gate is re-read. Null in production, where the
-    /// statements it sits between are adjacent. It holds open the window in which a handler that
-    /// passed the gate read on entry owns a target it may never start, which is the window that read
-    /// exists to keep empty and which nothing else can observe.
+    /// Test seam, invoked after the take and the running set entry and before the gate re-read. Null in
+    /// production. Holds open the window in which a handler that passed the gate read on entry owns a
+    /// target it may never start.
     /// </summary>
     internal Action? OwnershipTakenGate { get; set; }
 
     /// <summary>
-    /// Test seam, invoked inside <see cref="LifecycleInterceptor.TryRunWhileAttached"/>'s callback in
-    /// <see cref="MarkLiveIfAttached"/>, after the subject is known to be attached and before the
-    /// liveness write. Null in production, where the two are adjacent. Holding it holds the graph
-    /// mutation lock, which is the property it exists to make observable: a concurrent graph move
-    /// cannot land between the membership answer and the write.
+    /// Test seam, invoked inside <see cref="LifecycleInterceptor.TryRunWhileAttached"/>'s callback,
+    /// between the membership answer and the liveness write. Null in production. Holding it holds the
+    /// graph mutation lock, which is the property it makes observable.
     /// </summary>
     internal Action? LivenessWriteGate { get; set; }
 
     /// <summary>
-    /// Test seam, invoked inside the chain lock in
-    /// <see cref="HostedServiceTarget.TryTakeOwnershipAndAppendAsync"/> after the liveness read and
-    /// before the ownership take. Null in production, where the two statements it sits between are
-    /// adjacent. It holds open the window in which a context detach reads the target's owner as null
-    /// and releases nothing, so the take that follows would be one no release ever reaches.
+    /// Test seam, invoked inside the chain lock between the liveness read and the ownership take. Null
+    /// in production. Holds open the window in which a context detach reads the owner as null and
+    /// releases nothing, so the take that follows is one no release reaches.
     /// </summary>
     internal Action? LivenessReadGate { get; set; }
 
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        // Invoked from inside LifecycleInterceptor's lock (_attachedSubjects). Everything here only
-        // appends, and appending never blocks and never runs a transition body.
-        //
-        // Third party code does run under that lock: TakeStartupHolds calls IStartupCompletionDeferrer
-        // synchronously, and the refused append path disposes those holds from here too. The hold has
-        // to exist before the append completes and the event that appends arrives already inside the
-        // lock, so there is nowhere else to take it. That is an accepted hazard with a constraint on
-        // the implementer: see IStartupCompletionDeferrer and residual hazard 4 in
-        // docs/design/hosting-service-ownership.md.
+        // Runs inside LifecycleInterceptor's lock, so everything here only appends, which never blocks
+        // and never runs a body. Third party code does run under that lock through TakeStartupHolds,
+        // an accepted hazard with a constraint on the implementer: see IStartupCompletionDeferrer and
+        // residual hazard 4 in docs/design/hosting-service-ownership.md.
         if (change.IsContextAttach)
         {
             AttachSubject(change.Subject);
@@ -105,12 +91,9 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         var attachments = subject.GetHostedServiceAttachments();
         if (subjectTarget is null && attachments.IsEmpty)
         {
-            // The overwhelmingly common case, and the reason liveness is recorded here rather than for
-            // every subject entering the graph: this runs for every subject in an attaching graph and
-            // almost none of them host anything. Every reader of liveness holds a target when it
-            // reads, so a subject with no target has no reader. The one moment that is not true is a
-            // subject gaining its first target after it entered the graph, and MarkLiveIfAttached
-            // covers exactly that.
+            // The common case, and why liveness is recorded here rather than for every attaching
+            // subject: every reader of liveness holds a target, so a subject with no target has no
+            // reader. MarkLiveIfAttached covers the one moment that is not true.
             return;
         }
 
@@ -137,19 +120,14 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
     private void DetachSubject(IInterceptorSubject subject)
     {
-        // The overwhelmingly common case: this runs for every subject in a detaching graph, and almost
-        // none of them host anything. Read before anything is allocated and before the liveness set is
-        // touched, because a completion source per subject is 1.76 MB of garbage per detach of a
-        // 20,000 subject graph, all of it produced under the lifecycle lock.
+        // Read before anything is allocated: a completion source per subject is 1.76 MB of garbage per
+        // detach of a 20,000 subject graph, under the lifecycle lock. The type test stands in for a
+        // second data lookup, since only AttachSubject creates a subject target and only for an
+        // IHostedService.
         //
-        // The type test stands in for a second data lookup: only AttachSubject creates a subject
-        // target and only for an IHostedService, so nothing else can have one.
-        //
-        // The fast path turns on "has this subject ever hosted anything", not on "does it host
-        // anything now". Those differ for a subject whose last attachment was detached while it stayed
-        // in the graph, and skipping the clear for that one leaves an entry behind that outlives its
-        // membership: a start already queued against the detached attachment then re-reads liveness in
-        // its body, finds it, and creates and starts an instance for a subject that has left the graph.
+        // "Has ever hosted", not "hosts now": they differ for a subject whose last attachment was
+        // detached while it stayed in the graph, and skipping the clear there leaves an entry that
+        // outlives its membership, which a queued start reads and acts on.
         var everHosted = subject.TryGetHostedServiceAttachments(out var attachments);
         var subjectTarget = subject is IHostedService ? subject.TryGetSubjectTarget() : null;
         if (subjectTarget is null && !everHosted)
@@ -169,15 +147,13 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             return;
         }
 
-        // Ownership is read here and only here. A handler stops what it owns and nothing else:
-        // otherwise this detach stops and disposes an instance another handler created and is
-        // running, either a live handler that took over from this drained one or a sibling handler
-        // that lost the compare and exchange. It cannot move into the transition body either,
-        // because ownership is released a few lines below, so the body would always see a stranger.
+        // A handler stops what it owns and nothing else, or it disposes an instance another handler
+        // created and is running. Not readable from the transition body either, since ownership is
+        // released just below and the body would always see a stranger.
         //
-        // Stops are appended NOW, never deferred into another transition; deferring them disposes the
-        // instance a re-attach created and leaks the one this detach meant to stop. The walkthrough is
-        // in docs/design/hosting-service-ownership.md#why-a-composite-transition-is-wrong.
+        // Appended now, never deferred into another transition: deferring disposes the instance a
+        // re-attach created and leaks the one this detach meant to stop. Walkthrough in
+        // docs/design/hosting-service-ownership.md#why-a-composite-transition-is-wrong.
         TaskCompletionSource? subjectStopped = null;
         if (subjectTarget is not null && ReferenceEquals(subjectTarget.Owner, this))
         {
@@ -218,10 +194,9 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// for it, because another handler owns the target, or because this handler is draining.
     /// </summary>
     /// <remarks>
-    /// The appended transition deliberately carries no cancellation token: a caller's token bounds its
-    /// wait for the transition, never the transition itself, or cancelling an
-    /// <c>AttachHostedServiceAsync</c> await would abort a start that is already under way and record
-    /// the cancellation as a start failure.
+    /// The transition carries no cancellation token: a caller's token bounds its wait, never the
+    /// transition, or cancelling an <c>AttachHostedServiceAsync</c> await would abort a start already
+    /// under way and record it as a failure.
     /// </remarks>
     internal Task? TryTakeOwnershipAndStart(IInterceptorSubject subject, HostedServiceTarget target)
     {
@@ -261,21 +236,17 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         if (ownershipTaken && _gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
         {
-            // Re-read after both writes, which is what turns the check at the top from a narrowing
-            // into a guard. Reading Running here proves the drain had not begun when the two writes
-            // landed, so its own snapshot covers this target and its release loop reaches it. Reading
-            // anything later means the drain may already have swept past, so the take is undone here
-            // rather than left to a release loop that will never see it.
+            // Re-read after both writes, which turns the check at the top from a narrowing into a
+            // guard: reading Running still here proves the drain had not begun when they landed, so its
+            // snapshot covers this target. Any later read may already have been swept past.
             //
-            // Safe outside the chain lock only because a draining handler installs nothing: it bails
-            // in AttachSubject and again at the top of this method, so no concurrent take of this
-            // handler's can be in flight for ReleaseOwnership, which matches on the handler rather
-            // than on the take, to clobber. The liveness equivalent of this undo cannot be done here
-            // for exactly that reason and lives inside the chain lock instead.
+            // Outside the chain lock only because a draining handler installs nothing, so no take of
+            // this handler's can be in flight for ReleaseOwnership to clobber, matching as it does on
+            // the handler rather than on the take. The liveness equivalent has no such guarantee and
+            // lives inside the chain lock.
             //
-            // Only an ownership this call installed is undone. Finding this handler already installed
-            // means an earlier attach owns a target that may be running, and undoing that one would
-            // pull it out of the running set the drain is about to stop.
+            // Only an ownership this call installed. An earlier attach's may be running, and undoing
+            // that one would pull it out of the set the drain is about to stop.
             _running.TryRemove(target, out _);
             target.ReleaseOwnership(this);
         }
@@ -290,20 +261,15 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             await _gate.WaitForOpenAsync().ConfigureAwait(false);
             if (_gate.State != HostedServiceGateState.Running)
             {
-                // Read inside the body, never at append time: a start already queued when shutdown
-                // begins must re-read the state, and a body skipped at append time would never run
-                // its signalling.
+                // Inside the body, never at append time: a start queued when shutdown begins has to
+                // re-read, and a body skipped at append time would never run its signalling.
                 return;
             }
 
-            // Two conditions, two different windows, so neither is redundant. DetachSubject clears
-            // liveness first and releases ownership only after it has appended its stops, and this
-            // body does not hold the lifecycle lock, so it can read between the two: there the
-            // ownership read still passes and only the liveness read refuses. A start appended after
-            // the detach finished is the mirror case, where liveness is long gone and ownership is
-            // what refuses. No test separates them, because forcing a body into the window between
-            // those two statements means holding the lifecycle lock open, which blocks every graph
-            // write the test needs. Deleting either half alone therefore keeps the suite green.
+            // Two windows, so neither condition is redundant: a detach clears liveness before it
+            // releases ownership, so a body reading in between is refused by liveness alone, while one
+            // appended after the detach finished is refused by ownership alone. No test separates them,
+            // because holding a body in that window means holding the lifecycle lock.
             if (!_liveSubjects.ContainsKey(subject) || !ReferenceEquals(target.Owner, this))
             {
                 return;
@@ -363,8 +329,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
         finally
         {
-            // In a finally, so every way out releases: gated out by a drain, not live, skipped by
-            // the one instance guard, or a start that threw.
+            // In a finally, so every way out releases.
             ReleaseStartupHolds(startupHolds);
         }
     }
@@ -373,10 +338,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// Takes a completion hold on every deferrer reachable from <paramref name="context"/>.
     /// </summary>
     /// <remarks>
-    /// Empty for an application that configures no deferring subsystem (no source monitoring, for
-    /// example), which is the common case and costs one empty check per attach. The constraint this
-    /// call site puts on an implementer is on <see cref="IStartupCompletionDeferrer"/>; see also the
-    /// note on <see cref="HandleLifecycleChange"/>.
+    /// Empty for an application with no deferring subsystem, the common case. The constraint this call
+    /// site puts on an implementer is on <see cref="IStartupCompletionDeferrer"/>.
     /// </remarks>
     private IDisposable[] TakeStartupHolds(IInterceptorSubjectContext context)
     {
@@ -586,33 +549,22 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     internal bool IsRunning(HostedServiceTarget target) => _running.ContainsKey(target);
 
     /// <summary>
-    /// Records liveness for a subject that is already in the graph but hosted nothing when it entered,
-    /// so <c>AttachSubject</c> recorded none for it. Invoked when a subject gains a hosted service
-    /// attachment, which is the one moment the answer cannot be taken from a target.
+    /// Records liveness for a subject already in the graph that hosted nothing when it entered, so
+    /// <c>AttachSubject</c> recorded none. The one moment the answer cannot be taken from a target.
     /// </summary>
     /// <remarks>
-    /// The membership question goes to <see cref="LifecycleInterceptor"/>, which already maintains the
-    /// set, and the write happens inside its callback rather than after it. Reading membership and then
-    /// writing releases the lock in between, and a graph mutation landing in that gap makes the write
-    /// land on the opposite answer: an attach that wrote liveness has it removed again, so its service
-    /// never starts, or a detach that cleared it has it re-armed, so a service starts for a subject
-    /// that has left the graph.
+    /// The write happens inside <see cref="LifecycleInterceptor.TryRunWhileAttached"/>'s callback, not
+    /// after it: reading membership and then writing releases the lock in between, and a graph move
+    /// landing in that gap makes the write land on the opposite answer.
     /// <para>
-    /// Only the write needs that atomicity, not the ownership take that follows it. A detach landing
-    /// after this returns clears liveness itself, and the take reads liveness inside the target's chain
-    /// lock, so it refuses. Keeping the take outside also keeps this call site off the list of places
-    /// that run <see cref="IStartupCompletionDeferrer"/> under the graph lock.
+    /// Only the write needs that, not the take after it, which reads liveness under the chain lock and
+    /// refuses on its own. Keeping the take outside also keeps this off the list of places that run an
+    /// <see cref="IStartupCompletionDeferrer"/> under the graph lock.
     /// </para>
     /// <para>
-    /// Every interceptor reachable from the subject is asked, not just the first: a subject in two
-    /// hosting enabled contexts is live for both handlers, and one interceptor not holding it says
-    /// nothing about the other. A handler can therefore be marked live on the strength of a graph it
-    /// does not itself serve; see the multi context note in
-    /// docs/design/hosting-service-ownership.md.
-    /// </para>
-    /// <para>
-    /// Records and never removes. A stale entry cannot reach here, because a context detach clears
-    /// liveness for every subject that has ever hosted anything, so there is nothing to catch.
+    /// Every reachable interceptor is asked, because one not holding the subject says nothing about
+    /// another. A handler can therefore be marked live on the strength of a graph it does not serve;
+    /// see the multi context note in docs/design/hosting-service-ownership.md.
     /// </para>
     /// </remarks>
     internal void MarkLiveIfAttached(IInterceptorSubject subject)
