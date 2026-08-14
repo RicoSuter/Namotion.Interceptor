@@ -691,7 +691,7 @@ The equality check also applies to the `SetPropertyValueWithInterception` call d
 
 ### Transactions
 
-During transaction capture (`SubjectTransaction.HasActiveTransaction && !IsCommitting`), dependent recalculations are suppressed. Derived properties are recalculated when the transaction commits and replays the writes. Additionally, derived property writes are never captured in transactions (`SubjectTransactionInterceptor` checks `!context.Property.Metadata.IsDerived`), since derived values are always computed from their dependencies.
+During transaction capture (`SubjectTransaction.HasActiveTransaction && !IsCommitting && !IsDisposed`), dependent recalculations are suppressed. A disposed ambient transaction does not suppress, because the write it inherited went straight to the model and no commit is left to replay the cascade on. Derived properties are recalculated when the transaction commits and replays the writes. Additionally, derived property writes are never captured in transactions (`SubjectTransactionInterceptor` checks `!context.Property.Metadata.IsDerived`), since derived values are always computed from their dependencies.
 
 ## Design Notes
 

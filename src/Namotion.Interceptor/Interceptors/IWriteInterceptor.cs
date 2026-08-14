@@ -262,6 +262,19 @@ public struct PropertyWriteContext<TProperty>
     }
 
     /// <summary>
+    /// The unfinalized origin state, so an interceptor that finalizes speculatively can put the context
+    /// back exactly as the rest of the chain expects to find it. The transaction interceptor finalizes
+    /// before it knows whether its capture wins the race against a cross-flow dispose, and the terminal
+    /// write reads the unfinalized <see cref="Origin"/> to decide whether a source write may discard a
+    /// committed local write, so an abandoned finalization has to be undone rather than left standing.
+    /// </summary>
+    internal AttemptedOrigin AttemptedOriginSnapshot
+    {
+        get => _attempted;
+        set => _attempted = value;
+    }
+
+    /// <summary>
     /// Finalizes <see cref="Origin"/> at the terminal write (right after <see cref="IsWritten"/>
     /// becomes true). A stamped origin survives only when the stored value is exactly the value the
     /// source sent; otherwise the value was computed locally and the origin becomes Local.

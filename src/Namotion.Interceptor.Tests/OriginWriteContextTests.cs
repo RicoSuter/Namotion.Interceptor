@@ -56,6 +56,45 @@ public class OriginWriteContextTests
         Assert.Equal(ChangeOriginKind.FromSource, probe.KindAfterWrite);
     }
 
+    /// <summary>
+    /// Mimics the transaction interceptor, which finalizes the origin before it knows whether its capture
+    /// wins the race against a cross-flow dispose and rolls the finalization back when it loses.
+    /// </summary>
+    private sealed class SpeculativeOriginFinalizer : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            var attemptedOrigin = context.AttemptedOriginSnapshot;
+            context.FinalizeOrigin();
+            context.AttemptedOriginSnapshot = attemptedOrigin;
+            next(ref context);
+        }
+    }
+
+    [Fact]
+    public void WhenAnInterceptorRollsBackASpeculativeFinalization_ThenTheTerminalStillCountsTheWriteAsFromSource()
+    {
+        // Arrange: the terminal reads the unfinalized origin to pick which commit-revision slot the write
+        // lands in, and only then finalizes, so a rollback has to restore that decision too, not just the
+        // published origin kind. Local is 0, so a finalization left standing silently flips the slot.
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(new SpeculativeOriginFinalizer());
+        var car = new Car(context);
+        var property = new PropertyReference(car, "Speed");
+
+        // Act: the sent value differs from the stored one, so an un-rolled-back finalization demotes to Local.
+        using (PendingOrigin.Set(property, ChangeOrigin.FromSource(new object()), 42))
+        {
+            car.Speed = 99;
+        }
+
+        // Assert: the revision landed in the source slot, leaving the non-source slot untouched.
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: true, out var anyCommitRevision, out _));
+        Assert.True(anyCommitRevision > 0);
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var nonSourceCommitRevision, out _));
+        Assert.Equal(0, nonSourceCommitRevision);
+    }
+
     [Fact]
     public void WhenStoredValueDiffersFromSentValue_ThenOriginIsFinalizedToLocal()
     {

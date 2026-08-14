@@ -80,20 +80,31 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             // transformed (e.g. an OnChanging clamp) demotes to Local, matching what the terminal
             // write would have produced. Otherwise the stale FromSource survives commit replay and
             // the corrected value is echo-suppressed, leaving the source diverged.
+            // Speculative, because the capture below can still lose the race against a cross-flow dispose:
+            // the terminal write reads the unfinalized origin to decide whether a source write may discard
+            // a committed local write, so an abandoned finalization has to be rolled back.
+            var attemptedOrigin = context.AttemptedOriginSnapshot;
             context.FinalizeOrigin();
 
-            transaction.CaptureChange(
-                context.Property,
-                context.Origin,
-                context.WriteTimestampForPublishing,
-                SubjectChangeContext.Current.ReceivedTimestamp,
-                context.CurrentValue,
-                context.NewValue);
+            if (transaction.TryCaptureChange(
+                    context.Property,
+                    context.Origin,
+                    context.WriteTimestampForPublishing,
+                    SubjectChangeContext.Current.ReceivedTimestamp,
+                    context.CurrentValue,
+                    context.NewValue))
+            {
+                return; // Captured, interceptor chain stops here
+            }
 
-            return; // Captured, interceptor chain stops here
+            // Another flow disposed the transaction between the check above and the capture. A disposed
+            // transaction is no transaction, so the write falls through to the model with the speculative
+            // finalization undone. Throwing here is not an option: this runs inside a property setter, and
+            // an exception escaping one on a scheduler thread or a bare thread takes the process down.
+            context.AttemptedOriginSnapshot = attemptedOrigin;
         }
 
-        next(ref context); // No transaction, disposed, derived, or committing: Normal flow
+        next(ref context); // No transaction, disposed, derived, committing, or capture lost the dispose race: Normal flow
     }
 
     private sealed class LockReleaser(SemaphoreSlim semaphore) : IDisposable

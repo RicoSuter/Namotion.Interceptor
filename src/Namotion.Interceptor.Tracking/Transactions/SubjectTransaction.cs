@@ -130,10 +130,21 @@ public sealed class SubjectTransaction : IDisposable
     /// Atomically captures a property change into the pending dictionary.
     /// First write preserves <paramref name="currentValue"/> as old value for conflict detection;
     /// subsequent writes preserve the original old value (last write wins).
+    ///
+    /// Returns false when another flow disposed the transaction after the caller read
+    /// <see cref="IsDisposed"/>. That window is reachable from an ordinary property setter (any thread born
+    /// inside a transaction keeps it in its ambient slot for life), so it must not throw: an exception
+    /// escaping a setter on a scheduler thread or a bare thread is unhandled and takes the process down.
+    /// The caller falls through to the model instead, which is what "no transaction was ambient" means and
+    /// what the read path already does. A disposed transaction has no commit left to replay the change on.
+    ///
+    /// The disposed check must stay inside <see cref="_pendingChangesLock"/>: Dispose sets the flag before it
+    /// takes the lock and returns the dictionary to the pool only after releasing it, so a flag read taken
+    /// under the lock can never see a live transaction and then touch a buffer another transaction already
+    /// rented.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
-    /// <exception cref="ObjectDisposedException">Thrown if the transaction was disposed concurrently (TOCTOU race).</exception>
-    internal void CaptureChange<TProperty>(
+    internal bool TryCaptureChange<TProperty>(
         PropertyReference property,
         ChangeOrigin origin,
         DateTimeOffset changedTimestamp,
@@ -144,7 +155,11 @@ public sealed class SubjectTransaction : IDisposable
         lock (_pendingChangesLock)
         {
             ThrowIfCommittingConcurrently();
-            ThrowIfDisposedConcurrently();
+
+            if (Volatile.Read(ref _isDisposed) != 0)
+            {
+                return false;
+            }
 
             // Non-null once the disposed check above has passed: Dispose sets the flag before it nulls the field.
             var isFirstWrite = !_pendingChanges!.TryGetValue(property, out var existingChange);
@@ -155,27 +170,7 @@ public sealed class SubjectTransaction : IDisposable
                 receivedTimestamp: receivedTimestamp,
                 isFirstWrite ? currentValue : existingChange.GetOldValue<TProperty>(),
                 newValue);
-        }
-    }
-
-    /// <summary>
-    /// Write-path-only backstop for the window between the interceptor's disposed check and the capture
-    /// itself, when another flow disposes the transaction in between. Reads need no guard: Dispose nulls
-    /// <see cref="_pendingChanges"/> under <see cref="_pendingChangesLock"/>, so a read finds nothing pending
-    /// and falls through to the model. A capture cannot fall through, because the interceptor already
-    /// finalized the write's origin and letting the terminal write run would finalize it a second time.
-    /// The check must stay inside <see cref="_pendingChangesLock"/>: Dispose sets the flag before it takes the
-    /// lock and returns the dictionary to the pool only after releasing it, so a flag read taken under the lock
-    /// can never see a live transaction and then touch a buffer another transaction already rented.
-    /// </summary>
-    private void ThrowIfDisposedConcurrently()
-    {
-        if (Volatile.Read(ref _isDisposed) != 0)
-        {
-            throw new ObjectDisposedException(
-                nameof(SubjectTransaction),
-                "The transaction was disposed while one of its properties was being read or captured. " +
-                "Begin, use, commit, and dispose a transaction within the same async flow.");
+            return true;
         }
     }
 
@@ -250,8 +245,11 @@ public sealed class SubjectTransaction : IDisposable
         TimeSpan commitTimeout,
         CancellationToken cancellationToken)
     {
-        // Check for nested transactions BEFORE acquiring lock (prevents deadlock)
-        if (CurrentTransaction.Value != null)
+        // Check for nested transactions BEFORE acquiring lock (prevents deadlock). Only a live transaction
+        // nests: a thread born inside a transaction keeps it in its ambient slot for life, and Dispose can
+        // clear the slot only for the disposing flow, so treating a disposed one as nesting would wedge that
+        // thread out of transactions forever. SetCurrent overwrites the stale slot.
+        if (CurrentTransaction.Value is { IsDisposed: false })
         {
             throw new InvalidOperationException("Nested transactions are not supported.");
         }
@@ -745,9 +743,9 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     public void Dispose()
     {
-        // Setting the flag BEFORE taking _pendingChangesLock is load-bearing for
-        // ThrowIfDisposedConcurrently: it reads the flag under that lock, so this ordering is what makes
-        // "flag not set" under the lock mean "the buffer is still ours".
+        // Setting the flag BEFORE taking _pendingChangesLock is load-bearing for TryCaptureChange: it reads
+        // the flag under that lock, so this ordering is what makes "flag not set" under the lock mean
+        // "the buffer is still ours".
         if (Interlocked.CompareExchange(ref _isDisposed, 1, 0) == 0)
         {
             Interlocked.Decrement(ref _activeTransactionCount);
@@ -783,9 +781,9 @@ public sealed class SubjectTransaction : IDisposable
             // unpooled (GC'd).
             if (pendingChangesToReturn is not null)
             {
-                // Returning only AFTER _pendingChangesLock is released is load-bearing for
-                // ThrowIfDisposedConcurrently: a capture holding the lock has already been rejected by the
-                // flag, so no capture can be inside the dictionary when it changes owner.
+                // Returning only AFTER _pendingChangesLock is released is load-bearing for TryCaptureChange:
+                // a capture holding the lock has already been rejected by the flag, so no capture can be
+                // inside the dictionary when it changes owner.
                 PendingChangesPool.Return(pendingChangesToReturn);
                 _lockReleaser?.Dispose(); // May be null for Optimistic transactions
             }

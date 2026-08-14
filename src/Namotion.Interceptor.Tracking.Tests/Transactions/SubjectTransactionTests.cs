@@ -705,24 +705,151 @@ public class SubjectTransactionTests
     }
 
     [Fact]
-    public async Task WhenCaptureChangeIsCalledDirectlyOnADisposedTransaction_ThenItThrowsObjectDisposed()
+    public async Task WhenAmbientTransactionIsDisposedWhileAnotherThreadWrites_ThenNoExceptionEscapesTheSetterAndTheWriteLands()
     {
-        // Arrange: the interceptor never calls a disposed transaction, so this invokes the internal capture
-        // backstop directly rather than reproducing the cross-flow dispose race that is its only real caller.
+        // Arrange: a thread born inside a transaction keeps that transaction in its ambient slot for life
+        // (an Rx EventLoopScheduler worker, for example). Writing on that thread while another flow disposes
+        // the transaction races the interceptor's disposed check against the capture itself. An exception
+        // escaping the setter there is unhandled on a bare thread and terminates the process, so the write
+        // has to fall through to the model instead, exactly as if no transaction were ambient.
         var context = CreateTransactionContext();
-        var person = new Person(context);
+        var person = new Person(context) { LastName = "Model" };
 
-        var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        transaction.Dispose();
+        // The race is reachable within a handful of iterations; bounded so the test always terminates.
+        for (var iteration = 0; iteration < 50; iteration++)
+        {
+            var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+            var frozenFlow = ExecutionContext.Capture()
+                ?? throw new InvalidOperationException("Execution context flow must not be suppressed in this test.");
 
-        // Act & Assert
-        Assert.Throws<ObjectDisposedException>(() => transaction.CaptureChange(
-            new PropertyReference(person, nameof(Person.FirstName)),
-            default,
-            DateTimeOffset.UtcNow,
-            null,
-            "Old",
-            "New"));
+            var writerStarted = new ManualResetEventSlim();
+            var disposeCompleted = false;
+            Exception? escapedException = null;
+            var valueWrittenAfterDispose = $"AfterDispose{iteration}";
+
+            var writerThread = new Thread(() => ExecutionContext.Run(frozenFlow, _ =>
+            {
+                try
+                {
+                    writerStarted.Set();
+                    var writeCount = 0;
+                    while (!Volatile.Read(ref disposeCompleted))
+                    {
+                        // Distinct values so the equality check never short-circuits the chain.
+                        person.LastName = $"Racing{writeCount++}";
+                    }
+
+                    person.LastName = valueWrittenAfterDispose;
+                }
+                catch (Exception exception)
+                {
+                    escapedException = exception;
+                }
+            }, null));
+
+            // Act
+            writerThread.Start();
+            writerStarted.Wait();
+            transaction.Dispose();
+            Volatile.Write(ref disposeCompleted, true);
+            writerThread.Join();
+
+            // Assert
+            Assert.Null(escapedException);
+            Assert.Equal(valueWrittenAfterDispose, person.LastName);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAmbientTransactionWasDisposedByAnotherFlow_ThenTheFrozenFlowCanBeginANewTransaction()
+    {
+        // Arrange: freeze a flow while a transaction is current, then dispose that transaction from the flow
+        // that owns it. Dispose clears the ambient slot only for the disposing flow, so the frozen flow keeps
+        // pointing at the disposed transaction for the rest of its life.
+        var context = CreateTransactionContext();
+        var disposedTransaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        var frozenFlow = ExecutionContext.Capture()
+            ?? throw new InvalidOperationException("Execution context flow must not be suppressed in this test.");
+        disposedTransaction.Dispose();
+
+        // Act
+        Exception? failure = null;
+        SubjectTransaction? newTransaction = null;
+        ExecutionContext.Run(frozenFlow, _ =>
+        {
+            Assert.Same(disposedTransaction, SubjectTransaction.Current);
+            try
+            {
+                newTransaction = context
+                    .BeginTransactionAsync(TransactionFailureHandling.BestEffort)
+                    .GetAwaiter()
+                    .GetResult();
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        }, null);
+
+        // Assert
+        Assert.Null(failure);
+        Assert.NotNull(newTransaction);
+        newTransaction.Dispose();
+    }
+
+    [Fact]
+    public async Task WhenCommitIsParkedOnTheTransactionLockAndTheTransactionIsDisposed_ThenTheCommitCompletesWithoutFailing()
+    {
+        // Arrange: an optimistic commit parks acquiring the per-context transaction lock. A dispose on
+        // another flow then releases the pending-changes buffer while the commit is still parked, so the
+        // commit resumes with a null buffer. The null tolerance in StartCommitAndSnapshotChanges and
+        // FinishCommit is what keeps that from being a NullReferenceException; it is load-bearing, not
+        // defensive.
+        var context = CreateTransactionContext();
+        var person = new Person(context) { LastName = "Model" };
+
+        var lockHolder = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+
+        SubjectTransaction? parkedTransaction = null;
+        Task? parkedCommit = null;
+        var commitParked = new ManualResetEventSlim();
+
+        // Suppressed so the parked transaction does not inherit lockHolder as its ambient transaction.
+        var flowControl = ExecutionContext.SuppressFlow();
+        Task starter;
+        try
+        {
+            starter = Task.Run(async () =>
+            {
+                parkedTransaction = await context.BeginTransactionAsync(
+                    TransactionFailureHandling.BestEffort, TransactionLocking.Optimistic);
+                person.LastName = "Pending";
+
+                // CommitAsync has already parked on the lock by the time it returns its incomplete task.
+                parkedCommit = parkedTransaction.CommitAsync(CancellationToken.None).AsTask();
+                commitParked.Set();
+                await parkedCommit;
+            });
+        }
+        finally
+        {
+            flowControl.Undo();
+        }
+
+        commitParked.Wait();
+
+        // Act
+        parkedTransaction!.Dispose();
+        lockHolder.Dispose();
+        await starter;
+
+        // Assert
+        Assert.True(parkedCommit!.IsCompletedSuccessfully);
+        Assert.Empty(parkedTransaction.GetPendingChanges());
+
+        string? modelLastName = null;
+        await RunWithoutAsyncLocalFlowAsync(() => modelLastName = person.LastName);
+        Assert.Equal("Model", modelLastName);
     }
 
     /// <summary>

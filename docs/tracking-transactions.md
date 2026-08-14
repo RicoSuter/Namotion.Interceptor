@@ -514,7 +514,7 @@ Note that concurrent `CommitAsync` calls on the same transaction are rejected: o
 - `BeginTransactionAsync()` uses `AsyncLocal<T>` to store the current transaction
 - Exclusive transactions use a per-context semaphore
 - Each async execution context has its own transaction scope
-- The transaction is automatically cleared on `Dispose()`
+- `Dispose()` clears the transaction only for the disposing flow, so a flow that captured its execution context earlier (a thread started inside the transaction, for example) keeps the disposed transaction in its slot; reads and writes on such a flow behave as if no transaction were active
 - A transaction must be begun, used, committed, and disposed within the same async flow; committing from another flow throws
 - Concurrent `CommitAsync` calls on the same transaction instance are rejected
 
