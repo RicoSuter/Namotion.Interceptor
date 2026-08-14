@@ -9,6 +9,13 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <!-- Every test here can block on a seam another thread has to release, so a bug that strands one
+             hangs the run. xUnit then names the test in the diagnostic output instead of leaving CI to
+             time out the whole job with nothing to point at. -->
+        <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <ItemGroup>
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.10" />
         <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.10" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />

@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Hosting.Tests.Models;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Hosting.Tests;
@@ -1416,5 +1417,123 @@ public class HostedServiceHandlerTests
         Assert.False(((IInterceptorSubject)bystander).TryGetHostedServiceAttachments(out var attachments));
         Assert.Empty(attachments);
         Assert.True(((IInterceptorSubject)owner).TryGetHostedServiceAttachments(out _));
+    }
+
+    [Fact]
+    public async Task WhenTakingAStartupHoldThrows_ThenTheAttachStillStartsAndTheOtherHoldsAreReleased()
+    {
+        // Arrange - taking the holds is third party code on the attach path, and the attach runs inside
+        // a property write, so an exception escaping it surfaces at an unrelated assignment. The
+        // throwing deferrer is first, so the holds already taken are the ones after it that must still
+        // be released; a loop that abandoned them would leave a host that never finishes starting.
+        var builder = HostingTestHost.CreateBuilder();
+        var context = HostingTestHost.CreateContext(builder);
+
+        var throwing = new ThrowingStartupDeferrer { ThrowOnDefer = true };
+        var working = new CallbackStartupDeferrer();
+        context.AddService<IStartupCompletionDeferrer>(throwing);
+        context.AddService<IStartupCompletionDeferrer>(working);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            parent.Child = child;
+
+            // Act
+            var attachment = await child.AttachHostedServiceAsync(
+                () => new TrackedBackgroundService(), CancellationToken.None);
+
+            // Assert
+            await attachment.DrainAsync();
+            Assert.True(attachment.Current is { IsStarted: true });
+            Assert.Null(attachment.Fault);
+
+            Assert.Equal(1, throwing.Taken);
+            Assert.Equal(1, working.Taken);
+            Assert.Equal(0, working.Outstanding);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenReleasingAStartupHoldThrows_ThenTheOtherHoldsAreStillReleased()
+    {
+        // Arrange - the release runs in a finally on the transition thread, so an exception there
+        // faults the transition rather than any caller, and the holds behind it are never released:
+        // the host then waits on a completion that never comes. The throwing one is registered first
+        // so the working one is the one that would be stranded.
+        var builder = HostingTestHost.CreateBuilder();
+        var context = HostingTestHost.CreateContext(builder);
+
+        var throwing = new ThrowingStartupDeferrer { ThrowOnRelease = true };
+        var working = new CallbackStartupDeferrer();
+        context.AddService<IStartupCompletionDeferrer>(throwing);
+        context.AddService<IStartupCompletionDeferrer>(working);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            parent.Child = child;
+
+            // Act
+            var attachment = await child.AttachHostedServiceAsync(
+                () => new TrackedBackgroundService(), CancellationToken.None);
+
+            // Assert
+            await attachment.DrainAsync();
+            Assert.True(attachment.Current is { IsStarted: true });
+            Assert.Null(attachment.Fault);
+
+            Assert.Equal(1, throwing.Released);
+            Assert.Equal(0, working.Outstanding);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenDisposingAnInstanceThrows_ThenTheDetachStillCompletesAndARepeatAttachStarts()
+    {
+        // Arrange - a factory instance whose disposal throws is still stopped, still counted as
+        // disposed once, and still leaves the subject able to host again. Behaviour, not a guard: the
+        // catch inside DisposeInstanceAsync exists for the log, and the chain's own catch would absorb
+        // an escape from it either way, which is why deleting that catch leaves this test green.
+        await HostingTestHost.RunAsync(async context =>
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            parent.Child = child;
+
+            var first = new TrackedBackgroundService { ThrowOnDispose = true };
+            var attachment = await child.AttachHostedServiceAsync(() => first, CancellationToken.None);
+            Assert.True(first.IsStarted);
+
+            // Act
+            var detached = await child.DetachHostedServiceAsync(attachment, CancellationToken.None);
+
+            // Assert
+            Assert.True(detached);
+            Assert.True(first.IsStopped);
+            Assert.Equal(1, first.DisposeCount);
+
+            var second = await child.AttachHostedServiceAsync(
+                () => new TrackedBackgroundService(), CancellationToken.None);
+
+            Assert.True(second.Current is { IsStarted: true });
+            Assert.Null(second.Fault);
+        });
     }
 }

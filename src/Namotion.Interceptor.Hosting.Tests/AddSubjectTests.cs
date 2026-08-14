@@ -320,6 +320,107 @@ public class AddSubjectTests
         }
     }
 
+    [Fact]
+    public async Task WhenAContextResolverIsGiven_ThenItPicksTheContextInsteadOfTheOneInDependencyInjection()
+    {
+        // Arrange - two contexts, only one of them registered, so "the resolver was used" and "the
+        // resolver was ignored" land the subject in different registries rather than the same one.
+        var builder = HostingTestHost.CreateBuilder();
+        var registeredContext = CreateContextWithRegistry(builder);
+        var chosenContext = CreateContextWithRegistry(builder);
+        builder.Services.AddSingleton(registeredContext);
+        builder.Services.AddSubject<PersonWithBackgroundService>(contextResolver: _ => chosenContext);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            // Act
+            var subject = host.Services.GetRequiredService<PersonWithBackgroundService>();
+
+            // Assert
+            Assert.Contains(
+                chosenContext.GetService<ISubjectRegistry>().KnownSubjects,
+                known => ReferenceEquals(known.Key, subject));
+
+            Assert.DoesNotContain(
+                registeredContext.GetService<ISubjectRegistry>().KnownSubjects,
+                known => ReferenceEquals(known.Key, subject));
+
+            Assert.Equal(1, subject.StartCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheContextResolverReturnsNullAndOneIsRegistered_ThenTheConstructorStillReceivesIt()
+    {
+        // Arrange - a null result means this method attaches nothing, and that is all it means. The
+        // subject is then built by ActivatorUtilities, which picks the constructor taking a context
+        // because dependency injection can supply one, and that constructor attaches it. Pinned
+        // because the opposite reading is the natural one and the parameter documentation now says so.
+        var builder = HostingTestHost.CreateBuilder();
+        var context = CreateContextWithRegistry(builder);
+        builder.Services.AddSingleton(context);
+        builder.Services.AddSubject<PersonWithBackgroundService>(contextResolver: _ => null);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            // Act
+            var subject = host.Services.GetRequiredService<PersonWithBackgroundService>();
+
+            // Assert
+            Assert.Contains(
+                context.GetService<ISubjectRegistry>().KnownSubjects,
+                known => ReferenceEquals(known.Key, subject));
+
+            Assert.Equal(1, subject.StartCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenNoContextIsRegisteredAtAll_ThenTheSubjectIsUnattachedAndTheActivationStartsIt()
+    {
+        // Arrange - the shape that does keep a subject away from a context: leave it unregistered, so
+        // neither the resolver's fallback nor ActivatorUtilities can reach it. It still starts, because
+        // an unattached subject has no handler in its own context and the activation is the fallback
+        // for exactly that, which is what stops "no context" from silently meaning "never runs".
+        var builder = HostingTestHost.CreateBuilder();
+        var context = CreateContextWithRegistry(builder);
+        builder.Services.AddSubject<PersonWithBackgroundService>();
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            // Act
+            var subject = host.Services.GetRequiredService<PersonWithBackgroundService>();
+
+            // Assert
+            Assert.DoesNotContain(
+                context.GetService<ISubjectRegistry>().KnownSubjects,
+                known => ReferenceEquals(known.Key, subject));
+
+            Assert.Equal(1, subject.StartCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     private static IInterceptorSubjectContext CreateContextWithRegistry(HostApplicationBuilder builder)
         => InterceptorSubjectContext
             .Create()

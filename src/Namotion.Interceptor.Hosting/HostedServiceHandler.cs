@@ -509,7 +509,9 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
         catch (Exception exception)
         {
-            // Detach runs inside a property write, so throwing here would surface at an unrelated assignment.
+            // Here for the log, not for containment: this runs in a transition body, and the chain's own
+            // catch would swallow an escape from here anyway, silently. Every other guard in this file
+            // has an observable behaviour behind it; this one has only the report.
             Logger?.LogError(exception, "Failed to dispose hosted service {Service}.", instance.ToString());
         }
     }

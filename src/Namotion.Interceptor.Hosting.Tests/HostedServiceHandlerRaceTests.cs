@@ -612,7 +612,7 @@ public class HostedServiceHandlerRaceTests
         handler.StopBookkeepingGate = () =>
         {
             bookkeepingReached.TrySetResult();
-            releaseBookkeeping.Task.Wait();
+            releaseBookkeeping.Task.Wait(TimeSpan.FromSeconds(30));
         };
 
         // Act - the detach parks between its two writes, and the drain then runs both of its reads
@@ -670,7 +670,7 @@ public class HostedServiceHandlerRaceTests
         target.ChainLockGate = () =>
         {
             takeReached.TrySetResult();
-            releaseTake.Task.Wait();
+            releaseTake.Task.Wait(TimeSpan.FromSeconds(30));
         };
 
         // Act
@@ -1412,6 +1412,80 @@ public class HostedServiceHandlerRaceTests
         takeReached.Dispose();
         detachRunning.Dispose();
         return leaked;
+    }
+
+    [Fact]
+    public async Task WhenARepeatTakeLandsAfterTheDrainBegan_ThenItLeavesTheEarlierAttachAlone()
+    {
+        // Arrange - the "ownershipTaken" half of the gate re-read, as distinct from the re-read
+        // itself. The re-read undoes what its own call installed, and a repeat take installed nothing:
+        // the owner and the running set entry it finds belong to an earlier attach whose instance is
+        // running. Undoing those pulls that target out of the set the drain is about to stop, and the
+        // instance then survives shutdown with nothing left able to reach it.
+        //
+        // The repeat take needs a target this handler already owns, which one subject visible from two
+        // hosting contexts gives: the second context raises one more attach that the owning handler
+        // also sees, and its take finds itself already installed.
+        var builder = HostingTestHost.CreateBuilder();
+        var firstContext = HostingTestHost.CreateContext(builder);
+        var secondContext = HostingTestHost.CreateContext(builder);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        var subject = new CountingHostedSubject();
+        ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
+
+        var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
+        await target.AppendAsync(() => Task.CompletedTask);
+        Assert.Equal(1, subject.StartCount);
+
+        var handler = firstContext.TryGetService<HostedServiceHandler>()!;
+        var drainEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDrain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.DrainGate = () =>
+        {
+            drainEntered.TrySetResult();
+            return releaseDrain.Task;
+        };
+
+        // Armed only now, so the first attach's own take runs past it untouched and the next call to
+        // reach it is the repeat take under test. It fires outside the chain lock, so the drain below
+        // is held by its own seam rather than by this one.
+        var takeReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseTake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.OwnershipTakenGate = () =>
+        {
+            takeReached.TrySetResult();
+            releaseTake.Task.Wait(TimeSpan.FromSeconds(30));
+        };
+
+        // Act - the repeat take lands, the drain begins under it, and only then does it re-read.
+        var attaching = Task.Run(() => ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext));
+        await takeReached.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var stopping = Task.Run(() => host.StopAsync());
+        await drainEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        releaseTake.SetResult();
+        await attaching.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert - read while the drain is still held, which is before its snapshot. Once it is let go
+        // the drain releases and clears everything it covered, and the difference is unobservable.
+        Assert.Same(handler, target.Owner);
+        Assert.True(
+            handler.IsRunning(target),
+            "The repeat take undid an ownership and a running set entry it did not install, so the "
+            + "drain's snapshot misses a target whose instance is running.");
+
+        releaseDrain.SetResult();
+        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+
+        handler.DrainGate = null;
+        handler.OwnershipTakenGate = null;
+
+        Assert.Equal(1, subject.StartCount);
+        Assert.Equal(1, subject.StopCount);
     }
 
     private static async Task<(IHost Host, IInterceptorSubjectContext Context, CallbackStartupDeferrer Deferrer)>

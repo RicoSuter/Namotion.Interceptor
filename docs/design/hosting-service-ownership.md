@@ -407,6 +407,15 @@ The concrete collision is `SourceOwnershipManager`. Both its `Dispose` and its `
 
 The constraint that follows is stated in [the user documentation](../hosting.md#keep-the-dispose-path-out-of-the-lifecycle-lock). Note that `LifecycleInterceptor.WriteProperty` takes the lock only when the property type can contain subjects, which is why writing a scalar from a dispose path is harmless and writing a subject typed or collection typed property is not, and why attaching or detaching a subject enters the same lock without being a property write at all.
 
+## What Has No Test Behind It
+
+Most guards in this file are recorded with the test that fails when they are deleted. These four are not, and each one is here so that a later reader does not mistake silence for coverage. All four were confirmed by mutation: the change described leaves the suite green.
+
+- **`MarkDetached`'s lock, and its position before the `AppendStop` in `DetachHostedService`.** Both the lock and the ordering are argued in [Refusing a start for an attachment a detach already removed](#refusing-a-start-for-an-attachment-a-detach-already-removed), and `WhenADetachRacesTheAppendInsideTheChainLock_ThenTheStartIsOrderedAheadOfTheStop` covers the interleaving where the attach holds the chain lock. It does not cover the other one: a mark that lands after its own stop is appended lets an attach that already snapshotted the attachments read `_detached` as false, take the target and append a start behind that stop, which then creates an instance no later detach can reach. Reaching it needs a seam between the two statements, which would have to be added to a public extension method.
+- **The `ownershipTaken` guard on the liveness undo inside `TryTakeOwnershipAndAppendAsync`.** Its sibling on the gate undo is pinned by `WhenARepeatTakeLandsAfterTheDrainBegan_ThenItLeavesTheEarlierAttachAlone`. This one needs the same repeat take, and additionally a graph detach clearing liveness for the same subject while that take holds the chain lock, and no test builds both at once.
+- **`DetachHostedService` never releases ownership.** Inert rather than overlooked: the target is marked detached, so no later take can install anything, `AppendStop` removes it from the running set, and the attachment is gone from the subject's data, so no attach or detach path enumerates it again. The only thing the stale owner reference retains is the handler, which the context already holds.
+- **The `catch` in `DisposeInstanceAsync`.** It is there for the log. The chain's own catch absorbs an escape from it, so deleting it changes nothing a test can read, and the comment at that catch says so.
+
 ## Invariants
 
 Once lifecycle events and user driven attach and detach calls have settled:

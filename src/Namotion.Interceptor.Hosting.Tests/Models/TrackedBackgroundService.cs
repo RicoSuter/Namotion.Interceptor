@@ -9,6 +9,12 @@ public sealed class TrackedBackgroundService : IHostedService, IAsyncDisposable
 
     public bool ThrowOnStart { get; init; }
 
+    /// <summary>
+    /// Throws from <see cref="DisposeAsync"/>, which the handler runs inside a property write on the
+    /// detach path, so an exception escaping it surfaces at an unrelated assignment.
+    /// </summary>
+    public bool ThrowOnDispose { get; init; }
+
     public bool IsStarted { get; private set; }
 
     /// <summary>Calls into <see cref="StartAsync"/>, so a start on a disposed instance is measurable.</summary>
@@ -46,6 +52,12 @@ public sealed class TrackedBackgroundService : IHostedService, IAsyncDisposable
     public ValueTask DisposeAsync()
     {
         Interlocked.Increment(ref _disposeCount);
+
+        if (ThrowOnDispose)
+        {
+            throw new InvalidOperationException("dispose failed");
+        }
+
         return ValueTask.CompletedTask;
     }
 }

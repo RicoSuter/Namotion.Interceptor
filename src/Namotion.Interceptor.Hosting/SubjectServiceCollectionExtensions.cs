@@ -25,8 +25,12 @@ public static class SubjectServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Optional callback applied to the instance after construction.</param>
     /// <param name="contextResolver">
-    /// Optional resolver for the context. When null, the context is resolved from DI; when it returns
-    /// null, the subject is registered without a context.
+    /// Optional resolver for the context this method attaches the subject to. When the resolver itself
+    /// is null that context is taken from dependency injection instead. A resolver that returns null
+    /// makes this method attach nothing, which is not the same as the subject ending up with no
+    /// context: a subject whose constructor takes one is still built by
+    /// <see cref="ActivatorUtilities"/> and still receives whatever dependency injection holds. To keep
+    /// a subject away from a registered context, do not register that context.
     /// </param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddSubject<T>(
