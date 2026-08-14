@@ -215,10 +215,15 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // queued. Taking the hold before the append leaves no window in which that can happen.
         var startupHolds = TakeStartupHolds(subject.Context);
 
+        // The running set entry is written inside the chain lock, together with the take and the append,
+        // rather than here: see the comment at the call back. Writing it only on the path where the take
+        // succeeded keeps the old guarantee that a target this handler failed to take never enters the
+        // set, which would make the drain stop an instance another handler is running.
         var start = target.TryTakeOwnershipAndAppendAsync(
             this,
             subject,
             () => RunStartAsync(subject, target, startupHolds),
+            () => _running[target] = subject,
             out var ownershipTaken);
 
         if (start is null)
@@ -226,11 +231,6 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             ReleaseStartupHolds(startupHolds);
             return null;
         }
-
-        // Joined after the take rather than before it: a running set entry for a target this handler
-        // failed to take would make the drain stop and dispose an instance another handler created
-        // and is running.
-        _running[target] = subject;
 
         OwnershipTakenGate?.Invoke();
 
@@ -394,8 +394,6 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         Task? waitFor,
         CancellationToken cancellationToken)
     {
-        _running.TryRemove(target, out _);
-
         var stop = target.AppendAsync(async () =>
         {
             try
@@ -451,9 +449,17 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 // attachment stop parks forever on a signal that is never set.
                 signal?.TrySetResult();
             }
+        },
+        onAppended: appended =>
+        {
+            // All three under the chain lock, because the drain reads the two sets separately: leaving
+            // the running set before the append and joining the in flight set after it puts this stop
+            // in neither for as long as the gap lasts, and a drain that reads both inside it waits for
+            // nothing and returns while this stop is still about to touch a disposed service provider.
+            _running.TryRemove(target, out _);
+            TrackInFlightStop(appended);
         });
 
-        TrackInFlightStop(stop);
         return stop;
     }
 
@@ -608,11 +614,6 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     {
         _gate.BeginDraining();
 
-        // Snapshotted before anything else runs, so it holds exactly the stops that were queued
-        // before the drain. Awaited below: without it the drain returns while one of them is still
-        // touching a service provider the host disposes the moment this method returns.
-        var queuedStops = _inFlightStops.Keys;
-
         if (DrainGate is { } drainGate)
         {
             await drainGate().ConfigureAwait(false);
@@ -624,6 +625,17 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         _liveSubjects.Clear();
 
         var snapshot = _running.ToArray();
+
+        // Read after the running set, never before it, and that order is the barrier. AppendStop leaves
+        // the running set and joins this one under the target's chain lock, so a stop is in exactly one
+        // of the two at any moment; reading this one second means a stop that moved between the two
+        // reads is caught here. Reading it first leaves a window in which it is in neither, and the
+        // drain then waits for nothing and returns while that stop is still running.
+        //
+        // Nothing appended after this read is missed either: it is either for a target the snapshot
+        // above still held, so the drain appended its own stop ahead of it on the same chain and awaits
+        // that one, or it is for a target with no instance, which the stop body no-ops.
+        var queuedStops = _inFlightStops.Keys;
         var stops = new List<Task>(snapshot.Length + queuedStops.Count);
 
         // Shutdown uses the same shape per owned subject as a context detach does, rather than

@@ -101,11 +101,18 @@ internal sealed class HostedServiceTarget
     /// Appends a transition and returns a task completing when it has run. Appending never blocks and
     /// never runs the body, so callers may append while holding a lock.
     /// </summary>
-    public Task AppendAsync(Func<Task> body)
+    /// <param name="body">The transition.</param>
+    /// <param name="onAppended">
+    /// Runs inside the chain lock with the appended transition, for bookkeeping that a concurrent drain
+    /// must not be able to observe separately from the append itself.
+    /// </param>
+    public Task AppendAsync(Func<Task> body, Action<Task>? onAppended = null)
     {
         lock (_sync)
         {
-            return AppendCore(body);
+            var appended = AppendCore(body);
+            onAppended?.Invoke(appended);
+            return appended;
         }
     }
 
@@ -133,6 +140,7 @@ internal sealed class HostedServiceTarget
         HostedServiceHandler handler,
         IInterceptorSubject subject,
         Func<Task> body,
+        Action onTaken,
         out bool ownershipTaken)
     {
         ownershipTaken = false;
@@ -171,6 +179,12 @@ internal sealed class HostedServiceTarget
 
                 return null;
             }
+
+            // Before the append and inside this lock, because the append is what makes the body
+            // dispatchable: a drain that snapshots between the two would find nothing to stop while the
+            // body is already past its own guards and committed to creating an instance, and that
+            // instance is then never stopped and never disposed.
+            onTaken();
 
             ChainLockGate?.Invoke();
 
