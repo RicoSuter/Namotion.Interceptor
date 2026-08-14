@@ -185,7 +185,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 
                         if (property is not null)
                         {
-                            registeredSubject.RemoveParent(property, change.Index);
+                            registeredSubject.RemoveParent(property);
                          
                             property.RemoveChild(new SubjectPropertyChild
                             {
@@ -272,9 +272,9 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                 .TryGetProperty(property.Name);
         }
 
-        // Call outside lock — RefreshCollectionIndices updates parent entries;
+        // Call outside lock — RefreshChildIndices updates parent entries;
         // holding _knownSubjects would risk deadlock.
-        registeredProperty?.RefreshCollectionIndices(value, registry: this);
+        registeredProperty?.RefreshChildIndices(value, registry: this);
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

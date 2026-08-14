@@ -371,9 +371,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     return;
                 }
 
-                // Refresh child index metadata for retained subjects whose
-                // positions may have shifted in the new collection.
-                if (newValue is IEnumerable && oldTouchedSubjects.Overlaps(newTouchedSubjects))
+                // Refresh child index metadata for retained subjects, whose position or key may have moved,
+                // or dropped entirely where the new value holds the subject directly. Retention is the only
+                // condition: a subject that attached or detached already carries its index from that event.
+                if (oldTouchedSubjects.Overlaps(newTouchedSubjects))
                 {
                     var handlers = context.Property.Subject.Context.GetServices<IPropertyLifecycleHandler>();
                     for (var i = 0; i < handlers.Length; i++)

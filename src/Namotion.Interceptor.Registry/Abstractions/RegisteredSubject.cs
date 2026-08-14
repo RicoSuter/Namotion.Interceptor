@@ -162,12 +162,16 @@ public class RegisteredSubject
         }
     }
 
-    internal void RemoveParent(RegisteredSubjectProperty parent, object? index)
+    /// <summary>
+    /// Removes this subject's parent entry for the given property. Matched on the property alone: attach adds
+    /// at most one entry per property, and the stored index can differ from the one the detach carries, which
+    /// would leave the entry behind.
+    /// </summary>
+    internal void RemoveParent(RegisteredSubjectProperty parent)
     {
         lock (_lock)
         {
-            var entry = new SubjectPropertyParent { Property = parent, Index = index };
-            if (_firstParent.Property is not null && _firstParent.Equals(entry))
+            if (_firstParent.Property == parent)
             {
                 PromoteFirstParentFromAdditional();
                 return;
@@ -175,11 +179,14 @@ public class RegisteredSubject
 
             if (_additionalParents is not null)
             {
-                var indexInList = _additionalParents.IndexOf(entry);
-                if (indexInList >= 0)
+                for (var index = _additionalParents.Count - 1; index >= 0; index--)
                 {
-                    _additionalParents.RemoveAt(indexInList);
-                    InvalidateParentsSnapshot();
+                    if (_additionalParents[index].Property == parent)
+                    {
+                        _additionalParents.RemoveAt(index);
+                        InvalidateParentsSnapshot();
+                        return;
+                    }
                 }
             }
         }

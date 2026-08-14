@@ -3,6 +3,7 @@ using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
@@ -13,8 +14,19 @@ public class RegisteredSubjectProperty
     [ThreadStatic]
     private static Dictionary<IInterceptorSubject, int>? _reusableCollectionPositions;
 
+    [ThreadStatic]
+    private static Dictionary<IInterceptorSubject, object?>? _reusableDictionaryKeys;
+
+    private const byte ContainerKindUnresolved = 0;
+    private const byte ContainerKindNone = 1;
+    private const byte ContainerKindReference = 2;
+    private const byte ContainerKindCollection = 3;
+    private const byte ContainerKindDictionary = 4;
+
     private readonly List<SubjectPropertyChild> _children = [];
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
+
+    private byte _containerKind;
 
     private readonly PropertyAttributeAttribute? _attributeMetadata;
 
@@ -111,7 +123,7 @@ public class RegisteredSubjectProperty
     public bool CanContainSubjects
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Type.CanContainSubjects();
+        get => ContainerKind != ContainerKindNone;
     }
 
     /// <summary>
@@ -120,7 +132,7 @@ public class RegisteredSubjectProperty
     public bool IsSubjectReference
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Type.IsSubjectReferenceType();
+        get => ContainerKind == ContainerKindReference;
     }
 
     /// <summary>
@@ -129,7 +141,7 @@ public class RegisteredSubjectProperty
     public bool IsSubjectCollection
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Type.IsSubjectCollectionType();
+        get => ContainerKind == ContainerKindCollection;
     }
 
     /// <summary>
@@ -138,7 +150,38 @@ public class RegisteredSubjectProperty
     public bool IsSubjectDictionary
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Type.IsSubjectDictionaryType();
+        get => ContainerKind == ContainerKindDictionary;
+    }
+
+    /// <summary>
+    /// The property's container classification. Reference, collection and dictionary are mutually exclusive,
+    /// and <see cref="CanContainSubjects"/> is their union, so one resolved byte answers all four predicates
+    /// without the per-call type lookup each of them used to do.
+    /// </summary>
+    private byte ContainerKind
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            var containerKind = _containerKind;
+            return containerKind != ContainerKindUnresolved ? containerKind : ResolveContainerKind();
+        }
+    }
+
+    private byte ResolveContainerKind()
+    {
+        // The union first, so a property that cannot hold a subject, which is most of them, resolves in one
+        // lookup. Reference then needs no lookup of its own: it is whatever the other two are not.
+        var containerKind =
+            !Type.CanContainSubjects() ? ContainerKindNone :
+            Type.IsSubjectCollectionType() ? ContainerKindCollection :
+            Type.IsSubjectDictionaryType() ? ContainerKindDictionary :
+            ContainerKindReference;
+
+        // Racy on purpose: every thread resolves the same value from an immutable Type, and a byte
+        // assignment is atomic, so the worst case is resolving twice.
+        _containerKind = containerKind;
+        return containerKind;
     }
 
     /// <summary>
@@ -345,26 +388,19 @@ public class RegisteredSubjectProperty
     {
         lock (_children)
         {
+            // Matched by subject alone, for every property kind: attach adds at most one child per subject,
+            // and the stored index can differ from the one this detach carries, which would leave the child
+            // behind. Search backwards because LifecycleInterceptor detaches in reverse collection order,
+            // making each lookup O(1) instead of O(n).
+            var subject = child.Subject;
             var index = -1;
-            if (IsSubjectCollection)
+            for (var i = _children.Count - 1; i >= 0; i--)
             {
-                // For collections, match by Subject only. The Index field represents
-                // the collection position which shifts as items are removed.
-                // Search backwards because LifecycleInterceptor detaches in reverse
-                // collection order, making each lookup O(1) instead of O(n).
-                var subject = child.Subject;
-                for (var i = _children.Count - 1; i >= 0; i--)
+                if (_children[i].Subject == subject)
                 {
-                    if (_children[i].Subject == subject)
-                    {
-                        index = i;
-                        break;
-                    }
+                    index = i;
+                    break;
                 }
-            }
-            else
-            {
-                index = _children.IndexOf(child);
             }
 
             if (index == -1)
@@ -376,28 +412,58 @@ public class RegisteredSubjectProperty
     }
 
     /// <summary>
-    /// Syncs children's indices and parent entries with the live collection.
+    /// Syncs children's indices and parent entries with the live collection or dictionary.
     /// Must be called while LifecycleInterceptor's _attachedSubjects lock is held,
     /// because this method acquires _children then _knownSubjects, which is the inverse of
     /// HandleLifecycleChange's lock order. The outer _attachedSubjects lock serializes
     /// both paths and prevents deadlock.
     /// </summary>
-    /// <param name="collectionValue">The current collection value (passed from caller to avoid re-reading through interceptors).</param>
+    /// <param name="value">The current collection or dictionary value (passed from caller to avoid re-reading through interceptors).</param>
     /// <param name="registry">The subject registry (passed from caller to avoid repeated service resolution per child).</param>
-    internal void RefreshCollectionIndices(object? collectionValue, ISubjectRegistry registry)
+    internal void RefreshChildIndices(object? value, ISubjectRegistry registry)
     {
-        // Only collection-typed properties need position refresh; dictionary-keyed children
-        // are looked up by key (stable identity) rather than by integer index, so reordering
-        // entries doesn't invalidate their stored Index. The IEnumerable fallback in
-        // BuildCollectionPositions is therefore collection-only by design.
-        if (!IsSubjectCollection)
+        switch (ContainerKind)
+        {
+            case ContainerKindCollection:
+                RefreshCollectionPositions(value, registry);
+                return;
+
+            // Dictionary children are keyed, so reordering entries leaves their stored Index alone, but
+            // moving a retained subject to another key does change it.
+            case ContainerKindDictionary:
+                RefreshDictionaryKeys(value, registry);
+                return;
+
+            // Declared as object or as a plain interface, so it can hold a container too. The lifecycle
+            // interceptor derives these children's indices from the value, so this has to as well.
+            case ContainerKindReference:
+                switch (value)
+                {
+                    // The interceptor keys a subject value as a whole, with a null index.
+                    case IInterceptorSubject:
+                    case IDictionary:
+                        RefreshDictionaryKeys(value, registry);
+                        return;
+
+                    case IEnumerable:
+                        RefreshCollectionPositions(value, registry);
+                        return;
+                }
+
+                return;
+        }
+    }
+
+    private void RefreshCollectionPositions(object? value, ISubjectRegistry registry)
+    {
+        var collectionPositions = BuildCollectionPositions(value, _children.Count);
+        if (collectionPositions is null)
             return;
 
-        lock (_children)
+        try
         {
-            var collectionPositions = BuildCollectionPositions(collectionValue, _children.Count);
-            if (collectionPositions is null)
-                return;
+            lock (_children)
+            {
 
             for (var i = 0; i < _children.Count; i++)
             {
@@ -415,15 +481,112 @@ public class RegisteredSubjectProperty
                 // child is a readonly record struct snapshot from before the update above,
                 // so child.Index still holds the old value, which is correct for the oldIndex parameter.
                 registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, child.Index, boxedNewIndex);
+
+                // The tracked parents are a second copy of the same index, read by GetParents and by the
+                // JSON path helpers, so they move together or the two disagree.
+                child.Subject.UpdateParentIndex(Reference, boxedNewIndex);
             }
 
-            // Sort children to match live collection order
-            _children.Sort(static (a, b) => ((int)a.Index!).CompareTo((int)b.Index!));
-            _childrenCache = default;
-
-            // Release references so subjects can be GC'd on idle threads
-            collectionPositions.Clear();
+                // Sort children to match live collection order. Indices that are not positions sort last
+                // instead of throwing: a child stranded by an unsupported in-place mutation can still carry
+                // a key from an earlier value.
+                _children.Sort(static (a, b) => (a.Index as int? ?? int.MaxValue).CompareTo(b.Index as int? ?? int.MaxValue));
+                _childrenCache = default;
+            }
         }
+        finally
+        {
+            // Cleared so subjects can be GC'd, then handed back for the next refresh on this thread.
+            collectionPositions.Clear();
+            _reusableCollectionPositions = collectionPositions;
+        }
+    }
+
+    /// <summary>
+    /// Syncs children's keys and parent entries with the live dictionary. Unlike the collection path there is
+    /// no order to restore, so children are left in place. Same locking contract as
+    /// <see cref="RefreshChildIndices"/>.
+    /// </summary>
+    private void RefreshDictionaryKeys(object? dictionaryValue, ISubjectRegistry registry)
+    {
+        if (dictionaryValue is null)
+            return;
+
+        // Built outside the lock: it enumerates a caller-supplied dictionary, so holding _children here
+        // would run arbitrary enumeration code under it.
+        var dictionaryKeys = BuildDictionaryKeys(dictionaryValue);
+        try
+        {
+            lock (_children)
+            {
+                for (var i = 0; i < _children.Count; i++)
+                {
+                    var child = _children[i];
+                    if (!dictionaryKeys.TryGetValue(child.Subject, out var newKey) || Equals(child.Index, newKey))
+                        continue;
+
+                    _children[i] = child with { Index = newKey };
+                    _childrenCache = default;
+
+                    // child still holds the old key here, which is what UpdateParentIndex expects.
+                    registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, child.Index, newKey);
+                    child.Subject.UpdateParentIndex(Reference, newKey);
+                }
+            }
+        }
+        finally
+        {
+            // Cleared so subjects can be GC'd, then handed back for the next refresh on this thread.
+            dictionaryKeys.Clear();
+            _reusableDictionaryKeys = dictionaryKeys;
+        }
+    }
+
+    /// <summary>
+    /// Maps each subject in the dictionary to its current key, deriving keys as
+    /// <c>LifecycleInterceptor.FindSubjectsInProperty</c> does for a dictionary value, including null keys.
+    /// The last key wins, which differs from attach, where the first occurrence is the one recorded: it
+    /// matches the reverse detach loop, so the tracked parent entry is found by its exact key.
+    /// </summary>
+    private static Dictionary<IInterceptorSubject, object?> BuildDictionaryKeys(object value)
+    {
+        // Detached while in use, so a refresh re-entered from the enumeration below builds its own map
+        // instead of clearing this one.
+        var dictionaryKeys = _reusableDictionaryKeys ?? new Dictionary<IInterceptorSubject, object?>();
+        _reusableDictionaryKeys = null;
+        dictionaryKeys.Clear();
+
+        switch (value)
+        {
+            case IInterceptorSubject valueSubject:
+                dictionaryKeys[valueSubject] = null;
+                break;
+
+            case IDictionary dictionary:
+                foreach (DictionaryEntry entry in dictionary)
+                {
+                    if (entry.Value is IInterceptorSubject subject)
+                    {
+                        dictionaryKeys[subject] = entry.Key;
+                    }
+                }
+
+                break;
+
+            case IEnumerable enumerable:
+                // Read-only dictionaries that do not implement IDictionary enumerate key-value pairs.
+                foreach (var item in enumerable)
+                {
+                    if (item is not null && SubjectLookup.TryGetSubjectFromKeyValuePair(item, out var key, out var subject))
+                    {
+                        dictionaryKeys[subject] = key;
+                    }
+                }
+
+                break;
+        }
+
+        return dictionaryKeys;
     }
 
     /// <summary>
@@ -438,7 +601,10 @@ public class RegisteredSubjectProperty
         if (value is null)
             return null;
 
+        // Detached while in use, so a refresh re-entered from the enumeration below builds its own map
+        // instead of clearing this one.
         var collectionPositions = _reusableCollectionPositions;
+        _reusableCollectionPositions = null;
         collectionPositions?.Clear();
 
         if (value is IList list)

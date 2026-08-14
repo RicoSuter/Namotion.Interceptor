@@ -21,11 +21,12 @@ public interface IPropertyLifecycleHandler
     public void DetachProperty(SubjectPropertyLifecycleChange change);
 
     /// <summary>
-    /// Called after a collection property write has been fully reconciled
-    /// (all detach/attach events processed). Allows handlers to refresh
-    /// child index metadata from the live collection value.
+    /// Called after a subject-container property write has been fully reconciled
+    /// (all detach/attach events processed) and at least one subject was retained.
+    /// Allows handlers to refresh child index metadata from the live value, whether
+    /// that is a collection position, a dictionary key, or no index at all.
     /// </summary>
-    /// <param name="property">The collection property reference.</param>
-    /// <param name="value">The current collection value.</param>
+    /// <param name="property">The property reference.</param>
+    /// <param name="value">The current value of the property.</param>
     void RefreshCollectionProperty(PropertyReference property, object? value) { }
 }

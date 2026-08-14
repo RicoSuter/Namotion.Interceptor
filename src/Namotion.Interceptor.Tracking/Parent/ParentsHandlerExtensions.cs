@@ -12,6 +12,18 @@ public static class ParentsHandlerExtensions
         parentsSet.Add(new SubjectParent(parent, index));
     }
 
+    /// <summary>
+    /// Moves this subject's parent entry for the given property to a new index, so that the tracked parents
+    /// stay in step with the registry when a retained subject's position or key changes.
+    /// </summary>
+    internal static void UpdateParentIndex(this IInterceptorSubject subject, PropertyReference parent, object? newIndex)
+    {
+        if (subject.Data.TryGetValue((null, ParentsKey), out var existing))
+        {
+            ((ParentsSet)existing!).UpdateIndex(parent, newIndex);
+        }
+    }
+
     internal static void RemoveParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
     {
         if (subject.Data.TryGetValue((null, ParentsKey), out var existing))
@@ -101,7 +113,53 @@ public static class ParentsHandlerExtensions
                     _cache = null; // Invalidate cache
                     return true;
                 }
-                return false;
+
+                // Fall back to the property alone: attach adds at most one entry per property, so this is
+                // unambiguous, and an index that somehow moved unnoticed would otherwise strand the entry.
+                SubjectParent? stale = null;
+                foreach (var entry in _set)
+                {
+                    if (entry.Property == parent.Property)
+                    {
+                        stale = entry;
+                        break;
+                    }
+                }
+
+                if (stale is null)
+                {
+                    return false;
+                }
+
+                _set.Remove(stale.Value);
+                _cache = null; // Invalidate cache
+                return true;
+            }
+        }
+
+        public bool UpdateIndex(PropertyReference parent, object? newIndex)
+        {
+            lock (_lock)
+            {
+                SubjectParent? current = null;
+                foreach (var entry in _set)
+                {
+                    if (entry.Property == parent)
+                    {
+                        current = entry;
+                        break;
+                    }
+                }
+
+                if (current is null || Equals(current.Value.Index, newIndex))
+                {
+                    return false;
+                }
+
+                _set.Remove(current.Value);
+                _set.Add(new SubjectParent(parent, newIndex));
+                _cache = null; // Invalidate cache
+                return true;
             }
         }
 
