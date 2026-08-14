@@ -27,6 +27,13 @@ public class HostedServiceHandlerRaceTests
     /// </summary>
     private const int ChainLockRaceRounds = 4;
 
+    /// <summary>
+    /// How long a drain is watched for a return it must not make. "Did not happen" has no event to
+    /// wait on, so this is the one timed observation in the suite; too short only weakens it, and a
+    /// drain held on a lock cannot return however long it is watched.
+    /// </summary>
+    private static readonly TimeSpan DrainMustNotReturnWithin = TimeSpan.FromSeconds(1);
+
     [Fact]
     public async Task WhenADetachReleasesOwnershipBeforeAnAttachTakesIt_ThenTheAttachUndoesItsOwnTake()
     {
@@ -507,15 +514,13 @@ public class HostedServiceHandlerRaceTests
     [Fact]
     public async Task WhenAStopIsAppendedInsideTheDrainWindow_ThenTheDrainDoesNotReturnUntilItHasRun()
     {
-        // Arrange - the barrier. A detach that lands while the drain is between BeginDraining and its
-        // snapshots leaves the running set and joins the in flight set under one chain lock, so the
-        // drain sees it in exactly one of the two and has to wait for it. Held on the transition seam,
-        // so the only thing that can let StopAsync return is the drain awaiting it.
+        // Arrange - the whole detach completes inside the drain window, so both of its writes land
+        // ahead of both of the drain's reads and the barrier holds under either write order. What this
+        // covers is the plain case: a stop queued before the snapshots is waited for. The two tests
+        // that pin the write order itself, where a read falls between the writes, are below.
         //
         // This replaced two tests that pinned the opposite: that a stop escaping the drain still ran at
-        // Drained. That state was reachable only through the defect this guards, and it is not
-        // reachable now, because a target the detach removes from the running set is still in the
-        // drain's snapshot and the drain appends its own stop behind the held one on the same chain.
+        // Drained. That state was reachable only through the defect the barrier closes.
         var (host, context) = await HostingTestHost.StartAsync();
 
         var parent = new HostedParent(context);
@@ -554,7 +559,7 @@ public class HostedServiceHandlerRaceTests
         releaseDrain.SetResult();
 
         // Assert - the stop is held, so a drain that does not wait for it returns here.
-        var returnedEarly = await Task.WhenAny(stopping, Task.Delay(TimeSpan.FromSeconds(1))) == stopping;
+        var returnedEarly = await Task.WhenAny(stopping, Task.Delay(DrainMustNotReturnWithin)) == stopping;
         Assert.False(
             returnedEarly,
             "StopAsync returned while a stop appended inside the drain window was still held, so the "
@@ -568,6 +573,131 @@ public class HostedServiceHandlerRaceTests
 
         Assert.Equal(1, child.StopCount);
         Assert.True(created.ToArray() is [{ IsStopped: true, IsDisposed: true }]);
+    }
+
+    [Fact]
+    public async Task WhenAStopLeavesTheRunningSetAsTheDrainReadsIt_ThenTheDrainStillWaitsForIt()
+    {
+        // Arrange - the barrier's write order. A stop joins the in flight set before it leaves the
+        // running set, and the drain reads the running set before the in flight set, so a drain that
+        // misses it in the first read is reading the second one after the join and finds it there.
+        // Held at the one moment the stop is in both sets, which under the opposite write order is the
+        // moment it is in neither: the drain then waits for nothing.
+        var (host, context) = await HostingTestHost.StartAsync();
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+
+        var parent = new Parent(context);
+        var child = new Person();
+        parent.Child = child;
+
+        var created = new ConcurrentQueue<TrackedBackgroundService>();
+        var attachment = child.AttachHostedService(() =>
+        {
+            var instance = new TrackedBackgroundService();
+            created.Enqueue(instance);
+            return instance;
+        });
+
+        await attachment.DrainAsync();
+        Assert.True(created.ToArray() is [{ IsStarted: true }]);
+
+        // Holds the stop body as well as the bookkeeping, so the stop has provably not run when the
+        // drain returns and the only thing that can let it return is the drain awaiting that stop.
+        var releaseStop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+        target.TransitionGate = () => releaseStop.Task;
+
+        var bookkeepingReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseBookkeeping = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.StopBookkeepingGate = () =>
+        {
+            bookkeepingReached.TrySetResult();
+            releaseBookkeeping.Task.Wait();
+        };
+
+        // Act - the detach parks between its two writes, and the drain then runs both of its reads
+        // against that state. Both off the test thread, because each one blocks where it is held.
+        var detaching = Task.Run(() => { parent.Child = null; });
+        await bookkeepingReached.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var stopping = Task.Run(() => host.StopAsync());
+
+        // Assert - a drain whose two reads both missed the stop has nothing to await and returns here.
+        var returnedEarly = await Task.WhenAny(stopping, Task.Delay(DrainMustNotReturnWithin)) == stopping;
+
+        releaseBookkeeping.SetResult();
+        await detaching.WaitAsync(TimeSpan.FromSeconds(30));
+        releaseStop.SetResult();
+        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+
+        target.TransitionGate = null;
+        handler.StopBookkeepingGate = null;
+
+        Assert.False(
+            returnedEarly,
+            "StopAsync returned while a stop that had left the running set but not yet joined the in "
+            + "flight set was still held, so it fell through both reads and would run against a "
+            + "disposed service provider.");
+
+        Assert.True(created.ToArray() is [{ IsStopped: true, IsDisposed: true }]);
+    }
+
+    [Fact]
+    public async Task WhenAStartIsAppendedAsTheDrainReadsTheRunningSet_ThenTheDrainStillWaitsForIt()
+    {
+        // Arrange - the running set entry is written inside the chain lock and before the append,
+        // because the append is what makes the start body dispatchable. Written after the lock
+        // instead, a drain that reads the set in the gap finds nothing to stop while the body is
+        // already queued behind nothing and about to create an instance the drain will never see.
+        // Held on the chain lock seam, which sits between the entry and the append.
+        var (host, context) = await HostingTestHost.StartAsync();
+
+        var created = new ConcurrentQueue<TrackedBackgroundService>();
+        var child = new Person();
+
+        // Attached before the subject enters the graph, so the target exists to be armed and nothing
+        // has started yet: an attachment on a subject with no context resolves no handler.
+        var attachment = child.AttachHostedService(() =>
+        {
+            var instance = new TrackedBackgroundService();
+            created.Enqueue(instance);
+            return instance;
+        });
+
+        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+        var takeReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseTake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        target.ChainLockGate = () =>
+        {
+            takeReached.TrySetResult();
+            releaseTake.Task.Wait();
+        };
+
+        // Act
+        var parent = new Parent(context);
+        var attaching = Task.Run(() => { parent.Child = child; });
+        await takeReached.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var stopping = Task.Run(() => host.StopAsync());
+
+        // Assert - a drain whose snapshot missed this target has nothing to append and returns here.
+        var returnedEarly = await Task.WhenAny(stopping, Task.Delay(DrainMustNotReturnWithin)) == stopping;
+
+        releaseTake.SetResult();
+        await attaching.WaitAsync(TimeSpan.FromSeconds(30));
+        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+
+        target.ChainLockGate = null;
+
+        Assert.False(
+            returnedEarly,
+            "StopAsync returned while a start was queued on a target its snapshot never saw, so the "
+            + "instance that start creates is stopped by nobody.");
+
+        // The start the drain waited for refuses itself on the gate re-read, so nothing was created.
+        // What the assertion above pins is that the drain waited for it to reach that point.
+        Assert.Empty(created);
+        Assert.Null(target.Current);
     }
 
     [Fact]

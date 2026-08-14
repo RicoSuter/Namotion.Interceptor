@@ -61,6 +61,13 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// </summary>
     internal Action? LivenessReadGate { get; set; }
 
+    /// <summary>
+    /// Test seam, invoked inside the chain lock between a stop's in flight join and its running set
+    /// removal. Null in production. Holding it holds the only moment a stop is in both sets, which is
+    /// what the drain's read order turns into "always in at least one".
+    /// </summary>
+    internal Action? StopBookkeepingGate { get; set; }
+
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         // Runs inside LifecycleInterceptor's lock, so everything here only appends, which never blocks
@@ -452,12 +459,18 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         },
         onAppended: appended =>
         {
-            // All three under the chain lock, because the drain reads the two sets separately: leaving
-            // the running set before the append and joining the in flight set after it puts this stop
-            // in neither for as long as the gap lasts, and a drain that reads both inside it waits for
-            // nothing and returns while this stop is still about to touch a disposed service provider.
-            _running.TryRemove(target, out _);
+            // Joins the in flight set before leaving the running set, which is one half of the barrier;
+            // StopAsync reading the running set before the in flight set is the other. A drain that
+            // finds the target already gone from the running set is therefore reading the in flight set
+            // after this join and sees the stop. Removing first leaves a gap in which the stop is in
+            // neither set, and a drain reading both inside it waits for nothing and returns while this
+            // stop is still about to touch a service provider the host is disposing.
+            //
+            // Inside the chain lock only so a drain that does find the target has to queue behind this
+            // append rather than race it.
             TrackInFlightStop(appended);
+            StopBookkeepingGate?.Invoke();
+            _running.TryRemove(target, out _);
         });
 
         return stop;
@@ -626,14 +639,14 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         var snapshot = _running.ToArray();
 
-        // Read after the running set, never before it, and that order is the barrier. AppendStop leaves
-        // the running set and joins this one under the target's chain lock, so a stop is in exactly one
-        // of the two at any moment; reading this one second means a stop that moved between the two
-        // reads is caught here. Reading it first leaves a window in which it is in neither, and the
-        // drain then waits for nothing and returns while that stop is still running.
+        // Read after the running set, never before it, and that order is the barrier's other half.
+        // AppendStop joins this set before it leaves the running one, so a target the snapshot above
+        // missed had already been removed, which means its stop had already joined here and this read
+        // finds it. Reading this one first inverts the argument and leaves a window in which a stop is
+        // in neither, and the drain then waits for nothing and returns while that stop is still running.
         //
         // Nothing appended after this read is missed either: it is either for a target the snapshot
-        // above still held, so the drain appended its own stop ahead of it on the same chain and awaits
+        // above still held, so the drain appended its own stop behind it on the same chain and awaits
         // that one, or it is for a target with no instance, which the stop body no-ops.
         var queuedStops = _inFlightStops.Keys;
         var stops = new List<Task>(snapshot.Length + queuedStops.Count);

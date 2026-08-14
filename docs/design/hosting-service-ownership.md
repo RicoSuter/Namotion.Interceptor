@@ -48,12 +48,14 @@ _gate            HostedServiceGate       NotStarted, Running, Draining, Drained
 _running         ConcurrentDictionary    target -> subject, for targets this handler may have to stop
 _liveSubjects    ConcurrentDictionary    subject -> unused, for subjects in the graph that host something
 _inFlightStops   ConcurrentDictionary    stop task -> unused, for stops appended but not yet finished
-DrainGate        Func<Task>?             test seam, null in production
+DrainGate          Func<Task>?           test seam, null in production
 OwnershipTakenGate Action?               test seam, null in production
 LivenessWriteGate  Action?               test seam, null in production
+LivenessReadGate   Action?               test seam, null in production
+StopBookkeepingGate Action?              test seam, null in production
 ```
 
-The three concurrent dictionaries are the state the rest of this document is about. `_running` maps a target to its subject rather than being a set, because the drain has to group the targets it stops per subject to reproduce the ordering a context detach gives. The three seams are documented where they are declared; each one holds open a window between two statements that are adjacent in production.
+The three concurrent dictionaries are the state the rest of this document is about. `_running` maps a target to its subject rather than being a set, because the drain has to group the targets it stops per subject to reproduce the ordering a context detach gives. The seams are documented where they are declared; each one holds open a window between two statements that are adjacent in production.
 
 `_liveSubjects` holds an entry only for subjects that host something, not for every subject that attaches. Every reader of liveness holds a `HostedServiceTarget` when it reads, so a subject with no target has no reader, and recording one for the whole graph cost a concurrent dictionary write per subject on attach and a removal per subject on detach: measured on a 20,000 subject graph that hosts nothing at 95 bytes per subject into a fresh context and 40 bytes into a warm one, the difference being that a `ConcurrentDictionary` never shrinks its table, so only the first attach grows it. The removal on detach allocates nothing, which is why the attach half of that cost is the half `HostingLifecycleBenchmark` can see.
 
@@ -273,19 +275,30 @@ Both places that rethrow a recorded fault to a caller, `HostedServiceHandler.Wai
 `StopAsync` is built from the pieces above rather than around them:
 
 1. `BeginDraining`, which stops new targets being taken and releases parked waiters.
-2. Snapshot `_inFlightStops` immediately, so it holds exactly the stops queued before the drain.
-3. Clear `_liveSubjects`, for the reason recorded there, and because it is also what stops `WaitForStartAsync` appending an empty transition behind the drain's own stop, which is what `HostedServiceHandlerTests.WhenAHandlerIsAskedToWaitWhileItsOwnDrainIsStopping_ThenItAnswersWithoutQueueingBehindTheStop` pins: deleting the clear is the one change that fails it.
-4. Snapshot `_running` and append stops in the same per subject shape a context detach uses: a stop carrying a `subjectStopped` signal for every subject target, then a stop for every attachment target that awaits its own subject's signal when that subject was in the snapshot.
-5. Await those plus the stops from step 2, bounded by the host's stopping token.
+2. Clear `_liveSubjects`, for the reason recorded there, and because it is also what stops `WaitForStartAsync` appending an empty transition behind the drain's own stop, which is what `HostedServiceHandlerTests.WhenAHandlerIsAskedToWaitWhileItsOwnDrainIsStopping_ThenItAnswersWithoutQueueingBehindTheStop` pins: deleting the clear is the one change that fails it.
+3. Snapshot `_running`, then snapshot `_inFlightStops`, in that order and never the other one. Why is below.
+4. Append stops for the `_running` snapshot in the same per subject shape a context detach uses: a stop carrying a `subjectStopped` signal for every subject target, then a stop for every attachment target that awaits its own subject's signal when that subject was in the snapshot.
+5. Await those plus the stops from the `_inFlightStops` snapshot, bounded by the host's stopping token.
 6. Release ownership of every target in the snapshot, clear `_running`, `CompleteDraining`.
 
 A cancelled wait in step 5 is swallowed rather than propagated, and the drain still finishes: rethrowing would abandon step 6, so every target this handler owns would stay owned by a dead handler and a second host over the same subjects would start nothing. That reason is at the `catch`, and why nothing below step 5 observes the token is at the wait above it. Pinned by `HostedServiceHandlerTests.WhenAServiceStopNeverReturns_ThenShutdownDoesNotOutlastTheTimeout` and `HostedServiceHandlerTests.WhenTheShutdownTokenIsAlreadyCancelled_ThenTheInstanceIsStillDisposed`, both of which fail when the cancellation is rethrown instead.
 
 ### Joining and leaving the running set
 
-**A target joins `_running` when its start is taken and leaves when its stop is appended**, not when either completes. Joining at completion would let the drain's snapshot miss a queued start, which is the same race the `Draining` state closes and should not depend on two mechanisms agreeing. Joining happens after the ownership take rather than before, for the reason recorded at the join.
+**A target joins `_running` when its start is taken and leaves when its stop is appended**, not when either completes. Joining at completion would let the drain's snapshot miss a queued start, which is the same race the `Draining` state closes and should not depend on two mechanisms agreeing.
 
-Leaving at append time is why step 2 exists: a stop appended just before the drain is in no `_running` snapshot, so without it the drain returns while that stop is still running, and the host disposes the service provider the moment `StopAsync` returns. Each entry removes itself through a continuation, so the set does not grow with the process. Pinned by `HostedServiceHandlerRaceTests.WhenAStopIsInFlightWhenTheHostDrains_ThenTheDrainWaitsForIt`.
+Leaving at append time is why `_inFlightStops` exists: a stop appended just before the drain is in no `_running` snapshot, so without it the drain returns while that stop is still running, and the host disposes the service provider the moment `StopAsync` returns. Each entry removes itself through a continuation, so the set does not grow with the process. Pinned by `HostedServiceHandlerRaceTests.WhenAStopIsInFlightWhenTheHostDrains_ThenTheDrainWaitsForIt`.
+
+### Why the barrier is an ordering and not a lock
+
+The drain reads two sets that another thread is writing, and it holds nothing while it reads them. Nothing stops a start or a stop landing between the two reads, so the barrier is built out of the order of the writes against the order of the reads, and each side is worthless without the other:
+
+- **A stop joins `_inFlightStops` before it leaves `_running`**, and the drain reads `_running` before `_inFlightStops`. A drain that missed a stop in the first read did so because the removal had already happened, which means the join had already happened too, so the second read finds it. Reverse either order and there is a window in which the stop is in neither set, the drain waits for nothing, and it returns while that stop is still about to touch a provider the host is disposing. Pinned by `HostedServiceHandlerRaceTests.WhenAStopLeavesTheRunningSetAsTheDrainReadsIt_ThenTheDrainStillWaitsForIt`, which parks a detach between the two writes on `StopBookkeepingGate` and fails when they are swapped.
+- **A start joins `_running` before its body is appended**, both inside the chain lock. The append is what makes the body dispatchable, so a body that can run at all is one whose entry is already visible: a drain that reads the set afterwards sees it, and one that reads it before sees nothing but has also already reached `Draining`, which the body then re-reads and refuses. Joining after the append leaves a gap in which the body is live and the target is in no set. Pinned by `HostedServiceHandlerRaceTests.WhenAStartIsAppendedAsTheDrainReadsTheRunningSet_ThenTheDrainStillWaitsForIt`, which parks the take on `ChainLockGate` and fails when the join moves back out of the lock.
+
+The join is inside the take's lock rather than before it because a `_running` entry for a target this handler failed to take would make the drain stop and dispose an instance another handler created and is running.
+
+Both tests assert that `StopAsync` did **not** return within a bounded window, which is the one timed observation in the suite: "did not happen" has no event to wait on. It is not a race in either direction. On an intact build the drain is blocked on the chain lock the seam holds, so no length of wait lets it return; on a reverted build it has nothing to await and returns in tens of milliseconds.
 
 ### The two gate reads in `TryTakeOwnershipAndStart`
 
