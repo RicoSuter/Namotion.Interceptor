@@ -2,6 +2,7 @@
 using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
@@ -462,5 +463,46 @@ public class DerivedPropertyChangeHandlerTests
         // Assert - Each derived property should fire exactly once (no duplicates)
         Assert.Single(firedEvents, e => e == "FullName");
         Assert.Single(firedEvents, e => e == "FullNameWithPrefix");
+    }
+
+    [Fact]
+    public async Task WhenTransactionIsOpenOnAnotherContext_ThenDerivedPropertiesStillRecalculate()
+    {
+        // Arrange: the written context has no transaction interceptor, so the transaction open on the
+        // other context never captures the write and no commit will replay its cascade. The ambient
+        // transaction slot is process-wide, so the handler still sees that transaction.
+        var transactionContext = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithDerivedPropertyChangeDetection()
+            .WithPropertyChangeSubscriptions();
+
+        var transactionPerson = new Person(transactionContext);
+        var person = new Person(context)
+        {
+            FirstName = "John",
+            LastName = "Doe"
+        };
+
+        var changedProperties = new List<string>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change => changedProperties.Add(change.Property.Name));
+
+        // Act
+        using (await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            transactionPerson.FirstName = "Captured";
+            person.FirstName = "Jane";
+        }
+
+        // Assert
+        Assert.Contains(nameof(Person.FirstName), changedProperties);
+        Assert.Contains(nameof(Person.FullName), changedProperties);
+        Assert.Contains(nameof(Person.FullNameWithPrefix), changedProperties);
     }
 }
