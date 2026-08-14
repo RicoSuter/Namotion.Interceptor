@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.Tracking.Tests;
 public class LifecycleInterceptorTests
 {
     [Fact]
-    public void WhenSubjectIsAttached_ThenRunUnderLifecycleLockIfAttachedRunsTheCallback()
+    public void WhenSubjectIsAttached_ThenTryRunUnderLifecycleLockIfAttachedRunsTheCallback()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
@@ -18,7 +18,7 @@ public class LifecycleInterceptorTests
 
         // Act
         var ran = 0;
-        var reported = interceptor.RunUnderLifecycleLockIfAttached(person, () => ran++);
+        var reported = interceptor.TryRunUnderLifecycleLockIfAttached(person, () => ran++);
 
         // Assert
         Assert.True(reported);
@@ -26,7 +26,7 @@ public class LifecycleInterceptorTests
     }
 
     [Fact]
-    public void WhenSubjectIsNotAttached_ThenRunUnderLifecycleLockIfAttachedRunsNothing()
+    public void WhenSubjectIsNotAttached_ThenTryRunUnderLifecycleLockIfAttachedRunsNothing()
     {
         // Arrange - the callback carries the caller's whole decision, so a subject this interceptor
         // does not hold must not see it run at all rather than run and be told afterwards.
@@ -36,7 +36,7 @@ public class LifecycleInterceptorTests
 
         // Act
         var ran = 0;
-        var reported = interceptor.RunUnderLifecycleLockIfAttached(stranger, () => ran++);
+        var reported = interceptor.TryRunUnderLifecycleLockIfAttached(stranger, () => ran++);
 
         // Assert
         Assert.False(reported);
@@ -44,7 +44,7 @@ public class LifecycleInterceptorTests
     }
 
     [Fact]
-    public void WhenSubjectIsDetached_ThenRunUnderLifecycleLockIfAttachedStopsRunningTheCallback()
+    public void WhenSubjectIsDetached_ThenTryRunUnderLifecycleLockIfAttachedStopsRunningTheCallback()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithLifecycle();
@@ -53,13 +53,13 @@ public class LifecycleInterceptorTests
         var child = new Person();
         mother.Children = [child];
 
-        Assert.True(interceptor.RunUnderLifecycleLockIfAttached(child, () => { }));
+        Assert.True(interceptor.TryRunUnderLifecycleLockIfAttached(child, () => { }));
 
         // Act
         mother.Children = [];
 
         var ran = 0;
-        var reported = interceptor.RunUnderLifecycleLockIfAttached(child, () => ran++);
+        var reported = interceptor.TryRunUnderLifecycleLockIfAttached(child, () => ran++);
 
         // Assert
         Assert.False(reported);

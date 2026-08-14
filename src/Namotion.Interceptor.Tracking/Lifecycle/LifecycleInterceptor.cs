@@ -48,7 +48,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// <param name="subject">The subject.</param>
     /// <param name="whenAttached">Runs only if the subject is attached.</param>
     /// <returns>True when the subject was attached and the callback ran.</returns>
-    public bool RunUnderLifecycleLockIfAttached(IInterceptorSubject subject, Action whenAttached)
+    public bool TryRunUnderLifecycleLockIfAttached(IInterceptorSubject subject, Action whenAttached)
     {
         lock (_attachedSubjects)
         {
