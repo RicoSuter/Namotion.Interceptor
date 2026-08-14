@@ -156,6 +156,8 @@ internal sealed class HostedServiceTarget
                 return null;
             }
 
+            handler.LivenessReadGate?.Invoke();
+
             if (!TryTakeOwnership(handler, out ownershipTaken))
             {
                 return null;

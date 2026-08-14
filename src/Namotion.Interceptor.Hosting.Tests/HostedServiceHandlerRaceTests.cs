@@ -28,6 +28,76 @@ public class HostedServiceHandlerRaceTests
     private const int ChainLockRaceRounds = 4;
 
     [Fact]
+    public async Task WhenADetachReleasesOwnershipBeforeAnAttachTakesIt_ThenTheAttachUndoesItsOwnTake()
+    {
+        // Arrange - the take reads liveness and installs the owner inside the chain lock, while a
+        // context detach clears liveness, reads Owner and releases outside it. A take that lands after
+        // the detach read Owner as null is one nothing releases: the target stays owned by this handler
+        // and stays in its running set, which roots the detached subject until shutdown and makes the
+        // next handler over that subject lose the compare and exchange for good.
+        var (host, context) = await HostingTestHost.StartAsync();
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+
+        try
+        {
+            var parent = new Parent(context);
+            var child = new Person();
+            parent.Child = child;
+
+            var attachment = child.AttachHostedService(() => new TrackedBackgroundService());
+            var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+            await attachment.DrainAsync();
+
+            // A second attachment, so the act below has a target whose ownership is still unclaimed at
+            // the moment the detach runs. The first one is what keeps the subject live until then.
+            var created = 0;
+            var takeReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseTake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            // Armed on the handler rather than on the target, because the target the act creates does
+            // not exist until the act runs. The first attachment above already took its ownership, so
+            // the next take to reach this seam is the one under test.
+            handler.LivenessReadGate = () =>
+            {
+                takeReached.TrySetResult();
+                releaseTake.Task.GetAwaiter().GetResult();
+            };
+
+            HostedServiceTarget? secondTarget = null;
+            var attaching = Task.Run(() =>
+            {
+                var second = child.AttachHostedService(() =>
+                {
+                    Interlocked.Increment(ref created);
+                    return new TrackedBackgroundService();
+                });
+
+                secondTarget = ((IHostedServiceAttachmentTarget)second).Target;
+                return second;
+            });
+
+            await takeReached.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+            // Act - the whole detach runs while the take is held before its compare and exchange, so
+            // it clears liveness, reads Owner as null and releases nothing.
+            parent.Child = null;
+            releaseTake.SetResult();
+            await attaching.WaitAsync(TimeSpan.FromSeconds(30));
+
+            // Assert
+            Assert.False(handler.IsLive(child));
+            Assert.Null(secondTarget!.Owner);
+            Assert.False(handler.IsRunning(secondTarget!));
+            Assert.Equal(0, Volatile.Read(ref created));
+        }
+        finally
+        {
+            handler.LivenessReadGate = null;
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task WhenAReAttachLandsWhileTheSubjectStopIsHeld_ThenAFreshInstanceRunsAndTheOldOneIsDisposed()
     {
         // Arrange - holding the subject's stop is what makes the re-attach provably land mid-stop.

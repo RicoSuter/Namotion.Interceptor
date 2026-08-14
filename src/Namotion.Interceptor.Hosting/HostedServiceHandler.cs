@@ -61,6 +61,15 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// </summary>
     internal Action? LivenessWriteGate { get; set; }
 
+    /// <summary>
+    /// Test seam, invoked inside the chain lock in
+    /// <see cref="HostedServiceTarget.TryTakeOwnershipAndAppendAsync"/> after the liveness read and
+    /// before the ownership take. Null in production, where the two statements it sits between are
+    /// adjacent. It holds open the window in which a context detach reads the target's owner as null
+    /// and releases nothing, so the take that follows would be one no release ever reaches.
+    /// </summary>
+    internal Action? LivenessReadGate { get; set; }
+
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         // Invoked from inside LifecycleInterceptor's lock (_attachedSubjects). Everything here only
@@ -250,13 +259,22 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         OwnershipTakenGate?.Invoke();
 
-        if (ownershipTaken && _gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
+        if (ownershipTaken &&
+            (!_liveSubjects.ContainsKey(subject) ||
+             _gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained))
         {
-            // Re-read after both writes, which is what turns the check at the top from a narrowing
-            // into a guard. Reading Running here proves the drain had not begun when the two writes
-            // landed, so its own snapshot covers this target and its release loop reaches it. Reading
-            // anything later means the drain may already have swept past, so the take is undone here
-            // rather than left to a release loop that will never see it.
+            // Re-read after both writes, which is what turns the checks above from narrowings into
+            // guards. Reading Running here proves the drain had not begun when the two writes landed,
+            // so its own snapshot covers this target and its release loop reaches it. Reading anything
+            // later means the drain may already have swept past, so the take is undone here rather
+            // than left to a release loop that will never see it.
+            //
+            // The liveness read closes the same shape against a context detach rather than a drain,
+            // and it is needed because the detach reads Owner and releases outside the chain lock
+            // while this takes it inside: a take that lands after the detach read Owner as null is one
+            // nothing releases. The subject then stays rooted on this handler until shutdown, and the
+            // next handler over it loses the compare and exchange for good. The detach clears liveness
+            // before it reads Owner, so a take that missed the release cannot miss the clear as well.
             //
             // Only an ownership this call installed is undone. Finding this handler already installed
             // means an earlier attach owns a target that may be running, and undoing that one would
@@ -563,6 +581,12 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     }
 
     internal bool IsLive(IInterceptorSubject subject) => _liveSubjects.ContainsKey(subject);
+
+    /// <summary>
+    /// Whether this handler holds the target in the set its drain would stop. Test only: a target left
+    /// here for a subject that has left the graph is the leak, not an observable behaviour.
+    /// </summary>
+    internal bool IsRunning(HostedServiceTarget target) => _running.ContainsKey(target);
 
     /// <summary>
     /// Records liveness for a subject that is already in the graph but hosted nothing when it entered,

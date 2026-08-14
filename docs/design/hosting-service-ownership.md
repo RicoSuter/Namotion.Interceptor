@@ -305,6 +305,14 @@ What these two protect is the liveness entry rather than the owner: whichever of
 
 The read on entry has no test that fails for it alone, and that is a coverage limit rather than redundancy. The window it covers is a drain beginning between it and the liveness write beside it, and those two statements are adjacent, so no seam can drive anything into the gap.
 
+### Undoing a take the detach could not release
+
+`TryTakeOwnershipAndStart` re-reads liveness after its two writes and undoes an ownership it installed, exactly as it does for the drain. The two cases are the same shape against different racers.
+
+The detach clears liveness, then reads `Owner`, then releases, and it does the read and the release outside the chain lock while the take does both inside it. So a take whose liveness read passed before the detach's clear, and whose compare and exchange landed after the detach's release, is one the detach never saw and never releases. No instance is created, because the start body re-reads liveness and refuses, but the target stays owned and stays in the running set, which roots the detached subject on this handler until shutdown and makes the next handler over that subject lose the compare and exchange for good.
+
+The clear happens before the release, which is what makes the undo sound: a take that missed the release cannot also have missed the clear. Pinned by `HostedServiceHandlerRaceTests.WhenADetachReleasesOwnershipBeforeAnAttachTakesIt_ThenTheAttachUndoesItsOwnTake`, which holds the take on `LivenessReadGate` between its liveness read and its compare and exchange, because those two statements are adjacent in production.
+
 ### The two gate reads in `MarkLiveIfAttached`
 
 The same pair, on the path a subject takes when it gains its first target while already in the graph, and they protect the same thing: an entry written after the drain cleared the set is one nothing removes, so the subject stays live on a dead handler for the rest of that handler's life.
