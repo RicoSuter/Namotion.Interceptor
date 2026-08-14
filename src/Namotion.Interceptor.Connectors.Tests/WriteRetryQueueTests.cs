@@ -911,6 +911,59 @@ public class WriteRetryQueueTests
         Assert.Equal(new[] { "Refused", "Retryable" }, drained);
     }
 
+    [Fact]
+    public async Task WhenAHeldPropertyIsThenWrittenSuccessfully_ThenTheHeldWriteIsNotSentLater()
+    {
+        // Arrange - a source that refuses the property and then starts accepting it, which is what the
+        // access-scoped codes are documented to do mid-session. A held change is owed to the source only
+        // until something newer reaches it: sending the older one afterwards puts the source back on a
+        // value the newer write replaced, and the source then reports that value, so the model follows
+        // it down too.
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var property = CreateProperty("Flipping");
+        var writes = new List<SubjectPropertyChange[]>();
+        var refusing = true;
+
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                var batch = changes.ToArray();
+                writes.Add(batch);
+
+                return new ValueTask<WriteResult>(refusing
+                    ? WriteResult
+                        .Failure(batch, new InvalidOperationException("Refused"))
+                        .WithRefusedUntilReconnect(batch.ToImmutableArray())
+                    : WriteResult.Success);
+            });
+
+        queue.Enqueue(new[] { CreateChange(property, 1, revision: 1) });
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        Assert.Equal(1, queue.RefusedWriteCount);
+
+        // Act - the source starts taking the property, and a newer value reaches it successfully
+        refusing = false;
+        queue.Enqueue(new[] { CreateChange(property, 2, revision: 2) });
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        queue.RetryRefusedWrites();
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - nothing carrying the superseded value may reach the source after the newer one landed
+        Assert.Equal(0, queue.RefusedWriteCount);
+        Assert.Equal(0, queue.PendingWriteCount);
+
+        var valuesSentAfterTheAcceptedWrite = writes
+            .Skip(2)
+            .SelectMany(batch => batch)
+            .Select(change => change.GetNewValue<int>())
+            .ToArray();
+
+        Assert.DoesNotContain(1, valuesSentAfterTheAcceptedWrite);
+    }
+
     private static PropertyReference CreateProperty(string name)
     {
         return new PropertyReference(new Mock<IInterceptorSubject>().Object, name);

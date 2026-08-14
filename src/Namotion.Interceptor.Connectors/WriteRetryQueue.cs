@@ -242,6 +242,64 @@ internal sealed class WriteRetryQueue : IDisposable
     }
 
     /// <summary>
+    /// Drops a held write for any property this attempt wrote successfully. Call it with the batch that
+    /// was attempted and the changes that failed, whatever the outcome.
+    /// </summary>
+    /// <remarks>
+    /// A held write is owed to the source only until something newer reaches it. Holding it out of the
+    /// pending queue is what makes it invisible to the collapse that would otherwise have ranked the two,
+    /// so nothing else can notice it went stale. The source deciding to take a property it refused is not
+    /// an edge case either: it is what the access-scoped refusals are for, since role permissions and
+    /// access levels are the server's to change mid-session. Left held, the older value goes out on the
+    /// next connection and puts the source back, and the source then reports that value, so the model
+    /// follows it down and the newer write is lost at both ends.
+    /// </remarks>
+    public void DiscardHeldWritesFor(
+        ReadOnlySpan<SubjectPropertyChange> attempted, ImmutableArray<SubjectPropertyChange> failed)
+    {
+        if (attempted.IsEmpty)
+        {
+            return;
+        }
+
+        lock (_lock)
+        {
+            // Checked inside the lock and before anything is allocated: nothing is held on the ordinary
+            // path, and this runs after every write.
+            if (_refusedWrites.Count == 0)
+            {
+                return;
+            }
+
+            HashSet<PropertyReference>? failedProperties = null;
+            if (!failed.IsDefaultOrEmpty)
+            {
+                failedProperties = new HashSet<PropertyReference>(failed.Length, PropertyReference.Comparer);
+                foreach (var change in failed)
+                {
+                    failedProperties.Add(change.Property);
+                }
+            }
+
+            var discardedAny = false;
+            foreach (var change in attempted)
+            {
+                if (failedProperties?.Contains(change.Property) is true)
+                {
+                    continue;
+                }
+
+                discardedAny |= _refusedWrites.Remove(change.Property);
+            }
+
+            if (discardedAny)
+            {
+                Volatile.Write(ref _refusedCount, _refusedWrites.Count);
+            }
+        }
+    }
+
+    /// <summary>
     /// Records a change the source refuses until it reconnects, merging it with one already held for
     /// the same property. Caller holds <see cref="_lock"/>.
     /// </summary>
@@ -351,6 +409,11 @@ internal sealed class WriteRetryQueue : IDisposable
                 // replacement had already released against the connection that replaced it.
                 var connectionGeneration = ConnectionGeneration;
                 var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
+
+                // Before the failures are queued, so a property that failed here keeps whatever is held
+                // for it, and one that went through does not.
+                DiscardHeldWritesFor(memory.Span, result.FailedChanges);
+
                 if (result.Error is not null)
                 {
                     // FailedChanges is complete (see WriteChangesInBatchesAsync), so every dequeued item

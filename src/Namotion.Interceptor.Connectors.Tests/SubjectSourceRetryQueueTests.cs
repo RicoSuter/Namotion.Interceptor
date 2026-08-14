@@ -191,6 +191,102 @@ public class SubjectSourceRetryQueueTests
         }
     }
 
+    [Fact]
+    public async Task WhenTheSourceStartsAcceptingAHeldProperty_ThenTheHeldWriteIsNotSentOnTheNextConnection()
+    {
+        // Arrange: the source refuses FirstName, then takes it. Role permissions and access levels are
+        // the server's to change mid-session, which is the whole reason those refusals are scoped to a
+        // connection rather than treated as permanent. Holding the write keeps the queue empty, so the
+        // newer one goes straight out and nothing collapses the two.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+
+        var gate = new object();
+        var batches = new List<string[]>();
+        var refusing = true;
+
+        var source = new TestSubjectSource(person, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(8))
+        {
+            WriteChangesOverride = (changes, _) =>
+            {
+                lock (gate)
+                {
+                    var batch = changes.ToArray();
+                    batches.Add(batch
+                        .Select(change => $"{change.Property.Name}={change.GetNewValue<object?>()}")
+                        .ToArray());
+
+                    var refused = refusing
+                        ? batch.Where(change => change.Property.Name == nameof(Person.FirstName)).ToImmutableArray()
+                        : ImmutableArray<SubjectPropertyChange>.Empty;
+
+                    return ValueTask.FromResult(refused.IsEmpty
+                        ? WriteResult.Success
+                        : WriteResult
+                            .Failure(refused.AsSpan().ToArray(), new InvalidOperationException("Refused"))
+                            .WithRefusedUntilReconnect(refused));
+                }
+            },
+        };
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source);
+
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            var probeValue = 0;
+            var probe = string.Empty;
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                if (IndexOfBatchWith(gate, batches, probe) >= 0)
+                {
+                    return true;
+                }
+
+                probe = $"{nameof(Person.LastName)}=Probe{probeValue++}";
+                person.LastName = $"Probe{probeValue - 1}";
+                return false;
+            }, message: "Pump did not start processing changes.");
+
+            person.FirstName = "Refused";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.RefusedWriteCount == 1,
+                message: "The refused write was never held back.");
+
+            // Act: the source takes the property now, and a newer value reaches it
+            refusing = false;
+            person.FirstName = "Accepted";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => IndexOfBatchWith(gate, batches, "FirstName=Accepted") >= 0,
+                message: "The accepted write never reached the source.");
+
+            var acceptedIndex = IndexOfBatchWith(gate, batches, "FirstName=Accepted");
+            source.SimulateConnectionLost();
+
+            // Assert: releasing must not put the superseded value back on the source, which would then
+            // report it and take the model down with it.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundRetries.Depth == 0 && source.RefusedWriteCount == 0,
+                message: "The held write was never resolved after the connection was replaced.");
+
+            lock (gate)
+            {
+                var sentAfterAcceptance = batches.Skip(acceptedIndex + 1);
+                Assert.DoesNotContain(sentAfterAcceptance, batch => batch.Contains("FirstName=Refused"));
+            }
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
     private static int IndexOfBatchWith(object gate, List<string[]> batches, string entry)
     {
         if (entry.Length == 0)

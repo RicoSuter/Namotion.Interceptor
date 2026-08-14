@@ -406,6 +406,12 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             // Read before the write is issued, since the connection can be replaced while it is in flight.
             var connectionGeneration = WriteRetryQueue.ConnectionGeneration;
             var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+
+            // This is the path a write to a held property takes, because holding it keeps the queue empty
+            // and the flush above therefore short-circuits. A property that goes through here has to stop
+            // being held, or the older value is delivered on the next connection and replaces it.
+            WriteRetryQueue.DiscardHeldWritesFor(changes.Span, result.FailedChanges);
+
             if (!result.IsFullySuccessful)
             {
                 _logger.LogWarning(result.Error, "Failed to write {Count} changes to source, queuing for retry.",
