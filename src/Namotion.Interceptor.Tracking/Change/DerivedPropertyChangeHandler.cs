@@ -164,14 +164,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         var usedByProperties = data.GetUsedByProperties();
         if (usedByProperties.Length > 0)
         {
-            // Suppress cascading recalculations only when the ambient transaction captured this write and
-            // will therefore replay it on commit: it must still be capturing (neither committing nor
-            // disposed) and be bound to the context owning the written property. The ambient slot is
-            // process-wide while transaction capture is per-context, so a transaction open on an unrelated
-            // context leaves this write on the model with no commit to replay its cascade on.
+            // Suppress only when the ambient transaction captured this write and will replay it on commit.
+            // Capture skips derived properties, and the ambient slot is process-wide while capture is
+            // per-context, so neither a derived write nor a transaction on another context has a commit to
+            // replay its cascade on. Membership rather than TryGetService, which throws on more than one,
+            // and an exception escaping a setter takes the process down.
             if (SubjectTransaction.HasActiveTransaction &&
+                !context.Property.Metadata.IsDerived &&
                 SubjectTransaction.Current is { IsCommitting: false, IsDisposed: false } transaction &&
-                context.Property.Subject.Context.TryGetService<SubjectTransactionInterceptor>() == transaction.Interceptor)
+                context.Property.Subject.Context.GetServices<SubjectTransactionInterceptor>().Contains(transaction.Interceptor))
             {
                 return;
             }

@@ -505,4 +505,53 @@ public class DerivedPropertyChangeHandlerTests
         Assert.Contains(nameof(Person.FullName), changedProperties);
         Assert.Contains(nameof(Person.FullNameWithPrefix), changedProperties);
     }
+
+    [Fact]
+    public async Task WhenADerivedPropertyIsWrittenInATransaction_ThenItsDependentsStillRecalculate()
+    {
+        // Arrange: capture skips derived properties, so this write reaches the model and no commit will
+        // replay it. Suppressing its cascade would leave the dependents stale for good.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+
+        var person = new DerivedSetterPerson(context);
+        _ = person.NicknameWithPrefix;
+
+        var changedProperties = new List<string>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change => changedProperties.Add(change.Property.Name));
+
+        // Act
+        using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.Nickname = "Rico";
+        }
+
+        // Assert
+        Assert.Contains(nameof(DerivedSetterPerson.NicknameWithPrefix), changedProperties);
+    }
+
+    [Fact]
+    public async Task WhenTheContextResolvesTwoTransactionInterceptors_ThenADerivedWriteDoesNotThrow()
+    {
+        // Arrange: context inheritance adds another context as a fallback, so a subject can resolve two
+        // transaction interceptors. Resolving exactly one out of a property setter throws, and an
+        // exception escaping a setter on a scheduler thread takes the process down.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithTransactions();
+        var fallbackContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithTransactions();
+
+        var person = new DerivedSetterPerson(context);
+        _ = person.NicknameWithPrefix;
+        ((IInterceptorSubject)person).Context.AddFallbackContext(fallbackContext);
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        var exception = Record.Exception(() => person.Nickname = "Rico");
+
+        // Assert
+        Assert.Null(exception);
+    }
 }
