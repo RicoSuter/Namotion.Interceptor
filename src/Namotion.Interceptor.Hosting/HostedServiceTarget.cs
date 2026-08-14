@@ -163,6 +163,34 @@ internal sealed class HostedServiceTarget
                 return null;
             }
 
+            if (!handler.IsLive(subject))
+            {
+                // Read again, after the take and still inside this lock, because a context detach
+                // clears liveness, reads Owner and releases, and it does the last two outside this
+                // lock. A take that passed the read above and landed after that release is one the
+                // detach never saw and never releases: the target would stay owned and rooted on this
+                // handler until shutdown, and the next handler over the subject would lose the compare
+                // and exchange for good.
+                //
+                // Undone here rather than after the lock, because ReleaseOwnership matches on the
+                // handler rather than on the take: outside the lock a re-attach can install a fresh
+                // ownership in between, and undoing then destroys that one instead, leaving a subject
+                // in the graph whose service never starts, or a running instance in no running set
+                // that shutdown never stops. Inside the lock no install can interleave, because every
+                // install takes it.
+                //
+                // Only an ownership this call installed is released. Finding this handler already
+                // installed means an earlier take owns it, and the detach either has already released
+                // that one or is about to, having read Owner as non-null.
+                if (ownershipTaken)
+                {
+                    ReleaseOwnership(handler);
+                    ownershipTaken = false;
+                }
+
+                return null;
+            }
+
             ChainLockGate?.Invoke();
 
             return AppendCore(body);

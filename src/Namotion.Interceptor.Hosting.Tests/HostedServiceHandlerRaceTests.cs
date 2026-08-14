@@ -45,7 +45,6 @@ public class HostedServiceHandlerRaceTests
             parent.Child = child;
 
             var attachment = child.AttachHostedService(() => new TrackedBackgroundService());
-            var target = ((IHostedServiceAttachmentTarget)attachment).Target;
             await attachment.DrainAsync();
 
             // A second attachment, so the act below has a target whose ownership is still unclaimed at
@@ -56,7 +55,10 @@ public class HostedServiceHandlerRaceTests
 
             // Armed on the handler rather than on the target, because the target the act creates does
             // not exist until the act runs. The first attachment above already took its ownership, so
-            // the next take to reach this seam is the one under test.
+            // the next take to reach this seam is the one under test. It holds the second target's
+            // chain lock, which the detach below never needs: that target has no owner yet, so the
+            // detach appends no stop for it. A test whose detach must append on the held target would
+            // deadlock here.
             handler.LivenessReadGate = () =>
             {
                 takeReached.TrySetResult();
@@ -88,6 +90,10 @@ public class HostedServiceHandlerRaceTests
             Assert.False(handler.IsLive(child));
             Assert.Null(secondTarget!.Owner);
             Assert.False(handler.IsRunning(secondTarget!));
+
+            // Not discriminating on its own: the start body refuses on liveness whether or not the
+            // take was undone. Asserted because a leaked ownership that also started something is the
+            // worse of the two failures, and this separates them.
             Assert.Equal(0, Volatile.Read(ref created));
         }
         finally

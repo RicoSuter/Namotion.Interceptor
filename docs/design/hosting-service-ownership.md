@@ -307,11 +307,13 @@ The read on entry has no test that fails for it alone, and that is a coverage li
 
 ### Undoing a take the detach could not release
 
-`TryTakeOwnershipAndStart` re-reads liveness after its two writes and undoes an ownership it installed, exactly as it does for the drain. The two cases are the same shape against different racers.
+The detach clears liveness, then reads `Owner`, then releases, and it does the last two outside the chain lock while a take does its own read and compare and exchange inside it. So a take whose liveness read passed before the clear, and whose exchange landed after the release, is one the detach never saw and never releases. No instance is created while liveness stays cleared, because the start body re-reads it, but the target stays owned and stays in the running set, which roots the detached subject on this handler until shutdown and makes the next handler over that subject lose the compare and exchange for good.
 
-The detach clears liveness, then reads `Owner`, then releases, and it does the read and the release outside the chain lock while the take does both inside it. So a take whose liveness read passed before the detach's clear, and whose compare and exchange landed after the detach's release, is one the detach never saw and never releases. No instance is created, because the start body re-reads liveness and refuses, but the target stays owned and stays in the running set, which roots the detached subject on this handler until shutdown and makes the next handler over that subject lose the compare and exchange for good.
+`TryTakeOwnershipAndAppendAsync` therefore reads liveness a second time, after its own take and still inside the chain lock, and releases an ownership it installed rather than appending anything. The clear happens before the release, so a take that missed the release cannot also have missed the clear.
 
-The clear happens before the release, which is what makes the undo sound: a take that missed the release cannot also have missed the clear. Pinned by `HostedServiceHandlerRaceTests.WhenADetachReleasesOwnershipBeforeAnAttachTakesIt_ThenTheAttachUndoesItsOwnTake`, which holds the take on `LivenessReadGate` between its liveness read and its compare and exchange, because those two statements are adjacent in production.
+**Inside the lock, not after it, and that placement is the whole point.** `ReleaseOwnership` matches on the handler rather than on the take, so an undo running outside the lock can destroy an ownership a concurrent re-attach installed in between: the subject is then in the graph and live with nothing running and no error anywhere, or a started instance sits in no running set and shutdown never stops it. Inside the lock no install can interleave, because every install takes it. The gate equivalent of this undo does sit outside the lock, and is safe there only because a draining handler installs nothing at all.
+
+Pinned by `HostedServiceHandlerRaceTests.WhenADetachReleasesOwnershipBeforeAnAttachTakesIt_ThenTheAttachUndoesItsOwnTake`, which holds the take on `LivenessReadGate` between its first liveness read and its compare and exchange, because those two statements are adjacent in production.
 
 ### The two gate reads in `MarkLiveIfAttached`
 

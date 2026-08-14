@@ -259,22 +259,19 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         OwnershipTakenGate?.Invoke();
 
-        if (ownershipTaken &&
-            (!_liveSubjects.ContainsKey(subject) ||
-             _gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained))
+        if (ownershipTaken && _gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
         {
-            // Re-read after both writes, which is what turns the checks above from narrowings into
-            // guards. Reading Running here proves the drain had not begun when the two writes landed,
-            // so its own snapshot covers this target and its release loop reaches it. Reading anything
-            // later means the drain may already have swept past, so the take is undone here rather
-            // than left to a release loop that will never see it.
+            // Re-read after both writes, which is what turns the check at the top from a narrowing
+            // into a guard. Reading Running here proves the drain had not begun when the two writes
+            // landed, so its own snapshot covers this target and its release loop reaches it. Reading
+            // anything later means the drain may already have swept past, so the take is undone here
+            // rather than left to a release loop that will never see it.
             //
-            // The liveness read closes the same shape against a context detach rather than a drain,
-            // and it is needed because the detach reads Owner and releases outside the chain lock
-            // while this takes it inside: a take that lands after the detach read Owner as null is one
-            // nothing releases. The subject then stays rooted on this handler until shutdown, and the
-            // next handler over it loses the compare and exchange for good. The detach clears liveness
-            // before it reads Owner, so a take that missed the release cannot miss the clear as well.
+            // Safe outside the chain lock only because a draining handler installs nothing: it bails
+            // in AttachSubject and again at the top of this method, so no concurrent take of this
+            // handler's can be in flight for ReleaseOwnership, which matches on the handler rather
+            // than on the take, to clobber. The liveness equivalent of this undo cannot be done here
+            // for exactly that reason and lives inside the chain lock instead.
             //
             // Only an ownership this call installed is undone. Finding this handler already installed
             // means an earlier attach owns a target that may be running, and undoing that one would
