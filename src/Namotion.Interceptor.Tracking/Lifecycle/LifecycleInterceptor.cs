@@ -32,7 +32,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
     /// <summary>
     /// Runs <paramref name="whenAttached"/> while the subject is provably in this interceptor's object
-    /// graph, and reports whether it ran.
+    /// graph, holding the lock that serializes graph mutation for the duration, and reports whether it
+    /// ran.
     /// </summary>
     /// <remarks>
     /// A callback rather than a plain predicate, because the answer is only usable while it still
@@ -48,7 +49,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// <param name="subject">The subject.</param>
     /// <param name="whenAttached">Runs only if the subject is attached.</param>
     /// <returns>True when the subject was attached and the callback ran.</returns>
-    public bool TryRunUnderLifecycleLockIfAttached(IInterceptorSubject subject, Action whenAttached)
+    public bool TryRunWhileAttached(IInterceptorSubject subject, Action whenAttached)
     {
         lock (_attachedSubjects)
         {
