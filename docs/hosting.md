@@ -212,7 +212,7 @@ else if (attachment.Current is { } service)
 }
 ```
 
-`AttachHostedService` and `DetachHostedService` return as soon as the transition has been queued, so neither result means "started" or "stopped". `Current` and `Fault` are how the outcome is observed. `DetachHostedService` returns false when the attachment was not on the subject, which is what a second detach of the same handle gets. The awaitable overloads wait for the transition instead:
+`AttachHostedService` and `DetachHostedService` return once the transition has been queued rather than run, so neither result means "started" or "stopped". Queueing is not instant on the attach side: it takes the lifecycle lock to record liveness, so it blocks for as long as any graph move already holding that lock takes. Do not call it while holding a lock that a lifecycle handler could need, and do not call it from a hosted service's own dispose path. `Current` and `Fault` are how the outcome is observed. `DetachHostedService` returns false when the attachment was not on the subject, which is what a second detach of the same handle gets. The awaitable overloads wait for the transition instead:
 
 ```csharp
 var attachment = await person.AttachHostedServiceAsync(

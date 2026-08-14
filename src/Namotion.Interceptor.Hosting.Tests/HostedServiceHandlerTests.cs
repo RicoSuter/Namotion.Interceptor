@@ -1308,9 +1308,17 @@ public class HostedServiceHandlerTests
 
             mover.Start();
 
-            // Act
-            child.AttachHostedService(() => new TrackedBackgroundService());
-            mover.Join(TimeSpan.FromSeconds(30));
+            // Act - joined in a finally, or an attach that throws leaves the mover spinning for the
+            // rest of the run on a thread nothing collects.
+            try
+            {
+                child.AttachHostedService(() => new TrackedBackgroundService());
+            }
+            finally
+            {
+                Volatile.Write(ref release, 1);
+                mover.Join(TimeSpan.FromSeconds(30));
+            }
 
             // Assert
             Assert.False(
@@ -1326,5 +1334,90 @@ public class HostedServiceHandlerTests
         {
             await host.StopAsync();
         }
+    }
+
+    [Fact]
+    public async Task WhenAnAttachmentIsAddedAfterTheDrainClearedLiveness_ThenTheSubjectIsNotLeftLive()
+    {
+        // Arrange - the drain window MarkLiveIfAttached's own gate reads exist for, and the only one
+        // that reaches them. Attaching while the drain is parked at DrainGate heals itself, because
+        // the clear still follows; this parks the drain inside a stop body instead, past
+        // StopAsync's _liveSubjects.Clear(), so an entry written here is one nothing ever removes and
+        // it roots the subject on a dead handler for the life of the process.
+        var (host, context) = await HostingTestHost.StartAsync();
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+
+        var running = new CountingHostedSubject();
+        ((IInterceptorSubject)running).Context.AddFallbackContext(context);
+        await AsyncTestHelpers.WaitUntilAsync(() => running.StartCount == 1);
+
+        var stopEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        running.StopHold = () =>
+        {
+            stopEntered.TrySetResult();
+            return release.Task;
+        };
+
+        var parent = new Parent(context);
+        var child = new Person();
+        parent.Child = child;
+
+        // The drain has to begin after this attach passed the entry gate read and before its write
+        // lands, which is the only interleaving the re-read below covers and the reason it is not
+        // redundant with the read on entry. Driven through the seam, because the window is two
+        // adjacent statements.
+        var writeReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.LivenessWriteGate = () =>
+        {
+            writeReached.TrySetResult();
+            releaseWrite.Task.GetAwaiter().GetResult();
+        };
+
+        var attaching = Task.Run(() => child.AttachHostedService(() => new TrackedBackgroundService()));
+        await writeReached.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Act - the drain runs to past its liveness clear while the write is held. Nothing on this
+        // path needs the lifecycle lock the held write is holding.
+        var stopping = host.StopAsync();
+        await stopEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => !handler.IsLive(running),
+            message: "The drain never reached its liveness clear.");
+
+        releaseWrite.SetResult();
+        await attaching.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert - the write landed on a handler whose drain had already cleared the set, so the
+        // re-read after it is the only thing that stops the entry outliving the handler.
+        Assert.False(handler.IsLive(child));
+
+        handler.LivenessWriteGate = null;
+        release.SetResult();
+        await stopping;
+
+        Assert.False(handler.IsLive(child));
+    }
+
+    [Fact]
+    public void WhenAnAttachmentIsDetachedFromASubjectThatNeverHadOne_ThenThatSubjectIsNotRecordedAsEverHosting()
+    {
+        // Arrange - the detach path's fast path turns on whether a subject has ever hosted anything,
+        // and that answer is the presence of the attachments data key. A refused detach must not
+        // create it: the subject would then pay the full detach path for the rest of its life, which
+        // is the cost the fast path exists to avoid.
+        var owner = new Person();
+        var bystander = new Person();
+        var attachment = owner.AttachHostedService(() => new TrackedBackgroundService());
+
+        // Act
+        var removed = bystander.DetachHostedService(attachment);
+
+        // Assert
+        Assert.False(removed);
+        Assert.False(((IInterceptorSubject)bystander).TryGetHostedServiceAttachments(out var attachments));
+        Assert.Empty(attachments);
+        Assert.True(((IInterceptorSubject)owner).TryGetHostedServiceAttachments(out _));
     }
 }

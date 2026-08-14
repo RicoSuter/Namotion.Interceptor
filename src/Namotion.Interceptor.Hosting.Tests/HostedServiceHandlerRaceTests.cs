@@ -1086,8 +1086,12 @@ public class HostedServiceHandlerRaceTests
         // compare and exchange, which is the one thing a target owned by a draining handler denies it.
         var liveHandler = new HostedServiceHandler(() => null);
         // Last, not Single: the arrange added one to make the child live, and ImmutableArray.Add
-        // appends, so the one the act added is at the end.
-        var target = ((IHostedServiceAttachmentTarget)child.GetHostedServiceAttachments().Last()).Target;
+        // appends, so the one the act added is at the end. Counted first, because Single used to carry
+        // that check implicitly and Last does not: picking the wrong target here would test nothing.
+        var published = child.GetHostedServiceAttachments();
+        Assert.Equal(2, published.Length);
+
+        var target = ((IHostedServiceAttachmentTarget)published.Last()).Target;
         var claimed = target.TryTakeOwnership(liveHandler, out var ownershipTaken);
         target.ReleaseOwnership(liveHandler);
 

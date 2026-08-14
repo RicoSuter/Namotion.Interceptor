@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Hosting;
-using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Benchmark;
@@ -62,16 +62,16 @@ internal sealed class EmptyLifecycleHandler : ILifecycleHandler
 
 public enum HostingArm
 {
-    /// <summary>Registry only. Hosting is not enabled at all.</summary>
+    /// <summary>Lifecycle only. Hosting is not enabled at all.</summary>
     None,
 
-    /// <summary>Registry plus a lifecycle handler whose body does nothing.</summary>
+    /// <summary>Lifecycle plus a handler whose body does nothing, which isolates chain dispatch.</summary>
     EmptyHandler,
 
-    /// <summary>Registry plus <c>WithHostedServices</c>, on a graph where nothing is hosted.</summary>
+    /// <summary>Lifecycle plus <c>WithHostedServices</c>, on a graph where nothing is hosted.</summary>
     Hosting,
 
-    /// <summary>Registry plus <c>WithHostedServices</c>, on a graph where one subject is hosted.</summary>
+    /// <summary>Lifecycle plus <c>WithHostedServices</c>, on a graph where one subject is hosted.</summary>
     HostingOneHosted
 }
 
@@ -105,9 +105,14 @@ public class HostingLifecycleBenchmark
 
     private IInterceptorSubjectContext CreateContext()
     {
+        // Context inheritance rather than the registry, which is what the arms need and nothing more.
+        // The registry allocates a RegisteredSubject per subject, so including it puts a baseline of
+        // tens of megabytes under every arm and leaves the hosting delta a few percent of it. The
+        // detach arm is the one that suffers: its work is a dictionary removal that allocates nothing
+        // and costs nanoseconds, so it is only visible against a small baseline.
         var context = InterceptorSubjectContext
             .Create()
-            .WithRegistry();
+            .WithContextInheritance();
 
         switch (Arm)
         {

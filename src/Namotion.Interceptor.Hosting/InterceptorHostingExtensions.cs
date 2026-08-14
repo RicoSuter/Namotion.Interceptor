@@ -193,6 +193,15 @@ public static class InterceptorHostingExtensions
     {
         var removed = false;
 
+        // Read before the update, because AddOrUpdate's add factory runs when the key is absent:
+        // detaching an attachment this subject never had would otherwise insert the key and make the
+        // subject report "has ever hosted" for the rest of its life, costing it the detach fast path
+        // forever. Nothing removes the key once present, so it cannot vanish between the two calls.
+        if (!subject.Data.ContainsKey((null, AttachmentsKey)))
+        {
+            return false;
+        }
+
         subject.Data.AddOrUpdate((null, AttachmentsKey),
             _ => null,
             (_, value) =>
