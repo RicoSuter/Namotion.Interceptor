@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Reactive.Concurrency;
+using System.Reactive.Disposables;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using Namotion.Interceptor.Tracking;
@@ -41,7 +43,17 @@ internal static class SubscriptionMemoryMeasurements
 
         Console.WriteLine($"Retained memory of {SubscriptionCount} live subscriptions on {SubscriptionCount} distinct subjects");
         MeasureRetained("inline", static (property, observer) => property.SubscribeInline(observer));
+        MeasureRetained("inline observable", static (property, _) => property.GetInlineChangeObservable().Subscribe(NoOpRxObserver.Instance));
         MeasureRetained("scheduled", static (property, observer) => property.Subscribe(observer, Scheduler.Default));
+        MeasureInlineObservableInstance();
+
+        Console.WriteLine();
+        Console.WriteLine("Marginal cost of one more consumer on ONE context (context-level channels)");
+        MeasureContextChannelMarginalCost("queue", static context => context.CreatePropertyChangeQueueSubscription());
+        MeasureContextChannelMarginalCost("default observable", static context => context.GetPropertyChangeObservable().Subscribe(NoOpRxObserver.Instance));
+
+        Console.WriteLine();
+        MeasureDispatchThreads();
 
         Console.WriteLine();
         Console.WriteLine($"Writing-thread allocation over {WriteCount:N0} writes of one property");
@@ -132,6 +144,200 @@ internal static class SubscriptionMemoryMeasurements
         Console.WriteLine($"    heap delta, handles dropped   {(afterHandlesDropped - baseline) / (double)SubscriptionCount,10:0.#} bytes/subscription");
     }
 
+    // The context-level channels are per context rather than per property, so "held per subscription" means
+    // what one MORE consumer costs. Measuring each subscribe on its own separates that from the copy-on-write
+    // consumer array both channels grow, which is quadratic in the consumer count over a run of subscribes but
+    // is churn rather than retention: only the last array is held. The first subscribe additionally pays the
+    // channel's one-time setup, which is why the marginal figures start at the second.
+    private static void MeasureContextChannelMarginalCost(string label, Func<IInterceptorSubjectContext, IDisposable> subscribe)
+    {
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithPropertyChangeSubscriptions();
+
+        // A subject has to exist for the interceptor to be resolvable the way a caller would reach it.
+        var subject = new Car(context);
+
+        var subscriptions = new IDisposable[SubscriptionCount];
+        var marginal = new long[SubscriptionCount];
+
+        for (var index = 0; index < subscriptions.Length; index++)
+        {
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            subscriptions[index] = subscribe(context);
+            marginal[index] = GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+
+        var total = 0L;
+        foreach (var value in marginal)
+        {
+            total += value;
+        }
+
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        foreach (var subscription in subscriptions)
+        {
+            subscription.Dispose();
+        }
+        var disposeAllocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+        GC.KeepAlive(subject);
+        GC.KeepAlive(subscriptions);
+
+        Console.WriteLine($"  {label}");
+        Console.WriteLine($"    first subscriber              {marginal[0],10} bytes (includes the channel's one-time setup)");
+        Console.WriteLine($"    2nd / 3rd / 4th subscriber    {marginal[1],10} / {marginal[2]} / {marginal[3]} bytes");
+        Console.WriteLine($"    100th / 1000th subscriber     {marginal[99],10} / {marginal[SubscriptionCount - 1]} bytes (grows by 8 bytes per existing consumer: the array copy)");
+        Console.WriteLine($"    all {SubscriptionCount} subscribers          {total / (double)SubscriptionCount,10:0.#} bytes/subscription including that churn");
+        Console.WriteLine($"    allocated by dispose          {disposeAllocated / (double)SubscriptionCount,10:0.#} bytes/subscription");
+    }
+
+    // Splits the inline observable's subscribe figure: the observable object is the only part of it a caller
+    // who drops the observable after subscribing does not keep, the subscription holding the adapter instead.
+    private static void MeasureInlineObservableInstance()
+    {
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithPropertyChangeSubscriptions();
+
+        var property = new PropertyReference(new Car(context), nameof(Car.Name));
+        var observables = new IObservable<SubjectPropertyChange>[SubscriptionCount];
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var index = 0; index < observables.Length; index++)
+        {
+            observables[index] = property.GetInlineChangeObservable();
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        GC.KeepAlive(observables);
+
+        Console.WriteLine($"  the observable object alone, no subscribe");
+        Console.WriteLine($"    allocated                     {allocated / (double)SubscriptionCount,10:0.#} bytes");
+    }
+
+    // Managed heap is not all a subscriber holds. Rx resolves an ISchedulerLongRunning from Scheduler.Default,
+    // so the ObserveOn sink behind the default observable owns a thread per subscriber for the life of the
+    // subscription, taken on the first change rather than at subscribe. The scheduled per-property channel
+    // schedules an ordinary work item instead and shares the thread pool. Counting the distinct threads
+    // deliveries arrive on shows the difference without needing a platform thread count.
+    private static void MeasureDispatchThreads()
+    {
+        const int subscriberCount = 50;
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithPropertyChangeSubscriptions();
+
+        var subject = new Car(context);
+        var observableObservers = new DispatchThreadObserver[subscriberCount];
+        var observableSubscriptions = new IDisposable[subscriberCount];
+        for (var index = 0; index < subscriberCount; index++)
+        {
+            observableObservers[index] = new DispatchThreadObserver();
+            observableSubscriptions[index] = context
+                .GetPropertyChangeObservable()
+                .Subscribe(observableObservers[index]);
+        }
+
+        // One change reaches every subscriber, which is what makes each sink take its thread.
+        subject.Name = WriteValue;
+        WaitForFirstDelivery(observableObservers);
+
+        var scheduledObservers = new DispatchThreadObserver[subscriberCount];
+        var scheduledSubjects = new Car[subscriberCount];
+        var scheduledSubscriptions = new IDisposable[subscriberCount];
+        for (var index = 0; index < subscriberCount; index++)
+        {
+            scheduledObservers[index] = new DispatchThreadObserver();
+            scheduledSubjects[index] = new Car(context);
+            scheduledSubscriptions[index] = new PropertyReference(scheduledSubjects[index], nameof(Car.Name))
+                .Subscribe(scheduledObservers[index], Scheduler.Default);
+        }
+
+        foreach (var scheduledSubject in scheduledSubjects)
+        {
+            scheduledSubject.Name = WriteValue;
+        }
+        WaitForFirstDelivery(scheduledObservers);
+
+        Console.WriteLine($"Threads deliveries arrive on, {subscriberCount} subscribers");
+        ReportDispatchThreads("default observable", observableObservers);
+        ReportDispatchThreads("scheduled per-property", scheduledObservers);
+
+        foreach (var subscription in observableSubscriptions)
+        {
+            subscription.Dispose();
+        }
+
+        foreach (var subscription in scheduledSubscriptions)
+        {
+            subscription.Dispose();
+        }
+    }
+
+    private static void WaitForFirstDelivery(DispatchThreadObserver[] observers)
+    {
+        var spinWait = new SpinWait();
+        foreach (var observer in observers)
+        {
+            while (observer.ThreadId == 0)
+            {
+                spinWait.SpinOnce(-1);
+            }
+        }
+    }
+
+    private static void ReportDispatchThreads(string label, DispatchThreadObserver[] observers)
+    {
+        var threadIds = new HashSet<int>();
+        var poolDeliveries = 0;
+        foreach (var observer in observers)
+        {
+            threadIds.Add(observer.ThreadId);
+            if (observer.IsThreadPoolThread)
+            {
+                poolDeliveries++;
+            }
+        }
+
+        Console.WriteLine(
+            $"  {label,-22} {threadIds.Count,3} distinct threads, {poolDeliveries} of {observers.Length} on a thread-pool thread");
+    }
+
+    // Both interfaces so one observer can be pointed at either channel.
+    private sealed class DispatchThreadObserver : IObserver<SubjectPropertyChange>, IPropertyChangeObserver
+    {
+        private int _threadId;
+
+        public int ThreadId => Volatile.Read(ref _threadId);
+
+        public bool IsThreadPoolThread { get; private set; }
+
+        public void OnNext(SubjectPropertyChange value) => Record();
+
+        public void OnChange(in SubjectPropertyChange change) => Record();
+
+        private void Record()
+        {
+            if (ThreadId != 0)
+            {
+                return;
+            }
+
+            IsThreadPoolThread = Thread.CurrentThread.IsThreadPoolThread;
+            Volatile.Write(ref _threadId, Environment.CurrentManagedThreadId);
+        }
+
+        public void OnError(Exception error)
+        {
+        }
+
+        public void OnCompleted()
+        {
+        }
+    }
+
     // What a change costs while the queue is genuinely growing, which is the one regime the delivery
     // benchmarks cannot show: they drain every burst, so their queue segment ends up big enough to be reused
     // as a ring and stops allocating. Holding the drain for the whole run keeps every enqueued change alive
@@ -143,11 +349,9 @@ internal static class SubscriptionMemoryMeasurements
             .WithPropertyChangeSubscriptions();
 
         var subject = new Car(context);
-        var drainScheduler = new DrainScheduler();
-        drainScheduler.Hold();
 
         using var subscription = new PropertyReference(subject, nameof(Car.Name))
-            .Subscribe(new NoOpPropertyChangeObserver(), drainScheduler);
+            .Subscribe(new NoOpPropertyChangeObserver(), new SuspendedScheduler());
 
         for (var index = 0; index < WarmupWriteCount; index++)
         {
@@ -214,6 +418,29 @@ internal static class SubscriptionMemoryMeasurements
         }
 
         return scheduled.IsFaulted ? " (subscription FAULTED, figure is meaningless)" : " (queue drained)";
+    }
+
+    // Accepts drain work items and never runs them, so the backlog never shrinks. Holding the drain is the
+    // only way to reach a genuinely growing queue: a no-op observer otherwise outruns any single writer.
+    private sealed class SuspendedScheduler : IScheduler
+    {
+        public DateTimeOffset Now => Scheduler.Default.Now;
+
+        public IDisposable Schedule<TState>(TState state, Func<IScheduler, TState, IDisposable> action)
+            => Disposable.Empty;
+
+        public IDisposable Schedule<TState>(TState state, TimeSpan dueTime, Func<IScheduler, TState, IDisposable> action)
+            => Disposable.Empty;
+
+        public IDisposable Schedule<TState>(TState state, DateTimeOffset dueTime, Func<IScheduler, TState, IDisposable> action)
+            => Disposable.Empty;
+    }
+
+    private sealed class NoOpPropertyChangeObserver : IPropertyChangeObserver
+    {
+        public void OnChange(in SubjectPropertyChange change)
+        {
+        }
     }
 
     private static long GetSettledTotalMemory()

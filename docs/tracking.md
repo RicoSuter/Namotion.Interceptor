@@ -72,7 +72,8 @@ var person = new Person(context)
 - Great for UI data binding scenarios
 
 **Observable limitations:**
-- Higher memory overhead per change event
+- One dedicated dispatch thread per subscriber at the default scheduler, which is what bounds how many subscribers this channel supports (see [Channel Cost](#channel-cost))
+- Higher memory overhead per subscriber
 - Slightly lower throughput in high-frequency scenarios
 - Subject synchronization overhead
 
@@ -112,7 +113,7 @@ while (subscription.TryDequeue(out var change, cancellationToken))
 - Cancellation takes priority over buffered items: `TryDequeue` checks the token before dequeuing, so a cancelled call returns `false` even when items are available.
 
 **Queue limitations:**
-- `TryDequeue` is synchronous and blocks a consumer thread until an item arrives, cancellation is requested, or the subscription is disposed. Continuously draining several subscriptions therefore costs one blocked consumer thread per subscription while they are idle, whereas the observable multiplexes all its subscribers onto the dispatch thread and its scheduler.
+- `TryDequeue` is synchronous and blocks a consumer thread until an item arrives, cancellation is requested, or the subscription is disposed. Continuously draining several subscriptions therefore costs one blocked consumer thread per subscription while they are idle, though the observable at its default scheduler is no cheaper here: it takes a dedicated dispatch thread per subscriber.
 - There is no asynchronous consumer API: `TryDequeue` returns the change through an `out` parameter, so it cannot be awaited.
 
 **Queue use cases:**
@@ -173,7 +174,7 @@ using var handle = person.SubscribeToProperty(
 
 **Dormancy is not symmetric with disposal**: detaching the subject stops acceptance but not the drain, so a change accepted before the detach is still delivered afterwards, carrying a subject that has already left the registry. Disposal instead drops whatever is still queued.
 
-**Disposal allocates rather than releases**: clearing the queue installs a fresh segment instead of dropping the old one, so disposal allocates about 5,312 bytes and a disposed handle that is still referenced keeps roughly 5.3 KB alive. Drop the handle, do not merely dispose it.
+**Disposal allocates rather than releases**: clearing the queue installs a fresh segment instead of dropping the old one, so a disposed handle that is still referenced keeps holding most of what the live subscription held. Drop the handle, do not merely dispose it; [Channel Cost](#channel-cost) has the figures.
 
 #### Composing with Rx
 
@@ -218,25 +219,23 @@ On every channel, the old value is what the generated setter observed at the cal
 
 ### Channel Cost
 
-Everything below was measured on an Apple M4 Max running .NET 9.0.10 arm64, so read the figures as one machine's, not as universal. Allocation is quoted in absolute bytes because it came out bit-identical across three runs. Time is quoted only as a factor between channels measured in the same run: the noise floor here is about 1.5 percent with no CPU pinning available, and absolute timings did not hold up across runs.
+Measured on one Apple M4 Max running .NET 9.0.10 arm64, so read the figures as that machine's, not as universal. The byte figures were bit-identical across runs and hold as absolute values; the timings could not be pinned to a CPU, have a noise floor around 3.5 percent, and are usable only as factors between rows of the same run, each of which writes the same single property.
 
 | Channel | Allocated per write | Allocated per delivery | Held per live subscription | Allocated per subscribe and dispose | Write time, inline = 1 |
 |---|---|---|---|---|---|
-| `GetPropertyChangeObservable()` | not measured at its default, see below | not measured | not measured | not measured | not measured at its default, see below |
-| `CreatePropertyChangeQueueSubscription()` | none | not measured | not measured | not measured | 1.9, with a consumer draining |
+| `GetPropertyChangeObservable()` | none | none | about 5,672 bytes per additional subscriber, plus one dedicated dispatch thread each | 5,736 bytes | about 2.2 |
+| `CreatePropertyChangeQueueSubscription()` | none | none | about 5,496 bytes per additional subscription | 5,552 bytes | 1.9 |
 | `SubscribeInline` | none | in the write | about 172 bytes | 136 bytes | 1.0, the reference |
-| `GetInlineChangeObservable` | none | in the write, one lock taken | about 172 bytes | not measured | not measured |
+| `GetInlineChangeObservable` | none | in the write, one lock taken | about 216 bytes | 248 bytes | 1.0 |
 | `Subscribe` with a scheduler | about 34 bytes | 160 bytes keeping up, none under backlog | about 5,607 bytes | 10,912 bytes | 2.6 |
 
-Every write in the table is the same single-property write, so the factors compare channels rather than workloads, and the context-level channels were measured on the write side only. A property whose value is a reference type other than `string` adds about 48 bytes per write, once per write no matter how many channels consume it.
+**A dispatch thread per subscriber.** At its default scheduler, every subscriber to `GetPropertyChangeObservable()` holds a dedicated dispatch thread for as long as it lives: 50 subscribers were measured on 50 distinct threads, none from the thread pool, against 2 pool threads for 50 scheduled per-property subscriptions. That is what bounds how many consumers the channel supports.
 
-**Why the observable has no write figure.** The benchmark subscribes it with `ImmediateScheduler.Instance`, which is not its default and which takes a different code path: that scheduler skips `ObserveOn` entirely, so the measurement covers a synchronization lock and an inline handler and nothing else. At the default the write also enqueues into the `ObserveOn` sink and dispatches a scheduler work item, which is strictly more than the queue channel's enqueue and signal, so the observable's real write cost is above the queue's rather than below it. Publishing the `ImmediateScheduler` number here would invert that ordering, so it is left out until the default is measured.
+**Setup dominates, not steady state.** Almost all of a scheduled subscription's footprint is its empty `ConcurrentQueue<SubjectPropertyChange>`, about 5,376 bytes, so a thousand of them cost roughly 5.35 MB against roughly 0.16 MB for a thousand inline ones, and on a wide model that, not the per-write cost, decides the channel. The two context-level channels are per context, so their held figure is what one *more* consumer costs; the first also pays a one-time setup, about 9,976 bytes for the queue and 6,864 for the observable. The scheduled channel's subscribe-and-dispose figure is both halves added together, because [disposal allocates rather than releasing](#scheduled-delivery).
 
-**Setup dominates, not steady state.** Almost all of a scheduled subscription's footprint is its empty `ConcurrentQueue<SubjectPropertyChange>`, about 5,376 bytes, so a thousand of them cost roughly 5.35 MB against roughly 0.16 MB for a thousand inline ones. On a wide model that memory, not the per-write cost, is what decides the channel, and it is invisible from per-write cost alone.
+**The default observable costs the writer a little more than the queue**, about 2.2 against 1.9, and bimodally: the write pays a wake-up only when the dispatch thread has caught up, so it falls back towards 1.9 whenever that thread is behind.
 
-**Disposing a scheduled subscription allocates rather than releases**, so the subscribe-and-dispose figure above is the two halves added together and a disposed handle that stays referenced keeps holding most of it; see [Scheduled delivery](#scheduled-delivery).
-
-**The two delivery regimes differ by more than a constant.** While the observer keeps up, every change pays its own scheduler work item and allocates. Once a backlog forms, scheduling amortises to one work item per 1024 changes and the per-change allocation falls away as segment slots are recycled, which is why the table quotes two figures rather than one. That zero applies to a queue repeatedly filled and drained; one that keeps growing still pays for each new slot.
+**Delivery has two regimes.** A scheduled per-property subscription pays a scheduler work item per change while its observer keeps up; once a backlog forms that amortises to one work item per 1024 changes and the per-change allocation falls away as queue slots are recycled, though a backlog that keeps growing pays for each new slot instead. Latency splits the same way and is waiting rather than work: keeping up, a change takes about 456 ns to reach a queue consumer, 914 ns a scheduled observer and 6,800 ns a default observable subscriber, all falling to roughly 100 ns under a deep backlog.
 
 ## Property Value Equality Check
 

@@ -40,6 +40,10 @@ public class PropertyChangeSubscriptionsBenchmark
     private CancellationTokenSource? _drainCancellation;
     private Thread? _drainThread;
 
+    // Counts what the default observable actually delivered, so the end-of-run backlog can be read off the
+    // deliveries that still arrive once the writer has stopped.
+    private CountingRxObserver? _observableDeliveries;
+
     // idle: no consumers at all (gates the post-commit fence plus count re-read added by the merge).
     [GlobalSetup(Target = nameof(WriteIdle))]
     public void SetupIdle()
@@ -64,6 +68,31 @@ public class PropertyChangeSubscriptionsBenchmark
         _observableSubscription = _context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(_ => { });
+    }
+
+    // observable-only at its DEFAULT scheduler, which is what GetPropertyChangeObservable() with no argument
+    // gives: the change goes through the synchronized subject into the ObserveOn sink, which enqueues it and
+    // signals the dispatch thread instead of running the handler on the writer. The ImmediateScheduler state
+    // above skips ObserveOn entirely, so the two are different code paths and not two settings of one.
+    [GlobalSetup(Target = nameof(WriteWithDefaultObservableConsumer))]
+    public void SetupDefaultObservableOnly()
+    {
+        _car = CreateCarInFreshContext();
+        _observableDeliveries = new CountingRxObserver();
+        _observableSubscription = _context
+            .GetPropertyChangeObservable()
+            .Subscribe(_observableDeliveries);
+    }
+
+    // per-property inline observable: delivery is inline like the listener state, plus the per-subscriber
+    // serialization lock the adapter holds across the handler, which is the whole difference between the two.
+    [GlobalSetup(Target = nameof(WriteWithInlineObservableConsumer))]
+    public void SetupInlineObservableOnly()
+    {
+        _car = CreateCarInFreshContext();
+        _observableSubscription = new PropertyReference(_car, nameof(Car.Name))
+            .GetInlineChangeObservable()
+            .Subscribe(NoOpRxObserver.Instance);
     }
 
     // both-active: queue consumer plus Rx observer.
@@ -176,6 +205,18 @@ public class PropertyChangeSubscriptionsBenchmark
     }
 
     [Benchmark]
+    public void WriteWithDefaultObservableConsumer()
+    {
+        _car.Name = WriteValue;
+    }
+
+    [Benchmark]
+    public void WriteWithInlineObservableConsumer()
+    {
+        _car.Name = WriteValue;
+    }
+
+    [Benchmark]
     public void WriteWithQueueAndObservableConsumers()
     {
         _car.Name = WriteValue;
@@ -222,6 +263,17 @@ public class PropertyChangeSubscriptionsBenchmark
             Console.WriteLine($"// scheduled subscription pending after the run: {_scheduledSubscription.PendingCount}");
         }
 
+        // Same assertion for the default observable, whose ObserveOn queue has no public depth. Counting the
+        // deliveries that still arrive after the writer stopped measures the backlog left at the end of the
+        // iteration: a small number is the evidence that the allocation column is a write cost and not a queue
+        // that grew across the whole run.
+        if (_observableDeliveries is not null)
+        {
+            Console.WriteLine(
+                $"// default observable delivered after the run: {_observableDeliveries.CountDeliveriesUntilQuiescent()} " +
+                $"(of {_observableDeliveries.Count} total)");
+        }
+
         _perPropertySubscription?.Dispose();
         _scheduledSubscription?.Dispose();
         _observableSubscription?.Dispose();
@@ -259,5 +311,65 @@ public class PropertyChangeSubscriptionsBenchmark
             Name = "PropertyChangeQueueDrain"
         };
         _drainThread.Start();
+    }
+}
+
+/// <summary>
+/// Counts deliveries and, once the writer has stopped, how many more arrive before the channel goes quiet,
+/// which is the backlog left at the end of the run. Deliveries on one subscription are serialized, so the
+/// increment needs no interlocked form; the volatile store publishes the count to the waiting thread.
+/// </summary>
+internal sealed class CountingRxObserver : IObserver<SubjectPropertyChange>
+{
+    private long _count;
+
+    public long Count => Volatile.Read(ref _count);
+
+    public void OnNext(SubjectPropertyChange value) => Volatile.Write(ref _count, _count + 1);
+
+    public void OnError(Exception error)
+    {
+    }
+
+    public void OnCompleted()
+    {
+    }
+
+    /// <summary>
+    /// Waits for the delivery count to stop moving and returns how far it moved, which is what was still
+    /// queued when the writer stopped. Only meaningful once no writer is running.
+    /// </summary>
+    public long CountDeliveriesUntilQuiescent()
+    {
+        var start = Count;
+        var previous = start;
+        while (true)
+        {
+            Thread.Sleep(50);
+            var current = Count;
+            if (current == previous)
+            {
+                return current - start;
+            }
+
+            previous = current;
+        }
+    }
+}
+
+internal sealed class NoOpRxObserver : IObserver<SubjectPropertyChange>
+{
+    public static readonly NoOpRxObserver Instance = new();
+
+    public void OnNext(SubjectPropertyChange value)
+    {
+    }
+
+    public void OnError(Exception error)
+    {
+    }
+
+    public void OnCompleted()
+    {
     }
 }
