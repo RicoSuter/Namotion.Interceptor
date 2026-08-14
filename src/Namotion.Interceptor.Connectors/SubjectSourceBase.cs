@@ -315,7 +315,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                 {
                     // The base class only sees exceptions that leave RunAsync, and this loop swallows
                     // every per-attempt failure, so a source that can never connect would otherwise
-                    // report no error at all.
+                    // report no error at all. Guarded because the clause above covers only the
+                    // cancellation, while a stop tears the connection down mid-connect with an
+                    // arbitrary exception: recording that would overwrite the genuine fault for good,
+                    // since LastError is sticky and a stopped source never restarts.
                     if (!IsExpectedShutdown(stoppingToken))
                     {
                         Metrics.ReportError(ex);
@@ -357,6 +360,9 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             }
             catch (Exception e)
             {
+                // Unreachable today, kept as defence: WriteChangesInBatchesAsync turns every exception
+                // into a failed WriteResult, which is why this drop is unguarded while the reachable
+                // one above is filtered by IsExpectedShutdown.
                 Metrics.OutboundRetries.AddDropped(changes.Length);
                 _logger.LogError(e, "Failed to write changes to source.");
             }
@@ -401,6 +407,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// the failure that produces can be any exception, while
     /// <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/> reports even the cancellation
     /// itself as a failed <see cref="WriteResult"/> rather than throwing it.
+    /// <para>
+    /// Its second consumer is the drop counting in <see cref="WriteChangesViaRetryQueueAsync"/>, which
+    /// uses it to keep writes that only failed because the host was stopping out of the loss total.
+    /// </para>
     /// </remarks>
     private static bool IsExpectedShutdown(CancellationToken cancellationToken) =>
         cancellationToken.IsCancellationRequested;
@@ -710,6 +720,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     public override void Dispose()
     {
         // Publish the final Stopped while still registered, so a dispose without a stop is not silent.
+        // Deliberately ahead of base.Dispose(), which is what lets the monitors see it; the price is a
+        // sub-microsecond window in which a reader sees Stopped beside a still-true IsOperational.
         TransitionStateTo(SourceState.Stopped);
 
         // Take-and-clear in one step, so a concurrent StartAsync unwinding through its own local

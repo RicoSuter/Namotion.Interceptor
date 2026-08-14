@@ -226,13 +226,10 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                     Metrics.MarkNotOperational();
                 });
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            await CleanupSessionManagerAsync().ConfigureAwait(false);
-            throw;
-        }
         catch
         {
+            // Not reported here: it rethrows into SubjectSourceBase.RunAsync, whose retry loop records
+            // the same exception, so reporting it here as well would only duplicate it.
             await CleanupSessionManagerAsync().ConfigureAwait(false);
             throw;
         }
@@ -581,14 +578,15 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         }
         catch (Exception ex)
         {
-            // A stop cancels both this token and the kill source, so what lands here during shutdown
-            // is the cancellation a session, a lock wait or an initial load raises on the way down
-            // rather than a genuine fault. Counted as abandoned instead of failed, so it neither
-            // overwrites the sticky last error nor leaves an attempt without an outcome.
+            // This token is the listen lifetime's, cancelled both when the source stops and when the
+            // base retry loop tears the attempt down, and either cancels the kill source with it. What
+            // lands here is then the cancellation a session, a lock wait or an initial load raises on
+            // the way down rather than a genuine fault. Counted as abandoned instead of failed, so it
+            // neither overwrites the sticky last error nor leaves an attempt without an outcome.
             if (cancellationToken.IsCancellationRequested)
             {
                 ReconnectionMetrics.RecordAbandoned();
-                _logger.LogInformation("Reconnection abandoned because the source is stopping.");
+                _logger.LogInformation("Reconnection abandoned because the listen attempt is being torn down.");
             }
             else
             {

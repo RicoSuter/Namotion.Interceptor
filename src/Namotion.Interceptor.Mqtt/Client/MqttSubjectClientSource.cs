@@ -162,6 +162,9 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             {
                 await connectionMonitor.MonitorConnectionAsync(linkedToken).ConfigureAwait(false);
             }
+            // Both clauses are unreachable today and kept as defence: the monitor swallows every
+            // cancellation of its own token and returns normally, so a kill restarts the connection by
+            // letting this loop re-enter rather than by being caught here.
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 break;

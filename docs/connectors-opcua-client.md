@@ -669,8 +669,8 @@ This client measures both throughput directions, so `Throughput.IncomingPerSecon
 | `Reconnects.LastConnectionTime` | When a session was last established, `null` if never. Records a past event and survives the disconnection that follows it. |
 | `Reconnects.TotalAttempts` | Attempts started. Once all in-flight attempts resolve, this equals the three below summed. |
 | `Reconnects.TotalSucceeded` | Attempts that produced a usable session. |
-| `Reconnects.TotalFailed` | Attempts that ended with an exception. |
-| `Reconnects.TotalAbandoned` | Attempts that threw nothing but produced an unusable result: a null session, a failed transfer, a preserved session after a server restart, a stall reset, or a kill cancellation. |
+| `Reconnects.TotalFailed` | Attempts that ended with a genuine fault, meaning an exception raised while the attempt was still live. |
+| `Reconnects.TotalAbandoned` | Attempts that ended without a usable session and without a fault: a null session, a failed transfer, a preserved session after a server restart, a stall reset, or a cancellation from a kill or from the listen attempt being torn down, which happens both when the source stops and when the retry loop ends an attempt. |
 
 `Polling` is `null` when the [polling fallback](#polling-fallback-for-unsupported-nodes) is off, no session has been set up yet, or the client is between connect attempts. That last case is not a startup-only condition: the block reads through the session manager and goes `null` as soon as that manager is disposed, which every way out of a connect attempt does, so it stays `null` for the whole retry delay. The totals underneath survive that and reappear at their previous values once a session exists again. Otherwise it reports:
 

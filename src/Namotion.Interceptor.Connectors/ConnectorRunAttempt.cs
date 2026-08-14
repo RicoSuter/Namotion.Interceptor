@@ -53,7 +53,9 @@ public sealed class ConnectorRunAttempt : IDisposable
     /// <remarks>
     /// The mark is set and cleared without a compare-exchange, so two kills that overlap can leave it
     /// clear: the second unmarks after finding the attempt disposed, even though the first one cancelled
-    /// it and the loop has yet to run its kill check.
+    /// it. A loop must therefore read <see cref="WasForceKilled"/> before it disposes the attempt, which
+    /// an exception filter does by construction, since filters run before the <c>finally</c> that
+    /// disposes it.
     /// </remarks>
     public async Task ForceKillAsync()
     {

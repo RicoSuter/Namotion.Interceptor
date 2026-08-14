@@ -110,14 +110,17 @@ public sealed class ReconnectDiagnostics
     public long TotalSucceeded => _metrics.Successful;
 
     /// <summary>
-    /// Gets the number of attempts that ended with an exception.
+    /// Gets the number of attempts that ended with a genuine fault, which is an exception raised while
+    /// the attempt was still live. An exception raised by a teardown counts as
+    /// <see cref="TotalAbandoned"/> instead.
     /// </summary>
     public long TotalFailed => _metrics.Failed;
 
     /// <summary>
     /// Gets the number of attempts that ended without a usable session and without a fault: a null
     /// session, a failed transfer, a preserved session after a server restart, a stall reset, or a
-    /// cancellation from a kill or from the source stopping.
+    /// cancellation from a kill or from the listen attempt being torn down, which happens both when the
+    /// source stops and when the retry loop ends an attempt.
     /// </summary>
     public long TotalAbandoned => _metrics.Abandoned;
 }

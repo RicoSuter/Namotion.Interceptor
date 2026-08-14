@@ -243,14 +243,28 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
             _currentAttempt = attempt;
             var linkedToken = attempt.Token;
 
-            var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
-
-            if (_configuration.CleanCertificateStore)
+            ApplicationInstance application;
+            OpcUaStandardServer server;
+            try
             {
-                CleanCertificateStore(application);
+                application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
+
+                if (_configuration.CleanCertificateStore)
+                {
+                    CleanCertificateStore(application);
+                }
+
+                server = new OpcUaStandardServer(_subject, this, _configuration, _logger);
+            }
+            catch
+            {
+                // A failure here skips the block below, so its finally never runs and this is the only
+                // place left that can unpublish and release the attempt.
+                _currentAttempt = null;
+                attempt.Dispose();
+                throw;
             }
 
-            var server = new OpcUaStandardServer(_subject, this, _configuration, _logger);
             try
             {
                 try
