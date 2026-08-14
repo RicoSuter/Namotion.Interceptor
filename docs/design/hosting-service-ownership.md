@@ -305,6 +305,13 @@ What these two protect is the liveness entry rather than the owner: whichever of
 
 The read on entry has no test that fails for it alone, and that is a coverage limit rather than redundancy. The window it covers is a drain beginning between it and the liveness write beside it, and those two statements are adjacent, so no seam can drive anything into the gap.
 
+### The two gate reads in `MarkLiveIfAttached`
+
+The same pair, on the path a subject takes when it gains its first target while already in the graph, and they protect the same thing: an entry written after the drain cleared the set is one nothing removes, so the subject stays live on a dead handler for the rest of that handler's life.
+
+- The re-read: `HostedServiceHandlerTests.WhenAnAttachmentIsAddedAfterTheDrainClearedLiveness_ThenTheSubjectIsNotLeftLive`. The drain is parked inside a stop body, past the liveness clear, and the write is held on `LivenessWriteGate` so it lands after that clear. Deleting the re-read alone fails it. Parking on `DrainGate` instead cannot reach this, for the reason above: the clear still follows and sweeps the entry up.
+- The read on entry has no test that fails for it alone, for the same reason as in `AttachSubject`: it is a narrowing, and the re-read beside it absorbs its absence, so no observable outcome changes.
+
 ## Activation and Waiting for a Start
 
 `SubjectActivation<T>` exists because a singleton nobody resolves is never constructed, never attached to its context and never started, and `IHostedService` is the only hook the generic host offers for forcing that construction. Resolving the subject attaches it, which makes the handler append the start. When the resolved context has no `HostedServiceHandler` the activation starts the subject itself and stops exactly that instance, for the reason at the field it records it in. Pinned by `AddSubjectTests.WhenThereIsNoHostingHandler_ThenTheActivationStartsTheSubjectItself`.
@@ -359,9 +366,9 @@ Shape 3 is the one that occurs in practice, because it is what a `BackgroundServ
 2. `T`'s body writes a subject typed property, so it needs `_attachedSubjects`.
 3. Thread B holds `_attachedSubjects` for an unrelated graph write, reaches `HandleLifecycleChange`, and calls `DeferCompletion()` on that same deferrer. It blocks on `L`.
 
-Step 2 is no longer required for the cycle. `AttachHostedService` and `AttachHostedServiceAsync` take `_attachedSubjects` themselves, through `MarkLiveIfAttached`, before either of them appends anything. A caller that holds `L` and attaches a hosted service therefore blocks on `_attachedSubjects` directly, so `A` needs no transition body at all and the cycle has two parties rather than three. The constraint on the implementer is unchanged and the exposure is wider: a deferrer that takes a lock must not have that lock held across any hosted service attach.
-
 `A` waits for `T`, `T` waits for `_attachedSubjects`, `B` holds it and waits for `L`, and `A` holds `L`. Nothing resolves it, and unlike the three chain wedges above the blast radius is the whole process rather than one chain: `B` is holding `_attachedSubjects`, so every structural property write anywhere in the graph queues behind it.
+
+Step 2 is no longer required for the cycle. `AttachHostedService` and `AttachHostedServiceAsync` take `_attachedSubjects` themselves, through `MarkLiveIfAttached`, before either of them appends anything. A caller that holds `L` and attaches a hosted service therefore blocks on `_attachedSubjects` directly, so `A` needs no transition body at all and the cycle has two parties rather than three. The constraint on the implementer is unchanged and the exposure is wider: a deferrer that takes a lock must not have that lock held across any hosted service attach.
 
 **The call site is accepted rather than fixed, and it is not by itself the deadlock.** The hold must exist before the append completes, or the window it closes reopens: a subsystem that treats "the graph has finished starting" as a completion point would pass that point with a queued start still on its way in. On the lifecycle driven path the event that appends arrives already inside `_attachedSubjects`, so there is no earlier point at which to take it. Every alternative that keeps the guarantee either calls `DeferCompletion` from the same place, or needs a new cross-package protocol between Hosting and Connectors, which is a design change rather than a defect fix. Deferring only the release off the lock was considered and rejected: it costs an allocation and a thread hop on a rare path and leaves the take, which is the main exposure, exactly where it was.
 

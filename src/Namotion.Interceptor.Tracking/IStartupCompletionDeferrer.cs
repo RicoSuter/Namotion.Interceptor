@@ -21,10 +21,12 @@ namespace Namotion.Interceptor.Tracking;
 /// for is refused. So do not block, in either method, on anything that needs the lifecycle lock to
 /// make progress, and take a lock of your own only where its order against the lifecycle lock is
 /// already fixed, which means nothing held under that lock ever waits on anything that needs the
-/// lifecycle lock. Awaiting a hosted service transition is one such thing, and the one this
-/// repository reaches, because a transition that writes a subject typed property needs that lock. A lock that a thread inside the lifecycle lock can wait for is allowed under exactly
-/// that condition and forbidden without it, because without it the two can be acquired in either order
-/// and a cycle closes that nothing resolves. That cycle is set out in
+/// lifecycle lock. Two things in this repository need it: awaiting a hosted service transition, because
+/// a transition that writes a subject typed property takes that lock, and attaching a hosted service at
+/// all, because the attach takes it directly to record liveness. So a lock this deferrer takes must
+/// never be held across either. A lock that a thread inside the lifecycle lock can wait for is allowed
+/// under exactly that condition and forbidden without it, because without it the two can be acquired in
+/// either order and a cycle closes that nothing resolves. That cycle is set out in
 /// docs/design/hosting-service-ownership.md, section "A deferrer that takes a lock of its own", and its
 /// blast radius is every structural property write in the graph rather than only the caller, because the
 /// lifecycle lock is held throughout.
