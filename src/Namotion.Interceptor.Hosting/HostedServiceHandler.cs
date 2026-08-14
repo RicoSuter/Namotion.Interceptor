@@ -52,7 +52,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     internal Action? OwnershipTakenGate { get; set; }
 
     /// <summary>
-    /// Test seam, invoked inside <see cref="LifecycleInterceptor.RunIfSubjectAttached"/>'s callback in
+    /// Test seam, invoked inside <see cref="LifecycleInterceptor.RunUnderLifecycleLockIfAttached"/>'s callback in
     /// <see cref="MarkLiveIfAttached"/>, after the subject is known to be attached and before the
     /// liveness write. Null in production, where the two are adjacent. Holding it holds the graph
     /// mutation lock, which is the property it exists to make observable: a concurrent graph move
@@ -612,7 +612,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         var recorded = false;
         for (var index = 0; index < interceptors.Length && !recorded; index++)
         {
-            recorded = interceptors[index].RunIfSubjectAttached(subject, record);
+            recorded = interceptors[index].RunUnderLifecycleLockIfAttached(subject, record);
         }
 
         if (recorded && _gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
