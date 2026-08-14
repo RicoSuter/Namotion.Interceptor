@@ -296,36 +296,6 @@ Holds are counted, so nested attaches compose: a service that attaches children 
 
 A deferrer runs inside the lifecycle lock, so neither `DeferCompletion` nor the hold's `Dispose` may block on anything that needs that lock to make progress, and a lock of the deferrer's own is allowed only where its order against the lifecycle lock is already fixed. The full constraint is on `IStartupCompletionDeferrer`, and an implementation that follows it cannot take part in the deadlock: see [A deferrer that takes a lock of its own](design/hosting-service-ownership.md#4-a-deferrer-that-takes-a-lock-of-its-own).
 
-## Migrating from the Previous API
-
-Two groups of members were removed. Both were replaced rather than renamed, so the compiler points at every call site.
-
-### `AddHostedSubject<T>()` becomes `AddSubject<T>()`
-
-| Removed | Replacement |
-|---|---|
-| `HostedSubjectServiceCollectionExtensions.AddHostedSubject<T>(configure, contextResolver)` | `SubjectServiceCollectionExtensions.AddSubject<T>(configure, contextResolver)` |
-
-The parameters are unchanged, so the call site only needs the new name and the `Namotion.Interceptor.Hosting` using it already had. Three things changed underneath it:
-
-- `AddHostedSubject<T>` registered `T` with `AddHostedService<T>` as well, so a subject that the context also started ran two starts on one instance. `AddSubject<T>` leaves the start to the handler.
-- `AddHostedSubject<T>` passed the context only when `T` had a constructor accepting one, and never applied it afterwards, so a subject with injected constructor dependencies silently got no context at all. `AddSubject<T>` applies it unconditionally after construction.
-- The constraint widened from `IHostedService` to `IInterceptorSubject`, so it now also serves plain subjects that just need to exist and be attached at host start.
-
-### Instance based attachment becomes factory based
-
-| Removed | Replacement |
-|---|---|
-| `AttachHostedService(IHostedService)` returning `bool` | `AttachHostedService<T>(Func<T>)` returning `IHostedServiceAttachment<T>` |
-| `AttachHostedServiceAsync(IHostedService, CancellationToken)` returning `Task<bool>` | `AttachHostedServiceAsync<T>(Func<T>, CancellationToken)` returning `Task<IHostedServiceAttachment<T>>` |
-| `DetachHostedService(IHostedService)` | `DetachHostedService(IHostedServiceAttachment)` |
-| `DetachHostedServiceAsync(IHostedService, CancellationToken)` | `DetachHostedServiceAsync(IHostedServiceAttachment, CancellationToken)` |
-| `GetAttachedHostedServices()` returning `ImmutableArray<IHostedService>` | `GetHostedServiceAttachments()` returning `ImmutableArray<IHostedServiceAttachment>` |
-
-The handle the attach returns is what you now pass to detach, in place of the instance. `GetAttachedHostedServices()` returned the instances; `GetHostedServiceAttachments()` returns the handles, and `attachment.Current` is the instance for each.
-
-Do not translate `AttachHostedService(service)` into `AttachHostedService(() => service)`. That compiles, and the handler refuses only the repeat: the first start uses the captured instance and succeeds, so the shape reports nothing at all until the subject leaves the graph and comes back. Construct inside the lambda instead. See [The factory must construct](#the-factory-must-construct).
-
 ## For Library Authors
 
 If you're building a library that provides hosted subjects, see [Subject Guidelines - Implementing Hosted Subjects for DI](subject-guidelines.md#implementing-hosted-subjects-for-di) for the recommended pattern using `AddSubject<T>()`.
