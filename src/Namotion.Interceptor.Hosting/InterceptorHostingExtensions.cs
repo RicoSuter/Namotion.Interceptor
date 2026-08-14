@@ -209,9 +209,13 @@ public static class InterceptorHostingExtensions
 
         // Deliberately does not touch liveness. A start already appended re-reads liveness in its body,
         // so clearing it here retroactively cancels a start that was ordered ahead of this detach,
-        // which is the ordering HostedServiceHandlerRaceTests pins. A subject that loses its last
-        // attachment keeps its entry until it gains another one, and MarkLiveIfAttached is where a
-        // stale entry is caught.
+        // which is the ordering HostedServiceHandlerRaceTests pins.
+        //
+        // The entry a subject keeps after losing its last attachment is therefore ended by its context
+        // detach, which is why that detach's fast path turns on whether the subject has ever hosted
+        // anything rather than on whether it hosts anything now. Nothing downstream catches it: an
+        // entry that outlives the subject's membership is read by the start body and creates an
+        // instance for a subject that has left the graph.
         return removed;
     }
 

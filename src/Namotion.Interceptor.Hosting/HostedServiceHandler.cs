@@ -601,14 +601,18 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
 
         var interceptors = subject.Context.GetServices<LifecycleInterceptor>();
+
+        // Hoisted, so several interceptors cost one delegate rather than one each.
+        var record = () =>
+        {
+            LivenessWriteGate?.Invoke();
+            _liveSubjects[subject] = 0;
+        };
+
         var recorded = false;
         for (var index = 0; index < interceptors.Length && !recorded; index++)
         {
-            recorded = interceptors[index].RunIfSubjectAttached(subject, () =>
-            {
-                LivenessWriteGate?.Invoke();
-                _liveSubjects[subject] = 0;
-            });
+            recorded = interceptors[index].RunIfSubjectAttached(subject, record);
         }
 
         if (recorded && _gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)

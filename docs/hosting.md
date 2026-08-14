@@ -192,7 +192,7 @@ The handler disposes what the factory built, from a transition that can run whil
 - its dispose path must not enter the lifecycle lock, directly or transitively
 - it must not block on a lock that its own `SubjectDetaching` handler acquires
 
-Writing a scalar property from a dispose path is safe. Writing a property whose type can contain subjects takes the lifecycle lock and is not safe, and attaching or detaching a subject enters the same lock without being a property write at all. Nothing enforces this and no test covers it, which is exactly why it is written down here. The lock order that makes it a deadlock rather than a slow path is in [Disposal from a handler transition](design/hosting-service-ownership.md#disposal-from-a-handler-transition).
+Writing a scalar property from a dispose path is safe. Writing a property whose type can contain subjects takes the lifecycle lock and is not safe; attaching or detaching a subject enters the same lock without being a property write at all; and so does attaching a hosted service, which takes it to settle whether the subject is still in the graph. That last one is the likeliest of the three to appear on a hosted service's own teardown path. Nothing enforces this and no test covers it, which is exactly why it is written down here. The lock order that makes it a deadlock rather than a slow path is in [Disposal from a handler transition](design/hosting-service-ownership.md#disposal-from-a-handler-transition).
 
 ### Reading the outcome
 

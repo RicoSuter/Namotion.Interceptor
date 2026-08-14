@@ -46,7 +46,7 @@ _loggerResolver  Func<ILogger?>          resolves the logger on first use
 _logger          ILogger?                the resolved logger, cached
 _gate            HostedServiceGate       NotStarted, Running, Draining, Drained
 _running         ConcurrentDictionary    target -> subject, for targets this handler may have to stop
-_liveSubjects    ConcurrentDictionary    subject -> unused, for subjects in the graph for this handler
+_liveSubjects    ConcurrentDictionary    subject -> unused, for subjects in the graph that host something
 _inFlightStops   ConcurrentDictionary    stop task -> unused, for stops appended but not yet finished
 DrainGate        Func<Task>?             test seam, null in production
 OwnershipTakenGate Action?               test seam, null in production
@@ -162,7 +162,7 @@ Reading it that way was measured wrong: a subject reachable from two hosting ena
 
 ## Liveness
 
-**Liveness is a per subject flag, not per target ownership.** It is set on context attach and cleared on context detach, both under `lock (_attachedSubjects)`, and a start consults it before doing anything.
+**Liveness is a per subject flag, not per target ownership.** It is set when a subject that hosts something enters the graph and cleared when a subject that has ever hosted something leaves it, both under `lock (_attachedSubjects)`, and a start consults it before doing anything. A subject that gains its first target while already in the graph sets its own flag through `MarkLiveIfAttached`, which writes inside `LifecycleInterceptor.RunIfSubjectAttached`'s callback so that the write cannot land on a membership answer a graph move has already invalidated.
 
 Chain order covers lifecycle driven appends, because every lifecycle event fires under the lifecycle lock and the handler appends inside it. A user driven `AttachHostedService` appends under the target's own lock only and is unordered against them, so a start needs a second check. Target ownership cannot be that check, and the failure was measured: the attaching path takes ownership itself, so an attach racing a detach passes its own check and leaves the attachment running on a detached subject.
 
@@ -356,6 +356,8 @@ Shape 3 is the one that occurs in practice, because it is what a `BackgroundServ
 1. Thread A takes the deferrer's own lock `L`, then awaits a hosted service transition `T`, for example through `AttachHostedServiceAsync`.
 2. `T`'s body writes a subject typed property, so it needs `_attachedSubjects`.
 3. Thread B holds `_attachedSubjects` for an unrelated graph write, reaches `HandleLifecycleChange`, and calls `DeferCompletion()` on that same deferrer. It blocks on `L`.
+
+Step 2 is no longer required for the cycle. `AttachHostedService` and `AttachHostedServiceAsync` take `_attachedSubjects` themselves, through `MarkLiveIfAttached`, before either of them appends anything. A caller that holds `L` and attaches a hosted service therefore blocks on `_attachedSubjects` directly, so `A` needs no transition body at all and the cycle has two parties rather than three. The constraint on the implementer is unchanged and the exposure is wider: a deferrer that takes a lock must not have that lock held across any hosted service attach.
 
 `A` waits for `T`, `T` waits for `_attachedSubjects`, `B` holds it and waits for `L`, and `A` holds `L`. Nothing resolves it, and unlike the three chain wedges above the blast radius is the whole process rather than one chain: `B` is holding `_attachedSubjects`, so every structural property write anywhere in the graph queues behind it.
 

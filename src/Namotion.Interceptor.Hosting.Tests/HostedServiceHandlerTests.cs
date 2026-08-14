@@ -1272,27 +1272,38 @@ public class HostedServiceHandlerTests
             var child = new Person();
             parent.Child = child;
 
-            var seamReached = new ManualResetEventSlim(false);
+            // The mover spins rather than waiting on a handle, so that once it is released the only
+            // thing that can park it is the graph mutation lock itself.
+            var release = 0;
+            var moverEntered = 0;
             var moveFinished = 0;
-            var moveBlocked = false;
+            var moveRanDuringTheWrite = false;
 
             var mover = new Thread(() =>
             {
-                seamReached.Wait(TimeSpan.FromSeconds(30));
+                while (Volatile.Read(ref release) == 0)
+                {
+                    Thread.SpinWait(50);
+                }
+
+                Volatile.Write(ref moverEntered, 1);
                 parent.Child = null;
                 Volatile.Write(ref moveFinished, 1);
             });
 
             handler.LivenessWriteGate = () =>
             {
-                seamReached.Set();
+                Volatile.Write(ref release, 1);
+                SpinWait.SpinUntil(() => Volatile.Read(ref moverEntered) == 1, TimeSpan.FromSeconds(30));
 
-                // Recorded rather than asserted: this runs under the graph mutation lock, and throwing
-                // here unwinds out of a public attach with that lock held, which makes a failing run
-                // far noisier than the failure it reports.
-                moveBlocked = SpinWait.SpinUntil(
-                    () => (mover.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0,
-                    TimeSpan.FromSeconds(10));
+                // The assertion is on the move COMPLETING, not on the mover's thread state: a thread
+                // parked on its own start signal also reads as waiting, which would pass this whether
+                // or not the write is serialized. Completion cannot happen while this callback holds
+                // the graph mutation lock, so a completion here is the defect itself. Recorded rather
+                // than thrown, because this runs under that lock.
+                moveRanDuringTheWrite = SpinWait.SpinUntil(
+                    () => Volatile.Read(ref moveFinished) == 1,
+                    TimeSpan.FromSeconds(2));
             };
 
             mover.Start();
@@ -1302,9 +1313,9 @@ public class HostedServiceHandlerTests
             mover.Join(TimeSpan.FromSeconds(30));
 
             // Assert
-            Assert.True(
-                moveBlocked,
-                "The graph move ran while liveness was being written, so the membership answer and the write are not one step.");
+            Assert.False(
+                moveRanDuringTheWrite,
+                "The graph move completed while liveness was being written, so the membership answer and the write are not one step.");
             Assert.Equal(1, Volatile.Read(ref moveFinished));
 
             // The detach ran after the write, so it cleared the entry the write had just made. Liveness
