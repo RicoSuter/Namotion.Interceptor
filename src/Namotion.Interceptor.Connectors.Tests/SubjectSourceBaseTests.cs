@@ -492,7 +492,6 @@ public class SubjectSourceBaseTests
         };
 
         new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
-        new PropertyReference(subject, nameof(Person.LastName)).SetSource(source);
 
         // Act
         await source.StartAsync(CancellationToken.None);
@@ -500,12 +499,15 @@ public class SubjectSourceBaseTests
             () => Volatile.Read(ref initialStateApplied),
             message: "Expected initial state to be applied");
 
-        // Sentinel write after the snapshot: once it arrives at the source, any earlier flush
-        // containing the FirstName write would already have been delivered.
-        subject.LastName = "sentinel";
+        // The reconcile restores the write over the loaded value and the connected pump sends it, one
+        // buffer tick later. Waiting for that delivery is what detects the regression, because a
+        // discarded write never arrives at all.
         await AsyncTestHelpers.WaitUntilAsync(
-            () => receivedChanges.Any(c => c.Property.Name == nameof(Person.LastName)),
-            message: "Expected the sentinel write to reach the source");
+            () => receivedChanges.Any(c =>
+                c.Property.Name == nameof(Person.FirstName) &&
+                c.GetNewValue<string?>() == "stale-user-write"),
+            message: "Expected the connect-window write to reach the source");
+
         await source.StopAsync(CancellationToken.None);
 
         // Assert: the user's write reaches the source rather than being discarded by the load.
