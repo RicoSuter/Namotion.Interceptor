@@ -13,9 +13,10 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 {
     // A workaround, not a design choice: the generated context constructor attaches the subject
     // before the caller has assigned anything, so "new Car(context) { Name = "x" }" would otherwise
-    // start a service that reads a half built subject.
+    // start a service that reads a half built subject. Paid by the stop body as well as the start,
+    // which is why it is not named for the start.
     // See docs/design/hosting-service-ownership.md#the-50-ms-delay.
-    private const int StartDelayMilliseconds = 50;
+    private const int TransitionDelayMilliseconds = 50;
 
     private readonly Func<ILogger?> _loggerResolver;
     private readonly HostedServiceGate _gate = new();
@@ -308,7 +309,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
             try
             {
-                await Task.Delay(StartDelayMilliseconds, CancellationToken.None).ConfigureAwait(false);
+                await Task.Delay(TransitionDelayMilliseconds, CancellationToken.None).ConfigureAwait(false);
 
                 var instance = target.Subject ?? target.Factory!();
                 if (target.IsHandlerOwnedInstance && !target.TryRecordFactoryInstance(instance))
@@ -442,7 +443,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
                 target.SetCurrent(null);
 
-                await Task.Delay(StartDelayMilliseconds, CancellationToken.None).ConfigureAwait(false);
+                await Task.Delay(TransitionDelayMilliseconds, CancellationToken.None).ConfigureAwait(false);
 
                 try
                 {
@@ -626,7 +627,6 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _logger ??= _loggerResolver();
         EnsureStarted();
         return Task.CompletedTask;
     }

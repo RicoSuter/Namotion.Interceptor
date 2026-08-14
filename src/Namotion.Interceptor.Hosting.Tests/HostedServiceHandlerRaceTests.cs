@@ -81,15 +81,7 @@ public class HostedServiceHandlerRaceTests
         // running is reachable from nothing: a later context detach enumerates no attachment for it
         // and never stops it. Taking a startup hold is the only user code the attach path runs inside
         // that window, so the deferrer drives the interleaving rather than a delay.
-        var builder = HostingTestHost.CreateBuilder();
-
-        var context = HostingTestHost.CreateContext(builder);
-
-        var detacher = new CallbackStartupDeferrer();
-        context.AddService<IStartupCompletionDeferrer>(detacher);
-
-        var host = builder.Build();
-        await host.StartAsync();
+        var (host, context, detacher) = await StartHostWithDeferrerAsync();
 
         try
         {
@@ -133,15 +125,7 @@ public class HostedServiceHandlerRaceTests
     public async Task WhenAnAwaitedAttachmentIsDetachedBeforeItsStartIsAppended_ThenNothingIsStarted()
     {
         // Arrange - the same window on the awaiting overload, which appends through the same call.
-        var builder = HostingTestHost.CreateBuilder();
-
-        var context = HostingTestHost.CreateContext(builder);
-
-        var detacher = new CallbackStartupDeferrer();
-        context.AddService<IStartupCompletionDeferrer>(detacher);
-
-        var host = builder.Build();
-        await host.StartAsync();
+        var (host, context, detacher) = await StartHostWithDeferrerAsync();
 
         try
         {
@@ -188,15 +172,7 @@ public class HostedServiceHandlerRaceTests
         // the target before appending their stop, and each mark has to be pinned separately: the two
         // tests above drive the window through the synchronous overload only, so deleting the mark from
         // DetachHostedServiceAsync alone leaves them green.
-        var builder = HostingTestHost.CreateBuilder();
-
-        var context = HostingTestHost.CreateContext(builder);
-
-        var detacher = new CallbackStartupDeferrer();
-        context.AddService<IStartupCompletionDeferrer>(detacher);
-
-        var host = builder.Build();
-        await host.StartAsync();
+        var (host, context, detacher) = await StartHostWithDeferrerAsync();
 
         try
         {
@@ -317,8 +293,7 @@ public class HostedServiceHandlerRaceTests
 
         // An empty transition behind the start on the same chain, awaited before the drain is let
         // go: this is what pins the start body inside the window rather than merely near it.
-        await ((IHostedServiceAttachmentTarget)attachment).Target
-            .AppendAsync(() => Task.CompletedTask);
+        await attachment.DrainAsync();
 
         releaseDrain.SetResult();
 
@@ -402,8 +377,7 @@ public class HostedServiceHandlerRaceTests
             });
 
             // Assert
-            await ((IHostedServiceAttachmentTarget)attachment).Target
-                .AppendAsync(() => Task.CompletedTask);
+            await attachment.DrainAsync();
 
             Assert.Equal(0, Volatile.Read(ref created));
             Assert.Null(attachment.Current);
@@ -443,8 +417,7 @@ public class HostedServiceHandlerRaceTests
         try
         {
             // Assert
-            await ((IHostedServiceAttachmentTarget)attachment).Target
-                .AppendAsync(() => Task.CompletedTask);
+            await attachment.DrainAsync();
 
             Assert.Equal(0, Volatile.Read(ref created));
             Assert.Null(attachment.Current);

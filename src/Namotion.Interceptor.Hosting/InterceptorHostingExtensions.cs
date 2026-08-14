@@ -17,12 +17,8 @@ public static class InterceptorHostingExtensions
     /// </summary>
     public static ImmutableArray<IHostedServiceAttachment> GetHostedServiceAttachments(this IInterceptorSubject subject)
     {
-        // TryGetValue, not GetOrAdd: this runs on every context detach, under the lifecycle lock, and
-        // GetOrAdd inserts a null entry into every subject's data bag just to read it.
-        return subject.Data.TryGetValue((null, AttachmentsKey), out var value)
-            && value is ImmutableArray<IHostedServiceAttachment> attachments
-            ? attachments
-            : [];
+        subject.TryGetHostedServiceAttachments(out var attachments);
+        return attachments;
     }
 
     /// <summary>
@@ -34,6 +30,10 @@ public static class InterceptorHostingExtensions
     /// majority of subjects without ever skipping it for one that could still hold an entry.
     /// <see cref="RemoveAttachment"/> stores null rather than removing the key, so the key outlives the
     /// attachments themselves and this costs the same single lookup either way.
+    /// <para>
+    /// TryGetValue, not GetOrAdd: this runs for every subject on every context detach, under the
+    /// lifecycle lock, and GetOrAdd inserts a null entry into every subject's data bag just to read it.
+    /// </para>
     /// </remarks>
     internal static bool TryGetHostedServiceAttachments(
         this IInterceptorSubject subject, out ImmutableArray<IHostedServiceAttachment> attachments)

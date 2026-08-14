@@ -180,8 +180,7 @@ public class HostedServiceHandlerTests
 
             // Assert - the empty transition drains what the two graph moves appended. Counting is the
             // claim in the name; the attachment being gone is the mechanism.
-            await ((IHostedServiceAttachmentTarget)attachment).Target
-                .AppendAsync(() => Task.CompletedTask);
+            await attachment.DrainAsync();
 
             Assert.Equal(1, Volatile.Read(ref created));
             Assert.Empty(child.GetHostedServiceAttachments());
@@ -331,8 +330,7 @@ public class HostedServiceHandlerTests
 
             // Assert - without the empty transition a stop is still waiting out its transition delay
             // when Current is read, so the assertion cannot observe a restart even when one happens.
-            await ((IHostedServiceAttachmentTarget)attachment).Target
-                .AppendAsync(() => Task.CompletedTask);
+            await attachment.DrainAsync();
 
             Assert.Same(original, attachment.Current);
             Assert.False(original!.IsDisposed);
@@ -936,8 +934,7 @@ public class HostedServiceHandlerTests
         {
             // Assert - an empty transition behind the attachment's stop completes only once that stop
             // has run, which it can only do once the subject's stop released it.
-            await ((IHostedServiceAttachmentTarget)attachment).Target
-                .AppendAsync(() => Task.CompletedTask)
+            await attachment.DrainAsync()
                 .WaitAsync(TimeSpan.FromSeconds(10));
 
             Assert.Equal(0, child.StartCount);
@@ -1059,7 +1056,7 @@ public class HostedServiceHandlerTests
             var attachment = child.AttachHostedService(() => new TrackedBackgroundService());
 
             // Assert
-            await ((IHostedServiceAttachmentTarget)attachment).Target.AppendAsync(() => Task.CompletedTask);
+            await attachment.DrainAsync();
             Assert.True(handler.IsLive(child));
             Assert.NotNull(attachment.Current);
             Assert.True(attachment.Current!.IsStarted);
@@ -1104,7 +1101,7 @@ public class HostedServiceHandlerTests
             });
 
             // Assert
-            await ((IHostedServiceAttachmentTarget)attachment).Target.AppendAsync(() => Task.CompletedTask);
+            await attachment.DrainAsync();
             Assert.Equal(0, Volatile.Read(ref created));
             Assert.Null(attachment.Current);
             Assert.False(handler.IsLive(child));
@@ -1131,7 +1128,7 @@ public class HostedServiceHandlerTests
             parent.Child = child;
 
             var first = child.AttachHostedService(() => new TrackedBackgroundService());
-            await ((IHostedServiceAttachmentTarget)first).Target.AppendAsync(() => Task.CompletedTask);
+            await first.DrainAsync();
             Assert.NotNull(first.Current);
 
             child.DetachHostedService(first);
@@ -1140,7 +1137,7 @@ public class HostedServiceHandlerTests
             var second = child.AttachHostedService(() => new TrackedBackgroundService());
 
             // Assert
-            await ((IHostedServiceAttachmentTarget)second).Target.AppendAsync(() => Task.CompletedTask);
+            await second.DrainAsync();
             Assert.True(handler.IsLive(child));
             Assert.NotNull(second.Current);
             Assert.True(second.Current!.IsStarted);
@@ -1209,7 +1206,7 @@ public class HostedServiceHandlerTests
         parent.Child = null;
 
         await host.StartAsync();
-        await ((IHostedServiceAttachmentTarget)attachment).Target.AppendAsync(() => Task.CompletedTask);
+        await attachment.DrainAsync();
 
         try
         {

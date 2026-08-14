@@ -66,31 +66,21 @@ public static class SubjectServiceCollectionExtensions
             // decides a context taking constructor is usable is the code that then uses it. A
             // reflection query answers the looser question of whether any constructor mentions the
             // type, which can be true of one ActivatorUtilities cannot call.
-            if (context is not null && contextFactory is not null)
-            {
-                var attachedInstance = (T)contextFactory(serviceProvider, [context]);
+            var instance = context is not null && contextFactory is not null
+                ? (T)contextFactory(serviceProvider, [context])
+                : ActivatorUtilities.CreateInstance<T>(serviceProvider);
 
-                // Ordered ahead of the attach below, which is the only ordering this factory controls.
-                // For the generated constructor the subject is already attached and this changes
-                // nothing, but for the documented "MySubject(IInterceptorSubjectContext? context = null)"
-                // shape, which takes the context and never uses it, the attach below is the first one
-                // and running configure after it would start the subject half configured.
-                configure?.Invoke(attachedInstance);
-
-                // Unconditional and idempotent. Applying it only when there is no context constructor
-                // would leave that same shape unattached.
-                attachedInstance.Context.AddFallbackContext(context);
-
-                return attachedInstance;
-            }
-
-            var instance = ActivatorUtilities.CreateInstance<T>(serviceProvider);
-
-            // Ordered ahead of the attach for the reason above. The handler's start delay is not a
-            // synchronisation, so it is this ordering that keeps a handler from starting the subject
+            // Ordered ahead of the attach below, which is the only ordering this factory controls. For
+            // the generated constructor the subject is already attached and this changes nothing, but
+            // for the documented "MySubject(IInterceptorSubjectContext? context = null)" shape, which
+            // takes the context and never uses it, the attach below is the first one and running
+            // configure after it would start the subject half configured. The handler's start delay is
+            // not a synchronisation, so this ordering is what keeps a handler from starting the subject
             // half configured.
             configure?.Invoke(instance);
 
+            // Unconditional and idempotent, so the constructor shape that takes the context and ignores
+            // it is attached rather than left out.
             if (context is not null)
             {
                 instance.Context.AddFallbackContext(context);
