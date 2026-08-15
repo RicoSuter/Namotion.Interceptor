@@ -83,6 +83,21 @@ public sealed class SubjectTransaction : IDisposable
     internal bool IsDisposed => Volatile.Read(ref _isDisposed) != 0;
 
     /// <summary>
+    /// True while reads on this flow can still be served from the pending buffer. Dispose sets the disposed
+    /// flag before releasing the buffer, so a transaction can read as disposed and still feed a getter.
+    /// </summary>
+    internal bool ServesPendingValues
+    {
+        get
+        {
+            lock (_pendingChangesLock)
+            {
+                return _pendingChanges is not null;
+            }
+        }
+    }
+
+    /// <summary>
     /// Gets the interceptor this transaction is bound to (for cross-context validation).
     /// </summary>
     internal SubjectTransactionInterceptor Interceptor { get; }

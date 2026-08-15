@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
@@ -151,9 +152,9 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
 
         // Nothing reached the model, so there is nothing to recalculate or cascade from, and stamping a
-        // write timestamp here would report a write that never happened. Not the transaction path: capture
-        // returns before this handler is entered, so with the interceptors in this repository the flag is
-        // always set by the time we get here. This guards a third-party interceptor that drops a write.
+        // write timestamp here would report a write that never happened. With the interceptors in this
+        // repository the flag is always set here, because transaction capture returns before this handler
+        // is entered; this guards a third-party interceptor that drops a write.
         if (!context.IsWritten)
         {
             return;
@@ -172,6 +173,19 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         var usedByProperties = data.GetUsedByProperties();
         if (usedByProperties.Length > 0)
         {
+            // Suppress cascading recalculations while the ambient transaction can still serve a dependent's
+            // getter from its pending buffer: recalculating then computes a value from uncommitted state and
+            // publishes one the model may never hold, and a rollback leaves nothing to correct it. The
+            // commit replays the captured writes and their cascades run there instead. Tied to the buffer
+            // rather than to the disposed flag, because dispose sets that flag before releasing the buffer,
+            // and because a transaction already torn down has no commit left to replay anything on.
+            if (SubjectTransaction.HasActiveTransaction &&
+                SubjectTransaction.Current is { IsCommitting: false } ambientTransaction &&
+                ambientTransaction.ServesPendingValues)
+            {
+                return;
+            }
+
             // Thread the trigger's resolved timestamp into each dependent's context, skipping a
             // scope push. storageTimestamp=0 under a null scope preserves the never-written sentinel.
             var rawTimestamp = context.WriteTimestampRaw;
