@@ -137,10 +137,13 @@ public static class PropertyChangeSubscriptionExtensions
     /// quiet. Prefer <c>Scheduler.Default</c>, whose thread pool takes the execution context per work item, so
     /// the suppression applied when scheduling keeps all ambient state away from the observer. A scheduler
     /// that owns a thread, such as <c>EventLoopScheduler</c>, instead keeps for life the <c>AsyncLocal</c>
-    /// values ambient when that thread was created, so create one outside any transaction scope: for as long
-    /// as the transaction that thread inherited is live, a property write the observer makes is captured into
-    /// it rather than reaching the model, with nothing thrown and <paramref name="onError"/> silent. Once that
-    /// transaction is disposed the write falls through to the model as usual.
+    /// values ambient when that thread was created, and it creates the thread on first use rather than in its
+    /// constructor. Scheduling from this subscription is suppressed, so a thread started that way is born
+    /// clean; the hazard is a caller who also schedules their own work on the same scheduler and does so for
+    /// the first time inside a transaction scope. For as long as the transaction that thread inherited is
+    /// live, a property write the observer makes is captured into it rather than reaching the model, with
+    /// nothing thrown and <paramref name="onError"/> silent. Once that transaction is disposed the write
+    /// falls through to the model as usual.
     /// </para>
     /// </remarks>
     /// <param name="property">The property to subscribe to.</param>
