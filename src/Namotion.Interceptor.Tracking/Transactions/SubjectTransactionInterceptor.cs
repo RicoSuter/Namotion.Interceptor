@@ -29,7 +29,6 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
     {
-        // Fast path: Skip transaction check when no transaction is active (avoids AsyncLocal read)
         if (!SubjectTransaction.HasActiveTransaction)
         {
             return next(ref context);
@@ -49,7 +48,6 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        // Fast path: Skip transaction check when no transaction is active (avoids AsyncLocal read)
         if (!SubjectTransaction.HasActiveTransaction)
         {
             next(ref context);
@@ -59,7 +57,6 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         var transaction = SubjectTransaction.Current;
         if (transaction is { IsCommitting: false, IsDisposed: false } && !context.Property.Metadata.IsDerived)
         {
-            // Validate context binding
             var isBoundToThisContext = context.Property.Subject.Context
                 .GetServices<SubjectTransactionInterceptor>()
                 .Contains(transaction.Interceptor);
@@ -70,6 +67,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
                     $"Cannot modify property '{context.Property.Metadata.Name}': Transaction is bound to a different context.");
             }
 
+            // Origin comparison can run user equality code, so resolve it before taking the transaction lock.
             var resolvedOrigin = context.GetFinalOrigin();
             var changedTimestamp = context.WriteTimestampForPublishing;
             var receivedTimestamp = SubjectChangeContext.Current.ReceivedTimestamp;
@@ -86,7 +84,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             }
         }
 
-        next(ref context); // No transaction, disposed, derived, committing, or failed capture: Normal flow
+        next(ref context);
     }
 
     private sealed class LockReleaser(SemaphoreSlim semaphore) : IDisposable

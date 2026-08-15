@@ -223,7 +223,6 @@ public sealed class SubjectTransaction : IDisposable
         _commitTimeout = commitTimeout;
         _lockReleaser = lockReleaser;
 
-        // Increment in constructor ensures counter is always paired with Dispose
         Interlocked.Increment(ref _activeTransactionCount);
     }
 
@@ -250,7 +249,7 @@ public sealed class SubjectTransaction : IDisposable
         TimeSpan commitTimeout,
         CancellationToken cancellationToken)
     {
-        // Check for nested transactions BEFORE acquiring lock (prevents deadlock)
+        // Check before acquiring the context lock so an attempted nested exclusive transaction cannot deadlock.
         if (CurrentTransaction.Value is { IsDisposed: false })
         {
             throw new InvalidOperationException("Nested transactions are not supported.");
@@ -262,16 +261,13 @@ public sealed class SubjectTransaction : IDisposable
 
         IDisposable? transactionLock = null;
 
-        // For Exclusive locking, acquire the lock now
-        // For Optimistic locking, skip the lock - we'll acquire it during commit only
         if (locking == TransactionLocking.Exclusive)
         {
             transactionLock = await interceptor.AcquireTransactionLockAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        // Don't set CurrentTransaction.Value here because it won't flow to caller's context
-        // The caller (extension method) will call SetCurrent after awaiting this
-        // Counter increment is in constructor to ensure it's always paired with Dispose
+        // An AsyncLocal assignment here would not flow back through this async method's await;
+        // the caller assigns the transaction in its own execution context.
         return new SubjectTransaction(
             context,
             interceptor,
@@ -605,11 +601,9 @@ public sealed class SubjectTransaction : IDisposable
         OrderedDictionary<PropertyReference, SubjectPropertyChange>? pendingChangesToReturn = null;
         lock (_pendingChangesLock)
         {
-            // Clear under the lock so a concurrent Dispose observes the in-flight commit consistently: while
-            // _isCommitting is true Dispose skips returning the pooled buffer (this commit owns it) and defers
-            // the exclusive-lock release to us. Reading the flag here makes that release exactly-once
-            // (whichever of Dispose/EndCommit observes the other). The ArrayPool buffer below is owned solely
-            // by this commit and is always returned here.
+            // Clear under the lock so Dispose observes the in-flight commit consistently. A disposing caller
+            // defers exclusive-lock release while this commit owns it. If it also owns the pending dictionary,
+            // detach it here and return it after the lock so ownership transfers exactly once.
             _isCommitting = false;
             releaseDeferredLock = _disposeRequestedDuringCommit;
             if (releaseDeferredLock)
@@ -632,12 +626,9 @@ public sealed class SubjectTransaction : IDisposable
             ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray, clearArray: true);
         }
 
-        // Release the optimistic lock BEFORE resetting _commitStarted so a retry cannot start
-        // before the optimistic lock is actually free.
+        // Release the optimistic lock before allowing a retry to start.
         commitLock?.Dispose();
 
-        // Release the exclusive lock deferred by a concurrent Dispose, now that the commit has fully finished
-        // (so no other transaction on this context could interleave with its apply pass).
         if (releaseDeferredLock)
         {
             _lockReleaser?.Dispose();
@@ -645,10 +636,6 @@ public sealed class SubjectTransaction : IDisposable
 
         if (!_isCommitted)
         {
-            // Reset so CommitAsync can be retried, but only for failures before anything moved
-            // (conflict detected, optimistic lock not acquired, commit timeout). All later failures,
-            // including converted writer throws, run through FinishCommit first, which marks the
-            // transaction committed and skips this branch, so they are terminal.
             Volatile.Write(ref _commitStarted, 0);
         }
     }
@@ -672,8 +659,6 @@ public sealed class SubjectTransaction : IDisposable
 
     private ValueTask<IDisposable?> AcquireOptimisticLockIfNeededAsync(CancellationToken cancellationToken)
     {
-        // Sync fast path for the default (Exclusive) locking mode: lock was already
-        // acquired in BeginTransactionAsync, so commit needs no lock here.
         if (Locking != TransactionLocking.Optimistic)
         {
             return default;
@@ -690,16 +675,12 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            // Rent the ArrayPool buffer BEFORE setting _isCommitting so an OOM in Rent leaves the
-            // transaction reusable (the flag is never set, no cleanup is owed).
+            // Rent before setting _isCommitting so an allocation failure leaves the transaction reusable.
             var pendingChanges = _pendingChanges;
             var changeCount = pendingChanges?.Count ?? 0;
             var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
 
-            // Set _isCommitting inside the lock to prevent concurrent writes from being
-            // captured into _pendingChanges between the copy and the flag update (TOCTOU).
-            // Once set, EndCommit (run only in the caller's finally) is responsible for clearing it
-            // and returning the rented buffer.
+            // Set this while holding the lock so no write can be captured between snapshot and commit.
             _isCommitting = true;
 
             var index = 0;
@@ -754,6 +735,7 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     public void Dispose()
     {
+        // Publish disposal before taking the lock so a waiting capture observes it and continues normally.
         if (Interlocked.CompareExchange(ref _isDisposed, 1, 0) == 0)
         {
             Interlocked.Decrement(ref _activeTransactionCount);
@@ -770,6 +752,7 @@ public sealed class SubjectTransaction : IDisposable
                 }
                 else
                 {
+                    // Detach while locked; return the pooled dictionary after releasing the lock.
                     pendingChangesToReturn = _pendingChanges;
                     _pendingChanges = null;
                 }
@@ -782,10 +765,6 @@ public sealed class SubjectTransaction : IDisposable
                 CurrentTransaction.Value = null;
             }
 
-            // A commit in flight (reachable only by misuse: disposing without awaiting CommitAsync) still owns
-            // the pooled buffer and the exclusive lock, so skip both here: returning the buffer would corrupt
-            // another transaction's pending changes, and releasing the lock would drop mutual exclusion mid-apply.
-            // EndCommit returns the deferred buffer and releases the deferred lock once the commit completes.
             if (!committing)
             {
                 if (pendingChangesToReturn is not null)

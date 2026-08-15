@@ -75,7 +75,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 }
                 catch (Exception)
                 {
-                    // Getter threw — value will be computed on the next dependency write.
+                    // Getter threw. The value will be computed on the next dependency write.
                 }
             }
         }
@@ -239,7 +239,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         object? oldValue;
 
-        // Phase 1: Acquire recalculation ownership (brief lock).
         var data = derivedProperty.GetDerivedPropertyData();
         lock (data)
         {
@@ -261,7 +260,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // Outer loop handles the post-notification RecalculationNeeded check without recursion,
         // preventing stack overflow under sustained concurrent writes.
         // The try-finally at this level ensures IsRecalculating is always cleared on exit.
-        // Crucially, IsRecalculating stays true during NotifyDerivedPropertyChanged — this
+        // Crucially, IsRecalculating stays true during NotifyDerivedPropertyChanged. This
         // serializes notification delivery with recalculation, preventing a stale notification
         // from being delivered after a newer one (TOCTOU race between guard checks and delivery).
         try
@@ -271,10 +270,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 object? newValue;
                 long sequence;
 
-                // Inner loop: re-evaluates when the state changes during evaluation.
                 while (true)
                 {
-                    // Phase 2: Evaluate getter OUTSIDE lock(data).
                     // This prevents deadlock: getter side effects can safely acquire
                     // lock(_attachedSubjects) in LifecycleInterceptor without lock ordering inversion.
                     try
@@ -283,11 +280,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                     }
                     catch (Exception)
                     {
-                        // Getter threw — keep LastKnownValue, concurrent writer's cascade will retry.
+                        // Getter threw. Keep LastKnownValue; a concurrent writer's cascade will retry.
                         return;
                     }
 
-                    // Phase 3: Commit result under lock.
                     lock (data)
                     {
                         if (!data.IsAttached)
@@ -310,12 +306,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                     }
                 }
 
-                // Deliver notification while IsRecalculating is still true.
                 // Any concurrent writes during delivery set RecalculationNeeded=true and bail out,
                 // so no new recalculation (or notification) can start until delivery completes.
                 NotifyDerivedPropertyChanged(ref derivedProperty, data, sequence, newValue, oldValue, rawTimestamp);
 
-                // Handle recalculations that arrived during evaluation or notification delivery.
                 // Uses a loop (not recursion) to prevent stack overflow under sustained concurrent writes.
                 lock (data)
                 {
@@ -325,12 +319,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                     }
 
                     data.RecalculationNeeded = false;
-                    // IsRecalculating stays true for next iteration
                     oldValue = data.LastKnownValue;
                 }
             }
 
-            // Safety: if the outer loop exhausted MaxStabilizationIterations, log a warning.
             Trace.TraceWarning(
                 $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted for " +
                 $"'{derivedProperty.Metadata.Name}' on {derivedProperty.Subject.GetType().Name}. " +
@@ -448,7 +440,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 return result;
             }
 
-            // Concurrent write detected while dependencies changed — stabilize.
+            // Concurrent write detected while dependencies changed. Stabilize.
             for (var iteration = 0; iteration < MaxStabilizationIterations; iteration++)
             {
                 StartRecordingTouchedProperties(property);
