@@ -86,15 +86,6 @@ public class PropertyChangeSubscriptionsBenchmark
 
     // per-property inline observable: delivery is inline like the listener state, plus the per-subscriber
     // serialization lock the adapter holds across the handler, which is the whole difference between the two.
-    [GlobalSetup(Target = nameof(WriteWithInlineObservableConsumer))]
-    public void SetupInlineObservableOnly()
-    {
-        _car = CreateCarInFreshContext();
-        _observableSubscription = new PropertyReference(_car, nameof(Car.Name))
-            .GetInlineChangeObservable()
-            .Subscribe(NoOpRxObserver.Instance);
-    }
-
     // both-active: queue consumer plus Rx observer.
     [GlobalSetup(Target = nameof(WriteWithQueueAndObservableConsumers))]
     public void SetupBoth()
@@ -206,12 +197,6 @@ public class PropertyChangeSubscriptionsBenchmark
 
     [Benchmark]
     public void WriteWithDefaultObservableConsumer()
-    {
-        _car.Name = WriteValue;
-    }
-
-    [Benchmark]
-    public void WriteWithInlineObservableConsumer()
     {
         _car.Name = WriteValue;
     }

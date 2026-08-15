@@ -46,7 +46,6 @@ namespace Namotion.Interceptor.Tracking.Change
     }
     public static class PropertyChangeSubscriptionExtensions
     {
-        public static System.IObservable<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> GetInlineChangeObservable(this Namotion.Interceptor.PropertyReference property) { }
         public static Namotion.Interceptor.Tracking.Change.ScheduledPropertySubscription Subscribe(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.Tracking.Change.IPropertyChangeObserver observer, System.Reactive.Concurrency.IScheduler scheduler, System.Action<System.Exception>? onError = null) { }
         public static Namotion.Interceptor.Tracking.Change.ScheduledPropertySubscription Subscribe(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.Tracking.Change.PropertyChangeCallback callback, System.Reactive.Concurrency.IScheduler scheduler, System.Action<System.Exception>? onError = null) { }
         public static System.IDisposable SubscribeInline(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.Tracking.Change.IPropertyChangeObserver observer) { }

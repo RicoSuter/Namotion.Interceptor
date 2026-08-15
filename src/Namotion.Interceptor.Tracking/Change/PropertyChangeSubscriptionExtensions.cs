@@ -84,55 +84,6 @@ public static class PropertyChangeSubscriptionExtensions
     }
 
     /// <summary>
-    /// Exposes a single property's changes as an observable, so Rx operators compose over a per-property
-    /// subscription. Each subscriber installs its own underlying subscription, and each call returns a
-    /// distinct instance.
-    /// </summary>
-    /// <remarks>
-    /// Delivery keeps the inline part of the
-    /// <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/> contract: on the writing
-    /// thread, and a throwing handler propagates back into the setter. The context-level
-    /// <c>GetPropertyChangeObservable</c> reschedules onto a scheduler by default and is therefore not the
-    /// same thing.
-    /// <para>
-    /// Unlike that contract, notifications are serialized per subscriber as the Rx grammar requires, so
-    /// stateful operators such as <c>Take</c>, <c>Skip</c>, <c>Scan</c>, <c>DistinctUntilChanged</c> and
-    /// <c>Buffer</c> by count compose safely over concurrent writers with no extra work. The handler runs
-    /// under a per-subscription lock held across the call, so it must not block and must not take locks of
-    /// its own that a writer might hold. That lock is the library's own, so two subscribers over this
-    /// observable whose handlers write into each other's properties deadlock; a handler that writes
-    /// properties belongs on <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/> or on
-    /// a scheduled <c>Subscribe</c> overload instead.
-    /// </para>
-    /// <para>
-    /// Adding any operator also changes what a throwing handler does. Operators wrap the observer in the
-    /// auto-detaching decorator this type avoids, and that decorator disposes the subscription and then
-    /// rethrows, so the first handler exception both propagates to the writer and tears the subscription
-    /// down, leaving later writes neither delivered nor observable as failures. A handler composed over this
-    /// sequence must therefore not throw at all.
-    /// </para>
-    /// <para>
-    /// Composing the off-thread hop by hand costs more than the scheduler overloads of <c>Subscribe</c>:
-    /// <c>ObserveOn</c> dedicates a private thread to each subscription on both <c>Scheduler.Default</c> and
-    /// <c>TaskPoolScheduler</c>, because <c>Scheduler.AsLongRunning()</c> resolves an
-    /// <c>ISchedulerLongRunning</c> from both through their <c>IServiceProvider</c> implementation rather than
-    /// a direct interface cast. That thread is taken on the first signal rather than at subscribe, so an idle
-    /// property hides the cost until it stops being idle. A handler exception also escapes the sink into the
-    /// scheduler, terminating the process on the former and silently ending the stream on the latter.
-    /// </para>
-    /// <para>
-    /// The sequence never completes and never signals OnError, so operators that wait for completion, such
-    /// as <c>ToTask</c> and <c>LastAsync</c>, never return, and nothing disposes the subscription for you.
-    /// Disposing what <c>Subscribe</c> returns is as mandatory as for
-    /// <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/>: a dropped handle keeps the
-    /// observer receiving changes and permanently disables the process-wide idle write fast path, with no
-    /// finalizer and no recovery.
-    /// </para>
-    /// </remarks>
-    public static IObservable<SubjectPropertyChange> GetInlineChangeObservable(this PropertyReference property)
-        => new InlineChangeObservable(property);
-
-    /// <summary>
     /// Subscribes to changes of a single property and delivers them on <paramref name="scheduler"/> instead
     /// of on the writing thread, one at a time and in dispatch order.
     /// </summary>
@@ -169,10 +120,10 @@ public static class PropertyChangeSubscriptionExtensions
     /// change keeps its subject alive; watch <see cref="ScheduledPropertySubscription.PendingCount"/> and keep
     /// the observer cheap enough for the drain to outrun the writer. Draining a backlog does not give the
     /// memory back, because the queue keeps the largest segment it ever grew to, so the subscription costs its
-    /// peak backlog rather than its current one from then on, until it is disposed. Rate-limiting a hot
-    /// property by composing <c>Sample</c> or <c>Throttle</c> over <see cref="GetInlineChangeObservable"/> is
-    /// not the remedy: those operators deliver from a scheduler work item that does not catch a handler
-    /// exception, so one throwing handler terminates the process on <c>Scheduler.Default</c>. An observer that
+    /// peak backlog rather than its current one from then on, until it is disposed. Rate-limiting with Rx
+    /// operators such as <c>Sample</c> or <c>Throttle</c> is not the remedy: they deliver from a scheduler
+    /// work item that does not catch a handler exception, so one throwing handler terminates the process on
+    /// <c>Scheduler.Default</c>. An observer that
     /// writes the property it observes never drains: each delivery enqueues its own successor, so work items
     /// continue indefinitely and <paramref name="onError"/> never fires. The batched handoff keeps that a
     /// yielding loop rather than a held thread, so it degrades instead of starving, where the inline overload

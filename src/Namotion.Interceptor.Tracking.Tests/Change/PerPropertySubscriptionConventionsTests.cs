@@ -17,7 +17,6 @@ public class PerPropertySubscriptionConventionsTests
         // The scheduled channel and the observable adapter install real per-property subscriptions without
         // naming any type above, and the observable is subscribed in Rx form (.Subscribe(change => ...)),
         // which matches none of the lambda markers below. Naming the types covers both in any form.
-        "InlineChangeObservable",
         "ScheduledPropertySubscription",
         // The low-level callback overloads name none of the types above, so match the inline method itself
         // and the scheduled lambda form (both `in` spellings), which keeps the plain Subscribe name.

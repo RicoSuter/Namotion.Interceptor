@@ -31,7 +31,6 @@ All property change notifications flow through a single `PropertyChangeIntercept
 | `context.GetPropertyChangeObservable()` | Rx composition and UI binding over the whole model | a scheduler, by default | yes | [Property Change Observable](#property-change-observable-rx-based) |
 | `context.CreatePropertyChangeQueueSubscription()` | high throughput and source synchronization | your own consumer thread | one consumer per subscription | [Property Change Queue](#property-change-queue-high-performance) |
 | `property.SubscribeInline(callback)` | one property, cheapest possible | the writing thread, inside the write | no, your callback must be thread-safe | [Per-Property Subscriptions](#per-property-subscriptions) |
-| `property.GetInlineChangeObservable()` | one property, with Rx operators | the writing thread, inside the write | per subscriber | [Composing with Rx](#composing-with-rx) |
 | `property.Subscribe(callback, scheduler, onError)` | one property whose observer is slow, blocking or may throw | the scheduler | per subscription, not per observer | [Scheduled delivery](#scheduled-delivery) |
 
 The contract they share, per channel and across channels, is in [Delivery Guarantees](#delivery-guarantees), and what each one costs is in [Channel Cost](#channel-cost).
@@ -172,16 +171,6 @@ using var handle = person.SubscribeToProperty(
 
 **Dormancy is not symmetric with disposal**: detaching the subject stops acceptance but not the drain, so a change accepted before the detach is still delivered afterwards, while disposal drops the whole queue.
 
-#### Composing with Rx
-
-`property.GetInlineChangeObservable()` exposes one property's changes as an `IObservable<SubjectPropertyChange>`. It stays inline, on the writing thread, and a throwing handler propagates back into the setter; the context-level `GetPropertyChangeObservable()` reschedules onto a scheduler by default and is not the same thing.
-
-**Notifications are serialized per subscriber**, so stateful operators such as `Take`, `Skip`, `Scan`, `DistinctUntilChanged` and `Buffer` by count are safe over concurrent writers without extra work.
-
-**A handler composed over this must not throw.** Once an operator is in the chain, the first exception propagates to the writer and tears the subscription down, so later writes are neither delivered nor observable as failures.
-
-**A handler that writes properties belongs elsewhere**: two subscribers over this observable whose handlers write into each other's properties deadlock, so use `SubscribeInline` or a [scheduled subscription](#scheduled-delivery) for that.
-
 ### Delivery Guarantees
 
 Dispatch starts on the writing thread, outside the subject lock and after the commit, so a change that committed later can reach a consumer first. Every committed write carries a `SubjectPropertyChange.Revision`, monotonic **per subject**: of two changes to the *same* subject, the higher revision committed later. Revisions of *different* subjects are **not** comparable, and a change constructed outside a terminal write carries `0`. A consumer converging on the current value keeps the higher `Revision` or re-reads the property.
@@ -189,7 +178,6 @@ Dispatch starts on the writing thread, outside the subject lock and after the co
 | Channel | Exactly-once | Order | Consumer runs on | Serialized |
 |---|---|---|---|---|
 | Per-property callback (`SubscribeInline`) | conditional (a) | arrival | writer thread | no, concurrent writers re-enter it |
-| Per-property observable (`GetInlineChangeObservable`) | conditional (a) | arrival | writer thread | per subscriber |
 | Scheduled per-property callback (`Subscribe`) | conditional (a), (c) | arrival | scheduler thread | per subscription, not per observer instance |
 | Observable (`GetPropertyChangeObservable`) | conditional (a) | arrival | scheduler thread, writer thread with `ImmediateScheduler` | yes, through `Subject.Synchronize()` |
 | Pull queue | conditional (a) | arrival | consumer thread | single consumer by contract |
@@ -220,7 +208,6 @@ Measured on one Apple M4 Max running .NET 9.0.10 arm64, so the byte figures hold
 | `GetPropertyChangeObservable()` | none | none | about 5,712 bytes per additional subscriber, plus one dedicated dispatch thread each | 5,712 bytes, plus about 4,020 on dispose in a thousand-consumer context | about 2.2 |
 | `CreatePropertyChangeQueueSubscription()` | none | none | about 5,536 bytes per additional subscription | 5,536 bytes, plus about 4,052 on dispose in a thousand-consumer context | 1.9 |
 | `SubscribeInline` | none | in the write | about 172 bytes | about 173 bytes | 1.0, the reference |
-| `GetInlineChangeObservable` | none | in the write, one lock taken | about 216 bytes | 248 bytes | 1.0 |
 | `Subscribe` with a scheduler | 17 to 26 bytes across runs | 160 bytes keeping up, none under backlog | about 5,607 bytes | 5,607 bytes | 2.6 |
 
 **These compare one identical write, not equal workloads.** A context-level channel delivers every property's changes, so watching one property out of five hundred means paying for the other 499 as well, which is why 2.6 is usually the cheaper choice despite being the highest number in the column.
