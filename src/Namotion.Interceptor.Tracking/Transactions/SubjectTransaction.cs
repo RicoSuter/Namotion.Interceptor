@@ -230,7 +230,7 @@ public sealed class SubjectTransaction : IDisposable
         CancellationToken cancellationToken)
     {
         // Check for nested transactions BEFORE acquiring lock (prevents deadlock)
-        if (CurrentTransaction.Value != null)
+        if (CurrentTransaction.Value is { IsDisposed: false })
         {
             throw new InvalidOperationException("Nested transactions are not supported.");
         }

@@ -60,8 +60,11 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         if (transaction is { IsCommitting: false, IsDisposed: false } && !context.Property.Metadata.IsDerived)
         {
             // Validate context binding
-            var subjectInterceptor = context.Property.Subject.Context.TryGetService<SubjectTransactionInterceptor>();
-            if (subjectInterceptor != transaction.Interceptor)
+            var isBoundToThisContext = context.Property.Subject.Context
+                .GetServices<SubjectTransactionInterceptor>()
+                .Contains(transaction.Interceptor);
+
+            if (!isBoundToThisContext)
             {
                 throw new InvalidOperationException(
                     $"Cannot modify property '{context.Property.Metadata.Name}': Transaction is bound to a different context.");

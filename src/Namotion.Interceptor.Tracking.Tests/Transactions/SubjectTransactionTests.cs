@@ -51,6 +51,35 @@ public class SubjectTransactionTests
     }
 
     [Fact]
+    public async Task WhenTheContextResolvesTwoTransactionInterceptors_ThenTheWriteIsCapturedInsteadOfThrowing()
+    {
+        // Arrange: context inheritance adds another context as a fallback on attach, so a subject built on
+        // one transaction-enabled context and attached into a graph rooted on another resolves two.
+        // Requiring exactly one threw out of the property setter, which on a scheduler thread ends the
+        // process; the question being asked is only whether the transaction belongs to this context.
+        var context = CreateTransactionContext();
+        var fallbackContext = CreateTransactionContext();
+
+        var person = new Person(context);
+        ((IInterceptorSubject)person).Context.AddFallbackContext(fallbackContext);
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+
+            // Assert: captured rather than written straight through, so the binding resolved to this
+            // context. Reading the property here would serve the pending value either way.
+            Assert.Single(transaction.GetPendingChanges(),
+                change => change.Property.Name == nameof(Person.FirstName));
+
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        Assert.Equal("John", person.FirstName);
+    }
+
+    [Fact]
     public async Task WhenTransactionCommitted_ThenChangesAreApplied()
     {
         // Arrange
@@ -614,6 +643,27 @@ public class SubjectTransactionTests
     }
 
     [Fact]
+    public async Task WhenAmbientTransactionIsOpen_ThenWriteIsCapturedInsteadOfAppliedToModel()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+        var person = new Person(context) { FirstName = "Old" };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "New";
+
+        // Assert
+        var pendingChange = Assert.Single(transaction.GetPendingChanges());
+        Assert.Equal(nameof(Person.FirstName), pendingChange.Property.Name);
+        Assert.Equal("New", pendingChange.GetNewValue<string?>());
+
+        string? modelFirstName = null;
+        await RunWithoutAsyncLocalFlowAsync(() => modelFirstName = person.FirstName);
+        Assert.Equal("Old", modelFirstName);
+    }
+
+    [Fact]
     public async Task WhenAmbientTransactionIsDisposedAndAnotherIsOpen_ThenReadReturnsTheModelValueInsteadOfAPendingValue()
     {
         // Arrange: capture the flow while a transaction is current and holds a pending value, then dispose
@@ -708,6 +758,49 @@ public class SubjectTransactionTests
             // Assert
             Assert.Null(escapedException);
             Assert.Equal(valueWrittenAfterDispose, person.LastName);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAmbientTransactionWasDisposedByAnotherFlow_ThenTheFrozenFlowCanBeginANewTransaction()
+    {
+        // Arrange: freeze a flow while a transaction is current, then dispose that transaction from the flow
+        // that owns it. Dispose clears the ambient slot only for the disposing flow, so the frozen flow keeps
+        // pointing at the disposed transaction for the rest of its life.
+        var context = CreateTransactionContext();
+        var disposedTransaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        var frozenFlow = ExecutionContext.Capture()
+            ?? throw new InvalidOperationException("Execution context flow must not be suppressed in this test.");
+        disposedTransaction.Dispose();
+
+        // Act
+        SubjectTransaction? newTransaction = null;
+        try
+        {
+            Exception? failure = null;
+            ExecutionContext.Run(frozenFlow, _ =>
+            {
+                Assert.Same(disposedTransaction, SubjectTransaction.Current);
+                try
+                {
+                    newTransaction = context
+                        .BeginTransactionAsync(TransactionFailureHandling.BestEffort)
+                        .GetAwaiter()
+                        .GetResult();
+                }
+                catch (Exception exception)
+                {
+                    failure = exception;
+                }
+            }, null);
+
+            // Assert
+            Assert.Null(failure);
+            Assert.NotNull(newTransaction);
+        }
+        finally
+        {
+            newTransaction?.Dispose();
         }
     }
 
