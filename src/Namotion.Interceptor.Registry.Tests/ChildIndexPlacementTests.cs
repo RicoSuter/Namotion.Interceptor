@@ -16,8 +16,8 @@ public class ChildIndexPlacementTests
 {
     private const int ForceScanMinimum = int.MaxValue;
     private const int ForceRebuildMinimum = 0;
-    private const int ForceRebuildBudget = 0;
-    private const int NeverBudget = int.MaxValue;
+    private const int ForceRebuildLimit = 0;
+    private const int NeverLimit = int.MaxValue;
 
     /// <summary>
     /// What a direct call to the registry's placement can affect. The tracked parents behind GetParents are
@@ -149,15 +149,18 @@ public class ChildIndexPlacementTests
         var incoming = Incoming(fixture.Property, Shape(shape, fixture.Attached));
 
         var rebuilt = rebuild
-            ? fixture.Property.RefreshChildIndices(incoming, fixture.Registry, ForceRebuildMinimum, ForceRebuildBudget)
-            : fixture.Property.RefreshChildIndices(incoming, fixture.Registry, ForceScanMinimum, NeverBudget);
+            ? fixture.Property.RefreshChildIndices(incoming, fixture.Registry, ForceRebuildMinimum, ForceRebuildLimit)
+            : fixture.Property.RefreshChildIndices(incoming, fixture.Registry, ForceScanMinimum, NeverLimit);
 
         Assert.Equal(rebuild, rebuilt);
         return Snapshot(fixture);
     }
 
+    // SameOrder is absent on purpose: the handover only happens for a child found away from its slot, and
+    // that shape has none, so it can never reach the rebuild. It is covered by the scan-only rows of
+    // WhenTheDefaultLimitIsUsed and by the end-to-end writes, and a same-order remainder handed to the
+    // rebuild mid-scan is covered by RotateForward in WhenTheHandoverFallsAtAnySlot.
     [Theory]
-    [InlineData("SameOrder")]
     [InlineData("Reversed")]
     [InlineData("RotateForward")]
     [InlineData("RotateBack")]
@@ -178,6 +181,115 @@ public class ChildIndexPlacementTests
         Assert.Equal(scanned.RegistryParents, rebuilt.RegistryParents);
     }
 
+    [Theory]
+    [InlineData("Reversed")]
+    [InlineData("RotateBack")]
+    [InlineData("Swaps")]
+    [InlineData("Repeat")]
+    [InlineData("Stranded")]
+    [InlineData("Absent")]
+    public void WhenTheHandoverFallsAtAnySlot_ThenTheResultIsTheOneTheScanProduces(string shape)
+    {
+        // Forcing the rebuild from the first child only ever tests the two paths whole. Sweeping the limit
+        // moves the handover through every slot it can fall on, which is where a mistake in the slot or span
+        // bookkeeping would drop a child or place it twice.
+        // Arrange
+        var expected = Place(shape, 12, rebuild: false);
+
+        for (var limit = 0; limit <= 12; limit++)
+        {
+            var fixture = Create(12);
+            var incoming = Incoming(fixture.Property, Shape(shape, fixture.Attached));
+
+            // Act
+            fixture.Property.RefreshChildIndices(incoming, fixture.Registry, ForceRebuildMinimum, limit);
+
+            // Assert
+            var actual = Snapshot(fixture);
+            Assert.Equal(expected.Children, actual.Children);
+            Assert.Equal(expected.RegistryParents, actual.RegistryParents);
+        }
+    }
+
+    [Fact]
+    public void WhenTheRebuildReordersAfterChildrenWereRead_ThenTheCachedChildrenAreNotStale()
+    {
+        // Children hands out a cached snapshot. A rebuild that reorders without invalidating it would serve
+        // the old order to every reader from then on.
+        // Arrange
+        var fixture = Create(4);
+        var before = fixture.Property.Children;
+        Assert.Equal(["P0", "P1", "P2", "P3"], before.Select(child => ((Person)child.Subject).FirstName));
+
+        var incoming = Incoming(fixture.Property, Shape("Reversed", fixture.Attached));
+
+        // Act
+        fixture.Property.RefreshChildIndices(incoming, fixture.Registry, ForceRebuildMinimum, ForceRebuildLimit);
+
+        // Assert
+        Assert.Equal(["P3", "P2", "P1", "P0"], fixture.Property.Children.Select(child => ((Person)child.Subject).FirstName));
+    }
+
+    [Fact]
+    public void WhenTheRebuildThrowsAfterMovingAnIndex_ThenTheParentEntryCanStillBeRepaired()
+    {
+        // The parent entry is matched on the index the children hold. If the rebuild moved it before a later
+        // comparer threw, no later refresh could ever match it again and the index would stay wrong for good.
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var registry = context.TryGetService<ISubjectRegistry>()!;
+        var displacing = new Person { FirstName = "C" };
+        var moving = new Person { FirstName = "A" };
+        var exploding = new Person { FirstName = "B" };
+
+        var explodingKey = new ReentrantKey("beta", () => throw new InvalidOperationException("boom"));
+        var directory = new PersonDirectory(context)
+        {
+            Untyped = new Dictionary<ReentrantKey, Person>
+            {
+                [new ReentrantKey("alpha")] = moving,
+                [explodingKey] = exploding,
+                [new ReentrantKey("gamma")] = displacing
+            }
+        };
+
+        var property = directory.TryGetRegisteredSubject()!.TryGetProperty(nameof(PersonDirectory.Untyped))!;
+
+        // The last child first, so it is found away from its slot and the whole write is handed to the
+        // rebuild; then a moved index; then the child whose stored key explodes.
+        var failing = new[]
+        {
+            new SubjectChildReference(displacing, property.Reference, new ReentrantKey("z0")),
+            new SubjectChildReference(moving, property.Reference, new ReentrantKey("z1")),
+            new SubjectChildReference(exploding, property.Reference, new ReentrantKey("z2"))
+        };
+
+        explodingKey.Arm();
+
+        // Act
+        var exception = Record.Exception(() =>
+            property.RefreshChildIndices(failing, registry, ForceRebuildMinimum, ForceRebuildLimit));
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.Equal("alpha", moving.TryGetRegisteredSubject()!.Parents[0].Index!.ToString());
+        Assert.Equal("gamma", displacing.TryGetRegisteredSubject()!.Parents[0].Index!.ToString());
+
+        // A later write still repairs it, which it could not if a parent had moved ahead of the children.
+        var repairing = new[]
+        {
+            new SubjectChildReference(displacing, property.Reference, new ReentrantKey("omega")),
+            new SubjectChildReference(moving, property.Reference, new ReentrantKey("alpha")),
+            new SubjectChildReference(exploding, property.Reference, new ReentrantKey("beta"))
+        };
+
+        property.RefreshChildIndices(repairing, registry, ForceRebuildMinimum, ForceRebuildLimit);
+        Assert.Equal("omega", displacing.TryGetRegisteredSubject()!.Parents[0].Index!.ToString());
+    }
+
     [Fact]
     public void WhenTheRebuildPlacesAReorder_ThenBothParentCopiesFollowTheChildren()
     {
@@ -188,7 +300,7 @@ public class ChildIndexPlacementTests
         var incoming = Incoming(fixture.Property, Shape("Reversed", fixture.Attached));
 
         // Act
-        var rebuilt = fixture.Property.RefreshChildIndices(incoming, fixture.Registry, ForceRebuildMinimum, ForceRebuildBudget);
+        var rebuilt = fixture.Property.RefreshChildIndices(incoming, fixture.Registry, ForceRebuildMinimum, ForceRebuildLimit);
 
         // Assert
         Assert.True(rebuilt);
@@ -208,7 +320,7 @@ public class ChildIndexPlacementTests
         var incoming = Incoming(fixture.Property, order);
 
         // Act
-        fixture.Property.RefreshChildIndices(incoming, fixture.Registry, ForceRebuildMinimum, ForceRebuildBudget);
+        fixture.Property.RefreshChildIndices(incoming, fixture.Registry, ForceRebuildMinimum, ForceRebuildLimit);
 
         // Assert
         Assert.Equal(["P0@0", "P1@1", "P2@3", "P3@4"], Snapshot(fixture).Children);
@@ -226,7 +338,7 @@ public class ChildIndexPlacementTests
         var incoming = Incoming(fixture.Property, order);
 
         // Act
-        fixture.Property.RefreshChildIndices(incoming, fixture.Registry, ForceRebuildMinimum, ForceRebuildBudget);
+        fixture.Property.RefreshChildIndices(incoming, fixture.Registry, ForceRebuildMinimum, ForceRebuildLimit);
 
         // Assert
         Assert.Equal(["P5@0", "P3@1", "P0@0", "P1@1", "P2@2", "P4@4"], Snapshot(fixture).Children);
@@ -258,7 +370,7 @@ public class ChildIndexPlacementTests
 
         // Act
         var exception = Record.Exception(() =>
-            property.RefreshChildIndices(incoming, context.TryGetService<ISubjectRegistry>()!, ForceRebuildMinimum, ForceRebuildBudget));
+            property.RefreshChildIndices(incoming, context.TryGetService<ISubjectRegistry>()!, ForceRebuildMinimum, ForceRebuildLimit));
 
         // Assert
         Assert.Null(exception);
@@ -276,7 +388,7 @@ public class ChildIndexPlacementTests
     [InlineData("Swaps", 64, true)]
     [InlineData("Reversed", 16, false)]
     [InlineData("SameOrder", 16, false)]
-    public void WhenTheDefaultBudgetIsUsed_ThenOnlyQuadraticShapesRebuild(string shape, int count, bool expected)
+    public void WhenTheDefaultLimitIsUsed_ThenOnlyQuadraticShapesRebuild(string shape, int count, bool expected)
     {
         // Rotating by one and a handful of local swaps are linear for the scan however large the container,
         // so they must stay on it; reversing and rotating the other way are not, so they must not. Below the
@@ -287,7 +399,7 @@ public class ChildIndexPlacementTests
 
         // Act
         var rebuilt = fixture.Property.RefreshChildIndices(incoming, fixture.Registry,
-            RegisteredSubjectProperty.RebuildMinimumChildren, RegisteredSubjectProperty.RebuildWorkBudgetFactor);
+            RegisteredSubjectProperty.RebuildMinimumChildren, RegisteredSubjectProperty.RebuildCostlyChildLimit);
 
         // Assert
         Assert.Equal(expected, rebuilt);
@@ -311,7 +423,7 @@ public class ChildIndexPlacementTests
 
         // Act
         var rebuilt = fixture.Property.RefreshChildIndices(incoming, fixture.Registry,
-            RegisteredSubjectProperty.RebuildMinimumChildren, RegisteredSubjectProperty.RebuildWorkBudgetFactor);
+            RegisteredSubjectProperty.RebuildMinimumChildren, RegisteredSubjectProperty.RebuildCostlyChildLimit);
 
         // Assert
         Assert.True(rebuilt);
@@ -471,7 +583,7 @@ public class ChildIndexPlacementTests
 
         // Act
         var exception = Record.Exception(() =>
-            property.RefreshChildIndices(incoming, context.TryGetService<ISubjectRegistry>()!, ForceRebuildMinimum, ForceRebuildBudget));
+            property.RefreshChildIndices(incoming, context.TryGetService<ISubjectRegistry>()!, ForceRebuildMinimum, ForceRebuildLimit));
 
         // Assert
         Assert.IsType<InvalidOperationException>(exception);
@@ -498,7 +610,7 @@ public class ChildIndexPlacementTests
         var second = new Person { FirstName = "B" };
 
         var reentrant = new ReentrantKey("alpha", () =>
-            nested.Property.RefreshChildIndices(nestedIncoming, nested.Registry, ForceRebuildMinimum, ForceRebuildBudget));
+            nested.Property.RefreshChildIndices(nestedIncoming, nested.Registry, ForceRebuildMinimum, ForceRebuildLimit));
 
         var container = new PersonDirectory(context)
         {
@@ -516,7 +628,7 @@ public class ChildIndexPlacementTests
         reentrant.Arm();
 
         // Act
-        property.RefreshChildIndices(incoming, registry, ForceRebuildMinimum, ForceRebuildBudget);
+        property.RefreshChildIndices(incoming, registry, ForceRebuildMinimum, ForceRebuildLimit);
 
         // Assert
         Assert.Equal(

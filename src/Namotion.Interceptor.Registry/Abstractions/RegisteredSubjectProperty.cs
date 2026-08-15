@@ -16,8 +16,13 @@ public class RegisteredSubjectProperty
     private const byte ContainerKindCollection = 3;
     private const byte ContainerKindDictionary = 4;
 
-    /// <summary>How much scanning is worth doing, as a multiple of the child count, before rebuilding instead.</summary>
-    internal const int RebuildWorkBudgetFactor = 4;
+    /// <summary>
+    /// How many children may be found away from their slot, or not found at all, before the rest are placed
+    /// by the rebuild instead. Each such child costs the remainder of the list, against roughly fifty times
+    /// that for a rebuilt one, so the scan can never waste more than a fraction of a rebuild before handing
+    /// over, and a container of any size survives this many scattered moves without leaving the scan.
+    /// </summary>
+    internal const int RebuildCostlyChildLimit = 16;
 
     /// <summary>Below this many children the scan wins whatever the shape, so the rebuild never runs.</summary>
     internal const int RebuildMinimumChildren = 32;
@@ -30,6 +35,12 @@ public class RegisteredSubjectProperty
 
     [ThreadStatic]
     private static List<SubjectPropertyChild>? _reusableRebuild;
+
+    [ThreadStatic]
+    private static List<MovedChild>? _reusableMoved;
+
+    /// <summary>A child whose index the rebuild changed, and the two indices its parent entry moves between.</summary>
+    private readonly record struct MovedChild(IInterceptorSubject Subject, object? OldIndex, object? NewIndex);
 
     private readonly List<SubjectPropertyChild> _children = [];
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
@@ -433,25 +444,27 @@ public class RegisteredSubjectProperty
     /// <param name="registry">The subject registry (passed from caller to avoid repeated service resolution per child).</param>
     internal void RefreshChildIndices(ReadOnlySpan<SubjectChildReference> children, ISubjectRegistry registry)
     {
-        RefreshChildIndices(children, registry, RebuildMinimumChildren, RebuildWorkBudgetFactor);
+        RefreshChildIndices(children, registry, RebuildMinimumChildren, RebuildCostlyChildLimit);
     }
 
     /// <param name="children">The child subjects the property holds, with their indices, in the order the property holds them.</param>
     /// <param name="registry">The subject registry.</param>
     /// <param name="minimumChildrenForRebuild">Overridden by tests, so both placement paths can be driven without building large containers.</param>
-    /// <param name="workBudgetFactor">Overridden by tests, so either path can be forced for the same input.</param>
-    /// <returns>True when the rebuild path was taken, which is what tests assert the budget on.</returns>
+    /// <param name="costlyChildLimit">Overridden by tests, so either path can be forced for the same input.</param>
+    /// <returns>True when the rebuild path was taken, which is what tests assert the handover on.</returns>
     internal bool RefreshChildIndices(ReadOnlySpan<SubjectChildReference> children, ISubjectRegistry registry,
-        int minimumChildrenForRebuild, int workBudgetFactor)
+        int minimumChildrenForRebuild, int costlyChildLimit)
     {
         lock (_children)
         {
-            // Scanning is the fastest placement while children sit at or near their slot, and quadratic when
-            // they do not. Both of its quadratic terms are charged against one budget: walking past entries to
-            // find a child, and the block a displacement has to move. Once the charge exceeds what a rebuild
-            // would cost, the remainder is handed over, which bounds the whole method at O(n).
-            var budget = (long)workBudgetFactor * _children.Count;
-            var work = 0L;
+            // Scanning is the fastest placement while children sit at their slot, and quadratic when they do
+            // not. Exactly two things make it so, and both cost the rest of the list: a child found away from
+            // its slot, whose RemoveAt and Insert each shift everything after them, and a child not found at
+            // all, whose scan runs to the end. Counting those bounds the method: each costs about a
+            // fiftieth of what placing the same children through the rebuild costs, so stopping after a fixed
+            // number of them wastes at most a fraction of one rebuild, whatever the container size. A count
+            // rather than a proportion is what keeps a handful of moves in a large container on the scan.
+            var costly = 0;
             var slot = 0;
 
             for (var index = 0; index < children.Length; index++)
@@ -468,29 +481,20 @@ public class RegisteredSubjectProperty
                     }
                 }
 
-                // Charged whether or not the scan found anything: a miss walks the whole remainder, and a
-                // subject held at several indices misses on every repeat after the first.
-                work += position < 0 ? _children.Count - slot : position - slot + 1;
+                // Tested before the miss is skipped, or a run of misses would scan to the end every time with
+                // the limit already passed and no handover ever reached.
+                if (position != slot && ++costly > costlyChildLimit && _children.Count - slot >= minimumChildrenForRebuild)
+                {
+                    // This child is handed over too, so the handover neither drops nor places it twice.
+                    RebuildChildren(children[index..], slot, registry);
+                    return true;
+                }
 
                 // Either a repeat of a subject already placed, so the first index wins as it does on attach,
                 // or a subject which an unsupported in-place mutation hid from the lifecycle interceptor.
                 if (position < 0)
                 {
                     continue;
-                }
-
-                // RemoveAt and Insert each shift everything after them, so a displacement costs the rest of
-                // the list however near the child happened to be.
-                if (position != slot)
-                {
-                    work += _children.Count - slot;
-                }
-
-                if (work > budget && _children.Count - slot >= minimumChildrenForRebuild)
-                {
-                    // This child is handed over too, so the handover neither drops nor doubles it.
-                    RebuildChildren(children[index..], slot, registry);
-                    return true;
                 }
 
                 var existing = _children[position];
@@ -531,9 +535,11 @@ public class RegisteredSubjectProperty
         // buffers instead of clearing the ones being filled here.
         var positions = _reusablePositions ?? new Dictionary<IInterceptorSubject, int>(ReferenceEqualityComparer.Instance);
         var rebuilt = _reusableRebuild ?? [];
+        var moved = _reusableMoved ?? [];
 
         _reusablePositions = null;
         _reusableRebuild = null;
+        _reusableMoved = null;
 
         try
         {
@@ -555,7 +561,11 @@ public class RegisteredSubjectProperty
                 var existing = _children[position];
                 if (!Equals(existing.Index, child.Index))
                 {
-                    registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, existing.Index, child.Index);
+                    // Recorded rather than applied, because the parent entry is matched on the index the
+                    // children still hold. Moving it before them would leave a comparer that throws further
+                    // down with a parent the children no longer describe, which no later refresh could match
+                    // again, so the index would stay wrong for the life of the subject.
+                    moved.Add(new MovedChild(child.Subject, existing.Index, child.Index));
                     existing = existing with { Index = child.Index };
                 }
 
@@ -576,22 +586,34 @@ public class RegisteredSubjectProperty
             }
 
             // Spliced only once everything above succeeded, so a throwing comparer cannot leave the children
-            // half rebuilt.
+            // half rebuilt. Invalidated first, so a failure between the two cannot leave a cache describing
+            // a list that no longer exists.
+            _childrenCache = default;
             _children.RemoveRange(from, _children.Count - from);
             _children.AddRange(rebuilt);
-            _childrenCache = default;
+
+            // Only now that the children are the ones the parent entries will be matched against.
+            for (var i = 0; i < moved.Count; i++)
+            {
+                var entry = moved[i];
+                registry.TryGetRegisteredSubject(entry.Subject)?.UpdateParentIndex(this, entry.OldIndex, entry.NewIndex);
+            }
         }
         finally
         {
-            var reusable = rebuilt.Capacity <= MaximumPooledCapacity;
+            // Both buffers grow with the container, so one oversized write must not pin either of them on a
+            // pool thread, and Clear does not give the memory back.
+            var reusable = rebuilt.Capacity <= MaximumPooledCapacity && positions.Count <= MaximumPooledCapacity;
 
             positions.Clear();
             rebuilt.Clear();
+            moved.Clear();
 
             if (reusable)
             {
                 _reusablePositions = positions;
                 _reusableRebuild = rebuilt;
+                _reusableMoved = moved;
             }
         }
     }
