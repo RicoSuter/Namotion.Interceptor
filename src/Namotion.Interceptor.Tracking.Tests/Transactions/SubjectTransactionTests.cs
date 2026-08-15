@@ -643,6 +643,37 @@ public class SubjectTransactionTests
     }
 
     [Fact]
+    public async Task WhenAmbientTransactionIsDisposedAndAnotherIsOpen_ThenDerivedPropertiesStillRecalculate()
+    {
+        // Arrange: same frozen-flow setup as the write test above. The write reaches the model, so its
+        // derived cascade has to run with it: the disposed transaction has no commit left to replay it on,
+        // so suppressing the cascade would drop the recalculation forever.
+        var context = CreateTransactionContext();
+        var person = new Person(context) { FirstName = "Old", LastName = "Doe" };
+
+        var disposedTransaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        var frozenFlow = ExecutionContext.Capture()
+            ?? throw new InvalidOperationException("Execution context flow must not be suppressed in this test.");
+        disposedTransaction.Dispose();
+
+        // Keeps the process-wide active count above zero, so the derived handler does not take its
+        // no-transaction fast path.
+        using var openTransaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+
+        var changedProperties = new List<string>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change => changedProperties.Add(change.Property.Name));
+
+        // Act
+        ExecutionContext.Run(frozenFlow, _ => person.FirstName = "New", null);
+
+        // Assert
+        Assert.Contains(nameof(Person.FirstName), changedProperties);
+        Assert.Contains(nameof(Person.FullName), changedProperties);
+        Assert.Contains(nameof(Person.FullNameWithPrefix), changedProperties);
+    }
+
+    [Fact]
     public async Task WhenAmbientTransactionIsOpen_ThenWriteIsCapturedInsteadOfAppliedToModel()
     {
         // Arrange

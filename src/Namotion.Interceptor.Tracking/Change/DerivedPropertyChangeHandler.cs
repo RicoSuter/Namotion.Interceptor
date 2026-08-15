@@ -166,7 +166,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         {
             // Suppress cascading recalculations during transaction capture (replayed on commit).
             if (SubjectTransaction.HasActiveTransaction &&
-                SubjectTransaction.Current is { IsCommitting: false })
+                SubjectTransaction.Current is { IsCommitting: false } ambientTransaction &&
+                AnyDependentReadsPendingValue(ambientTransaction, usedByProperties))
             {
                 return;
             }
@@ -177,6 +178,30 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
             RecalculateDependents(usedByProperties, context.Property, storageTimestamp, rawTimestamp);
         }
+    }
+
+    private static bool AnyDependentReadsPendingValue(
+        SubjectTransaction transaction,
+        ReadOnlySpan<PropertyReference> usedByProperties)
+    {
+        for (var index = 0; index < usedByProperties.Length; index++)
+        {
+            var dependentData = usedByProperties[index].TryGetDerivedPropertyData();
+            if (dependentData is null)
+            {
+                continue;
+            }
+
+            lock (dependentData)
+            {
+                if (transaction.ContainsAnyPendingValue(dependentData.RequiredPropertiesSpan))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -2,6 +2,7 @@
 using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
@@ -462,5 +463,127 @@ public class DerivedPropertyChangeHandlerTests
         // Assert - Each derived property should fire exactly once (no duplicates)
         Assert.Single(firedEvents, e => e == "FullName");
         Assert.Single(firedEvents, e => e == "FullNameWithPrefix");
+    }
+
+    [Fact]
+    public async Task WhenTransactionIsOpenOnAnotherContext_ThenDerivedPropertiesStillRecalculate()
+    {
+        // Arrange: the written context has no transaction interceptor, so the transaction open on the
+        // other context never captures the write and no commit will replay its cascade. The ambient
+        // transaction slot is process-wide, so the handler still sees that transaction.
+        var transactionContext = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithDerivedPropertyChangeDetection()
+            .WithPropertyChangeSubscriptions();
+
+        var transactionPerson = new Person(transactionContext);
+        var person = new Person(context)
+        {
+            FirstName = "John",
+            LastName = "Doe"
+        };
+
+        var changedProperties = new List<string>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change => changedProperties.Add(change.Property.Name));
+
+        // Act
+        using (await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            transactionPerson.FirstName = "Captured";
+            person.FirstName = "Jane";
+        }
+
+        // Assert
+        Assert.Contains(nameof(Person.FirstName), changedProperties);
+        Assert.Contains(nameof(Person.FullName), changedProperties);
+        Assert.Contains(nameof(Person.FullNameWithPrefix), changedProperties);
+    }
+
+    [Fact]
+    public void WhenATransactionBecomesAmbientDuringAnUncapturedWrite_ThenTheDependentsStillRecalculate()
+    {
+        // Arrange: no transaction is ambient when the write starts, so the transaction interceptor takes its
+        // fast path and the write reaches the model. A synchronous observer then opens one, which publishes
+        // it into the ambient slot of the flow the write is running on, so by the time the cascade is
+        // decided a live transaction is bound to this context for a write nothing captured.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+
+        var person = new Person(context) { LastName = "Doe" };
+        _ = person.FullName;
+
+        SubjectTransaction? ambientTransaction = null;
+        var changedProperties = new List<string>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change =>
+            {
+                changedProperties.Add(change.Property.Name);
+                if (change.Property.Name == nameof(Person.FirstName) && ambientTransaction is null)
+                {
+                    ambientTransaction = context
+                        .BeginTransactionAsync(TransactionFailureHandling.BestEffort)
+                        .GetAwaiter()
+                        .GetResult();
+                }
+            });
+
+        // Act
+        try
+        {
+            person.FirstName = "Jane";
+        }
+        finally
+        {
+            // Disposal releases a process-wide active count, so leaking it here would leave every later
+            // test in the assembly believing a transaction is open.
+            ambientTransaction?.Dispose();
+        }
+
+        // Assert: the model holds the recalculated value either way, so only the announcements discriminate.
+        Assert.Contains(nameof(Person.FullName), changedProperties);
+        Assert.Contains(nameof(Person.FullNameWithPrefix), changedProperties);
+    }
+
+    [Fact]
+    public async Task WhenATransactionIsRolledBack_ThenNoDependentValueWasAnnouncedFromItsPendingState()
+    {
+        // Arrange: a derived write is not captured, so it lands during capture and cascades. The
+        // dependent's getter reads a property the transaction did capture, so recalculating now would
+        // compute from pending state and publish a value the model never holds once the commit is
+        // rolled back, with nothing left to correct it.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+
+        var subject = new TransactionCascadeSubject(context) { Plain = "committed" };
+        _ = subject.Combined;
+
+        var announced = new List<string?>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => change.Property.Name == nameof(TransactionCascadeSubject.Combined))
+            .Subscribe(change => announced.Add(change.GetNewValue<string>()));
+
+        // Act: begin, write, then dispose without committing.
+        using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            subject.Plain = "uncommitted";
+            subject.DerivedWithSetter = "d1";
+        }
+
+        // Assert
+        Assert.Empty(announced);
+        Assert.Equal("committed|d1", subject.Combined);
     }
 }

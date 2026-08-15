@@ -121,6 +121,27 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
+    internal bool ContainsAnyPendingValue(ReadOnlySpan<PropertyReference> properties)
+    {
+        lock (_pendingChangesLock)
+        {
+            if (Volatile.Read(ref _isDisposed) != 0 || _pendingChanges is null)
+            {
+                return false;
+            }
+
+            for (var index = 0; index < properties.Length; index++)
+            {
+                if (_pendingChanges.ContainsKey(properties[index]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
     /// <summary>
     /// Atomically captures a property change into the pending dictionary.
     /// First write preserves <paramref name="currentValue"/> as old value for conflict detection;
