@@ -223,12 +223,18 @@ public class RegisteredSubject
         }
     }
 
-    internal void UpdateParentIndex(RegisteredSubjectProperty property, object? oldIndex, object? newIndex)
+    /// <summary>
+    /// Moves this subject's parent entry for the given property to a new index. Matched on the property
+    /// alone, as <see cref="RemoveParent"/> is and as the tracked parents are: attach adds at most one entry
+    /// per property, so it is unambiguous, it repairs an entry whose index somehow drifted rather than
+    /// silently missing it, and it keeps arbitrary caller equality on an index key out of a method that runs
+    /// while the children lock is held.
+    /// </summary>
+    internal void UpdateParentIndex(RegisteredSubjectProperty property, object? newIndex)
     {
         lock (_lock)
         {
-            var oldEntry = new SubjectPropertyParent { Property = property, Index = oldIndex };
-            if (_firstParent.Property is not null && _firstParent.Equals(oldEntry))
+            if (_firstParent.Property == property)
             {
                 _firstParent = new SubjectPropertyParent { Property = property, Index = newIndex };
                 InvalidateParentsSnapshot();
@@ -237,11 +243,14 @@ public class RegisteredSubject
 
             if (_additionalParents is not null)
             {
-                var indexInList = _additionalParents.IndexOf(oldEntry);
-                if (indexInList >= 0)
+                for (var index = 0; index < _additionalParents.Count; index++)
                 {
-                    _additionalParents[indexInList] = new SubjectPropertyParent { Property = property, Index = newIndex };
-                    InvalidateParentsSnapshot();
+                    if (_additionalParents[index].Property == property)
+                    {
+                        _additionalParents[index] = new SubjectPropertyParent { Property = property, Index = newIndex };
+                        InvalidateParentsSnapshot();
+                        return;
+                    }
                 }
             }
         }

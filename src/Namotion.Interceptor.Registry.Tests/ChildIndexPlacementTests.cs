@@ -158,8 +158,7 @@ public class ChildIndexPlacementTests
 
     // SameOrder is absent on purpose: the handover only happens for a child found away from its slot, and
     // that shape has none, so it can never reach the rebuild. It is covered by the scan-only rows of
-    // WhenTheDefaultLimitIsUsed and by the end-to-end writes, and a same-order remainder handed to the
-    // rebuild mid-scan is covered by RotateForward in WhenTheHandoverFallsAtAnySlot.
+    // WhenTheDefaultLimitIsUsed and by the end-to-end writes.
     [Theory]
     [InlineData("Reversed")]
     [InlineData("RotateForward")]
@@ -181,13 +180,14 @@ public class ChildIndexPlacementTests
         Assert.Equal(scanned.RegistryParents, rebuilt.RegistryParents);
     }
 
+    // Repeat and Absent are left out on purpose: each has a single child costing the remainder of the list,
+    // so every limit above zero stays on the scan and the sweep collapses to the one handover the
+    // equivalence theory already covers. The shapes below all have many.
     [Theory]
     [InlineData("Reversed")]
     [InlineData("RotateBack")]
     [InlineData("Swaps")]
-    [InlineData("Repeat")]
     [InlineData("Stranded")]
-    [InlineData("Absent")]
     public void WhenTheHandoverFallsAtAnySlot_ThenTheResultIsTheOneTheScanProduces(string shape)
     {
         // Forcing the rebuild from the first child only ever tests the two paths whole. Sweeping the limit
@@ -195,6 +195,7 @@ public class ChildIndexPlacementTests
         // bookkeeping would drop a child or place it twice.
         // Arrange
         var expected = Place(shape, 12, rebuild: false);
+        var handedOver = 0;
 
         for (var limit = 0; limit <= 12; limit++)
         {
@@ -202,13 +203,23 @@ public class ChildIndexPlacementTests
             var incoming = Incoming(fixture.Property, Shape(shape, fixture.Attached));
 
             // Act
-            fixture.Property.RefreshChildIndices(incoming, fixture.Registry, ForceRebuildMinimum, limit);
+            var rebuilt = fixture.Property.RefreshChildIndices(incoming, fixture.Registry, ForceRebuildMinimum, limit);
 
             // Assert
             var actual = Snapshot(fixture);
             Assert.Equal(expected.Children, actual.Children);
             Assert.Equal(expected.RegistryParents, actual.RegistryParents);
+
+            if (rebuilt)
+            {
+                handedOver++;
+            }
         }
+
+        // Without this the sweep passes just as well with the rebuild switched off entirely, and every shape
+        // here has more than one child that costs the remainder of the list, so more than one limit must
+        // reach it.
+        Assert.True(handedOver > 1, $"only {handedOver} of 13 limits handed over");
     }
 
     [Fact]
@@ -231,10 +242,10 @@ public class ChildIndexPlacementTests
     }
 
     [Fact]
-    public void WhenTheRebuildThrowsAfterMovingAnIndex_ThenTheParentEntryCanStillBeRepaired()
+    public void WhenTheRebuildThrowsPartWayThrough_ThenNeitherChildrenNorParentsMoved()
     {
-        // The parent entry is matched on the index the children hold. If the rebuild moved it before a later
-        // comparer threw, no later refresh could ever match it again and the index would stay wrong for good.
+        // A comparer that throws must leave the write as if it had never started: nothing spliced and no
+        // parent moved. Both are recorded and applied only once the whole placement has succeeded.
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
@@ -275,10 +286,13 @@ public class ChildIndexPlacementTests
 
         // Assert
         Assert.IsType<InvalidOperationException>(exception);
+        Assert.Equal(
+            ["A@alpha", "B@beta", "C@gamma"],
+            property.Children.Select(child => $"{((Person)child.Subject).FirstName}@{child.Index}"));
         Assert.Equal("alpha", moving.TryGetRegisteredSubject()!.Parents[0].Index!.ToString());
         Assert.Equal("gamma", displacing.TryGetRegisteredSubject()!.Parents[0].Index!.ToString());
 
-        // A later write still repairs it, which it could not if a parent had moved ahead of the children.
+        // And a later write still lands, from a state nothing has touched.
         var repairing = new[]
         {
             new SubjectChildReference(displacing, property.Reference, new ReentrantKey("omega")),
@@ -410,12 +424,13 @@ public class ChildIndexPlacementTests
     {
         // A miss walks the whole remainder and displaces nothing, so a budget that only counted
         // displacements would let this stay quadratic on the scan.
+        // An unbroken run, with no hit after it to carry the handover: testing the limit after the miss was
+        // skipped would scan to the end for every one of these and never hand over.
         // Arrange
         var fixture = Create(64);
-        var order = new List<Person>();
-        foreach (var person in fixture.Attached)
+        var order = new List<Person> { fixture.Attached[0] };
+        for (var i = 0; i < 5000; i++)
         {
-            order.Add(person);
             order.Add(fixture.Attached[0]);
         }
 
