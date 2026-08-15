@@ -32,9 +32,8 @@ public class DerivedPropertyWriteGenerationTests
         finally
         {
             subject.ContinueEvaluation.Set();
+            await trigger.WaitAsync(TimeSpan.FromSeconds(10));
         }
-
-        await trigger.WaitAsync(TimeSpan.FromSeconds(10));
 
         // Assert
         Assert.Equal(callsBefore + 1, subject.GetterCallCount);

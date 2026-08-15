@@ -473,16 +473,25 @@ public class DerivedPropertyChangeHandlerTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         context.AddService<IWriteInterceptor>(new VetoingWriteInterceptor());
 
-        var person = new DerivedSetterPerson(context);
-        _ = person.NicknameWithPrefix;
+        var initialTimestamp = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        DerivedSetterPerson person;
+        using (SubjectChangeContext.WithChangedTimestamp(initialTimestamp))
+        {
+            person = new DerivedSetterPerson(context);
+            _ = person.NicknameWithPrefix;
+        }
 
         var nickname = new PropertyReference(person, nameof(DerivedSetterPerson.Nickname));
         var dependent = new PropertyReference(person, nameof(DerivedSetterPerson.NicknameWithPrefix));
         var nicknameBefore = nickname.TryGetWriteTimestamp();
         var dependentBefore = dependent.TryGetWriteTimestamp();
+        var vetoTimestamp = initialTimestamp.AddSeconds(1);
 
         // Act
-        person.Nickname = "vetoed";
+        using (SubjectChangeContext.WithChangedTimestamp(vetoTimestamp))
+        {
+            person.Nickname = "vetoed";
+        }
 
         // Assert
         Assert.Null(person.Nickname);
