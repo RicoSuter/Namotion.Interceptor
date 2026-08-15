@@ -15,8 +15,10 @@ public interface IWriteInterceptor
     /// Use <c>context.Property.Metadata.Type</c> for the actual declared property type.</typeparam>
     /// <param name="context">The write context containing the property reference and values.</param>
     /// <param name="next">The next interceptor in the chain to call. Always forward the context you
-    /// received; a freshly constructed context loses the per-call state the chain threads through it
-    /// (including the terminal write operation).</param>
+    /// received, by reference and without copying it; a freshly constructed context loses the per-call
+    /// state the chain threads through it (including the terminal write operation), and a copy leaves the
+    /// state the terminal sets, such as <see cref="PropertyWriteContext{TProperty}.IsWritten"/>, on the
+    /// copy, which suppresses the change notification and any derived recalculation.</param>
     void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next);
 }
 

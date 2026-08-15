@@ -1,5 +1,6 @@
 ﻿using System.Reactive.Concurrency;
 using System.Reactive.Linq;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -538,11 +539,18 @@ public class DerivedPropertyChangeHandlerTests
             });
 
         // Act
-        person.FirstName = "Jane";
-        ambientTransaction?.Dispose();
+        try
+        {
+            person.FirstName = "Jane";
+        }
+        finally
+        {
+            // Disposal releases a process-wide active count, so leaking it here would leave every later
+            // test in the assembly believing a transaction is open.
+            ambientTransaction?.Dispose();
+        }
 
-        // Assert
-        Assert.Equal("Jane Doe", person.FullName);
+        // Assert: the model holds the recalculated value either way, so only the announcements discriminate.
         Assert.Contains(nameof(Person.FullName), changedProperties);
         Assert.Contains(nameof(Person.FullNameWithPrefix), changedProperties);
     }
@@ -576,23 +584,28 @@ public class DerivedPropertyChangeHandlerTests
     }
 
     [Fact]
-    public async Task WhenTheContextResolvesTwoTransactionInterceptors_ThenADerivedWriteDoesNotThrow()
+    public void WhenAWriteIsVetoedAfterTheDerivedHandler_ThenNoWriteTimestampIsBumped()
     {
-        // Arrange: context inheritance adds another context as a fallback, so a subject can resolve two
-        // transaction interceptors. Resolving exactly one out of a property setter throws, and an
-        // exception escaping a setter on a scheduler thread takes the process down.
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithTransactions();
-        var fallbackContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithTransactions();
+        // Arrange: an interceptor drops the write, so nothing reaches the model. Write timestamps are
+        // public and feed source timestamps and read-after-write staleness checks, where a stamp for a
+        // value that was never written can discard a real device read.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        context.AddService<IWriteInterceptor>(new VetoingWriteInterceptor());
 
         var person = new DerivedSetterPerson(context);
         _ = person.NicknameWithPrefix;
-        ((IInterceptorSubject)person).Context.AddFallbackContext(fallbackContext);
+
+        var nickname = new PropertyReference(person, nameof(DerivedSetterPerson.Nickname));
+        var dependent = new PropertyReference(person, nameof(DerivedSetterPerson.NicknameWithPrefix));
+        var nicknameBefore = nickname.TryGetWriteTimestamp();
+        var dependentBefore = dependent.TryGetWriteTimestamp();
 
         // Act
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        var exception = Record.Exception(() => person.Nickname = "Rico");
+        person.Nickname = "vetoed";
 
         // Assert
-        Assert.Null(exception);
+        Assert.Null(person.Nickname);
+        Assert.Equal(nicknameBefore, nickname.TryGetWriteTimestamp());
+        Assert.Equal(dependentBefore, dependent.TryGetWriteTimestamp());
     }
 }

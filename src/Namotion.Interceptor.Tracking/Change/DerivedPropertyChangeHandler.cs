@@ -150,6 +150,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
+        // Nothing reached the model, so there is nothing to recalculate or cascade from, and stamping a
+        // write timestamp here would report a write that never happened. Not the transaction path: capture
+        // returns before this handler is entered, so with the interceptors in this repository the flag is
+        // always set by the time we get here. This guards a third-party interceptor that drops a write.
+        if (!context.IsWritten)
+        {
+            return;
+        }
+
         // Derived-with-setter: value comes from the getter, so setter changes require recalc
         // even when the getter recorded zero deps (e.g. short-circuited at attach).
         if (Volatile.Read(ref data.IsDerived) && context.Property.Metadata.SetValue is not null)
@@ -163,13 +172,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         var usedByProperties = data.GetUsedByProperties();
         if (usedByProperties.Length > 0)
         {
-            // The value never reached the model, so there is nothing to cascade from. Transaction capture is
-            // the usual reason: it is terminal, and the commit replays the write with its cascade.
-            if (!context.IsWritten)
-            {
-                return;
-            }
-
             // Thread the trigger's resolved timestamp into each dependent's context, skipping a
             // scope push. storageTimestamp=0 under a null scope preserves the never-written sentinel.
             var rawTimestamp = context.WriteTimestampRaw;
