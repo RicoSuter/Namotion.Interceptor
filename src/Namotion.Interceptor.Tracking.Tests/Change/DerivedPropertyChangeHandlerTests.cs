@@ -1,5 +1,6 @@
 ﻿using System.Reactive.Concurrency;
 using System.Reactive.Linq;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
@@ -463,6 +464,30 @@ public class DerivedPropertyChangeHandlerTests
         // Assert - Each derived property should fire exactly once (no duplicates)
         Assert.Single(firedEvents, e => e == "FullName");
         Assert.Single(firedEvents, e => e == "FullNameWithPrefix");
+    }
+
+    [Fact]
+    public void WhenAWriteIsVetoedAfterTheDerivedHandler_ThenNoWriteTimestampIsBumped()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        context.AddService<IWriteInterceptor>(new VetoingWriteInterceptor());
+
+        var person = new DerivedSetterPerson(context);
+        _ = person.NicknameWithPrefix;
+
+        var nickname = new PropertyReference(person, nameof(DerivedSetterPerson.Nickname));
+        var dependent = new PropertyReference(person, nameof(DerivedSetterPerson.NicknameWithPrefix));
+        var nicknameBefore = nickname.TryGetWriteTimestamp();
+        var dependentBefore = dependent.TryGetWriteTimestamp();
+
+        // Act
+        person.Nickname = "vetoed";
+
+        // Assert
+        Assert.Null(person.Nickname);
+        Assert.Equal(nicknameBefore, nickname.TryGetWriteTimestamp());
+        Assert.Equal(dependentBefore, dependent.TryGetWriteTimestamp());
     }
 
     [Fact]

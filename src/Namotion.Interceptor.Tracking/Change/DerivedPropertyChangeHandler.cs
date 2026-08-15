@@ -142,7 +142,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         next(ref context);
 
-        // Signal write before TryGet so writes to not-yet-tracked properties are also detected.
+        if (!context.IsWritten)
+        {
+            return;
+        }
+
+        // Signal landed writes before TryGet so writes to not-yet-tracked properties are also detected.
         Interlocked.Increment(ref _writeGeneration);
 
         var data = context.Property.TryGetDerivedPropertyData();
