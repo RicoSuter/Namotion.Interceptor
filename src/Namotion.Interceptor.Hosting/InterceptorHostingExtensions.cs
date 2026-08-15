@@ -104,6 +104,19 @@ public static class InterceptorHostingExtensions
         {
             RemoveAttachment(subject, attachment);
 
+            // The removal above is what puts this target out of reach: no later attach or detach
+            // enumerates an attachment that is gone from the subject's data, so an ownership left
+            // installed here is one nothing retires before shutdown, and a host that retries failed
+            // attaches leaks a subject per failure.
+            //
+            // Released rather than only retired, which is the opposite of what an explicit detach does,
+            // because the reason for that asymmetry is absent here: the awaited start has run and
+            // faulted, so there is no queued start to refuse itself on a null owner and no stop left
+            // holding an instance. Marked first, so a context attach that snapshotted this attachment
+            // before the removal cannot take the target in the gap and start something unreachable.
+            attachment.Target.MarkDetached();
+            attachment.Target.ReleaseOwnership(handler);
+
             // Captured rather than rethrown: the fault was raised on the transition thread, and a
             // plain throw overwrites its stack trace with this one, which is the stack a user reads
             // when a failing subject aborts host startup. Two callers can also reach the same

@@ -313,6 +313,51 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
+    public async Task WhenAnAwaitedAttachFaults_ThenTheHandlerStopsRetainingItsTarget()
+    {
+        // Arrange - the removal that makes the awaiting overload transactional is also what puts the
+        // target out of reach: no later attach or detach enumerates an attachment that is gone from the
+        // subject's data, so the ownership this call took has to be undone here or the subject stays
+        // rooted on the handler until shutdown. A host that retries failed attaches, which is the
+        // connector shape, leaks one subject per failure.
+        var (host, context) = await HostingTestHost.StartAsync();
+
+        try
+        {
+            var handler = context.TryGetService<HostedServiceHandler>()!;
+            var person = new Person(context);
+
+            // Read from inside the factory, which is the last moment the attachment is still published:
+            // the overload removes it before it throws, so the caller never sees the handle.
+            HostedServiceTarget? target = null;
+
+            // Act
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                person.AttachHostedServiceAsync<TrackedBackgroundService>(
+                    () =>
+                    {
+                        var attachment = person.GetHostedServiceAttachments().Single();
+                        target = ((IHostedServiceAttachmentTarget)attachment).Target;
+                        throw new InvalidOperationException("factory failed");
+                    },
+                    CancellationToken.None));
+
+            // Assert
+            Assert.NotNull(target);
+            Assert.False(
+                handler.IsOwned(target!),
+                "The handler retains the target of a failed attach, and the attachment it belongs to is "
+                + "already gone, so nothing reaches it again before shutdown.");
+
+            Assert.Null(target!.Owner);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task WhenAStartFaults_ThenTheInstanceIsDisposed()
     {
         // Arrange - leaving a half started connector undisposed is the leak this design exists to fix
