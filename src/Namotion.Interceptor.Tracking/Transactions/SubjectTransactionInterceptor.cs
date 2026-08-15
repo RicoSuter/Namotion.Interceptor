@@ -36,7 +36,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         var transaction = SubjectTransaction.Current;
-        if (transaction is { IsCommitting: false } &&
+        if (transaction is { IsCommitting: false, IsDisposed: false } &&
             transaction.TryGetPendingValue<TProperty>(context.Property, out var pendingValue))
         {
             return pendingValue;
@@ -57,7 +57,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         var transaction = SubjectTransaction.Current;
-        if (transaction is { IsCommitting: false } && !context.Property.Metadata.IsDerived)
+        if (transaction is { IsCommitting: false, IsDisposed: false } && !context.Property.Metadata.IsDerived)
         {
             // Validate context binding
             var subjectInterceptor = context.Property.Subject.Context.TryGetService<SubjectTransactionInterceptor>();
@@ -67,25 +67,23 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
                     $"Cannot modify property '{context.Property.Metadata.Name}': Transaction is bound to a different context.");
             }
 
-            // Capture is a terminal outcome for the chain: the downstream write (and its origin
-            // finalization) never runs. Finalize here so a stamped origin whose captured value was
-            // transformed (e.g. an OnChanging clamp) demotes to Local, matching what the terminal
-            // write would have produced. Otherwise the stale FromSource survives commit replay and
-            // the corrected value is echo-suppressed, leaving the source diverged.
-            context.FinalizeOrigin();
+            var resolvedOrigin = context.GetFinalOrigin();
+            var changedTimestamp = context.WriteTimestampForPublishing;
+            var receivedTimestamp = SubjectChangeContext.Current.ReceivedTimestamp;
 
-            transaction.CaptureChange(
-                context.Property,
-                context.Origin,
-                context.WriteTimestampForPublishing,
-                SubjectChangeContext.Current.ReceivedTimestamp,
-                context.CurrentValue,
-                context.NewValue);
-
-            return; // Captured, interceptor chain stops here
+            if (transaction.TryCaptureChange(
+                    context.Property,
+                    resolvedOrigin,
+                    changedTimestamp,
+                    receivedTimestamp,
+                    context.CurrentValue,
+                    context.NewValue))
+            {
+                return;
+            }
         }
 
-        next(ref context); // No transaction, derived, or committing: Normal flow
+        next(ref context); // No transaction, disposed, derived, committing, or failed capture: Normal flow
     }
 
     private sealed class LockReleaser(SemaphoreSlim semaphore) : IDisposable

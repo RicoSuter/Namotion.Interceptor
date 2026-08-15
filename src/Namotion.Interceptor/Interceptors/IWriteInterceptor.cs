@@ -261,17 +261,12 @@ public struct PropertyWriteContext<TProperty>
             : NewValue;
     }
 
-    /// <summary>
-    /// Finalizes <see cref="Origin"/> at the terminal write (right after <see cref="IsWritten"/>
-    /// becomes true). A stamped origin survives only when the stored value is exactly the value the
-    /// source sent; otherwise the value was computed locally and the origin becomes Local.
-    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void FinalizeOrigin()
+    internal ChangeOrigin GetFinalOrigin()
     {
         if (_attempted.Origin.Kind == ChangeOriginKind.Local)
         {
-            return;
+            return default;
         }
 
         // A derived property's stored value is recomputed by its getter, never literally the sent value,
@@ -279,8 +274,7 @@ public struct PropertyWriteContext<TProperty>
         // here (this executes under the subject's SyncRoot).
         if (Property.Metadata.IsDerived)
         {
-            _attempted = default;
-            return;
+            return default;
         }
 
         // Survive only when the sent value was faithfully stored. The 'is TProperty' pattern unboxes
@@ -294,7 +288,18 @@ public struct PropertyWriteContext<TProperty>
                 ? NewValue is null
                 : SentValueEqualsAfterUnbox(_attempted.SentValue, NewValue);
 
-        if (!survives)
+        return survives ? _attempted.Origin : default;
+    }
+
+    /// <summary>
+    /// Finalizes <see cref="Origin"/> at the terminal write (right after <see cref="IsWritten"/>
+    /// becomes true). A stamped origin survives only when the stored value is exactly the value the
+    /// source sent; otherwise the value was computed locally and the origin becomes Local.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void FinalizeOrigin()
+    {
+        if (GetFinalOrigin().Kind == ChangeOriginKind.Local)
         {
             _attempted = default;
         }

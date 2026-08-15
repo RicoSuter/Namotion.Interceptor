@@ -34,7 +34,7 @@ public sealed class SubjectTransaction : IDisposable
     private static readonly ObjectPool<OrderedDictionary<PropertyReference, SubjectPropertyChange>> PendingChangesPool
         = new(() => new OrderedDictionary<PropertyReference, SubjectPropertyChange>(PropertyReference.Comparer));
 
-    private readonly OrderedDictionary<PropertyReference, SubjectPropertyChange> _pendingChanges = PendingChangesPool.Rent();
+    private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _pendingChanges = PendingChangesPool.Rent();
     private readonly Lock _pendingChangesLock = new();
 
     private volatile bool _isCommitting;
@@ -74,6 +74,11 @@ public sealed class SubjectTransaction : IDisposable
     internal bool IsCommitting => _isCommitting;
 
     /// <summary>
+    /// Gets a value indicating whether the transaction has been disposed.
+    /// </summary>
+    internal bool IsDisposed => Volatile.Read(ref _isDisposed) != 0;
+
+    /// <summary>
     /// Gets the interceptor this transaction is bound to (for cross-context validation).
     /// </summary>
     internal SubjectTransactionInterceptor Interceptor { get; }
@@ -85,7 +90,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            return _pendingChanges.Values.ToList();
+            return _pendingChanges?.Values.ToList() ?? [];
         }
     }
 
@@ -97,6 +102,12 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
+            if (Volatile.Read(ref _isDisposed) != 0 || _pendingChanges is null)
+            {
+                value = default!;
+                return false;
+            }
+
             ThrowIfCommittingConcurrently();
 
             if (_pendingChanges.TryGetValue(property, out var change))
@@ -113,10 +124,11 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Atomically captures a property change into the pending dictionary.
     /// First write preserves <paramref name="currentValue"/> as old value for conflict detection;
-    /// subsequent writes preserve the original old value (last write wins).
+    /// subsequent writes preserve the original old value (last write wins). Returns false when
+    /// disposal wins the race, allowing the caller to continue the normal write chain.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
-    internal void CaptureChange<TProperty>(
+    internal bool TryCaptureChange<TProperty>(
         PropertyReference property,
         ChangeOrigin origin,
         DateTimeOffset changedTimestamp,
@@ -128,14 +140,21 @@ public sealed class SubjectTransaction : IDisposable
         {
             ThrowIfCommittingConcurrently();
 
-            var isFirstWrite = !_pendingChanges.TryGetValue(property, out var existingChange);
-            _pendingChanges[property] = SubjectPropertyChange.Create(
+            if (Volatile.Read(ref _isDisposed) != 0)
+            {
+                return false;
+            }
+
+            var pendingChanges = _pendingChanges!;
+            var isFirstWrite = !pendingChanges.TryGetValue(property, out var existingChange);
+            pendingChanges[property] = SubjectPropertyChange.Create(
                 property,
                 origin: origin,
                 changedTimestamp: changedTimestamp,
                 receivedTimestamp: receivedTimestamp,
                 isFirstWrite ? currentValue : existingChange.GetOldValue<TProperty>(),
                 newValue);
+            return true;
         }
     }
 
@@ -271,7 +290,7 @@ public sealed class SubjectTransaction : IDisposable
 
         lock (_pendingChangesLock)
         {
-            if (_pendingChanges.Count == 0)
+            if (_pendingChanges is null || _pendingChanges.Count == 0)
             {
                 _isCommitted = true;
                 return default;
@@ -549,7 +568,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            _pendingChanges.Clear();
+            _pendingChanges?.Clear();
         }
 
         _isCommitted = true;
@@ -562,6 +581,7 @@ public sealed class SubjectTransaction : IDisposable
     private void EndCommit(SubjectPropertyChange[]? rentedArray, IDisposable? commitLock)
     {
         bool releaseDeferredLock;
+        OrderedDictionary<PropertyReference, SubjectPropertyChange>? pendingChangesToReturn = null;
         lock (_pendingChangesLock)
         {
             // Clear under the lock so a concurrent Dispose observes the in-flight commit consistently: while
@@ -571,6 +591,16 @@ public sealed class SubjectTransaction : IDisposable
             // by this commit and is always returned here.
             _isCommitting = false;
             releaseDeferredLock = _disposeRequestedDuringCommit;
+            if (releaseDeferredLock)
+            {
+                pendingChangesToReturn = _pendingChanges;
+                _pendingChanges = null;
+            }
+        }
+
+        if (pendingChangesToReturn is not null)
+        {
+            PendingChangesPool.Return(pendingChangesToReturn);
         }
 
         if (rentedArray != null)
@@ -641,7 +671,8 @@ public sealed class SubjectTransaction : IDisposable
         {
             // Rent the ArrayPool buffer BEFORE setting _isCommitting so an OOM in Rent leaves the
             // transaction reusable (the flag is never set, no cleanup is owed).
-            var changeCount = _pendingChanges.Count;
+            var pendingChanges = _pendingChanges;
+            var changeCount = pendingChanges?.Count ?? 0;
             var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
 
             // Set _isCommitting inside the lock to prevent concurrent writes from being
@@ -651,9 +682,12 @@ public sealed class SubjectTransaction : IDisposable
             _isCommitting = true;
 
             var index = 0;
-            foreach (var change in _pendingChanges.Values)
+            if (pendingChanges is not null)
             {
-                rentedArray[index++] = change;
+                foreach (var change in pendingChanges.Values)
+                {
+                    rentedArray[index++] = change;
+                }
             }
 
             return (rentedArray, rentedArray.AsMemory(0, changeCount));
@@ -704,13 +738,19 @@ public sealed class SubjectTransaction : IDisposable
             Interlocked.Decrement(ref _activeTransactionCount);
 
             bool committing;
+            OrderedDictionary<PropertyReference, SubjectPropertyChange>? pendingChangesToReturn = null;
             lock (_pendingChangesLock)
             {
-                _pendingChanges.Clear();
+                _pendingChanges?.Clear();
                 committing = _isCommitting;
                 if (committing)
                 {
                     _disposeRequestedDuringCommit = true;
+                }
+                else
+                {
+                    pendingChangesToReturn = _pendingChanges;
+                    _pendingChanges = null;
                 }
             }
 
@@ -724,10 +764,13 @@ public sealed class SubjectTransaction : IDisposable
             // A commit in flight (reachable only by misuse: disposing without awaiting CommitAsync) still owns
             // the pooled buffer and the exclusive lock, so skip both here: returning the buffer would corrupt
             // another transaction's pending changes, and releasing the lock would drop mutual exclusion mid-apply.
-            // EndCommit releases the deferred lock once the commit completes; the buffer is left unpooled (GC'd).
+            // EndCommit returns the deferred buffer and releases the deferred lock once the commit completes.
             if (!committing)
             {
-                PendingChangesPool.Return(_pendingChanges);
+                if (pendingChangesToReturn is not null)
+                {
+                    PendingChangesPool.Return(pendingChangesToReturn);
+                }
                 _lockReleaser?.Dispose(); // May be null for Optimistic transactions
             }
         }
