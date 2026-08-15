@@ -92,9 +92,9 @@ public static class PropertyChangeSubscriptionExtensions
     /// <see cref="SubscribeInline(PropertyReference, IPropertyChangeObserver)"/>, with three differences that
     /// follow from delivery being scheduled. Within this subscription the observer is never re-entered, so it
     /// needs no synchronization of its own; an observer, closure, or <paramref name="onError"/> delegate
-    /// shared across several subscriptions is still invoked concurrently. It must still not block: the drain
-    /// owns the scheduler thread for the whole call, so a blocking observer silently starves every other
-    /// subscription sharing that scheduler. An exception from the observer
+    /// shared across several subscriptions is still invoked concurrently. A blocking observer needs a scheduler of its own: the drain
+    /// owns the scheduler thread for the whole call, so on a single-threaded scheduler it silently starves
+    /// every other subscription sharing it. An exception from the observer
     /// cannot reach the writer and is reported to <paramref name="onError"/>, leaving the subscription live.
     /// And dormancy stops acceptance but not the drain, so a change accepted before the subject detaches is
     /// still delivered afterwards, unlike disposal, which drops what is still queued; an observer that looks

@@ -691,7 +691,15 @@ The equality check also applies to the `SetPropertyValueWithInterception` call d
 
 ### Transactions
 
-During transaction capture (`SubjectTransaction.HasActiveTransaction && !IsCommitting && !IsDisposed`), dependent recalculations are suppressed. A disposed ambient transaction does not suppress, because the write it inherited went straight to the model and no commit is left to replay the cascade on. Derived properties are recalculated when the transaction commits and replays the writes. Additionally, derived property writes are never captured in transactions (`SubjectTransactionInterceptor` checks `!context.Property.Metadata.IsDerived`), since derived values are always computed from their dependencies.
+Dependent recalculations are suppressed while the ambient transaction can still serve a getter from its pending buffer (`SubjectTransaction.HasActiveTransaction && !IsCommitting && ServesPendingValues`). A dependent's getter reads through the transaction, so recalculating during capture would compute the value from uncommitted state and publish one the model may never hold, which a rollback then leaves with nothing to correct it. The commit replays the captured writes and the cascades run there instead.
+
+`ServesPendingValues` is false once the transaction is disposed or its buffer released. Keying on the disposed flag alone would not do: dispose sets that flag before releasing the buffer, so a cascade in that window would still read pending values. Keying on the buffer alone would not either, because a dispose requested during a commit never releases it.
+
+Derived property writes are never captured (`SubjectTransactionInterceptor` checks `!context.Property.Metadata.IsDerived`), since derived values are computed from their dependencies. Their cascades are therefore suppressed with nothing left to replay them, along with two other writes a transaction does not capture. See issue #467.
+
+### Writes that never reached the model
+
+`WriteProperty` returns early when `context.IsWritten` is false, before both the derived-with-setter self-recalculation and the dependent cascade. A write dropped by an interceptor changed nothing, so there is nothing to recalculate from, and stamping a write timestamp would report a write that never happened. With the interceptors in this repository the flag is always set at that point, because transaction capture returns before this handler is entered; the guard covers a third-party interceptor that skips `next`.
 
 ## Design Notes
 

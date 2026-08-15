@@ -31,7 +31,7 @@ All property change notifications flow through a single `PropertyChangeIntercept
 | `context.GetPropertyChangeObservable()` | Rx composition and UI binding over the whole model | a scheduler, by default | yes | [Property Change Observable](#property-change-observable-rx-based) |
 | `context.CreatePropertyChangeQueueSubscription()` | high throughput and source synchronization | your own consumer thread | one consumer per subscription | [Property Change Queue](#property-change-queue-high-performance) |
 | `property.SubscribeInline(callback)` | one property, cheapest possible | the writing thread, inside the write | no, your callback must be thread-safe | [Per-Property Subscriptions](#per-property-subscriptions) |
-| `property.Subscribe(callback, scheduler, onError)` | one property whose observer is slow, blocking or may throw | the scheduler | per subscription, not per observer | [Scheduled delivery](#scheduled-delivery) |
+| `property.Subscribe(callback, scheduler, onError)` | one property whose observer is slow or may throw | the scheduler | per subscription, not per observer | [Scheduled delivery](#scheduled-delivery) |
 
 The contract they share, per channel and across channels, is in [Delivery Guarantees](#delivery-guarantees), and what each one costs is in [Channel Cost](#channel-cost).
 
@@ -123,7 +123,7 @@ while (subscription.TryDequeue(out var change, cancellationToken))
 
 ### Per-Property Subscriptions
 
-When you only care about a single property on a single subject, subscribe to it directly instead of filtering the whole stream. Use `SubscribeInline` when the callback is quick, thread-safe and cannot throw, and [scheduled delivery](#scheduled-delivery) for anything that does I/O, may block or may throw. A scheduled subscription costs far more memory, which decides the choice at thousands of subscriptions (see [Channel Cost](#channel-cost)).
+When you only care about a single property on a single subject, subscribe to it directly instead of filtering the whole stream. Use `SubscribeInline` when the callback is quick, thread-safe and cannot throw, and [scheduled delivery](#scheduled-delivery) for anything that does I/O or may throw. An observer that blocks needs a scheduler of its own, or the thread pool, because it holds its scheduler thread for the whole call. A scheduled subscription costs far more memory, which decides the choice at thousands of subscriptions (see [Channel Cost](#channel-cost)).
 
 ```csharp
 // Strongly typed, via a direct property selector on the subject. Inline means this callback runs on
@@ -161,7 +161,7 @@ using var handle = person.SubscribeToProperty(
     exception => logger.LogError(exception, "FirstName observer failed."));
 ```
 
-**Serialized per subscription, not per observer**: one subscription never re-enters its observer, but an observer shared across several subscriptions is still invoked concurrently, and one that blocks starves every other subscription on its scheduler.
+**Serialized per subscription, not per observer**: one subscription never re-enters its observer, but an observer shared across several subscriptions is still invoked concurrently. One that blocks holds its scheduler thread for the whole call, so on a single-threaded scheduler shared with other subscriptions it starves them; `Scheduler.Default` grows its pool instead.
 
 **The queue is unbounded**, with no backpressure: `handle.PendingCount` makes a growing backlog observable, and draining it back to zero does not give the memory back, because the queue keeps the largest segment it ever grew to until disposal.
 
