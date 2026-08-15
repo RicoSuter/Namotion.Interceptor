@@ -1,3 +1,6 @@
+using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Interceptors;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
@@ -731,6 +734,68 @@ public class SubjectTransactionTests
 
         // The open transaction still masks reads in its own flow.
         Assert.Equal("PendingInOpenTransaction", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenCaptureLosesTheDisposeRace_ThenTheWriteStillCountsAsComingFromItsSource()
+    {
+        // Arrange: capture is terminal, so it finalizes the origin itself, which demotes a stamped origin to
+        // Local once a hook has rewritten the value. When capture then loses the race to a cross-flow dispose
+        // the write falls through after all, and the terminal reads the unfinalized origin to choose which
+        // commit-revision slot it lands in. A finalization left standing moves a source write into the local
+        // slot, where a later source write may no longer discard it.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithTransactions()
+            .WithRegistry();
+        context.AddService<IWriteInterceptor>(new TransformingWriteInterceptor());
+
+        var person = new Person(context);
+        var property = new PropertyReference(person, nameof(Person.LastName));
+        var source = new object();
+        var registeredProperty = person.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.LastName))!;
+
+        // Every iteration races one capture against a dispose; the window is narrow, so the loop runs a
+        // fixed number of times rather than stopping at the first write that reaches the model, which a
+        // clean fall-through after disposal would satisfy without exercising the speculative path at all.
+        for (var iteration = 0; iteration < 200; iteration++)
+        {
+            var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+            var frozenFlow = ExecutionContext.Capture()
+                ?? throw new InvalidOperationException("Execution context flow must not be suppressed in this test.");
+
+            using var writerStarted = new ManualResetEventSlim();
+            var disposeCompleted = false;
+
+            var writerThread = new Thread(() => ExecutionContext.Run(frozenFlow, _ =>
+            {
+                writerStarted.Set();
+                var writeCount = 0;
+                while (!Volatile.Read(ref disposeCompleted))
+                {
+                    // Distinct values so the equality check never short-circuits the chain, and lower case so
+                    // the transform above always rewrites them.
+                    registeredProperty.SetValueFromSource(source, null, null, $"racing{writeCount++}");
+                }
+            }, null))
+            {
+                IsBackground = true
+            };
+
+            writerThread.Start();
+            writerStarted.Wait(TimeSpan.FromSeconds(5));
+            transaction.Dispose();
+            Volatile.Write(ref disposeCompleted, true);
+            writerThread.Join(TimeSpan.FromSeconds(5));
+
+        }
+
+        // Act & Assert: every write came from the source, so the local slot must never have advanced.
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: true, out var anyCommitRevision, out _));
+        Assert.True(anyCommitRevision > 0);
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var nonSourceCommitRevision, out _));
+        Assert.Equal(0, nonSourceCommitRevision);
     }
 
     [Fact]
