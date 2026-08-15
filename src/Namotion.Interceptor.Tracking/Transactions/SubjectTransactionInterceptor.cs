@@ -67,9 +67,15 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         // inside a transaction) keeps replaying the flow it was captured from.
         if (transaction is { IsCommitting: false, IsDisposed: false } && !context.Property.Metadata.IsDerived)
         {
-            // Validate context binding
-            var subjectInterceptor = context.Property.Subject.Context.TryGetService<SubjectTransactionInterceptor>();
-            if (subjectInterceptor != transaction.Interceptor)
+            // Membership rather than TryGetService, which requires exactly one and throws otherwise:
+            // context inheritance can leave two resolvable, and an exception escaping a property setter
+            // ends the process on a scheduler thread. The question is only whether the transaction
+            // belongs to this context.
+            var isBoundToThisContext = context.Property.Subject.Context
+                .GetServices<SubjectTransactionInterceptor>()
+                .Contains(transaction.Interceptor);
+
+            if (!isBoundToThisContext)
             {
                 throw new InvalidOperationException(
                     $"Cannot modify property '{context.Property.Metadata.Name}': Transaction is bound to a different context.");

@@ -48,6 +48,35 @@ public class SubjectTransactionTests
     }
 
     [Fact]
+    public async Task WhenTheContextResolvesTwoTransactionInterceptors_ThenTheWriteIsCapturedInsteadOfThrowing()
+    {
+        // Arrange: context inheritance adds another context as a fallback on attach, so a subject built on
+        // one transaction-enabled context and attached into a graph rooted on another resolves two.
+        // Requiring exactly one threw out of the property setter, which on a scheduler thread ends the
+        // process; the question being asked is only whether the transaction belongs to this context.
+        var context = CreateTransactionContext();
+        var fallbackContext = CreateTransactionContext();
+
+        var person = new Person(context);
+        ((IInterceptorSubject)person).Context.AddFallbackContext(fallbackContext);
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+
+            // Assert: captured rather than written straight through, so the binding resolved to this
+            // context. Reading the property here would serve the pending value either way.
+            Assert.Single(transaction.GetPendingChanges(),
+                change => change.Property.Name == nameof(Person.FirstName));
+
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        Assert.Equal("John", person.FirstName);
+    }
+
+    [Fact]
     public async Task WhenTransactionCommitted_ThenChangesAreApplied()
     {
         // Arrange
