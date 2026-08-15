@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Hosting.Tests.Models;
+
 namespace Namotion.Interceptor.Hosting.Tests;
 
 public class HostedServiceTargetTests
@@ -8,6 +10,26 @@ public class HostedServiceTargetTests
     /// with the append lock removed: one round failed 13 of 15 runs, twelve rounds failed 15 of 15.
     /// </summary>
     private const int AppendRaceRounds = 12;
+
+    /// <summary>
+    /// Rounds of the take against release race. Each round is a thread pair, so this is the expensive
+    /// kind of round, and it is still not the place to economise: measured against a build without the
+    /// ownership lock, 2,000 rounds failed 8 of 8 runs at 90 ms each, and 200 rounds failed 2 of 8.
+    /// </summary>
+    private const int OwnershipRaceRounds = 2000;
+
+    /// <summary>
+    /// How far the releasing thread's park is swept across the window, in spins. The window is a few
+    /// instructions wide and its position moves with the scheduler, so a fixed park finds it far less
+    /// often than a sweep of the same total length does.
+    /// </summary>
+    private const int OwnershipRaceSpinSweep = 64;
+
+    /// <summary>
+    /// Appends onto an already completed tail. Measured against a build with the increment moved below
+    /// the append, this reported a negative count on 7 of 7 runs and takes under a second.
+    /// </summary>
+    private const int CompletedTailAppends = 300000;
 
     [Fact]
     public async Task WhenTransitionsAreAppendedConcurrently_ThenTheyNeverOverlap()
@@ -166,15 +188,109 @@ public class HostedServiceTargetTests
     }
 
     [Fact]
+    public void WhenATakeRacesARelease_ThenTheOwnerAndTheRecordNeverDisagree()
+    {
+        // Arrange - the exchange and the handler's record are one fact, and a release landing between
+        // them nulls the owner, finds no record to retire, and leaves one that no later release can
+        // match. The window is a few instructions wide, so the release is swept across it rather than
+        // fired once: each round parks the releasing thread a different number of spins in.
+        var leaked = 0;
+        var unrecorded = 0;
+
+        // Act
+        for (var round = 0; round < OwnershipRaceRounds; round++)
+        {
+            var target = new HostedServiceTarget(factory: null, subject: null);
+            var handler = new HostedServiceHandler();
+            var subject = new Person();
+
+            using var start = new Barrier(2);
+            var spins = round % OwnershipRaceSpinSweep;
+
+            var releasing = new Thread(() =>
+            {
+                start.SignalAndWait();
+                Thread.SpinWait(spins);
+                target.ReleaseOwnership(handler);
+            });
+
+            releasing.Start();
+            start.SignalAndWait();
+            target.TryTakeOwnership(handler, subject, out _);
+            releasing.Join();
+
+            // Read after both threads finished, so this is the settled state rather than a snapshot of
+            // the race. Both directions are counted: the first is a record nothing can ever retire, the
+            // second is a running target no drain snapshot contains, which is the worse of the two and
+            // is what retiring the record unconditionally trades the first one for.
+            if (handler.IsOwned(target) && !ReferenceEquals(target.Owner, handler))
+            {
+                leaked++;
+            }
+
+            if (!handler.IsOwned(target) && ReferenceEquals(target.Owner, handler))
+            {
+                unrecorded++;
+            }
+        }
+
+        // Assert
+        Assert.Equal(0, leaked);
+        Assert.Equal(0, unrecorded);
+    }
+
+    [Fact]
+    public async Task WhenTransitionsAreAppendedOntoACompletedTail_ThenTheInFlightCountIsNeverNegative()
+    {
+        // Arrange - the increment sits ahead of the ContinueWith. Below it, an already completed tail's
+        // continuation decrements before the appending thread reaches the increment, and the count goes
+        // negative: a later increment then brings it back to zero while a transition is still running,
+        // which is a drain returning into a service provider the host is disposing. A sampling thread
+        // reaches the gap that no seam can, because the two statements are adjacent.
+        var target = new HostedServiceTarget(factory: null, subject: null);
+        var handler = new HostedServiceHandler();
+
+        var stopSampling = false;
+        var minimum = 0;
+
+        var sampler = new Thread(() =>
+        {
+            while (!Volatile.Read(ref stopSampling))
+            {
+                minimum = Math.Min(minimum, handler.InFlightTransitionCount);
+            }
+        })
+        {
+            IsBackground = true
+        };
+
+        sampler.Start();
+
+        // Act - awaited one at a time, so every append but the first lands on a completed tail, which
+        // is the only shape whose continuation can run before the appending thread's next statement.
+        for (var append = 0; append < CompletedTailAppends; append++)
+        {
+            await target.AppendAsync(handler, () => Task.CompletedTask);
+        }
+
+        Volatile.Write(ref stopSampling, true);
+        sampler.Join();
+
+        // Assert
+        Assert.Equal(0, minimum);
+    }
+
+    [Fact]
     public void WhenOwnershipIsTakenTwiceByTheSameHandler_ThenItSucceeds()
     {
         // Arrange - a re-attach arriving before the release must not read as "lost to another handler"
         var target = new HostedServiceTarget(factory: null, subject: null);
         var handler = new HostedServiceHandler();
+        var subject = new Person();
 
         // Act
-        var first = target.TryTakeOwnership(handler, out var firstTaken);
-        var second = target.TryTakeOwnership(handler, out var secondTaken);
+        var first = target.TryTakeOwnership(handler, subject, out var firstTaken);
+        var second = target.TryTakeOwnership(handler, subject, out var secondTaken);
 
         // Assert - both succeed, but only the first installed the owner. A caller that has to undo
         // its own take must not undo the earlier one, whose instance may still be running.
@@ -191,10 +307,11 @@ public class HostedServiceTargetTests
         var target = new HostedServiceTarget(factory: null, subject: null);
         var first = new HostedServiceHandler();
         var second = new HostedServiceHandler();
-        target.TryTakeOwnership(first, out _);
+        var subject = new Person();
+        target.TryTakeOwnership(first, subject, out _);
 
         // Act
-        var taken = target.TryTakeOwnership(second, out _);
+        var taken = target.TryTakeOwnership(second, subject, out _);
 
         // Assert
         Assert.False(taken);
@@ -208,11 +325,12 @@ public class HostedServiceTargetTests
         var target = new HostedServiceTarget(factory: null, subject: null);
         var first = new HostedServiceHandler();
         var second = new HostedServiceHandler();
-        target.TryTakeOwnership(first, out _);
+        var subject = new Person();
+        target.TryTakeOwnership(first, subject, out _);
 
         // Act
         target.ReleaseOwnership(first);
-        var taken = target.TryTakeOwnership(second, out _);
+        var taken = target.TryTakeOwnership(second, subject, out _);
 
         // Assert
         Assert.True(taken);

@@ -40,7 +40,7 @@ public class HostedServiceHandlerRaceTests
         // Arrange - the take reads liveness and installs the owner inside the chain lock, while a
         // context detach clears liveness, reads Owner and releases outside it. A take that lands after
         // the detach read Owner as null is one nothing releases: the target stays owned by this handler
-        // and stays in its running set, which roots the detached subject until shutdown and makes the
+        // and stays in its owned set, which roots the detached subject until shutdown and makes the
         // next handler over that subject lose the compare and exchange for good.
         var (host, context) = await HostingTestHost.StartAsync();
         var handler = context.TryGetService<HostedServiceHandler>()!;
@@ -96,7 +96,7 @@ public class HostedServiceHandlerRaceTests
             // Assert
             Assert.False(handler.IsLive(child));
             Assert.Null(secondTarget!.Owner);
-            Assert.False(handler.IsRunning(secondTarget!));
+            Assert.False(handler.IsOwned(secondTarget!));
 
             // Not discriminating on its own: the start body refuses on liveness whether or not the
             // take was undone. Asserted because a leaked ownership that also started something is the
@@ -576,80 +576,13 @@ public class HostedServiceHandlerRaceTests
     }
 
     [Fact]
-    public async Task WhenAStopLeavesTheRunningSetAsTheDrainReadsIt_ThenTheDrainStillWaitsForIt()
+    public async Task WhenAStartIsQueuedAndUnrunAsTheDrainRuns_ThenTheDrainStillWaitsForIt()
     {
-        // Arrange - the barrier's write order. A stop joins the in flight set before it leaves the
-        // running set, and the drain reads the running set before the in flight set, so a drain that
-        // misses it in the first read is reading the second one after the join and finds it there.
-        // Held at the one moment the stop is in both sets, which under the opposite write order is the
-        // moment it is in neither: the drain then waits for nothing.
-        var (host, context) = await HostingTestHost.StartAsync();
-        var handler = context.TryGetService<HostedServiceHandler>()!;
-
-        var parent = new Parent(context);
-        var child = new Person();
-        parent.Child = child;
-
-        var created = new ConcurrentQueue<TrackedBackgroundService>();
-        var attachment = child.AttachHostedService(() =>
-        {
-            var instance = new TrackedBackgroundService();
-            created.Enqueue(instance);
-            return instance;
-        });
-
-        await attachment.DrainAsync();
-        Assert.True(created.ToArray() is [{ IsStarted: true }]);
-
-        // Holds the stop body as well as the bookkeeping, so the stop has provably not run when the
-        // drain returns and the only thing that can let it return is the drain awaiting that stop.
-        var releaseStop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
-        target.TransitionGate = () => releaseStop.Task;
-
-        var bookkeepingReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseBookkeeping = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        handler.StopBookkeepingGate = () =>
-        {
-            bookkeepingReached.TrySetResult();
-            releaseBookkeeping.Task.Wait(TimeSpan.FromSeconds(30));
-        };
-
-        // Act - the detach parks between its two writes, and the drain then runs both of its reads
-        // against that state. Both off the test thread, because each one blocks where it is held.
-        var detaching = Task.Run(() => { parent.Child = null; });
-        await bookkeepingReached.Task.WaitAsync(TimeSpan.FromSeconds(30));
-
-        var stopping = Task.Run(() => host.StopAsync());
-
-        // Assert - a drain whose two reads both missed the stop has nothing to await and returns here.
-        var returnedEarly = await Task.WhenAny(stopping, Task.Delay(DrainMustNotReturnWithin)) == stopping;
-
-        releaseBookkeeping.SetResult();
-        await detaching.WaitAsync(TimeSpan.FromSeconds(30));
-        releaseStop.SetResult();
-        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
-
-        target.TransitionGate = null;
-        handler.StopBookkeepingGate = null;
-
-        Assert.False(
-            returnedEarly,
-            "StopAsync returned while a stop that had left the running set but not yet joined the in "
-            + "flight set was still held, so it fell through both reads and would run against a "
-            + "disposed service provider.");
-
-        Assert.True(created.ToArray() is [{ IsStopped: true, IsDisposed: true }]);
-    }
-
-    [Fact]
-    public async Task WhenAStartIsAppendedAsTheDrainReadsTheRunningSet_ThenTheDrainStillWaitsForIt()
-    {
-        // Arrange - the running set entry is written inside the chain lock and before the append,
-        // because the append is what makes the start body dispatchable. Written after the lock
-        // instead, a drain that reads the set in the gap finds nothing to stop while the body is
-        // already queued behind nothing and about to create an instance the drain will never see.
-        // Held on the chain lock seam, which sits between the entry and the append.
+        // Arrange - a start that is appended and has not run. The drain waits for it because appending
+        // counted it, not because its target was in the snapshot, and the host disposes the service
+        // provider the moment the drain returns. Held on the chain lock seam, which is the only way to
+        // have a start provably queued and unrun while a drain is running: the take holds the target's
+        // chain lock, so the drain's own append for that target queues behind it rather than racing it.
         var (host, context) = await HostingTestHost.StartAsync();
 
         var created = new ConcurrentQueue<TrackedBackgroundService>();
@@ -854,11 +787,11 @@ public class HostedServiceHandlerRaceTests
     [Fact]
     public async Task WhenAStopIsInFlightWhenTheHostDrains_ThenTheDrainWaitsForIt()
     {
-        // Arrange - a stop queued before the drain left the running set when it was appended, so the
-        // drain's own snapshot cannot see it, and the host disposes the service provider as soon as
-        // the drain returns. The second subject is what makes the ordering observable: the drain
-        // releases the ownership of the targets it snapshotted only once it has waited for
-        // everything, so that owner is still set when the queued stop finally runs.
+        // Arrange - a stop queued before the drain, whose target the detach released, so the drain's
+        // own snapshot cannot see it, and the host disposes the service provider as soon as the drain
+        // returns. Only the count carries it. The second subject is what makes the ordering
+        // observable: the drain releases the ownership of the targets it snapshotted only once it has
+        // waited for everything, so that owner is still set when the queued stop finally runs.
         var (host, context) = await HostingTestHost.StartAsync();
 
         var detachingParent = new HostedParent(context);
@@ -1168,7 +1101,7 @@ public class HostedServiceHandlerRaceTests
     [Fact]
     public async Task WhenAnAttachLandsItsTakeAfterTheDrainBegan_ThenTheTakeIsUndone()
     {
-        // Arrange - the gate re-read after the ownership take and the running set entry, as distinct
+        // Arrange - the gate re-read after the ownership take and its record, as distinct
         // from the read on entry. An attach that read Running just before BeginDraining still lands
         // both writes after it, and the read on entry cannot see that. Nothing else undoes the take:
         // the drain's release loop covers only the targets its own snapshot held, and that snapshot is
@@ -1284,7 +1217,7 @@ public class HostedServiceHandlerRaceTests
         Assert.Equal(2, published.Length);
 
         var target = ((IHostedServiceAttachmentTarget)published.Last()).Target;
-        var claimed = target.TryTakeOwnership(liveHandler, out var ownershipTaken);
+        var claimed = target.TryTakeOwnership(liveHandler, child, out var ownershipTaken);
         target.ReleaseOwnership(liveHandler);
 
         liveHandlerTried.SetResult();
@@ -1419,9 +1352,9 @@ public class HostedServiceHandlerRaceTests
     {
         // Arrange - the "ownershipTaken" half of the gate re-read, as distinct from the re-read
         // itself. The re-read undoes what its own call installed, and a repeat take installed nothing:
-        // the owner and the running set entry it finds belong to an earlier attach whose instance is
-        // running. Undoing those pulls that target out of the set the drain is about to stop, and the
-        // instance then survives shutdown with nothing left able to reach it.
+        // the owner and the record it finds belong to an earlier attach whose instance is running.
+        // Undoing those pulls that target out of the set the drain is about to stop, and the instance
+        // then survives shutdown with nothing left able to reach it.
         //
         // The repeat take needs a target this handler already owns, which one subject visible from two
         // hosting contexts gives: the second context raises one more attach that the owning handler
@@ -1471,12 +1404,12 @@ public class HostedServiceHandlerRaceTests
         await attaching.WaitAsync(TimeSpan.FromSeconds(30));
 
         // Assert - read while the drain is still held, which is before its snapshot. Once it is let go
-        // the drain releases and clears everything it covered, and the difference is unobservable.
+        // the drain releases everything it covered, and the difference is unobservable.
+        //
+        // The record follows the owner now, so a repeat take that undid either undid both, and reading
+        // both would be reading one fact twice. The damage is read by the stop count at the end: a
+        // target pulled out of the snapshot is never stopped.
         Assert.Same(handler, target.Owner);
-        Assert.True(
-            handler.IsRunning(target),
-            "The repeat take undid an ownership and a running set entry it did not install, so the "
-            + "drain's snapshot misses a target whose instance is running.");
 
         releaseDrain.SetResult();
         await stopping.WaitAsync(TimeSpan.FromSeconds(30));
@@ -1489,13 +1422,80 @@ public class HostedServiceHandlerRaceTests
     }
 
     [Fact]
-    public async Task WhenAWholeStopLandsBetweenTheDrainsTwoReads_ThenTheDrainStillWaitsForIt()
+    public async Task WhenARepeatTakeFindsLivenessCleared_ThenItLeavesTheEarlierAttachAlone()
     {
-        // Arrange - the read order, as distinct from the write order the two tests above cover. Those
-        // park a detach mid write, where the stop is in both sets and the first read finds it whichever
-        // order the reads are in. This one lets the whole detach run between the reads: the running set
-        // read has to be the first one, or it happens after the removal and finds nothing while the in
-        // flight read happened before the join and found nothing either.
+        // Arrange - the "ownershipTaken" half of the liveness undo inside the chain lock, as distinct
+        // from its sibling on the gate undo. A repeat take installs nothing, so the owner and the record
+        // it finds belong to an earlier attach whose instance is running. Undoing those pulls the target
+        // out from under the drain's own append, which then reads a stranger and refuses, and the
+        // instance survives shutdown.
+        //
+        // The clear the second liveness read has to see is the drain's own, and the repeat take needs a
+        // target this handler already owns, which one subject visible from two hosting contexts gives.
+        var builder = HostingTestHost.CreateBuilder();
+        var firstContext = HostingTestHost.CreateContext(builder);
+        var secondContext = HostingTestHost.CreateContext(builder);
+
+        var host = builder.Build();
+        await host.StartAsync();
+
+        var subject = new CountingHostedSubject();
+        ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
+
+        var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
+        await target.AppendAsync(() => Task.CompletedTask);
+        Assert.Equal(1, subject.StartCount);
+
+        var handler = firstContext.TryGetService<HostedServiceHandler>()!;
+
+        // Armed only now, so the first attach's own take ran past it untouched. It fires inside the
+        // chain lock, between the take's first liveness read and its compare and exchange, which is
+        // where the drain's liveness clear has to land for the second read to see it.
+        var takeReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseTake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.LivenessReadGate = () =>
+        {
+            takeReached.TrySetResult();
+            releaseTake.Task.Wait(TimeSpan.FromSeconds(30));
+        };
+
+        var drainAtAppend = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDrainAppend = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.DrainAppendGate = () =>
+        {
+            drainAtAppend.TrySetResult();
+            return releaseDrainAppend.Task;
+        };
+
+        // Act - the repeat take holds the chain lock, the drain clears liveness and snapshots what it
+        // owns underneath it, and only then does the take read liveness for the second time.
+        var attaching = Task.Run(() => ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext));
+        await takeReached.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var stopping = Task.Run(() => host.StopAsync());
+        await drainAtAppend.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        releaseTake.SetResult();
+        await attaching.WaitAsync(TimeSpan.FromSeconds(30));
+
+        releaseDrainAppend.SetResult();
+        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+
+        handler.LivenessReadGate = null;
+        handler.DrainAppendGate = null;
+
+        // Assert
+        Assert.Equal(1, subject.StartCount);
+        Assert.Equal(1, subject.StopCount);
+    }
+
+    [Fact]
+    public async Task WhenAWholeStopLandsAfterTheDrainSnapshotsWhatItOwns_ThenTheDrainStillWaitsForIt()
+    {
+        // Arrange - a whole detach, appended and released, lands between the drain's snapshot and its
+        // own appends. The drain's append for that target is then refused, because ownership has moved
+        // back out from under it, so nothing but the count carries the stop the detach appended. Held
+        // at the seam between the two, which is the only place that interleaving is reachable.
         var (host, context) = await HostingTestHost.StartAsync();
         var handler = context.TryGetService<HostedServiceHandler>()!;
 
@@ -1519,20 +1519,20 @@ public class HostedServiceHandlerRaceTests
         var target = ((IHostedServiceAttachmentTarget)attachment).Target;
         target.TransitionGate = () => releaseStop.Task;
 
-        var betweenReads = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseReads = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        handler.DrainSnapshotGate = () =>
+        var snapshotTaken = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseAppends = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.DrainAppendGate = () =>
         {
-            betweenReads.TrySetResult();
-            return releaseReads.Task;
+            snapshotTaken.TrySetResult();
+            return releaseAppends.Task;
         };
 
         var stopping = Task.Run(() => host.StopAsync());
-        await betweenReads.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await snapshotTaken.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-        // Act - the whole detach, appended and bookkept, lands here.
+        // Act - the whole detach, appended and released, lands here.
         parent.Child = null;
-        releaseReads.SetResult();
+        releaseAppends.SetResult();
 
         // Assert
         var returnedEarly = await Task.WhenAny(stopping, Task.Delay(DrainMustNotReturnWithin)) == stopping;
@@ -1541,12 +1541,12 @@ public class HostedServiceHandlerRaceTests
         await stopping.WaitAsync(TimeSpan.FromSeconds(30));
 
         target.TransitionGate = null;
-        handler.DrainSnapshotGate = null;
+        handler.DrainAppendGate = null;
 
         Assert.False(
             returnedEarly,
-            "StopAsync returned while a stop appended between its two reads was still held, so reading "
-            + "the in flight set first let that stop fall through both.");
+            "StopAsync returned while a stop appended after its snapshot was still held, so the append "
+            + "it refused left that stop covered by nothing.");
 
         Assert.True(created.ToArray() is [{ IsStopped: true, IsDisposed: true }]);
     }
@@ -1556,9 +1556,9 @@ public class HostedServiceHandlerRaceTests
     {
         // Arrange - the re-read undoes a take it made a moment ago, and it cannot assume the start it
         // appended has not run: that body reads the gate at its own top, so it can have read Running
-        // just before BeginDraining and be past every guard it has. An undo that only deleted the
-        // running set entry would hide the instance that body is about to create from the drain's
-        // snapshot, and nothing would ever stop or dispose it. Appending a stop covers it instead.
+        // just before BeginDraining and be past every guard it has. An undo that only retired the
+        // ownership record would hide the instance that body is about to create from a snapshot taken
+        // afterwards, and nothing would ever stop or dispose it. Appending a stop covers it instead.
         //
         // Three seams, so all of it is driven: the factory parks a start that is provably committed,
         // OwnershipTakenGate parks the appending thread between the append and the re-read, and
@@ -1631,6 +1631,215 @@ public class HostedServiceHandlerRaceTests
                 created.ToArray().Select(i => $"started={i.IsStarted} stopped={i.IsStopped} disposed={i.IsDisposed}")));
 
         Assert.Null(attachment.Current);
+    }
+
+    [Fact]
+    public async Task WhenASubjectJoinsASecondHostWhileTheFirstIsDraining_ThenTheSecondHostsInstanceSurvives()
+    {
+        // Arrange - the drain reads its owned set holding nothing and appends afterwards, so ownership
+        // can move in between. Decided outside the chain lock, this handler stops and disposes the
+        // instance the second host started and owns, and the second graph is left live with nothing
+        // running and no error anywhere. The seam holds the drain between the snapshot and the appends,
+        // which is the only place that interleaving is reachable.
+        var firstBuilder = HostingTestHost.CreateBuilder();
+        var firstContext = HostingTestHost.CreateContext(firstBuilder);
+        var firstHost = firstBuilder.Build();
+        await firstHost.StartAsync();
+
+        var secondBuilder = HostingTestHost.CreateBuilder();
+        var secondContext = HostingTestHost.CreateContext(secondBuilder);
+        var secondHost = secondBuilder.Build();
+        await secondHost.StartAsync();
+
+        try
+        {
+            var created = new ConcurrentQueue<TrackedBackgroundService>();
+            var child = new Person();
+            var attachment = child.AttachHostedService(() =>
+            {
+                var instance = new TrackedBackgroundService();
+                created.Enqueue(instance);
+                return instance;
+            });
+
+            var firstParent = new Parent(firstContext);
+            firstParent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(() => created.ToArray() is [{ IsStarted: true }]);
+
+            var firstHandler = firstContext.TryGetService<HostedServiceHandler>()!;
+            var snapshotTaken = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseAppends = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            firstHandler.DrainAppendGate = () =>
+            {
+                snapshotTaken.TrySetResult();
+                return releaseAppends.Task;
+            };
+
+            // Act - the whole move lands after the first host snapshotted the target and before it
+            // appends anything for it.
+            var stopping = firstHost.StopAsync();
+            await snapshotTaken.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+            firstParent.Child = null;
+            var secondParent = new Parent(secondContext);
+            secondParent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => created.ToArray() is [_, { IsStarted: true }],
+                message: "The second host never started its own instance, so the drain below proves nothing.");
+
+            releaseAppends.SetResult();
+            await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+            firstHandler.DrainAppendGate = null;
+
+            // Assert - an empty transition behind whatever the drain appended, so the reads below are
+            // deterministic rather than timed.
+            await attachment.DrainAsync();
+
+            var instances = created.ToArray();
+            Assert.Equal(2, instances.Length);
+            Assert.True(instances[0].IsStopped);
+            Assert.True(instances[0].IsDisposed);
+            Assert.False(
+                instances[1].IsStopped,
+                "The first host's drain stopped an instance the second host started and owns.");
+
+            Assert.False(instances[1].IsDisposed);
+            Assert.Same(instances[1], attachment.Current);
+        }
+        finally
+        {
+            await secondHost.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenNothingIsInFlightAsTheDrainBegins_ThenItStillWaitsForTheStopsItAppends()
+    {
+        // Arrange - everything the graph did has settled, so the count is zero at the moment the drain
+        // starts. A barrier that decided on the count it read before appending, or that armed a signal
+        // and waited for it to be set, returns here while its own stop is still running and the host
+        // disposes the service provider underneath it.
+        var (host, context) = await HostingTestHost.StartAsync();
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+
+        var parent = new Parent(context);
+        var child = new Person();
+        var instance = new TrackedBackgroundService();
+        var attachment = child.AttachHostedService(() => instance);
+
+        parent.Child = child;
+        await attachment.DrainAsync();
+        Assert.True(instance.IsStarted);
+        Assert.Equal(0, handler.InFlightTransitionCount);
+
+        var releaseStop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+        target.TransitionGate = () => releaseStop.Task;
+
+        // Act
+        var stopping = host.StopAsync();
+
+        // Assert - the drain's own stop is held, so a drain that did not wait for it returns here.
+        var returnedEarly = await Task.WhenAny(stopping, Task.Delay(DrainMustNotReturnWithin)) == stopping;
+
+        releaseStop.SetResult();
+        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+        target.TransitionGate = null;
+
+        Assert.False(
+            returnedEarly,
+            "StopAsync returned while the stop it appended itself was still held, so that stop would "
+            + "run against a disposed service provider.");
+
+        Assert.True(instance.IsStopped);
+        Assert.True(instance.IsDisposed);
+    }
+
+    [Fact]
+    public async Task WhenAStopIsAppendedAfterTheCountFirstReachedZero_ThenTheDrainStillWaitsForIt()
+    {
+        // Arrange - the count is read, not held, so a stop appended after the drain's own stops finished
+        // went through the same increment and only a second read sees it. The seam sits after the first
+        // wait and before the ownership release, which is the window a context detach still reads this
+        // handler as the owner in and appends from.
+        var (host, context) = await HostingTestHost.StartAsync();
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+
+        var parent = new Parent(context);
+        var child = new Person();
+        var instance = new TrackedBackgroundService();
+        var attachment = child.AttachHostedService(() => instance);
+
+        parent.Child = child;
+        await attachment.DrainAsync();
+        Assert.True(instance.IsStarted);
+
+        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+        var releaseStop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstWaitReturned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSeam = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.DrainReleaseGate = () =>
+        {
+            // Armed from inside the seam, so the drain's own stop ran unheld and the count provably
+            // reached zero before the detach below appends anything.
+            target.TransitionGate = () => releaseStop.Task;
+            firstWaitReturned.TrySetResult();
+            return releaseSeam.Task;
+        };
+
+        // Act
+        var stopping = host.StopAsync();
+        await firstWaitReturned.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(0, handler.InFlightTransitionCount);
+
+        parent.Child = null;
+        releaseSeam.SetResult();
+
+        // Assert - the appended stop is held, so a drain that read the count once returns here.
+        var returnedEarly = await Task.WhenAny(stopping, Task.Delay(DrainMustNotReturnWithin)) == stopping;
+
+        releaseStop.SetResult();
+        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+
+        handler.DrainReleaseGate = null;
+        target.TransitionGate = null;
+
+        Assert.False(
+            returnedEarly,
+            "StopAsync returned while a stop appended after its first read of the count was still held, "
+            + "so that stop would run against a disposed service provider.");
+    }
+
+    [Fact]
+    public async Task WhenAStartFaultedAndTheSubjectStayedInTheGraph_ThenTheDrainStillReleasesTheTarget()
+    {
+        // Arrange - the record is written when the take installs the owner, not when an instance is
+        // created, so a target whose start faulted is still the drain's to release. Left owned by a
+        // drained handler, every later handler over that subject loses the compare and exchange.
+        var (host, context) = await HostingTestHost.StartAsync();
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+
+        var parent = new Parent(context);
+        var child = new Person();
+        var attachment = child.AttachHostedService<TrackedBackgroundService>(
+            () => throw new InvalidOperationException("the start fails"));
+
+        parent.Child = child;
+        await AsyncTestHelpers.WaitUntilAsync(() => attachment.Fault is not null);
+
+        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+        Assert.Same(handler, target.Owner);
+        Assert.True(handler.IsOwned(target), "The take recorded nothing, so the drain has nothing to release.");
+
+        // Act
+        await host.StopAsync();
+
+        // Assert
+        Assert.Null(target.Owner);
+        Assert.False(
+            handler.IsOwned(target),
+            "The drained handler still holds the target, which roots the subject and denies every later "
+            + "handler the compare and exchange.");
     }
 
     private static async Task<(IHost Host, IInterceptorSubjectContext Context, CallbackStartupDeferrer Deferrer)>

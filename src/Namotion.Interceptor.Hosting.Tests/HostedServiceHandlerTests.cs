@@ -220,6 +220,79 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
+    public async Task WhenAnAttachmentIsDetachedExplicitly_ThenTheHandlerStopsRetainingItsTarget()
+    {
+        // Arrange - the explicit detach stops the target without releasing it, and that is deliberate:
+        // releasing makes a start queued ahead of the detach read Owner as null and refuse, which
+        // leaves the stop no instance to dispose. The record still has to go, or every attach and
+        // detach cycle retains a target and its subject on the handler for the handler's whole life.
+        var (host, context) = await HostingTestHost.StartAsync();
+
+        try
+        {
+            var handler = context.TryGetService<HostedServiceHandler>()!;
+            var person = new Person(context);
+            var instance = new TrackedBackgroundService();
+            var attachment = person.AttachHostedService(() => instance);
+
+            await attachment.DrainAsync();
+            var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+            Assert.True(handler.IsOwned(target));
+
+            // Act
+            Assert.True(person.DetachHostedService(attachment));
+            await attachment.DrainAsync();
+
+            // Assert
+            Assert.False(
+                handler.IsOwned(target),
+                "The handler retains the detached target and its subject for the rest of its life.");
+
+            Assert.Same(handler, target.Owner);
+            Assert.True(instance.IsDisposed);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAnAttachmentIsDetachedByTheAwaitingOverload_ThenTheHandlerStopsRetainingItsTarget()
+    {
+        // Arrange - the same retirement on the other overload. Each one retires its own record, so
+        // deleting either alone leaves the test that drives the other green.
+        var (host, context) = await HostingTestHost.StartAsync();
+
+        try
+        {
+            var handler = context.TryGetService<HostedServiceHandler>()!;
+            var person = new Person(context);
+            var instance = new TrackedBackgroundService();
+            var attachment = person.AttachHostedService(() => instance);
+
+            await attachment.DrainAsync();
+            var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+            Assert.True(handler.IsOwned(target));
+
+            // Act
+            Assert.True(await person.DetachHostedServiceAsync(attachment, CancellationToken.None));
+
+            // Assert
+            Assert.False(
+                handler.IsOwned(target),
+                "The handler retains the detached target and its subject for the rest of its life.");
+
+            Assert.Same(handler, target.Owner);
+            Assert.True(instance.IsDisposed);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task WhenTheFactoryThrows_ThenTheFaultIsRecordedAndCurrentStaysNull()
     {
         // Arrange

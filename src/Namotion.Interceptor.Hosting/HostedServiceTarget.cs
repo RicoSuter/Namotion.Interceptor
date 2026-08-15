@@ -11,6 +11,20 @@ internal sealed class HostedServiceTarget
 {
     private readonly object _sync = new();
 
+    /// <summary>
+    /// Pairs the ownership exchange with the handler's record of it, which are one fact and were not
+    /// atomic against each other: a release landing between an install and its record nulls the owner,
+    /// finds no record to retire, and leaves one that no later release can match, because the owner it
+    /// would have matched on is already gone. Measured at tens of leaks per two million races.
+    /// </summary>
+    /// <remarks>
+    /// Its own lock rather than <c>_sync</c>. A context detach releases every attachment target it
+    /// enumerates, including ones whose chain lock a concurrent attach is holding, so releasing under
+    /// the chain lock deadlocks that pair. Nothing held here ever takes another lock, and the take
+    /// enters it while already holding <c>_sync</c>, so the one order is chain lock then this.
+    /// </remarks>
+    private readonly object _ownershipSync = new();
+
     private Task _tail = Task.CompletedTask;
     private IHostedService? _current;
     private Exception? _fault;
@@ -83,36 +97,92 @@ internal sealed class HostedServiceTarget
     }
 
     /// <summary>
-    /// Takes ownership. Finding this handler already installed is also success;
-    /// <paramref name="ownershipTaken"/> tells the two apart, which a caller that may undo its own take
-    /// but must leave an earlier one alone needs.
+    /// Takes ownership and records the target on the handler. Finding this handler already installed is
+    /// also success; <paramref name="ownershipTaken"/> tells the two apart, which a caller that may undo
+    /// its own take but must leave an earlier one alone needs.
     /// </summary>
-    public bool TryTakeOwnership(HostedServiceHandler handler, out bool ownershipTaken)
+    /// <remarks>
+    /// The record is written on the install only, so membership can be gained through nothing but a take
+    /// that has an undo behind it.
+    /// </remarks>
+    public bool TryTakeOwnership(HostedServiceHandler handler, IInterceptorSubject subject, out bool ownershipTaken)
     {
-        var previous = Interlocked.CompareExchange(ref _owner, handler, null);
-        ownershipTaken = previous is null;
-        return ownershipTaken || ReferenceEquals(previous, handler);
+        lock (_ownershipSync)
+        {
+            var previous = Interlocked.CompareExchange(ref _owner, handler, null);
+            ownershipTaken = previous is null;
+
+            if (ownershipTaken)
+            {
+                handler.RecordOwnership(this, subject);
+            }
+
+            return ownershipTaken || ReferenceEquals(previous, handler);
+        }
     }
 
+    /// <summary>
+    /// Releases an ownership this handler installed and retires its record.
+    /// </summary>
+    /// <remarks>
+    /// The record is retired only when the exchange matched, because the record and <c>_owner</c> are
+    /// one fact: a release that matched nothing released nothing.
+    /// </remarks>
     public void ReleaseOwnership(HostedServiceHandler handler)
-        => Interlocked.CompareExchange(ref _owner, null, handler);
+    {
+        lock (_ownershipSync)
+        {
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _owner, null, handler), handler))
+            {
+                handler.ForgetOwnership(this);
+            }
+        }
+    }
 
     /// <summary>
     /// Appends a transition and returns a task completing when it has run. Appending never blocks and
     /// never runs the body, so callers may append while holding a lock.
     /// </summary>
     /// <param name="body">The transition.</param>
-    /// <param name="onAppended">
-    /// Runs inside the chain lock with the appended transition, for bookkeeping that a concurrent drain
-    /// must not be able to observe separately from the append itself.
-    /// </param>
-    public Task AppendAsync(Func<Task> body, Action<Task>? onAppended = null)
+    /// <param name="handler">The handler the transition is counted against, so its drain waits for it.</param>
+    public Task AppendAsync(HostedServiceHandler handler, Func<Task> body)
     {
         lock (_sync)
         {
-            var appended = AppendCore(body);
-            onAppended?.Invoke(appended);
-            return appended;
+            return AppendCore(body, handler);
+        }
+    }
+
+    /// <summary>
+    /// Appends a transition no drain waits for.
+    /// </summary>
+    /// <remarks>
+    /// Test only. Every production append is attributed, or shutdown returns while the transition is
+    /// still about to touch a service provider the host is disposing.
+    /// </remarks>
+    public Task AppendAsync(Func<Task> body)
+    {
+        lock (_sync)
+        {
+            return AppendCore(body, handler: null);
+        }
+    }
+
+    /// <summary>
+    /// Appends a transition only while <paramref name="handler"/> still owns the target, both decided
+    /// under one acquisition of the chain lock. Returns null when ownership has moved on, in which case
+    /// nothing was appended.
+    /// </summary>
+    /// <remarks>
+    /// The drain snapshots what it owns while holding nothing and appends afterwards. Deciding outside
+    /// this lock lets a subject that left one host's graph and joined another's have the second host's
+    /// instance stopped and disposed by the first host's drain.
+    /// </remarks>
+    public Task? AppendIfOwnedAsync(HostedServiceHandler handler, Func<Task> body)
+    {
+        lock (_sync)
+        {
+            return ReferenceEquals(Owner, handler) ? AppendCore(body, handler) : null;
         }
     }
 
@@ -135,12 +205,17 @@ internal sealed class HostedServiceTarget
     /// it the start runs and creates an instance no later detach can reach, because the attachment it
     /// would be enumerated from is gone.
     /// </para>
+    /// <para>
+    /// The record the take writes lands inside this lock and ahead of the append, which is what makes
+    /// the body dispatchable: a drain that snapshots between the two queues behind this section for its
+    /// own append and then reads the ownership the liveness undo below may just have released, so it
+    /// appends nothing for a take that was undone and appends behind the start for one that stood.
+    /// </para>
     /// </remarks>
     public Task? TryTakeOwnershipAndAppendAsync(
         HostedServiceHandler handler,
         IInterceptorSubject subject,
         Func<Task> body,
-        Action onTaken,
         out bool ownershipTaken)
     {
         ownershipTaken = false;
@@ -154,7 +229,7 @@ internal sealed class HostedServiceTarget
 
             handler.LivenessReadGate?.Invoke();
 
-            if (!TryTakeOwnership(handler, out ownershipTaken))
+            if (!TryTakeOwnership(handler, subject, out ownershipTaken))
             {
                 return null;
             }
@@ -180,27 +255,26 @@ internal sealed class HostedServiceTarget
                 return null;
             }
 
-            // Before the append and inside this lock, because the append is what makes the body
-            // dispatchable: a drain that snapshots between the two would find nothing to stop while the
-            // body is already past its own guards and committed to creating an instance, and that
-            // instance is then never stopped and never disposed.
-            onTaken();
-
             ChainLockGate?.Invoke();
 
-            return AppendCore(body);
+            return AppendCore(body, handler);
         }
     }
 
-    private Task AppendCore(Func<Task> body)
+    private Task AppendCore(Func<Task> body, HostedServiceHandler? handler)
     {
+        // Before the append, never after: on an already completed tail the continuation runs and
+        // decrements before the next statement here executes, which takes the count negative. Nothing
+        // between here and the append may throw, because a leaked increment never comes back.
+        handler?.EnterTransition();
+
         // The lock the callers hold is required: "_tail = _tail.ContinueWith(...)" is a
         // read-modify-write, and two racing appenders lose an assignment and run both transitions
         // concurrently. TaskScheduler.Default is required: ContinueWith otherwise captures
         // TaskScheduler.Current, which can be a scheduler the appending task is itself occupying.
         _tail = _tail
             .ContinueWith(
-                _ => RunAsync(body),
+                _ => RunAsync(body, handler),
                 CancellationToken.None,
                 TaskContinuationOptions.None,
                 TaskScheduler.Default)
@@ -209,7 +283,7 @@ internal sealed class HostedServiceTarget
         return _tail;
     }
 
-    private async Task RunAsync(Func<Task> body)
+    private async Task RunAsync(Func<Task> body, HostedServiceHandler? handler)
     {
         // Bodies never throw. A faulted tail would raise UnobservedTaskException for every dropped
         // fire and forget transition and would be retained until the target transitions again.
@@ -226,6 +300,12 @@ internal sealed class HostedServiceTarget
         {
             // Handled by the body itself, which records into Fault and logs. This catch only
             // guarantees the chain stays unfaulted.
+        }
+        finally
+        {
+            // In the finally rather than after the catch, which covers the body alone: the gate above
+            // is inside the same count.
+            handler?.LeaveTransition();
         }
     }
 }

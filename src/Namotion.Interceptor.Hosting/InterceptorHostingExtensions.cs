@@ -134,6 +134,12 @@ public static class InterceptorHostingExtensions
 
         var handler = subject.Context.TryGetService<HostedServiceHandler>();
         handler?.AppendStop(subject, target, signal: null, waitFor: null, CancellationToken.None);
+
+        // Retired without releasing ownership, and that asymmetry is load bearing: a release here makes
+        // a start queued ahead of this detach read Owner as null and refuse, which leaves the stop above
+        // no instance to dispose. Without the retirement every attach and detach cycle keeps the target
+        // and its subject on the handler for the handler's whole life.
+        handler?.ForgetOwnership(target);
         return true;
     }
 
@@ -160,11 +166,13 @@ public static class InterceptorHostingExtensions
         }
 
         handler.EnsureStarted();
-        await handler
-            .AppendStop(subject, target, signal: null, waitFor: null, cancellationToken)
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
+        var stop = handler.AppendStop(subject, target, signal: null, waitFor: null, cancellationToken);
 
+        // Retired without releasing ownership, and before the await so a cancelled wait cannot skip it.
+        // The reason for the asymmetry is on the synchronous overload.
+        handler.ForgetOwnership(target);
+
+        await stop.WaitAsync(cancellationToken).ConfigureAwait(false);
         return true;
     }
 

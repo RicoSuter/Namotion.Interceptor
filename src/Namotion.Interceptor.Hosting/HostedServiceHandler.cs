@@ -18,10 +18,23 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     // See docs/design/hosting-service-ownership.md#the-50-ms-delay.
     private const int TransitionDelayMilliseconds = 50;
 
+    /// <summary>
+    /// How long the drain waits between reads of the in flight count. Once per process, on a path that
+    /// already spends <see cref="TransitionDelayMilliseconds"/> inside every transition it waits for.
+    /// </summary>
+    private const int DrainPollMilliseconds = 1;
+
     private readonly HostedServiceGate _gate = new();
-    private readonly ConcurrentDictionary<HostedServiceTarget, IInterceptorSubject> _running = new();
+    private readonly ConcurrentDictionary<HostedServiceTarget, IInterceptorSubject> _owned = new();
     private readonly ConcurrentDictionary<IInterceptorSubject, byte> _liveSubjects = new();
-    private readonly ConcurrentDictionary<Task, byte> _inFlightStops = new();
+
+    /// <summary>
+    /// Transitions this handler appended that have not finished. Read by the drain rather than
+    /// signalled: a completion source has to cope with the count already being zero when the drain
+    /// starts, with a transient zero before the drain's own stops land, and with a store-load
+    /// reordering on both sides. Re-reading has none of those cases because it re-reads.
+    /// </summary>
+    private int _inFlight;
 
     /// <summary>
     /// Set once, by the service provider factory that hands this handler to the host, on whichever
@@ -43,9 +56,9 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     internal Func<Task>? DrainGate { get; set; }
 
     /// <summary>
-    /// Test seam, invoked after the take and the running set entry and before the gate re-read. Null in
-    /// production. Holds open the window in which a handler that passed the gate read on entry owns a
-    /// target it may never start.
+    /// Test seam, invoked after the take and before the gate re-read. Null in production. Holds open
+    /// the window in which a handler that passed the gate read on entry owns a target it may never
+    /// start.
     /// </summary>
     internal Action? OwnershipTakenGate { get; set; }
 
@@ -64,19 +77,19 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     internal Action? LivenessReadGate { get; set; }
 
     /// <summary>
-    /// Test seam, invoked inside the chain lock between a stop's in flight join and its running set
-    /// removal. Null in production. Holding it holds the only moment a stop is in both sets, which is
-    /// what the drain's read order turns into "always in at least one".
+    /// Test seam, awaited in <see cref="StopAsync"/> between the owned snapshot and the stops it
+    /// appends. Null in production. Ownership moving while it is held is the interleaving the append's
+    /// own ownership read exists for, and the only one that reaches it.
     /// </summary>
-    internal Action? StopBookkeepingGate { get; set; }
+    internal Func<Task>? DrainAppendGate { get; set; }
 
     /// <summary>
-    /// Test seam, awaited in <see cref="StopAsync"/> between the running set snapshot and the in flight
-    /// snapshot. Null in production. A whole stop appended while it is held lands between the two
-    /// reads, which is the interleaving their order exists for and the only one that tells the two
-    /// orders apart.
+    /// Test seam, awaited in <see cref="StopAsync"/> after the first wait for in flight transitions and
+    /// before ownership is released. Null in production. A stop appended while it is held lands after
+    /// the count first reached zero and while a context detach still reads this handler as the owner,
+    /// which is the interleaving the second wait exists for.
     /// </summary>
-    internal Func<Task>? DrainSnapshotGate { get; set; }
+    internal Func<Task>? DrainReleaseGate { get; set; }
 
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
@@ -232,15 +245,10 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // queued. Taking the hold before the append leaves no window in which that can happen.
         var startupHolds = TakeStartupHolds(subject.Context);
 
-        // The running set entry is written inside the chain lock, together with the take and the append,
-        // rather than here: see the comment at the call back. Writing it only on the path where the take
-        // succeeded keeps the old guarantee that a target this handler failed to take never enters the
-        // set, which would make the drain stop an instance another handler is running.
         var start = target.TryTakeOwnershipAndAppendAsync(
             this,
             subject,
             () => RunStartAsync(subject, target, startupHolds),
-            () => _running[target] = subject,
             out var ownershipTaken);
 
         if (start is null)
@@ -254,16 +262,14 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         if (ownershipTaken && _gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
         {
             // Re-read after both writes, which turns the check at the top from a narrowing into a
-            // guard: reading Running still here proves the drain had not begun when they landed, so its
+            // guard: the record and the owner landed while the gate still read Running, so the drain's
             // snapshot covers this target. Any later read may already have been swept past.
             //
-            // A stop rather than a plain removal from the running set, because the start appended just
+            // A stop rather than a plain retirement of the record, because the start appended just
             // above may already be past every one of its guards: it read the gate as Running before
-            // BeginDraining and is committed to creating an instance. Deleting the entry then hides
-            // that instance from the drain's snapshot and nothing ever stops or disposes it. The stop
-            // is behind the start on the same chain, so it stops whatever the start creates, and
-            // AppendStop leaves the running set and joins the in flight set in the barrier's own order,
-            // so a drain reading either one still catches it.
+            // BeginDraining and is committed to creating an instance. Retiring the record then hides
+            // that instance from a snapshot taken afterwards and nothing ever stops or disposes it. The
+            // stop is behind the start on the same chain, so it stops whatever the start creates.
             AppendStop(subject, target, signal: null, waitFor: null, CancellationToken.None);
 
             // Released after the stop is appended, never before, for the reason on the context detach
@@ -419,8 +425,28 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         TaskCompletionSource? signal,
         Task? waitFor,
         CancellationToken cancellationToken)
-    {
-        var stop = target.AppendAsync(async () =>
+        => target.AppendAsync(this, CreateStopBody(subject, target, signal, waitFor, cancellationToken));
+
+    /// <summary>
+    /// Appends a stop only while this handler still owns the target, the two decided under one
+    /// acquisition of the chain lock. Returns null when the append was refused, which the caller must
+    /// not then hand to another stop as a wait: a refused stop has no body, so nothing sets its signal.
+    /// </summary>
+    private Task? AppendStopIfOwned(
+        IInterceptorSubject subject,
+        HostedServiceTarget target,
+        TaskCompletionSource? signal,
+        Task? waitFor,
+        CancellationToken cancellationToken)
+        => target.AppendIfOwnedAsync(this, CreateStopBody(subject, target, signal, waitFor, cancellationToken));
+
+    private Func<Task> CreateStopBody(
+        IInterceptorSubject subject,
+        HostedServiceTarget target,
+        TaskCompletionSource? signal,
+        Task? waitFor,
+        CancellationToken cancellationToken)
+        => async () =>
         {
             try
             {
@@ -475,42 +501,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 // attachment stop parks forever on a signal that is never set.
                 signal?.TrySetResult();
             }
-        },
-        onAppended: appended =>
-        {
-            // Joins the in flight set before leaving the running set, which is one half of the barrier;
-            // StopAsync reading the running set before the in flight set is the other. A drain that
-            // finds the target already gone from the running set is therefore reading the in flight set
-            // after this join and sees the stop. Removing first leaves a gap in which the stop is in
-            // neither set, and a drain reading both inside it waits for nothing and returns while this
-            // stop is still about to touch a service provider the host is disposing.
-            //
-            // Inside the chain lock only so a drain that does find the target has to queue behind this
-            // append rather than race it.
-            TrackInFlightStop(appended);
-            StopBookkeepingGate?.Invoke();
-            _running.TryRemove(target, out _);
-        });
-
-        return stop;
-    }
-
-    /// <summary>
-    /// Registers a stop so <see cref="StopAsync"/> can be a barrier for it. A target leaves the
-    /// running set when its stop is appended, so no running set snapshot covers a stop queued before
-    /// the drain.
-    /// </summary>
-    private void TrackInFlightStop(Task stop)
-    {
-        _inFlightStops[stop] = 0;
-
-        _ = stop.ContinueWith(
-            static (completed, state) => ((ConcurrentDictionary<Task, byte>)state!).TryRemove(completed, out _),
-            _inFlightStops,
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-    }
+        };
 
     private async Task DisposeInstanceAsync(IHostedService instance)
     {
@@ -564,7 +555,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // An empty transition on the same chain. Appending never runs a body, so this completes only
         // once the start appended ahead of it has run.
         await target
-            .AppendAsync(() => Task.CompletedTask)
+            .AppendAsync(this, () => Task.CompletedTask)
             .WaitAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -584,10 +575,32 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     internal bool IsLive(IInterceptorSubject subject) => _liveSubjects.ContainsKey(subject);
 
     /// <summary>
+    /// Records a target this handler installed itself as the owner of, so its drain can stop and
+    /// release it. Written from the take, on the install only: a repeat take finds a record an earlier
+    /// take made, and undoing that one would pull a running instance out of the drain's snapshot.
+    /// </summary>
+    internal void RecordOwnership(HostedServiceTarget target, IInterceptorSubject subject) => _owned[target] = subject;
+
+    /// <summary>
+    /// Retires a target's record. Called by the release, and by an explicit detach, which stops a
+    /// target without releasing it and inherits the rule that it must still retire the record.
+    /// </summary>
+    internal void ForgetOwnership(HostedServiceTarget target) => _owned.TryRemove(target, out _);
+
+    internal void EnterTransition() => Interlocked.Increment(ref _inFlight);
+
+    internal void LeaveTransition() => Interlocked.Decrement(ref _inFlight);
+
+    /// <summary>
+    /// How many transitions this handler has appended that have not finished. Test only.
+    /// </summary>
+    internal int InFlightTransitionCount => Volatile.Read(ref _inFlight);
+
+    /// <summary>
     /// Whether this handler holds the target in the set its drain would stop. Test only: a target left
     /// here for a subject that has left the graph is the leak, not an observable behaviour.
     /// </summary>
-    internal bool IsRunning(HostedServiceTarget target) => _running.ContainsKey(target);
+    internal bool IsOwned(HostedServiceTarget target) => _owned.ContainsKey(target);
 
     /// <summary>
     /// Records liveness for a subject already in the graph that hosted nothing when it entered, so
@@ -659,24 +672,12 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // releases it, because the release loop below only covers the drain's own snapshot.
         _liveSubjects.Clear();
 
-        var snapshot = _running.ToArray();
+        var snapshot = _owned.ToArray();
 
-        if (DrainSnapshotGate is { } drainSnapshotGate)
+        if (DrainAppendGate is { } drainAppendGate)
         {
-            await drainSnapshotGate().ConfigureAwait(false);
+            await drainAppendGate().ConfigureAwait(false);
         }
-
-        // Read after the running set, never before it, and that order is the barrier's other half.
-        // AppendStop joins this set before it leaves the running one, so a target the snapshot above
-        // missed had already been removed, which means its stop had already joined here and this read
-        // finds it. Reading this one first inverts the argument and leaves a window in which a stop is
-        // in neither, and the drain then waits for nothing and returns while that stop is still running.
-        //
-        // Nothing appended after this read is missed either: it is either for a target the snapshot
-        // above still held, so the drain appended its own stop behind it on the same chain and awaits
-        // that one, or it is for a target with no instance, which the stop body no-ops.
-        var queuedStops = _inFlightStops.Keys;
-        var stops = new List<Task>(snapshot.Length + queuedStops.Count);
 
         // Shutdown uses the same shape per owned subject as a context detach does, rather than
         // stopping every target independently: a subject's own stop has to return before the
@@ -690,8 +691,14 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             }
 
             var subjectStopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (AppendStopIfOwned(subject, target, subjectStopped, waitFor: null, cancellationToken) is null)
+            {
+                continue;
+            }
+
+            // Recorded only for an accepted append. A refused one has no body and therefore no finally,
+            // so an attachment stop handed this signal would park on it for the whole shutdown deadline.
             (subjectStops ??= new Dictionary<IInterceptorSubject, TaskCompletionSource>())[subject] = subjectStopped;
-            stops.Add(AppendStop(subject, target, subjectStopped, waitFor: null, cancellationToken));
         }
 
         foreach (var (target, subject) in snapshot)
@@ -705,43 +712,80 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 ? subjectStopped.Task
                 : null;
 
-            stops.Add(AppendStop(subject, target, signal: null, waitFor, cancellationToken));
+            // Discarded rather than collected: the count is what the drain waits on, and a stop this
+            // append refused is one another handler now owns.
+            _ = AppendStopIfOwned(subject, target, signal: null, waitFor, cancellationToken);
         }
 
-        stops.AddRange(queuedStops);
+        // Bounded by the token, which for a host is the shutdown deadline. Nothing further down
+        // observes it: the chain waits inside a stop body are untokened by design, and a stop that is
+        // wedged behind one of them would otherwise hold the process open forever. A service that
+        // ignores its own stop token, or a chain wedged by the forbidden self detach shape, is exactly
+        // what this barrier has to give up on.
+        var remaining = await WaitForTransitionsAsync(cancellationToken).ConfigureAwait(false);
 
-        try
+        if (DrainReleaseGate is { } drainReleaseGate)
         {
-            // Bounded by the token, which for a host is the shutdown deadline. Nothing further down
-            // observes it: the chain waits inside a stop body are untokened by design, and a stop that
-            // is wedged behind one of them would otherwise hold the process open forever. A service
-            // that ignores its own stop token, or a chain wedged by the forbidden self detach shape,
-            // is exactly what this barrier has to give up on.
-            await Task.WhenAll(stops).WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // Swallowed rather than propagated, and the drain still finishes below. Rethrowing would
-            // abandon the ownership release, so every target this handler owns would stay owned by a
-            // dead handler and a second host over the same subjects would start nothing. The host
-            // treats an exception here as a failed shutdown and disposes the provider anyway, so
-            // there is nothing to gain and the whole cleanup to lose.
-            Logger?.LogWarning(
-                "Shutdown gave up waiting for {Count} hosted service transitions; they keep running unobserved.",
-                stops.Count);
+            await drainReleaseGate().ConfigureAwait(false);
         }
 
         foreach (var (target, _) in snapshot)
         {
-            // Released after the stops so a second host cannot start ahead of this host's stop,
-            // and released at all so a second host over the same subjects is not blocked forever.
+            // Released after the stops so a second host cannot start ahead of this host's stop, and
+            // released at all so a second host over the same subjects is not blocked forever. Released
+            // even when the wait above gave up, because a wrong stop is recoverable and a target owned
+            // by a dead handler is not.
             target.ReleaseOwnership(this);
         }
 
-        // A drained handler is still reachable from the context that created it, so it must not keep
-        // rooting the subjects and targets it has seen.
-        _running.Clear();
+        if (remaining == 0)
+        {
+            // Read again rather than held: an append landing after the count first reached zero went
+            // through the same increment, and only a second read sees it. Past the release above a
+            // context detach appends nothing for this handler, because it reads Owner and finds a
+            // stranger, so one more round is the last that path can need.
+            remaining = await WaitForTransitionsAsync(cancellationToken).ConfigureAwait(false);
+        }
 
+        if (remaining != 0)
+        {
+            // Logged rather than thrown, and the release above still ran: rethrowing would abandon it,
+            // so every target this handler owns would stay owned by a dead handler and a second host
+            // over the same subjects would start nothing. The host treats an exception here as a failed
+            // shutdown and disposes the provider anyway, so there is nothing to gain.
+            Logger?.LogWarning(
+                "Shutdown gave up waiting for {Count} hosted service transitions; they keep running unobserved.",
+                remaining);
+        }
+
+        // The owned set is not cleared here. After the release loop the only entries left are installs
+        // whose own gate re-read releases them, and clearing is what would make the set and the owner
+        // field disagree for anything still in flight.
         _gate.CompleteDraining();
+    }
+
+    /// <summary>
+    /// Waits for every transition this handler appended to finish, and reports how many were still
+    /// running when <paramref name="cancellationToken"/> expired. Zero means the wait completed.
+    /// </summary>
+    private async Task<int> WaitForTransitionsAsync(CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var remaining = Volatile.Read(ref _inFlight);
+            if (remaining == 0)
+            {
+                return 0;
+            }
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return remaining;
+            }
+
+            // Untokened, so every round reads the count and the deadline in the same order. The cost of
+            // noticing an expired deadline late is one poll.
+            await Task.Delay(DrainPollMilliseconds, CancellationToken.None).ConfigureAwait(false);
+        }
     }
 }
