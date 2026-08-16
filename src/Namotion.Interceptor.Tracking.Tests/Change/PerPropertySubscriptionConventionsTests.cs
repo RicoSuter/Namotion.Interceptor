@@ -9,12 +9,14 @@ public class PerPropertySubscriptionConventionsTests
     [
         "PropertyChangeSubscriptions.",
         "PropertyChangeSubscription.Create",
+        // Matches both SubscribeToPropertyInline and scheduled SubscribeToProperty as a substring.
         "SubscribeToProperty",
         "SubscribeToPath",
         "IPropertyChangeObserver",
         "PropertyChangeCallback",
-        // The low-level PropertyReference.Subscribe overloads taking an inline callback name none
-        // of the types above, so match the lambda form itself (both `in` spellings).
+        "ScheduledPropertySubscription",
+        "SubscribeInline",
+        // Scheduled callback overloads name none of the types above, so match both `in` lambda spellings.
         ".Subscribe((in ",
         ".Subscribe(static (in ",
     ];
