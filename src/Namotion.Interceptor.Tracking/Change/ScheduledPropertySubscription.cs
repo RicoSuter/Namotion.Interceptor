@@ -166,6 +166,12 @@ public sealed class ScheduledPropertySubscription : IDisposable
         }
 
         var onError = Volatile.Read(ref _onError);
+        // Disposal before this check prevents submission; disposal after it cannot erase the captured handler.
+        if (Volatile.Read(ref _state) != Live)
+        {
+            return;
+        }
+
         try
         {
             if (ExecutionContext.IsFlowSuppressed())
@@ -196,13 +202,14 @@ public sealed class ScheduledPropertySubscription : IDisposable
 
     private void Deliver(in SubjectPropertyChange change)
     {
+        // Terminal cleanup clears the observer before the handler, preserving this snapshot pair.
+        var onError = Volatile.Read(ref _onError);
         var observer = Volatile.Read(ref _observer);
         if (observer is null)
         {
             return;
         }
 
-        var onError = Volatile.Read(ref _onError);
         try
         {
             observer.OnChange(in change);
