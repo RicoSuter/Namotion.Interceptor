@@ -398,9 +398,11 @@ When `OnChanging/OnChanged` throws:
 
 Derived properties (marked with `[Derived]`) are handled specially:
 
-- **During capture**: Derived property recalculation notifications are skipped
-- **During read**: Derived properties return calculated value based on pending changes
-- **After commit**: Derived properties are recalculated with committed values and notifications fired
+- **Direct reads**: Getters called by application code use pending transaction values.
+- **Shared tracking**: Cached derived values, dependencies, timestamps, and notifications use values that have landed in the model.
+- **Captured writes**: Non-derived writes remain silent until commit replay applies them.
+- **Landed writes**: Derived writes are not captured and can recalculate and notify immediately while a transaction is open.
+- **Derived chains**: Derived-of-derived tracking uses the landed model view and retains flattened source dependencies.
 
 ```csharp
 [InterceptorSubject]
@@ -421,9 +423,13 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
     Console.WriteLine(person.FullName); // Output: John Doe (from pending values)
 
     await transaction.CommitAsync(cancellationToken);
-    // FullName change notification is fired after commit
+    // FullName tracking is updated when the captured writes land during commit.
 }
 ```
+
+The same landed-model rule applies when tracking evaluates a getter during initial attachment, automatic recalculation, manual `RecalculateDerivedProperty()`, or a stabilization retry. It does not clear or replace the ambient transaction, so non-derived writes performed as getter side effects are still captured and direct reads resume the pending view as soon as the tracking evaluation finishes.
+
+Notification boundaries follow the evaluation nesting. A top-level derived recalculation publishes after its tracking evaluation has ended, so a synchronous subscriber reads pending values normally. If a getter causes a reentrant derived recalculation or a landed side-effect notification, that nested publication occurs while the outer getter is still being evaluated. Synchronous subscribers in that nested path read landed model values until the outer evaluation finishes.
 
 ### Capture and Commit Replay
 

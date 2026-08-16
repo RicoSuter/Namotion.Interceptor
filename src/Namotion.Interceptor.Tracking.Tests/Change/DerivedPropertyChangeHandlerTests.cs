@@ -2,6 +2,7 @@
 using System.Reactive.Linq;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
 
@@ -591,33 +592,380 @@ public class DerivedPropertyChangeHandlerTests
     [Fact]
     public async Task WhenATransactionIsRolledBack_ThenNoDependentValueWasAnnouncedFromItsPendingState()
     {
-        // Arrange: a derived write is not captured, so it lands during capture and cascades. The
-        // dependent's getter reads a property the transaction did capture, so recalculating now would
-        // compute from pending state and publish a value the model never holds once the commit is
-        // rolled back, with nothing left to correct it.
+        // Arrange
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
             .WithTransactions();
 
-        var subject = new TransactionCascadeSubject(context) { Plain = "committed" };
+        var subject = new TransactionCascadeSubject(context)
+        {
+            Plain = "committed",
+            DerivedWithSetter = "d0"
+        };
         _ = subject.Combined;
 
-        var announced = new List<string?>();
+        var announced = new List<SubjectPropertyChange>();
         using var subscription = context
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Where(change => change.Property.Name == nameof(TransactionCascadeSubject.Combined))
-            .Subscribe(change => announced.Add(change.GetNewValue<string>()));
+            .Subscribe(announced.Add);
 
-        // Act: begin, write, then dispose without committing.
+        // Act
         using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             subject.Plain = "uncommitted";
             subject.DerivedWithSetter = "d1";
+
+            var landedChange = Assert.Single(announced);
+            Assert.Equal("committed|d1", landedChange.GetNewValue<string>());
+            Assert.DoesNotContain(announced, change => change.GetNewValue<string>() == "uncommitted|d1");
+            Assert.Equal("uncommitted|d1", subject.Combined);
         }
 
         // Assert
-        Assert.Empty(announced);
         Assert.Equal("committed|d1", subject.Combined);
+
+        subject.DerivedWithSetter = "d2";
+
+        var subsequentChange = Assert.Single(
+            announced,
+            change => change.GetNewValue<string>() == "committed|d2");
+        Assert.Equal("committed|d1", subsequentChange.GetOldValue<string>());
+    }
+
+    [Fact]
+    public async Task WhenADerivedSetterLandsWithAPendingDependency_ThenDerivedOfDerivedUsesTheModelView()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var subject = new TransactionCascadeSubject(context)
+        {
+            Plain = "committed",
+            DerivedWithSetter = "d0"
+        };
+        _ = subject.CombinedAgain;
+
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => change.Property.Name is
+                nameof(TransactionCascadeSubject.Combined) or
+                nameof(TransactionCascadeSubject.CombinedAgain))
+            .Subscribe(changes.Add);
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            subject.Plain = "pending";
+            subject.DerivedWithSetter = "d1";
+
+            // Assert
+            Assert.Contains(changes, change =>
+                change.Property.Name == nameof(TransactionCascadeSubject.Combined) &&
+                change.GetNewValue<string>() == "committed|d1");
+            Assert.Contains(changes, change =>
+                change.Property.Name == nameof(TransactionCascadeSubject.CombinedAgain) &&
+                change.GetNewValue<string>() == "[committed|d1]");
+
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        Assert.Contains(changes, change =>
+            change.Property.Name == nameof(TransactionCascadeSubject.Combined) &&
+            change.GetNewValue<string>() == "pending|d1");
+        Assert.Contains(changes, change =>
+            change.Property.Name == nameof(TransactionCascadeSubject.CombinedAgain) &&
+            change.GetNewValue<string>() == "[pending|d1]");
+        Assert.Equal("[pending|d1]", subject.CombinedAgain);
+    }
+
+    [Fact]
+    public async Task WhenOneDependentReadsAPendingProperty_ThenEveryDependentStillRecalculates()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var subject = new TransactionCascadeSubject(context)
+        {
+            Plain = "committed",
+            DerivedWithSetter = "d0"
+        };
+        _ = subject.Combined;
+        _ = subject.Independent;
+
+        var independentChanges = new List<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => change.Property.Name == nameof(TransactionCascadeSubject.Independent))
+            .Subscribe(independentChanges.Add);
+
+        // Act
+        using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            subject.Plain = "pending";
+            subject.DerivedWithSetter = "d1";
+
+            // Assert
+            var change = Assert.Single(independentChanges);
+            Assert.Equal("d0", change.GetOldValue<string?>());
+            Assert.Equal("d1", change.GetNewValue<string?>());
+        }
+    }
+
+    [Fact]
+    public async Task WhenACommitLandsThePendingDependency_ThenTheFinalCommittedDerivedValuesAreAnnounced()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var subject = new TransactionCascadeSubject(context)
+        {
+            Plain = "committed",
+            DerivedWithSetter = "d0"
+        };
+        _ = subject.CombinedAgain;
+
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => change.Property.Name is
+                nameof(TransactionCascadeSubject.Combined) or
+                nameof(TransactionCascadeSubject.CombinedAgain))
+            .Subscribe(changes.Add);
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            subject.Plain = "committed-after-commit";
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert
+        Assert.Contains(changes, change =>
+            change.Property.Name == nameof(TransactionCascadeSubject.Combined) &&
+            change.GetOldValue<string>() == "committed|d0" &&
+            change.GetNewValue<string>() == "committed-after-commit|d0");
+        Assert.Contains(changes, change =>
+            change.Property.Name == nameof(TransactionCascadeSubject.CombinedAgain) &&
+            change.GetOldValue<string>() == "[committed|d0]" &&
+            change.GetNewValue<string>() == "[committed-after-commit|d0]");
+    }
+
+    [Fact]
+    public async Task WhenADerivedPropertyIsAttachedInsideATransaction_ThenItsCachedValueUsesTheModelView()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var subject = new TransactionCascadeSubject(context)
+        {
+            Plain = "committed",
+            DerivedWithSetter = "d0"
+        };
+        var property = new PropertyReference(subject, nameof(TransactionCascadeSubject.Combined));
+        var lifecycleChange = new SubjectPropertyLifecycleChange((IInterceptorSubject)subject, property);
+        var handler = context.TryGetService<DerivedPropertyChangeHandler>()!;
+        handler.DetachProperty(lifecycleChange);
+
+        // Act
+        using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            subject.Plain = "pending";
+            handler.AttachProperty(lifecycleChange);
+        }
+
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => change.Property.Name == nameof(TransactionCascadeSubject.Combined))
+            .Subscribe(changes.Add);
+        subject.DerivedWithSetter = "d1";
+
+        // Assert
+        var change = Assert.Single(changes);
+        Assert.Equal("committed|d0", change.GetOldValue<string>());
+        Assert.Equal("committed|d1", change.GetNewValue<string>());
+    }
+
+    [Fact]
+    public async Task WhenDerivedEvaluationRunsInsideATransaction_ThenTheAmbientTransactionIdentityIsPreserved()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var subject = new TransactionCascadeSubject(context) { Plain = "committed" };
+        SubjectTransaction? observedTransaction = null;
+        subject.ProbeEvaluator = value =>
+        {
+            observedTransaction = SubjectTransaction.Current;
+            return $"{value.Plain}|evaluated";
+        };
+
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => change.Property.Name == nameof(TransactionCascadeSubject.Probe))
+            .Subscribe(changes.Add);
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            subject.Plain = "pending";
+            new PropertyReference(subject, nameof(TransactionCascadeSubject.Probe)).RecalculateDerivedProperty();
+
+            // Assert
+            Assert.Same(transaction, observedTransaction);
+            Assert.Same(transaction, SubjectTransaction.Current);
+        }
+
+        Assert.Equal("committed|evaluated", Assert.Single(changes).GetNewValue<string>());
+    }
+
+    [Fact]
+    public async Task WhenAGetterWritesANonDerivedProperty_ThenThatSideEffectIsStillCaptured()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var subject = new TransactionCascadeSubject(context) { Plain = "committed" };
+        subject.ProbeEvaluator = value =>
+        {
+            value.SideEffect = "captured-side-effect";
+            return $"{value.Plain}|evaluated";
+        };
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        subject.Plain = "pending";
+        new PropertyReference(subject, nameof(TransactionCascadeSubject.Probe)).RecalculateDerivedProperty();
+
+        // Assert
+        Assert.Contains(transaction.GetPendingChanges(), change =>
+            change.Property.Name == nameof(TransactionCascadeSubject.SideEffect) &&
+            change.GetNewValue<string?>() == "captured-side-effect");
+
+        string? modelSideEffect = null;
+        var flowControl = ExecutionContext.SuppressFlow();
+        Task readTask;
+        try
+        {
+            readTask = Task.Run(() => modelSideEffect = subject.SideEffect);
+        }
+        finally
+        {
+            flowControl.Undo();
+        }
+
+        await readTask;
+        Assert.Null(modelSideEffect);
+    }
+
+    [Fact]
+    public async Task WhenAGetterPublishesALandedSideEffect_ThenItsSynchronousSubscriberUsesTheModelView()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var subject = new TransactionCascadeSubject(context)
+        {
+            Plain = "committed",
+            DerivedWithSetter = "d0"
+        };
+        _ = subject.Combined;
+
+        string? valueReadBySubscriber = null;
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => change.Property.Name == nameof(TransactionCascadeSubject.Combined))
+            .Subscribe(_ => valueReadBySubscriber = subject.Plain);
+        subject.ProbeEvaluator = value =>
+        {
+            value.DerivedWithSetter = "d1";
+            return "outer";
+        };
+
+        // Act
+        using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            subject.Plain = "pending";
+            new PropertyReference(subject, nameof(TransactionCascadeSubject.Probe)).RecalculateDerivedProperty();
+
+            // Assert
+            Assert.Equal("committed", valueReadBySubscriber);
+            Assert.Equal("pending", subject.Plain);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAGetterTriggersAReentrantDerivedRecalculation_ThenTheOuterRecorderFrameAndModelViewRemainIntact()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
+        var subject = new TransactionCascadeSubject(context)
+        {
+            Plain = "plain-model",
+            SideEffect = "side-model",
+            DerivedWithSetter = "d0",
+            ExternalSuffix = "before"
+        };
+        _ = subject.Combined;
+        var property = new PropertyReference(subject, nameof(TransactionCascadeSubject.Probe));
+        var writeInnerValue = 0;
+        subject.ProbeEvaluator = value =>
+        {
+            var plain = value.Plain;
+            if (Interlocked.Exchange(ref writeInnerValue, 1) == 0)
+            {
+                value.DerivedWithSetter = "d1";
+            }
+            return $"{plain}|{value.SideEffect}|{value.ExternalSuffix}";
+        };
+
+        var innerSubscriberReads = new List<string?>();
+        var probeChanges = new List<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change =>
+            {
+                if (change.Property.Name == nameof(TransactionCascadeSubject.Combined))
+                {
+                    innerSubscriberReads.Add($"{subject.Plain}|{subject.SideEffect}");
+                }
+                else if (change.Property.Name == nameof(TransactionCascadeSubject.Probe))
+                {
+                    probeChanges.Add(change);
+                }
+            });
+
+        // Act
+        using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            subject.Plain = "plain-pending";
+            subject.SideEffect = "side-pending";
+            subject.ExternalSuffix = "after";
+            property.RecalculateDerivedProperty();
+
+            // Assert
+            Assert.Contains("plain-model|side-model", innerSubscriberReads);
+            Assert.Equal("plain-model|side-model|after", Assert.Single(probeChanges).GetNewValue<string>());
+        }
+
+        probeChanges.Clear();
+        subject.Plain = "plain-landed";
+        Assert.Single(probeChanges);
+        probeChanges.Clear();
+        subject.SideEffect = "side-landed";
+        Assert.Single(probeChanges);
     }
 }

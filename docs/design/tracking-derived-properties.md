@@ -145,7 +145,7 @@ EvaluateAndStabilize(data, FullName)
         break                                    // deps stabilized
     return result
   finally:
-    DiscardActiveRecording()                     // always clears recorder buffer
+    DiscardActiveRecording(ownsActiveRecording)  // clears only this invocation's frame
 ```
 
 On the common path (single-threaded construction), `_writeGeneration` is unchanged and the loop is skipped entirely: zero extra getter evaluations. If a concurrent write is detected, the full stabilization loop runs for correctness.
@@ -691,9 +691,13 @@ The equality check also applies to the `SetPropertyValueWithInterception` call d
 
 ### Transactions
 
-Dependent recalculations are suppressed only while the ambient transaction is not committing and at least one dependent's recorded property set intersects the transaction's pending keys. A dependent getter could otherwise observe uncommitted state and publish a value that rollback leaves behind. Commit replay runs the cascades after pending reads are disabled. Empty, unrelated, committing, and disposed ambient transactions do not suppress a landed write because the dependent cannot read pending state from them.
+Direct property reads inside a transaction return pending values. Shared derived tracking has a different view: `LastKnownValue`, dependencies, timestamps, and notifications always represent values that landed in the model. Attach-time evaluation, automatic recalculation, manual recalculation, and every stabilization retry therefore evaluate getters while transaction-local pending reads are bypassed. The ambient transaction remains unchanged, so getter side-effect writes retain normal transaction behavior.
 
-Derived properties are recalculated when the transaction commits and replays the writes. Additionally, derived property writes are never captured in transactions (`SubjectTransactionInterceptor` checks `!context.Property.Metadata.IsDerived`), since derived values are always computed from their dependencies.
+The existing thread-static recorder depth defines this model-read extent. Nested and derived-of-derived evaluations remain in the model view until the outermost recorder frame finishes. Dependency recording still flattens intercepted source reads into the graph. Each evaluation owns one frame, so normal or exceptional cleanup finishes only that invocation's unfinished frame and cannot pop an outer frame.
+
+Captured non-derived writes stop at the transaction interceptor and produce no cascade or notification until commit replay lands them. Derived property writes are never captured. When a derived write lands while a transaction is open, it recalculates every dependent immediately from landed model inputs. This keeps unrelated dependents current and prevents rollback from leaving a transaction-local value in shared tracking state.
+
+A top-level recalculation publishes after its final recorder frame ends, so synchronous subscribers perform ordinary pending-aware reads. Reentrant publication inside an outer getter, including publication caused by a landed getter side-effect write, remains inside the outer model-read extent. Those synchronous subscribers read landed model values until the outer getter finishes.
 
 #### Writes that never reached the model
 

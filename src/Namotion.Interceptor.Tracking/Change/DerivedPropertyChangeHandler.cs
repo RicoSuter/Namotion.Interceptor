@@ -3,7 +3,6 @@ using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
-using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
@@ -34,6 +33,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
     [ThreadStatic]
     private static DerivedPropertyRecorder? _recorder;
+
+    internal static bool IsRecordingDerivedProperty
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _recorder?.IsRecording == true;
+    }
 
     // Global counter incremented on every write (Interlocked.Increment, full fence).
     // Paired with Volatile.Read in AttachProperty/RecalculateDerivedProperty to detect
@@ -169,44 +174,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         var usedByProperties = data.GetUsedByProperties();
         if (usedByProperties.Length > 0)
         {
-            // Suppress cascading recalculations during transaction capture (replayed on commit).
-            if (SubjectTransaction.HasActiveTransaction &&
-                SubjectTransaction.Current is { IsCommitting: false } ambientTransaction &&
-                AnyDependentReadsPendingValue(ambientTransaction, usedByProperties))
-            {
-                return;
-            }
-
             // Thread the trigger's resolved timestamp into each dependent's context, skipping a
             // scope push. storageTimestamp=0 under a null scope preserves the never-written sentinel.
             var rawTimestamp = context.WriteTimestampRaw;
             var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
             RecalculateDependents(usedByProperties, context.Property, storageTimestamp, rawTimestamp);
         }
-    }
-
-    private static bool AnyDependentReadsPendingValue(
-        SubjectTransaction transaction,
-        ReadOnlySpan<PropertyReference> usedByProperties)
-    {
-        for (var index = 0; index < usedByProperties.Length; index++)
-        {
-            var dependentData = usedByProperties[index].TryGetDerivedPropertyData();
-            if (dependentData is null)
-            {
-                continue;
-            }
-
-            lock (dependentData)
-            {
-                if (transaction.ContainsAnyPendingValue(dependentData.RequiredPropertiesSpan))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -409,12 +382,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         DerivedPropertyData data, in PropertyReference property, bool callerHoldsLock)
     {
         var generationBefore = Volatile.Read(ref _writeGeneration);
+        var ownsActiveRecording = false;
 
         try
         {
             StartRecordingTouchedProperties(property);
+            ownsActiveRecording = true;
             var result = property.Metadata.GetValue?.Invoke(property.Subject);
             var recordedDeps = _recorder!.FinishRecording();
+            ownsActiveRecording = false;
 
             bool dependenciesChanged;
             if (callerHoldsLock)
@@ -444,8 +420,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             for (var iteration = 0; iteration < MaxStabilizationIterations; iteration++)
             {
                 StartRecordingTouchedProperties(property);
+                ownsActiveRecording = true;
                 result = property.Metadata.GetValue?.Invoke(property.Subject);
                 recordedDeps = _recorder.FinishRecording();
+                ownsActiveRecording = false;
 
                 if (callerHoldsLock)
                 {
@@ -480,7 +458,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
         finally
         {
-            DiscardActiveRecording();
+            DiscardActiveRecording(ownsActiveRecording);
         }
     }
 
@@ -495,14 +473,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// No-op on the happy path (recording already finished and cleared).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void DiscardActiveRecording()
+    private static void DiscardActiveRecording(bool ownsActiveRecording)
     {
         if (_recorder is null)
         {
             return;
         }
 
-        if (_recorder.IsRecording)
+        if (ownsActiveRecording)
         {
             _recorder.FinishRecording();
         }

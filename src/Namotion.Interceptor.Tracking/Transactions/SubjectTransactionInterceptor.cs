@@ -36,6 +36,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
 
         var transaction = SubjectTransaction.Current;
         if (transaction is { IsCommitting: false, IsDisposed: false } &&
+            !DerivedPropertyChangeHandler.IsRecordingDerivedProperty &&
             transaction.TryGetPendingValue<TProperty>(context.Property, out var pendingValue))
         {
             return pendingValue;
