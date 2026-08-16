@@ -261,16 +261,15 @@ public class OutboundDropCountingTests
         var context = InterceptorSubjectContext.Create().WithRegistry().WithPropertyChangeSubscriptions();
         var person = new Person(context);
 
-        var first = CreateBoundedProcessor(context, maxQueueDepth: 1);
-        metrics.OutboundChanges.Register(() => first.QueueDepth, () => first.DropCount, capacity: 1);
+        using var first = CreateBoundedProcessor(context, maxQueueDepth: 1);
+        var firstRegistration = metrics.OutboundChanges.Register(() => first.QueueDepth, () => first.DropCount, capacity: 1);
         await OverflowAsync(first, person, tag: "one");
         var afterFirst = diagnostics.OutboundChanges.TotalDropped;
 
         // Act
-        metrics.OutboundChanges.Deregister();
-        first.Dispose();
+        firstRegistration.Dispose();
         using var second = CreateBoundedProcessor(context, maxQueueDepth: 1);
-        metrics.OutboundChanges.Register(() => second.QueueDepth, () => second.DropCount, capacity: 1);
+        using var secondRegistration = metrics.OutboundChanges.Register(() => second.QueueDepth, () => second.DropCount, capacity: 1);
         await OverflowAsync(second, person, tag: "two");
 
         // Assert

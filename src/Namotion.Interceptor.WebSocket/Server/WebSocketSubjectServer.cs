@@ -114,7 +114,7 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
 
                     // Declared after the processor so it is released first, which is what lets the
                     // next restart register its own: a second Register while one is still live throws.
-                    using var outboundRegistration = Metrics.OutboundChanges.BeginRegister(
+                    using var outboundRegistration = Metrics.OutboundChanges.Register(
                         () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
 
                     var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);

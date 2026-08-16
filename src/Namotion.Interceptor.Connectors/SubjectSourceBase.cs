@@ -84,16 +84,16 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             var writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger, metrics.OutboundRetries);
             WriteRetryQueue = writeRetryQueue;
 
-            // Never deregistered: the queue lives as long as the source, and its count field stays
+            // Never disposed: the queue lives as long as the source, and its count field stays
             // readable after Dispose.
-            metrics.OutboundRetries.Register(
+            _ = metrics.OutboundRetries.Register(
                 () => writeRetryQueue.PendingWriteCount, dropped: null, capacity: writeRetryQueueSize);
         }
         else
         {
             // Registered as disabled rather than left unregistered: an unregistered QueueMetrics
             // reports a null capacity, which reads as unbounded, the opposite of the truth.
-            metrics.OutboundRetries.Register(static () => 0, dropped: null, capacity: 0);
+            _ = metrics.OutboundRetries.Register(static () => 0, dropped: null, capacity: 0);
         }
 
         _propertyWriter = new SubjectPropertyWriter(this, logger, metrics.InboundBuffer);
@@ -302,7 +302,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     // still live throws. The release narrows rather than closes the race with a
                     // concurrent reader, which is safe only because the processor's queue depth and
                     // drop count survive its disposal.
-                    using var outboundRegistration = Metrics.OutboundChanges.BeginRegister(
+                    using var outboundRegistration = Metrics.OutboundChanges.Register(
                         () => processor.QueueDepth, () => processor.DropCount, capacity: null);
 
                     await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);

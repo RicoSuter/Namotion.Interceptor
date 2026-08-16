@@ -56,8 +56,8 @@ public sealed class SubjectPropertyWriter
         _logger = logger;
         _inboundBufferMetrics = inboundBufferMetrics;
 
-        // Never deregistered: the writer and its buffer live as long as the source does.
-        _inboundBufferMetrics?.Register(() => BufferedUpdateCount, dropped: null, capacity: null);
+        // Never disposed: the writer and its buffer live as long as the source does.
+        _ = _inboundBufferMetrics?.Register(() => BufferedUpdateCount, dropped: null, capacity: null);
     }
 
     /// <summary>

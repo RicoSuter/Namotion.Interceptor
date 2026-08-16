@@ -769,13 +769,13 @@ The outbound queue is wired up by registering the processor's two providers and 
 using var processor = CreateChangeQueueProcessor();
 
 // Declared after the processor, so reverse-order disposal releases the registration first.
-using var registration = Metrics.OutboundChanges.BeginRegister(
+using var registration = Metrics.OutboundChanges.Register(
     () => processor.QueueDepth, () => processor.DropCount, capacity: null);
 
 await processor.ProcessAsync(stoppingToken);
 ```
 
-`BeginRegister` allows one live registration at a time and throws while one is still held, so a restart that does not release the previous one fails on every attempt. `Register` is the same acquisition without a handle, for a registration that lives as long as the connector and is never released. Skipping the registration altogether is silent instead: the block reports a depth of 0 and a `TotalDropped` of 0 for the life of the server. The `maxQueueDepth` argument of `ChangeQueueProcessor` is a bound on the buffered queue and must be either `null` for unbounded, which is what all three built-in servers pass, or positive; zero is rejected, because a bound has to leave room for at least one change. A server that wants no buffering at all passes a `bufferTime` of zero, which takes the immediate path, never fills that queue and therefore neither reads the bound nor validates it.
+`Register` allows one live registration at a time and throws while one is still held, so a restart that does not dispose the previous handle fails on every attempt. Dispose a scoped registration when its processor goes away; lifetime-long providers intentionally leave their returned handle undisposed. Skipping the registration altogether is silent instead: the block reports a depth of 0 and a `TotalDropped` of 0 for the life of the server. The `maxQueueDepth` argument of `ChangeQueueProcessor` is a bound on the buffered queue and must be either `null` for unbounded, which is what all three built-in servers pass, or positive; zero is rejected, because a bound has to leave room for at least one change. A server that wants no buffering at all passes a `bufferTime` of zero, which takes the immediate path, never fills that queue and therefore neither reads the bound nor validates it.
 
 ### Connector Diagnostics
 
