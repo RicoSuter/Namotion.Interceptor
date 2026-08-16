@@ -28,6 +28,7 @@ public sealed class ScheduledPropertySubscription : IDisposable
     private Action<Exception>? _onError;
     private IDisposable? _upstream;
     private IScheduler? _scheduler;
+    private int _scheduleRequestCount;
     private int _state;
     private int _wip;
 
@@ -48,8 +49,8 @@ public sealed class ScheduledPropertySubscription : IDisposable
     public int PendingCount => Volatile.Read(ref _queue)?.Count ?? 0;
 
     /// <summary>
-    /// Gets whether a scheduler failure permanently faulted the subscription. Deliberate disposal is not a
-    /// fault.
+    /// Gets whether a scheduler failure won the terminal transition and faulted the subscription. Deliberate
+    /// disposal is not a fault.
     /// </summary>
     public bool IsFaulted => Volatile.Read(ref _state) == Faulted;
 
@@ -139,6 +140,25 @@ public sealed class ScheduledPropertySubscription : IDisposable
 
     private void ScheduleDrain()
     {
+        if (Interlocked.Increment(ref _scheduleRequestCount) != 1)
+        {
+            return;
+        }
+
+        var observed = 1;
+        do
+        {
+            SubmitDrain();
+
+            // An inline drain can request a successor before Schedule returns. Its owner coalesces that
+            // request into another submission from this same stack depth.
+            observed = Interlocked.Add(ref _scheduleRequestCount, -observed);
+        }
+        while (observed != 0);
+    }
+
+    private void SubmitDrain()
+    {
         var scheduler = Volatile.Read(ref _scheduler);
         if (scheduler is null)
         {
@@ -220,7 +240,8 @@ public sealed class ScheduledPropertySubscription : IDisposable
 
     /// <summary>
     /// Stops acceptance and delivery, releases the observer, scheduler, and upstream subscription, and drops
-    /// all queued changes. An observer call already in progress may finish after this method returns.
+    /// all queued changes. A delivery already in flight may still invoke the observer or finish after this
+    /// method returns.
     /// </summary>
     public void Dispose() => TransitionOutOfLive(Disposed);
 

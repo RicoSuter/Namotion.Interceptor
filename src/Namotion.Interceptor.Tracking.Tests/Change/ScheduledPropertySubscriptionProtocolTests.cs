@@ -7,6 +7,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 [Collection(PerPropertySubscriptionCollection.Name)]
 public class ScheduledPropertySubscriptionProtocolTests
 {
+    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
+
     public ScheduledPropertySubscriptionProtocolTests() => PropertyChangeSubscriptions.ResetForTests();
 
     [Fact]
@@ -67,6 +69,100 @@ public class ScheduledPropertySubscriptionProtocolTests
         scheduler.RunUntilIdle();
         Assert.Equal(total, delivered);
         Assert.Equal(0, subscription.WorkInProgressForTests);
+    }
+
+    [Fact]
+    public async Task WhenAnAcceptedInlineSchedulerDrainsMultipleBatches_ThenScheduleCallsDoNotNest()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        var scheduler = new DepthTrackingInlineScheduler();
+        using var firstDeliveryEntered = new ManualResetEventSlim();
+        using var releaseFirstDelivery = new ManualResetEventSlim();
+        var waitTimeoutCount = 0;
+        var deliveryCount = 0;
+
+        using var subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe(
+                (in SubjectPropertyChange _) =>
+                {
+                    if (Interlocked.Increment(ref deliveryCount) == 1)
+                    {
+                        firstDeliveryEntered.Set();
+                        if (!releaseFirstDelivery.Wait(WaitTimeout))
+                        {
+                            Interlocked.Increment(ref waitTimeoutCount);
+                        }
+                    }
+                },
+                scheduler);
+
+        var additionalChanges = (ScheduledPropertySubscription.MaxBatch * 2) + 10;
+        var firstWriter = Task.Run(() => person.FirstName = "initial");
+
+        try
+        {
+            Assert.True(firstDeliveryEntered.Wait(WaitTimeout), "the first delivery did not enter");
+
+            // Act
+            await Task.Run(() =>
+            {
+                for (var index = 0; index < additionalChanges; index++)
+                {
+                    person.FirstName = index.ToString();
+                }
+            }).WaitAsync(WaitTimeout);
+        }
+        finally
+        {
+            releaseFirstDelivery.Set();
+            await firstWriter.WaitAsync(WaitTimeout);
+        }
+
+        // Assert
+        Assert.Equal(additionalChanges + 1, deliveryCount);
+        Assert.Equal(3, scheduler.ScheduleCallCount);
+        Assert.Equal(1, scheduler.MaximumScheduleDepth);
+        Assert.Equal(0, Volatile.Read(ref waitTimeoutCount));
+        Assert.Equal(0, subscription.PendingCount);
+        Assert.Equal(0, subscription.WorkInProgressForTests);
+    }
+
+    [Fact]
+    public void WhenAnInlineSchedulerRunsThenThrowsAfterReentrantDisposal_ThenDisposalWinsAndTheWriterDoesNotSeeTheFailure()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        var scheduler = new DepthTrackingInlineScheduler(throwAfterAction: true);
+        var errors = new List<Exception>();
+        var deliveryCount = 0;
+        ScheduledPropertySubscription? subscription = null;
+
+        subscription = new PropertyReference(person, nameof(Person.FirstName))
+            .Subscribe(
+                (in SubjectPropertyChange _) =>
+                {
+                    deliveryCount++;
+                    subscription!.Dispose();
+                },
+                scheduler,
+                errors.Add);
+
+        // Act
+        var escaped = Record.Exception(() => person.FirstName = "one");
+
+        // Assert
+        Assert.Equal(1, deliveryCount);
+        Assert.Null(escaped);
+        Assert.IsType<InvalidOperationException>(Assert.Single(errors));
+        Assert.False(subscription.IsFaulted);
+        Assert.Equal(1, scheduler.ScheduleCallCount);
+        Assert.Equal(1, scheduler.MaximumScheduleDepth);
+        Assert.Equal(0, subscription.PendingCount);
+        Assert.Equal(0, subscription.WorkInProgressForTests);
+        Assert.Equal(0, PropertyChangeSubscriptions.ReadSubscriptionCount());
     }
 
     [Fact]

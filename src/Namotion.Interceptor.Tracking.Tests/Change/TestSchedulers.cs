@@ -225,3 +225,62 @@ internal sealed class LongRunningTrapScheduler : IScheduler, ISchedulerLongRunni
 
     public void RunUntilIdle() => _inner.RunUntilIdle();
 }
+
+// Runs accepted work synchronously while recording whether successor submissions grow the call stack.
+internal sealed class DepthTrackingInlineScheduler(bool throwAfterAction = false) : IScheduler
+{
+    private int _scheduleCallCount;
+    private int _scheduleDepth;
+    private int _maximumScheduleDepth;
+
+    public DateTimeOffset Now => DateTimeOffset.UtcNow;
+    public int ScheduleCallCount => Volatile.Read(ref _scheduleCallCount);
+    public int MaximumScheduleDepth => Volatile.Read(ref _maximumScheduleDepth);
+
+    public IDisposable Schedule<TState>(TState state, Func<IScheduler, TState, IDisposable> action)
+    {
+        Interlocked.Increment(ref _scheduleCallCount);
+        var depth = Interlocked.Increment(ref _scheduleDepth);
+        RecordMaximumDepth(depth);
+
+        try
+        {
+            var disposable = action(this, state);
+            if (throwAfterAction)
+            {
+                throw new InvalidOperationException("The scheduler failed after running the action.");
+            }
+
+            return disposable;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _scheduleDepth);
+        }
+    }
+
+    public IDisposable Schedule<TState>(
+        TState state,
+        TimeSpan dueTime,
+        Func<IScheduler, TState, IDisposable> action) => Schedule(state, action);
+
+    public IDisposable Schedule<TState>(
+        TState state,
+        DateTimeOffset dueTime,
+        Func<IScheduler, TState, IDisposable> action) => Schedule(state, action);
+
+    private void RecordMaximumDepth(int depth)
+    {
+        var maximum = Volatile.Read(ref _maximumScheduleDepth);
+        while (depth > maximum)
+        {
+            var observed = Interlocked.CompareExchange(ref _maximumScheduleDepth, depth, maximum);
+            if (observed == maximum)
+            {
+                return;
+            }
+
+            maximum = observed;
+        }
+    }
+}

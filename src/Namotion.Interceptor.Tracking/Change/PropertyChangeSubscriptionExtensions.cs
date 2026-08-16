@@ -89,8 +89,9 @@ public static class PropertyChangeSubscriptionExtensions
     /// </summary>
     /// <remarks>
     /// Serialization is per subscription. An observer shared by several subscriptions may be invoked
-    /// concurrently. The queue is unbounded, and disposal drops queued work while allowing an observer call
-    /// already in progress to finish. Changes queued before a subject detaches still drain.
+    /// concurrently. The queue is unbounded, and disposal drops queued work. A delivery already in flight may
+    /// still invoke the observer or finish after Dispose returns. Changes queued before a subject detaches
+    /// still drain.
     /// <see cref="ImmediateScheduler.Instance"/> and <see cref="CurrentThreadScheduler.Instance"/> are rejected,
     /// but a custom or wrapped scheduler may still invoke work inline and cannot be detected. In that case the
     /// observer runs inside the setter, its latency affects the writer, and it sees the writer's current ambient
