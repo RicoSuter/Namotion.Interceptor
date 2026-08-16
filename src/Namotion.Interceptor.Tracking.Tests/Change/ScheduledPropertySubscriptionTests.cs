@@ -96,12 +96,13 @@ public class ScheduledPropertySubscriptionTests
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
-        var person = new Person(context);
+        var holder = new PlainPropertyHolder(context);
         var scheduler = new ControllableScheduler();
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() =>
-            new PropertyReference(person, "NotAProperty").Subscribe((in SubjectPropertyChange _) => { }, scheduler));
+        Assert.Throws<ArgumentException>(() =>
+            new PropertyReference(holder, nameof(PlainPropertyHolder.PlainProperty))
+                .Subscribe((in SubjectPropertyChange _) => { }, scheduler));
         Assert.Equal(0, PropertyChangeSubscriptions.ReadSubscriptionCount());
     }
 
