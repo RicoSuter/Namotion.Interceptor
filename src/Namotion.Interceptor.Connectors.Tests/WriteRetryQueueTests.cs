@@ -152,6 +152,46 @@ public class WriteRetryQueueTests
     }
 
     [Fact]
+    public async Task WhenFailedInflightBatchIsRequeuedAfterNewWritesFillCapacity_ThenOldestFailedWritesAreDropped()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var diagnostics = new QueueDiagnostics(metrics);
+        var queue = new WriteRetryQueue(2, NullLogger.Instance, metrics);
+        var sourceMock = new Mock<ISubjectSource>();
+        var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completeWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        sourceMock
+            .Setup(source => source.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                writeStarted.SetResult();
+                await completeWrite.Task;
+                return WriteResult.Failure(changes, new InvalidOperationException("Connection failed"));
+            });
+
+        queue.Enqueue(CreateChanges(2, startId: 0)); // A/B
+
+        // Act
+        var flush = queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        await writeStarted.Task;
+        queue.Enqueue(CreateChanges(2, startId: 2)); // C/D
+        Assert.Equal(2, queue.PendingWriteCount);
+        completeWrite.SetResult();
+        var result = await flush;
+        var retained = queue.DrainForLocalReapply();
+
+        // Assert
+        Assert.False(result);
+        Assert.Equal(2, retained.Length);
+        Assert.Equal(2, retained[0].GetOldValue<int>());
+        Assert.Equal(3, retained[1].GetOldValue<int>());
+        Assert.Equal(2, diagnostics.TotalDropped);
+    }
+
+    [Fact]
     public void WhenMaxQueueSizeIsZero_ThenWritesAreDropped()
     {
         // Arrange

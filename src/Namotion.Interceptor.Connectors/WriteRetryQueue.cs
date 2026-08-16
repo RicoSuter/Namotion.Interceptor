@@ -172,9 +172,10 @@ internal sealed class WriteRetryQueue : IDisposable
 
                     _hasFlushWarnings = true;
 
-                    // FailedChanges is complete (see WriteChangesInBatchesAsync), so requeueing it
-                    // never drops dequeued items.
-                    RequeueChanges(result.FailedChanges.AsSpan());
+                    // FailedChanges is complete (see WriteChangesInBatchesAsync), so every failed
+                    // item is restored before ring capacity is applied to the combined queue.
+                    var droppedCount = RequeueChanges(result.FailedChanges.AsSpan());
+                    _metrics.AddDropped(droppedCount);
                     Array.Clear(_scratchBuffer, 0, count);
                     return false;
                 }
@@ -214,12 +215,22 @@ internal sealed class WriteRetryQueue : IDisposable
         }
     }
 
-    private void RequeueChanges(ReadOnlySpan<SubjectPropertyChange> changes)
+    private int RequeueChanges(ReadOnlySpan<SubjectPropertyChange> changes)
     {
         lock (_lock)
         {
             _pendingWrites.InsertRange(0, changes);
+
+            // The failed in-flight changes are older than anything enqueued while the write was in
+            // progress. Ring semantics therefore evict from the front after restoring the batch.
+            var droppedCount = _pendingWrites.Count - _maxQueueSize;
+            if (droppedCount > 0)
+            {
+                _pendingWrites.RemoveRange(0, droppedCount);
+            }
+
             Volatile.Write(ref _count, _pendingWrites.Count);
+            return droppedCount;
         }
     }
 
