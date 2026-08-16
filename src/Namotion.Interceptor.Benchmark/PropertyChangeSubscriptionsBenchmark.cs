@@ -31,7 +31,6 @@ public class PropertyChangeSubscriptionsBenchmark
     private PropertyChangeQueueSubscription? _queueSubscription;
     private IDisposable? _observableSubscription;
     private IDisposable? _perPropertySubscription;
-    private ScheduledPropertySubscription? _scheduledSubscription;
 
     // A reference-typed value (not a string, not inline-sized): its change takes the two-holder
     // BoxedValueHolder path, so the build-once merge shows up as halved allocations under both channels.
@@ -84,14 +83,6 @@ public class PropertyChangeSubscriptionsBenchmark
     {
         _car = CreateCarInFreshContext();
         _perPropertySubscription = _car.SubscribeToPropertyInline(x => x.Name, (in SubjectPropertyChange _) => { });
-    }
-
-    [GlobalSetup(Target = nameof(WriteWithScheduledListenerOnSameProperty))]
-    public void SetupScheduledListenerOnWrittenProperty()
-    {
-        _car = CreateCarInFreshContext();
-        _scheduledSubscription = new PropertyReference(_car, nameof(Car.Name))
-            .Subscribe((in SubjectPropertyChange _) => { }, Scheduler.Default);
     }
 
     // listener-elsewhere: a per-property listener on a DIFFERENT property, so the live count is nonzero
@@ -185,12 +176,6 @@ public class PropertyChangeSubscriptionsBenchmark
     }
 
     [Benchmark]
-    public void WriteWithScheduledListenerOnSameProperty()
-    {
-        _car.Name = WriteValue;
-    }
-
-    [Benchmark]
     public void WriteWithListenerOnOtherProperty()
     {
         _car.Name = WriteValue;
@@ -205,8 +190,6 @@ public class PropertyChangeSubscriptionsBenchmark
     [GlobalCleanup]
     public void Cleanup()
     {
-        _scheduledSubscription?.Dispose();
-
         _drainCancellation?.Cancel();
         _drainThread?.Join();
         _drainCancellation?.Dispose();
