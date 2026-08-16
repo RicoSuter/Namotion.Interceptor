@@ -115,7 +115,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     /// Number of active OPC UA client sessions. Null when not running.
     /// </summary>
     [State]
-    public partial int? ActiveSessionCount { get; set; }
+    public partial uint? ActiveSessionCount { get; set; }
 
     // Operations
 
