@@ -6,6 +6,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 [Collection(PerPropertySubscriptionCollection.Name)]
 public class CurrentValueTests
 {
+    public CurrentValueTests() => PropertyChangeSubscriptions.ResetForTests();
+
     [Fact]
     public void WhenNothingWrittenSinceTheChange_ThenGetCurrentValueEqualsGetNewValue()
     {

@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
 
+using Namotion.Interceptor.Tracking.Change;
+
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
 public class PerPropertySubscriptionConventionsTests
@@ -44,6 +46,35 @@ public class PerPropertySubscriptionConventionsTests
             "These test files use per-property subscriptions or the process-wide subscription count " +
             "but do not declare [Collection(PerPropertySubscriptionCollection.Name)]: " +
             $"{string.Join(", ", offenders)}. See the comment on PerPropertySubscriptionCollection.");
+    }
+
+    [Fact]
+    public void WhenTestFileUsesPerPropertySubscriptionState_ThenItResetsProcessWideState()
+    {
+        // Arrange
+        var conventionsFileName = $"{nameof(PerPropertySubscriptionConventionsTests)}.cs";
+        var resetMarker =
+            $"{nameof(PropertyChangeSubscriptions)}.{nameof(PropertyChangeSubscriptions.ResetForTests)}()";
+
+        // Act
+        var offenders = Directory
+            .EnumerateFiles(GetTestProjectDirectory(), "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                        && !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+            .Select(file => (Name: Path.GetFileName(file), Content: File.ReadAllText(file)))
+            .Where(file => SensitiveMarkers.Any(file.Content.Contains))
+            .Where(file => file.Name != conventionsFileName)
+            .Where(file => !file.Content.Contains(resetMarker))
+            .Select(file => file.Name)
+            .ToArray();
+
+        // Assert
+        Assert.True(
+            offenders.Length == 0,
+            "These test files use per-property subscriptions or the process-wide subscription count " +
+            $"but do not call {resetMarker} from their test-class constructor: " +
+            $"{string.Join(", ", offenders)}. Only {conventionsFileName} is exempt because it scans " +
+            "sensitive markers but creates no subscription.");
     }
 
     private static string GetTestProjectDirectory([CallerFilePath] string thisFile = "")

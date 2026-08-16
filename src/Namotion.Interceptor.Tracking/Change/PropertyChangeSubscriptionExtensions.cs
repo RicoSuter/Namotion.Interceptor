@@ -20,7 +20,7 @@ public static class PropertyChangeSubscriptionExtensions
     /// than relying on the delivered new value.
     /// Provided the downstream interceptor chain returns normally after the commit, a write that commits
     /// after SubscribeInline returns is always delivered while the subscription stays live and no earlier
-    /// inline observer of the same write throws. A write that committed before may not be, and reading
+    /// synchronous observer of the same write throws. A write that committed before may not be, and reading
     /// the property after subscribing observes that earlier state. OldValue is the value the setter observed
     /// when it started, including when the subscription raced the write.
     /// </remarks>
