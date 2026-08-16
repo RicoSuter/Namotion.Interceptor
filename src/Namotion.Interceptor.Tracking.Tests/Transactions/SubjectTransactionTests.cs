@@ -910,6 +910,44 @@ public class SubjectTransactionTests
     }
 
     [Fact]
+    public async Task WhenTransactionIsDisposedDuringCommit_ThenTryCaptureChangeReturnsFalse()
+    {
+        // Arrange
+        var writer = new ControllableTransactionWriter();
+        var context = CreateTransactionContext();
+        context.AddService<ITransactionWriter>(writer);
+        var person = new Person(context) { LastName = "Model" };
+        var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "Pending";
+        var commitTask = transaction.CommitAsync(CancellationToken.None).AsTask();
+        bool TryCaptureChange() => transaction.TryCaptureChange(
+            new PropertyReference(person, nameof(Person.LastName)),
+            ChangeOrigin.Local,
+            DateTimeOffset.UnixEpoch,
+            receivedTimestamp: null,
+            currentValue: "Model",
+            newValue: "AfterDispose");
+
+        try
+        {
+            Assert.True(writer.CommitStarted.Wait(TimeSpan.FromSeconds(10)), "commit did not reach the writer");
+            Assert.Throws<InvalidOperationException>(() => TryCaptureChange());
+            transaction.Dispose();
+
+            // Act
+            var captured = TryCaptureChange();
+
+            // Assert
+            Assert.False(captured);
+        }
+        finally
+        {
+            writer.Release();
+            await commitTask.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    [Fact]
     public async Task WhenSourceValueIsTransformedBeforeCapture_ThenTheCapturedOriginIsLocal()
     {
         // Arrange
@@ -1152,6 +1190,31 @@ public class SubjectTransactionTests
             object? revertState,
             CancellationToken cancellationToken)
             => new(new SourceRevertResult([], []));
+    }
+
+    private sealed class ControllableTransactionWriter : ITransactionWriter
+    {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ManualResetEventSlim CommitStarted { get; } = new();
+
+        public async ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            Memory<SubjectPropertyChange> changes,
+            TransactionRequirement requirement,
+            CancellationToken cancellationToken)
+        {
+            CommitStarted.Set();
+            await _release.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            return new SourceWriteResult([], [], [], RevertState: null);
+        }
+
+        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written,
+            object? revertState,
+            CancellationToken cancellationToken)
+            => new(new SourceRevertResult([], []));
+
+        public void Release() => _release.TrySetResult();
     }
 
     /// <summary>

@@ -396,12 +396,12 @@ When `OnChanging/OnChanged` throws:
 
 ### Derived Properties
 
-Derived properties (marked with `[Derived]`) are handled specially:
+Derived properties (marked with `[Derived]`) are handled specially. The pending read view belongs to each execution flow carrying a live ambient transaction, while derived tracking is shared across flows and therefore uses only values that have landed in the model:
 
-- **Direct reads**: Getters called by application code use pending transaction values.
+- **Direct reads**: Getters called by application code in a flow carrying a live transaction use that transaction's pending values. A flow without a live transaction reads the landed model.
 - **Shared tracking**: Cached derived values, dependencies, timestamps, and notifications use values that have landed in the model.
 - **Captured writes**: Non-derived writes remain silent until commit replay applies them.
-- **Landed writes**: Derived writes are not captured and can recalculate and notify immediately while a transaction is open.
+- **Landed writes**: Writes to settable derived properties are not captured. They land, recalculate, and notify immediately while a transaction is open, and survive transaction disposal or rollback.
 - **Derived chains**: Derived-of-derived tracking uses the landed model view and retains flattened source dependencies.
 
 ```csharp

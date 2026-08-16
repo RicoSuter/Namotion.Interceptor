@@ -212,6 +212,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         object? oldValue;
 
+        // Phase 1: Acquire recalculation ownership (brief lock).
         var data = derivedProperty.GetDerivedPropertyData();
         lock (data)
         {
@@ -245,6 +246,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
                 while (true)
                 {
+                    // Phase 2: Evaluate getter OUTSIDE lock(data).
                     // This prevents deadlock: getter side effects can safely acquire
                     // lock(_attachedSubjects) in LifecycleInterceptor without lock ordering inversion.
                     try
@@ -257,6 +259,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                         return;
                     }
 
+                    // Phase 3: Commit result under lock.
                     lock (data)
                     {
                         if (!data.IsAttached)

@@ -976,4 +976,52 @@ public class DerivedPropertyChangeHandlerTests
         subject.SideEffect = "side-landed";
         Assert.Single(probeChanges);
     }
+
+    [Fact]
+    public void WhenAReentrantDerivedGetterFinishesWithoutAnotherRead_ThenAFollowingSubjectStillTracksDerivedProperties()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking();
+        var reentrantSubject = new TransactionCascadeSubject(context)
+        {
+            Plain = "before",
+            DerivedWithSetter = "d0"
+        };
+        var triggerInnerRecalculation = 0;
+        reentrantSubject.ProbeEvaluator = subject =>
+        {
+            var result = subject.Plain;
+            if (Interlocked.Exchange(ref triggerInnerRecalculation, 1) == 0)
+            {
+                subject.DerivedWithSetter = "d1";
+            }
+
+            return result;
+        };
+
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        // Act
+        new PropertyReference(reentrantSubject, nameof(TransactionCascadeSubject.Probe))
+            .RecalculateDerivedProperty();
+
+        var unrelatedSubject = new Person(context)
+        {
+            FirstName = "John",
+            LastName = "Doe"
+        };
+        changes.Clear();
+        unrelatedSubject.FirstName = "Jane";
+
+        // Assert
+        var change = Assert.Single(changes, change =>
+            change.Property.Subject == unrelatedSubject &&
+            change.Property.Name == nameof(Person.FullName));
+        Assert.Equal("John Doe", change.GetOldValue<string>());
+        Assert.Equal("Jane Doe", change.GetNewValue<string>());
+    }
 }

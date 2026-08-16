@@ -138,12 +138,12 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            ThrowIfCommittingConcurrently();
-
             if (Volatile.Read(ref _isDisposed) != 0)
             {
                 return false;
             }
+
+            ThrowIfCommittingConcurrently();
 
             var pendingChanges = _pendingChanges!;
             var isFirstWrite = !pendingChanges.TryGetValue(property, out var existingChange);
@@ -581,8 +581,9 @@ public sealed class SubjectTransaction : IDisposable
         lock (_pendingChangesLock)
         {
             // Clear under the lock so Dispose observes the in-flight commit consistently. A disposing caller
-            // defers exclusive-lock release while this commit owns it. If it also owns the pending dictionary,
-            // detach it here and return it after the lock so ownership transfers exactly once.
+            // defers exclusive-lock release until commit completion so another transaction cannot interleave
+            // with the apply pass. If it also owns the pending dictionary, detach it here and return it after
+            // the lock so ownership transfers exactly once.
             _isCommitting = false;
             releaseDeferredLock = _disposeRequestedDuringCommit;
             if (releaseDeferredLock)
@@ -615,6 +616,7 @@ public sealed class SubjectTransaction : IDisposable
 
         if (!_isCommitted)
         {
+            // Only failures that escape before FinishCommit are retryable; later failures are terminal.
             Volatile.Write(ref _commitStarted, 0);
         }
     }
