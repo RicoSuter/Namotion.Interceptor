@@ -32,9 +32,9 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     private volatile ConnectorRunAttempt? _currentAttempt;
     private int _consecutiveFailures;
 
-    internal ThroughputCounter IncomingThroughput { get; }
+    internal ThroughputCounter IncomingThroughput => Metrics.Incoming!;
 
-    internal ThroughputCounter OutgoingThroughput { get; }
+    internal ThroughputCounter OutgoingThroughput => Metrics.Outgoing!;
 
     // Thread-scoped, not an instance field: a client write on another thread must not be caught by it.
     [ThreadStatic]
@@ -89,23 +89,8 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         IInterceptorSubject subject,
         OpcUaServerConfiguration configuration,
         ILogger logger)
-        : this(subject, configuration, logger, new ThroughputCounter(), new ThroughputCounter())
+        : base(new ConnectorMetrics(new ThroughputCounter(), new ThroughputCounter()))
     {
-    }
-
-    // The counters are threaded through because the same two instances have to reach both base(...)
-    // and the properties the write paths feed, and a constructor initializer cannot reference this.
-    private OpcUaSubjectServer(
-        IInterceptorSubject subject,
-        OpcUaServerConfiguration configuration,
-        ILogger logger,
-        ThroughputCounter incoming,
-        ThroughputCounter outgoing)
-        : base(new ConnectorMetrics(incoming, outgoing))
-    {
-        IncomingThroughput = incoming;
-        OutgoingThroughput = outgoing;
-
         _subject = subject;
         _context = subject.Context;
         _logger = logger;

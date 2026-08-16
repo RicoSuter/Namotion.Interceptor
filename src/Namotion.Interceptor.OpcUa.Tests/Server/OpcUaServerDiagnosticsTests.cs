@@ -43,13 +43,13 @@ public class OpcUaServerDiagnosticsTests
         using var server = CreateServer();
 
         // Act
+        server.IncomingThroughput.Add(60);
+        server.OutgoingThroughput.Add(120);
         var throughput = server.Diagnostics.Throughput;
 
         // Assert
-        // A null rate means the connector does not measure that direction, so this pins both counters
-        // to the metrics the diagnostics read.
-        Assert.NotNull(throughput.IncomingPerSecond);
-        Assert.NotNull(throughput.OutgoingPerSecond);
+        Assert.Equal(1.0, throughput.IncomingPerSecond!.Value);
+        Assert.Equal(2.0, throughput.OutgoingPerSecond!.Value);
     }
 
     /// <summary>

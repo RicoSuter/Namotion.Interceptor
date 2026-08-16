@@ -56,6 +56,22 @@ public class OpcUaClientDiagnosticsTests
     }
 
     [Fact]
+    public async Task WhenThroughputCountersAreWritten_ThenDiagnosticsReadTheSameCounters()
+    {
+        // Arrange
+        await using var source = CreateClientSource();
+
+        // Act
+        source.IncomingThroughput.Add(60);
+        source.OutgoingThroughput.Add(120);
+        var throughput = source.Diagnostics.Throughput;
+
+        // Assert
+        Assert.Equal(1.0, throughput.IncomingPerSecond!.Value);
+        Assert.Equal(2.0, throughput.OutgoingPerSecond!.Value);
+    }
+
+    [Fact]
     public async Task WhenTheSessionBecomesHealthy_ThenLivenessRisesAndItsTimestampIsStamped()
     {
         // Arrange

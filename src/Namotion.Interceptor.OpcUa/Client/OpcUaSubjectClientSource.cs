@@ -50,8 +50,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     internal ReadAfterWriteMetrics ReadAfterWriteMetrics { get; } = new();
 
-    internal ThroughputCounter IncomingThroughput { get; }
-    internal ThroughputCounter OutgoingThroughput { get; }
+    internal ThroughputCounter IncomingThroughput => Metrics.Incoming!;
+    internal ThroughputCounter OutgoingThroughput => Metrics.Outgoing!;
 
     /// <summary>
     /// Forwards to the protected ReportConnectionLost transition seam for SessionManager, which
@@ -96,29 +96,20 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     public event EventHandler<OpcUaCurrentSessionChangedEventArgs>? CurrentSessionChanged;
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
-        : this(subject, configuration, logger, new ThroughputCounter(), new ThroughputCounter())
-    {
-    }
-
-    // A constructor initializer cannot reference this, so the counters are created by the caller and
-    // threaded through: the same two instances have to reach both base(...) and the properties.
-    private OpcUaSubjectClientSource(
-        IInterceptorSubject subject,
-        OpcUaClientConfiguration configuration,
-        ILogger logger,
-        ThroughputCounter incoming,
-        ThroughputCounter outgoing)
-        : base(subject.Context, logger, configuration.BufferTime, configuration.RetryTime,
-            configuration.WriteRetryQueueSize, incoming, outgoing)
+        : base(
+            subject.Context,
+            logger,
+            configuration.BufferTime,
+            configuration.RetryTime,
+            configuration.WriteRetryQueueSize,
+            new ThroughputCounter(),
+            new ThroughputCounter())
     {
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(logger);
 
         configuration.Validate();
-
-        IncomingThroughput = incoming;
-        OutgoingThroughput = outgoing;
 
         _subject = subject;
         _logger = logger;
