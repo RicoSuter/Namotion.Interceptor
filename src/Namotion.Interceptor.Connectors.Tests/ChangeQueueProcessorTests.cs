@@ -416,7 +416,7 @@ public class ChangeQueueProcessorTests
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
 
         long echoRevision = 0;
-        using var observed = firstName.Subscribe((in SubjectPropertyChange change) =>
+        using var observed = firstName.SubscribeInline((in SubjectPropertyChange change) =>
         {
             if (change.GetNewValue<string>() == "FromSource")
             {
@@ -500,7 +500,7 @@ public class ChangeQueueProcessorTests
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
 
         long inboundRevision = 0;
-        using var observed = firstName.Subscribe((in SubjectPropertyChange change) =>
+        using var observed = firstName.SubscribeInline((in SubjectPropertyChange change) =>
         {
             if (change.GetNewValue<string>() == "FromClient")
             {
