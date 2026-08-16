@@ -23,7 +23,7 @@ namespace Namotion.Interceptor.Connectors
     }
     public class ChangeQueueProcessor : System.IDisposable
     {
-        public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, Namotion.Interceptor.Connectors.ChangeDeliveryRule deliveryRule, System.TimeSpan? bufferTime, int? maxQueueDepth, Microsoft.Extensions.Logging.ILogger logger) { }
+        public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, Namotion.Interceptor.Connectors.ChangeDeliveryRule deliveryRule, System.TimeSpan? bufferTime, int? maxQueueDepth, Microsoft.Extensions.Logging.ILogger logger, System.Action<long>? dropHandler = null) { }
         public long DropCount { get; }
         public int QueueDepth { get; }
         public void Dispose() { }
@@ -205,7 +205,7 @@ namespace Namotion.Interceptor.Connectors.Diagnostics
     {
         public QueueMetrics(string name = "queue") { }
         public void AddDropped(long count) { }
-        public System.IDisposable Register(System.Func<int> depth, System.Func<long>? dropped, int? capacity) { }
+        public System.IDisposable Register(System.Func<int> depth, int? capacity) { }
     }
     public class SourceDiagnostics : Namotion.Interceptor.Connectors.Diagnostics.ConnectorDiagnostics
     {

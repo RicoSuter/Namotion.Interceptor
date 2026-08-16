@@ -87,13 +87,13 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             // Never disposed: the queue lives as long as the source, and its count field stays
             // readable after Dispose.
             _ = metrics.OutboundRetries.Register(
-                () => writeRetryQueue.PendingWriteCount, dropped: null, capacity: writeRetryQueueSize);
+                () => writeRetryQueue.PendingWriteCount, capacity: writeRetryQueueSize);
         }
         else
         {
             // Registered as disabled rather than left unregistered: an unregistered QueueMetrics
             // reports a null capacity, which reads as unbounded, the opposite of the truth.
-            _ = metrics.OutboundRetries.Register(static () => 0, dropped: null, capacity: 0);
+            _ = metrics.OutboundRetries.Register(static () => 0, capacity: 0);
         }
 
         _propertyWriter = new SubjectPropertyWriter(this, logger, metrics.InboundBuffer);
@@ -295,15 +295,15 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         DeliveryRule,
                         _bufferTime,
                         maxQueueDepth: null,
-                        logger: _logger);
+                        logger: _logger,
+                        dropHandler: Metrics.OutboundChanges.AddDropped);
 
                     // Declared after the processor so it is released first, which is what lets the
                     // retry loop's next attempt register its own: a second Register while one is
-                    // still live throws. The release narrows rather than closes the race with a
-                    // concurrent reader, which is safe only because the processor's queue depth and
-                    // drop count survive its disposal.
+                    // still live throws. Drops are reported into the lifetime-owned metrics directly,
+                    // so releasing this depth provider cannot lose them.
                     using var outboundRegistration = Metrics.OutboundChanges.Register(
-                        () => processor.QueueDepth, () => processor.DropCount, capacity: null);
+                        () => processor.QueueDepth, capacity: null);
 
                     await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
                 }

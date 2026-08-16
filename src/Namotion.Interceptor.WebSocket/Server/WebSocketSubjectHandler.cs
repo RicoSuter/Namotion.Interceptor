@@ -397,6 +397,9 @@ public sealed class WebSocketSubjectHandler
     }
 
     public ChangeQueueProcessor CreateChangeQueueProcessor(ILogger logger) =>
+        CreateChangeQueueProcessor(logger, dropHandler: null);
+
+    internal ChangeQueueProcessor CreateChangeQueueProcessor(ILogger logger, Action<long>? dropHandler) =>
         new(source: this, Context,
             propertyFilter: propertyReference =>
                 propertyReference.TryGetRegisteredProperty() is { } property &&
@@ -406,7 +409,7 @@ public sealed class WebSocketSubjectHandler
             // this handler, so none of them is skipped here as our own echo and every superseding value
             // is broadcast on. Applying them under this handler would break it.
             ChangeDeliveryRule.SourceValuesAreSettled,
-            BufferTime, null, logger);
+            BufferTime, null, logger, dropHandler);
 
     public async ValueTask CloseAllConnectionsAsync()
     {

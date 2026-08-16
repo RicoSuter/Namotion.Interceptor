@@ -19,6 +19,7 @@ public class ChangeQueueProcessor : IDisposable
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
     private readonly ChangeDeliveryRule _deliveryRule;
+    private readonly Action<long>? _dropHandler;
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
@@ -79,6 +80,9 @@ public class ChangeQueueProcessor : IDisposable
     /// increments <see cref="DropCount"/>, so the newest change is retained. Read only on the buffered
     /// path, so a processor with a buffer time of zero never touches the queue this bounds.</param>
     /// <param name="logger">The logger.</param>
+    /// <param name="dropHandler">Optional handler invoked only when bounded-queue overflow drops
+    /// changes. Use this to report the count to queue diagnostics without adding work to successful
+    /// enqueue or dequeue operations.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
     /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
     /// the first flush, where it would end delivery for this processor's lifetime. Also thrown when
@@ -92,13 +96,15 @@ public class ChangeQueueProcessor : IDisposable
         ChangeDeliveryRule deliveryRule,
         TimeSpan? bufferTime,
         int? maxQueueDepth,
-        ILogger logger)
+        ILogger logger,
+        Action<long>? dropHandler = null)
     {
         _source = source;
         _propertyFilter = propertyFilter;
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
+        _dropHandler = dropHandler;
 
         try
         {
@@ -130,13 +136,15 @@ public class ChangeQueueProcessor : IDisposable
         ChangeDeliveryRule deliveryRule,
         TimeSpan? bufferTime,
         int? maxQueueDepth,
-        ILogger logger)
+        ILogger logger,
+        Action<long>? dropHandler = null)
     {
         _source = source;
         _propertyFilter = propertyFilter;
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
+        _dropHandler = dropHandler;
 
         try
         {
@@ -323,9 +331,16 @@ public class ChangeQueueProcessor : IDisposable
     /// </summary>
     private void DropOverflow(int maxQueueDepth)
     {
+        var droppedCount = 0L;
         while (_changes.Count > maxQueueDepth && _changes.TryDequeue(out _))
         {
             Interlocked.Increment(ref _dropCount);
+            droppedCount++;
+        }
+
+        if (droppedCount > 0)
+        {
+            _dropHandler?.Invoke(droppedCount);
         }
     }
 

@@ -57,7 +57,7 @@ public sealed class SubjectPropertyWriter
         _inboundBufferMetrics = inboundBufferMetrics;
 
         // Never disposed: the writer and its buffer live as long as the source does.
-        _ = _inboundBufferMetrics?.Register(() => BufferedUpdateCount, dropped: null, capacity: null);
+        _ = _inboundBufferMetrics?.Register(() => BufferedUpdateCount, capacity: null);
     }
 
     /// <summary>

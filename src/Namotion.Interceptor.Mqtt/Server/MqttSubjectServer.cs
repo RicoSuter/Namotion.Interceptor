@@ -103,7 +103,8 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
             ChangeDeliveryRule.SourceValuesAreSettled,
             _configuration.BufferTime,
             maxQueueDepth: null,
-            logger: _logger);
+            logger: _logger,
+            dropHandler: Metrics.OutboundChanges.AddDropped);
 
     private bool IsPropertyIncluded(PropertyReference propertyReference) =>
         propertyReference.TryGetRegisteredProperty() is { } property &&
@@ -197,7 +198,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                     // Declared after the processor so it is released first, which is what lets the
                     // next restart register its own: a second Register while one is still live throws.
                     using var outboundRegistration = Metrics.OutboundChanges.Register(
-                        () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
+                        () => changeQueueProcessor.QueueDepth, capacity: null);
 
                     await changeQueueProcessor.ProcessAsync(linkedToken).ConfigureAwait(false);
                 }

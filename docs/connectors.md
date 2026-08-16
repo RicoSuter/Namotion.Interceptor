@@ -763,19 +763,19 @@ protected override async Task RunAsync(CancellationToken stoppingToken)
 
 The stopping token is checked before the kill flag, so a stop that lands together with a kill exits instead of restarting. `ForceKillAsync` marks before it cancels, so the loop cannot reach its kill clause ahead of the mark, and leaves an already disposed attempt unmarked, because a kill that reached a torn-down iteration reached nothing. `CancelAsync` ends an iteration without marking it, which is what a loop uses to stop a sibling task once the first of them has completed. Where the restart backoff sits decides what a kill during it does: inside the iteration it is accepted and cancels work that has already ended, after the iteration it has nothing to cancel and is dropped.
 
-The outbound queue is wired up by registering the processor's two providers and releasing them again when that processor goes away:
+The outbound queue is wired up by reporting drops into the lifetime-owned metrics and registering only the processor's depth provider. The registration is released when that processor goes away:
 
 ```csharp
-using var processor = CreateChangeQueueProcessor();
+using var processor = CreateChangeQueueProcessor(); // Factory wires AddDropped as its drop handler.
 
 // Declared after the processor, so reverse-order disposal releases the registration first.
 using var registration = Metrics.OutboundChanges.Register(
-    () => processor.QueueDepth, () => processor.DropCount, capacity: null);
+    () => processor.QueueDepth, capacity: null);
 
 await processor.ProcessAsync(stoppingToken);
 ```
 
-`Register` allows one live registration at a time and throws while one is still held, so a restart that does not dispose the previous handle fails on every attempt. Dispose a scoped registration when its processor goes away; lifetime-long providers intentionally leave their returned handle undisposed. Skipping the registration altogether is silent instead: the block reports a depth of 0 and a `TotalDropped` of 0 for the life of the server. The `maxQueueDepth` argument of `ChangeQueueProcessor` is a bound on the buffered queue and must be either `null` for unbounded, which is what all three built-in servers pass, or positive; zero is rejected, because a bound has to leave room for at least one change. A server that wants no buffering at all passes a `bufferTime` of zero, which takes the immediate path, never fills that queue and therefore neither reads the bound nor validates it.
+`Register` allows one live registration at a time and throws while one is still held, so a restart that does not dispose the previous handle fails on every attempt. Dispose a scoped registration when its processor goes away; lifetime-long providers intentionally leave their returned handle undisposed. A bounded buffer reports each drop through `AddDropped`; `ChangeQueueProcessor` invokes its optional `dropHandler` only on that drop path. Keeping drop counts in the metrics makes registration handover monotonic and exact without adding diagnostics work to successful queue operations. Skipping the registration altogether is silent for depth, while skipping drop reports leaves `TotalDropped` at 0. The `maxQueueDepth` argument of `ChangeQueueProcessor` is a bound on the buffered queue and must be either `null` for unbounded, which is what all three built-in servers pass, or positive; zero is rejected, because a bound has to leave room for at least one change. A server that wants no buffering at all passes a `bufferTime` of zero, which takes the immediate path, never fills that queue and therefore neither reads the bound nor validates it.
 
 ### Connector Diagnostics
 

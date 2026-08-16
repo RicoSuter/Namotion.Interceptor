@@ -28,7 +28,7 @@ public class QueueMetricsTests
         var diagnostics = new QueueDiagnostics(metrics);
 
         // Act
-        using var registration = metrics.Register(() => depth, dropped: null, capacity: 100);
+        using var registration = metrics.Register(() => depth, capacity: 100);
 
         // Assert
         Assert.Equal(7, diagnostics.Depth);
@@ -40,7 +40,7 @@ public class QueueMetricsTests
     {
         // Arrange
         var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
-        var registration = metrics.Register(() => 7, dropped: null, capacity: 100);
+        var registration = metrics.Register(() => 7, capacity: 100);
         var diagnostics = new QueueDiagnostics(metrics);
 
         // Act
@@ -52,44 +52,72 @@ public class QueueMetricsTests
     }
 
     [Fact]
-    public void WhenLiveProviderReportsDrops_ThenTotalAdvancesDuringTheBurst()
+    public void WhenDropsAreReported_ThenTotalAdvancesDuringTheBurst()
     {
         // Arrange
         var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
-        var live = 0L;
-        using var registration = metrics.Register(() => 0, () => live, capacity: 10);
+        using var registration = metrics.Register(() => 0, capacity: 10);
         var diagnostics = new QueueDiagnostics(metrics);
 
         // Act
-        live = 5;
+        metrics.AddDropped(5);
 
         // Assert
         Assert.Equal(5, diagnostics.TotalDropped);
     }
 
     [Fact]
-    public void WhenProviderIsHandedOver_ThenTotalNeitherDecreasesNorDoubleCounts()
+    public void WhenRegistrationIsHandedOver_ThenTotalNeitherDecreasesNorDoubleCounts()
     {
         // Arrange
         var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
-        var first = 5L;
-        var firstRegistration = metrics.Register(() => 0, () => first, capacity: 10);
+        var firstRegistration = metrics.Register(() => 0, capacity: 10);
         var diagnostics = new QueueDiagnostics(metrics);
+        metrics.AddDropped(5);
         Assert.Equal(5, diagnostics.TotalDropped);
 
         // Act
         firstRegistration.Dispose();
         var afterFirstRegistrationIsDisposed = diagnostics.TotalDropped;
 
-        var second = 0L;
-        using var secondRegistration = metrics.Register(() => 0, () => second, capacity: 10);
+        using var secondRegistration = metrics.Register(() => 0, capacity: 10);
         var afterSecondRegistration = diagnostics.TotalDropped;
-        second = 3;
+        metrics.AddDropped(3);
 
         // Assert
         Assert.Equal(5, afterFirstRegistrationIsDisposed);
         Assert.Equal(5, afterSecondRegistration);
         Assert.Equal(8, diagnostics.TotalDropped);
+    }
+
+    [Fact]
+    public async Task WhenDropReportIsGatedAcrossRegistrationRelease_ThenFinalTotalDoesNotDecreaseOrLoseTheDrop()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
+        var diagnostics = new QueueDiagnostics(metrics);
+        var registration = metrics.Register(() => 0, capacity: 10);
+        metrics.AddDropped(1);
+        Assert.Equal(1, diagnostics.TotalDropped);
+        var dropReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var continueDrop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reportDrop = Task.Run(async () =>
+        {
+            dropReady.SetResult();
+            await continueDrop.Task;
+            metrics.AddDropped(1);
+        });
+
+        // Act
+        await dropReady.Task;
+        var observedBeforeRelease = diagnostics.TotalDropped;
+        registration.Dispose();
+        continueDrop.SetResult();
+        await reportDrop;
+
+        // Assert
+        Assert.Equal(1, observedBeforeRelease);
+        Assert.Equal(2, diagnostics.TotalDropped);
     }
 
     [Fact]
@@ -113,7 +141,7 @@ public class QueueMetricsTests
         {
             for (var i = 0; i < 200; i++)
             {
-                metrics.Register(() => 0, dropped: null, capacity: 10).Dispose();
+                metrics.Register(() => 0, capacity: 10).Dispose();
             }
         });
 
@@ -152,15 +180,13 @@ public class QueueMetricsTests
 
         for (var i = 0; i < 500; i++)
         {
-            var live = 0L;
-            var registration = metrics.Register(() => 0, () => live, capacity: 10);
+            var registration = metrics.Register(() => 0, capacity: 10);
 
-            // Stepping instead of jumping to the final count widens the window in which a broken
-            // handover shows up as a decrease. Volatile.Write keeps the JIT from collapsing the
-            // stores into one, which would undo that widening.
+            // Stepping instead of adding the final count in one operation widens the window in which
+            // a broken handover shows up as a decrease.
             for (var step = 1; step <= 4; step++)
             {
-                Volatile.Write(ref live, step);
+                metrics.AddDropped(1);
             }
 
             registration.Dispose();
@@ -180,7 +206,7 @@ public class QueueMetricsTests
         // Arrange
         var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
         metrics.AddDropped(9);
-        using var registration = metrics.Register(() => 4, dropped: null, capacity: 10);
+        using var registration = metrics.Register(() => 4, capacity: 10);
         var diagnostics = new QueueDiagnostics(metrics);
 
         // Act
@@ -193,22 +219,20 @@ public class QueueMetricsTests
     }
 
     [Fact]
-    public void WhenProviderIsReplacedAfterReset_ThenTotalDroppedKeepsTheDropsAndNeverGoesNegative()
+    public void WhenRegistrationIsReplacedAfterReset_ThenTotalDroppedKeepsLaterDrops()
     {
         // Arrange
         var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
-        var first = 5L;
-        var firstRegistration = metrics.Register(() => 0, () => first, capacity: 10);
+        var firstRegistration = metrics.Register(() => 0, capacity: 10);
         var diagnostics = new QueueDiagnostics(metrics);
+        metrics.AddDropped(5);
         metrics.Reset();
         Assert.Equal(0, diagnostics.TotalDropped);
 
-        // Act: three more drops arrive on the still-live first provider after the reset, then it is
-        // handed over through the normal registration-handle disposal cycle.
-        first = 8;
+        // Act
+        metrics.AddDropped(3);
         firstRegistration.Dispose();
-        var second = 0L;
-        using var secondRegistration = metrics.Register(() => 0, () => second, capacity: 10);
+        using var secondRegistration = metrics.Register(() => 0, capacity: 10);
 
         // Assert
         Assert.Equal(3, diagnostics.TotalDropped);
@@ -219,14 +243,14 @@ public class QueueMetricsTests
     {
         // Arrange
         var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
-        var firstRegistration = metrics.Register(() => 0, dropped: null, capacity: 10);
+        var firstRegistration = metrics.Register(() => 0, capacity: 10);
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => metrics.Register(() => 0, dropped: null, capacity: 20));
+        Assert.Throws<InvalidOperationException>(() => metrics.Register(() => 0, capacity: 20));
 
         // Act
         firstRegistration.Dispose();
-        using var secondRegistration = metrics.Register(() => 3, dropped: null, capacity: 30);
+        using var secondRegistration = metrics.Register(() => 3, capacity: 30);
         var diagnostics = new QueueDiagnostics(metrics);
 
         // Assert
@@ -240,11 +264,11 @@ public class QueueMetricsTests
         // Arrange: the failure surfaces from inside a connector's retry loop, which catches it and
         // tries again, so the message is all an operator gets.
         var metrics = new SourceMetrics();
-        using var registration = metrics.OutboundRetries.Register(() => 0, dropped: null, capacity: 10);
+        using var registration = metrics.OutboundRetries.Register(() => 0, capacity: 10);
 
         // Act & Assert
         var exception = Assert.Throws<InvalidOperationException>(
-            () => metrics.OutboundRetries.Register(() => 0, dropped: null, capacity: 20));
+            () => metrics.OutboundRetries.Register(() => 0, capacity: 20));
 
         Assert.Contains(nameof(SourceMetrics.OutboundRetries), exception.Message);
     }
@@ -266,7 +290,7 @@ public class QueueMetricsTests
         void RunScope()
         {
             using var buffer = new CallbackDisposable(() => depthSeenByTheBuffer = diagnostics.Depth);
-            using var registration = metrics.Register(() => 7, dropped: null, capacity: null);
+            using var registration = metrics.Register(() => 7, capacity: null);
 
             Assert.Equal(7, diagnostics.Depth);
         }
@@ -278,9 +302,9 @@ public class QueueMetricsTests
         // Arrange
         var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
         var diagnostics = new QueueDiagnostics(metrics);
-        var firstRegistration = metrics.Register(() => 7, dropped: null, capacity: 10);
+        var firstRegistration = metrics.Register(() => 7, capacity: 10);
         firstRegistration.Dispose();
-        using var secondRegistration = metrics.Register(() => 3, dropped: null, capacity: 20);
+        using var secondRegistration = metrics.Register(() => 3, capacity: 20);
 
         // Act
         firstRegistration.Dispose();
@@ -295,25 +319,24 @@ public class QueueMetricsTests
     {
         // Arrange
         var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
-        using var registration = metrics.Register(() => 7, dropped: null, capacity: 10);
+        using var registration = metrics.Register(() => 7, capacity: 10);
         var diagnostics = new QueueDiagnostics(metrics);
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => metrics.Register(() => 3, dropped: null, capacity: 20));
+        Assert.Throws<InvalidOperationException>(() => metrics.Register(() => 3, capacity: 20));
 
         Assert.Equal(7, diagnostics.Depth);
         Assert.Equal(10, diagnostics.Capacity);
     }
 
     [Fact]
-    public void WhenTheHandleIsDisposedTwice_ThenProvidersAreReleasedAndDropsAreFoldedOnce()
+    public void WhenTheHandleIsDisposedTwice_ThenProviderIsReleasedAndDropsRemainCountedOnce()
     {
         // Arrange
         var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
         var diagnostics = new QueueDiagnostics(metrics);
-        var dropped = 0L;
-        var registration = metrics.Register(() => 7, () => dropped, capacity: 10);
-        dropped = 4;
+        var registration = metrics.Register(() => 7, capacity: 10);
+        metrics.AddDropped(4);
 
         // Act
         registration.Dispose();
@@ -327,32 +350,11 @@ public class QueueMetricsTests
     }
 
     [Fact]
-    public void WhenProviderThrowsAfterReset_ThenTotalDroppedNeverGoesNegative()
-    {
-        // Arrange
-        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
-        var shouldThrow = false;
-        var live = 5L;
-        using var registration = metrics.Register(() => 0, () => shouldThrow ? throw new InvalidOperationException("boom") : live, capacity: 10);
-        var diagnostics = new QueueDiagnostics(metrics);
-        metrics.Reset();
-        Assert.Equal(0, diagnostics.TotalDropped);
-
-        // Act: the provider starts throwing instead of being handed over, so Reset's negated
-        // accumulator is left uncancelled.
-        shouldThrow = true;
-
-        // Assert
-        Assert.Equal(0, diagnostics.TotalDropped);
-    }
-
-    [Fact]
-    public void WhenProvidersThrow_ThenDiagnosticsReportZero()
+    public void WhenDepthProviderThrows_ThenDiagnosticsReportZeroDepth()
     {
         // Arrange
         var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
         using var registration = metrics.Register(
-            () => throw new InvalidOperationException("boom"),
             () => throw new InvalidOperationException("boom"),
             capacity: 10);
         var diagnostics = new QueueDiagnostics(metrics);
@@ -383,7 +385,7 @@ public class QueueMetricsTests
 
                 try
                 {
-                    registrations.Add(metrics.Register(() => 0, dropped: null, capacity: 10));
+                    registrations.Add(metrics.Register(() => 0, capacity: 10));
                 }
                 catch (InvalidOperationException exception)
                 {

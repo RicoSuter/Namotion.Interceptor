@@ -261,15 +261,17 @@ public class OutboundDropCountingTests
         var context = InterceptorSubjectContext.Create().WithRegistry().WithPropertyChangeSubscriptions();
         var person = new Person(context);
 
-        using var first = CreateBoundedProcessor(context, maxQueueDepth: 1);
-        var firstRegistration = metrics.OutboundChanges.Register(() => first.QueueDepth, () => first.DropCount, capacity: 1);
+        using var first = CreateBoundedProcessor(
+            context, maxQueueDepth: 1, dropHandler: metrics.OutboundChanges.AddDropped);
+        var firstRegistration = metrics.OutboundChanges.Register(() => first.QueueDepth, capacity: 1);
         await OverflowAsync(first, person, tag: "one");
         var afterFirst = diagnostics.OutboundChanges.TotalDropped;
 
         // Act
         firstRegistration.Dispose();
-        using var second = CreateBoundedProcessor(context, maxQueueDepth: 1);
-        using var secondRegistration = metrics.OutboundChanges.Register(() => second.QueueDepth, () => second.DropCount, capacity: 1);
+        using var second = CreateBoundedProcessor(
+            context, maxQueueDepth: 1, dropHandler: metrics.OutboundChanges.AddDropped);
+        using var secondRegistration = metrics.OutboundChanges.Register(() => second.QueueDepth, capacity: 1);
         await OverflowAsync(second, person, tag: "two");
 
         // Assert
@@ -388,7 +390,10 @@ public class OutboundDropCountingTests
         }, message: "The outbound change queue never reported a depth.");
     }
 
-    private static ChangeQueueProcessor CreateBoundedProcessor(IInterceptorSubjectContext context, int maxQueueDepth)
+    private static ChangeQueueProcessor CreateBoundedProcessor(
+        IInterceptorSubjectContext context,
+        int maxQueueDepth,
+        Action<long> dropHandler)
     {
         // The long buffer time keeps anything from flushing the queue, so every change past the bound
         // overflows. The source sentinel must be non-null, or every local change would match the echo
@@ -401,7 +406,8 @@ public class OutboundDropCountingTests
             ChangeDeliveryRule.SourceValuesMayBeStale,
             bufferTime: TimeSpan.FromMinutes(5),
             maxQueueDepth: maxQueueDepth,
-            logger: NullLogger.Instance);
+            logger: NullLogger.Instance,
+            dropHandler: dropHandler);
     }
 
     /// <summary>
@@ -427,7 +433,14 @@ public class OutboundDropCountingTests
             message: "The bounded queue did not overflow.");
 
         await cancellation.CancelAsync();
-        await processing;
+        try
+        {
+            await processing;
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // ProcessAsync may surface the requested cancellation when its timer task observes it first.
+        }
     }
 
     private static SubjectPropertyChange CreateChange<TValue>(

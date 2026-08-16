@@ -121,7 +121,8 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         new(source: this, _context,
             propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
             DeliveryRule,
-            _configuration.BufferTime, maxQueueDepth: null, logger: _logger);
+            _configuration.BufferTime, maxQueueDepth: null, logger: _logger,
+            dropHandler: Metrics.OutboundChanges.AddDropped);
 
     private bool IsPropertyIncluded(PropertyReference propertyReference)
     {
@@ -265,7 +266,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                     // Declared after the processor so it is released first, which is what lets the
                     // next restart register its own: a second Register while one is still live throws.
                     using var outboundRegistration = Metrics.OutboundChanges.Register(
-                        () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
+                        () => changeQueueProcessor.QueueDepth, capacity: null);
 
                     await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
                     await application.StartAsync(server).ConfigureAwait(false);

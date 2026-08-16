@@ -110,12 +110,13 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                     await _app.StartAsync(stoppingToken).ConfigureAwait(false);
                     Metrics.MarkOperational();
 
-                    using var changeQueueProcessor = _handler.CreateChangeQueueProcessor(_logger);
+                    using var changeQueueProcessor = _handler.CreateChangeQueueProcessor(
+                        _logger, Metrics.OutboundChanges.AddDropped);
 
                     // Declared after the processor so it is released first, which is what lets the
                     // next restart register its own: a second Register while one is still live throws.
                     using var outboundRegistration = Metrics.OutboundChanges.Register(
-                        () => changeQueueProcessor.QueueDepth, () => changeQueueProcessor.DropCount, capacity: null);
+                        () => changeQueueProcessor.QueueDepth, capacity: null);
 
                     var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);
                     var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedToken);

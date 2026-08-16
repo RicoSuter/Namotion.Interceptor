@@ -5,9 +5,8 @@ namespace Namotion.Interceptor.Connectors.Diagnostics;
 /// buffer it describes may be created and destroyed many times.
 /// </summary>
 /// <remarks>
-/// All state lives in a single immutable snapshot swapped with <see cref="Interlocked"/>, so a
-/// reader sees the accumulated count and the live provider that belongs with it. Splitting them into
-/// separate fields cannot be lock-free, monotonic and free of double counting at the same time.
+/// All state lives in a single immutable snapshot swapped with <see cref="Interlocked"/>, so
+/// registration handover, resets and drop reports cannot overwrite one another.
 /// </remarks>
 public sealed class QueueMetrics
 {
@@ -38,27 +37,23 @@ public sealed class QueueMetrics
     /// that registration, and disposing it more than once has no further effect.
     /// </summary>
     /// <remarks>
-    /// Neither delegate may throw (a throwing delegate is treated as reporting zero) and neither may
+    /// The depth delegate may not throw (a throwing delegate is treated as reporting zero) and may not
     /// take a lock owned by this library, because a diagnostics read can happen while a monitor holds
-    /// its own lock.
+    /// its own lock. A buffer must report every drop through <see cref="AddDropped"/>. The metrics own
+    /// that count so a drop racing registration release cannot be lost or make the total decrease.
     /// Lifetime-long providers may intentionally leave the returned handle undisposed when their
     /// lifetime matches this instance.
     /// </remarks>
     /// <param name="depth">Reads the buffer's current item count.</param>
-    /// <param name="dropped">
-    /// Reads the buffer's own drop counter, or <c>null</c> for a buffer that has none and reports
-    /// through <see cref="AddDropped"/> instead. Must be non-decreasing: both <see cref="Reset"/> and
-    /// the fold on handover rely on that to keep <see cref="TotalDropped"/> from decreasing.
-    /// </param>
     /// <param name="capacity">The buffer's bound, or <c>null</c> if it is unbounded.</param>
     /// <exception cref="InvalidOperationException">
     /// A registration is already live. Dispose its registration handle first.
     /// </exception>
-    public IDisposable Register(Func<int> depth, Func<long>? dropped, int? capacity)
+    public IDisposable Register(Func<int> depth, int? capacity)
     {
         ArgumentNullException.ThrowIfNull(depth);
 
-        var registration = new Registration(this, depth, dropped, capacity);
+        var registration = new Registration(this, depth, capacity);
         SpinWait spin = default;
         while (true)
         {
@@ -93,23 +88,13 @@ public sealed class QueueMetrics
     }
 
     internal void Reset() =>
-        Swap<object?>(null, static (current, _) => current with { Accumulated = -SafeInvokeDropped(current.Active?.Dropped) });
+        Swap<object?>(null, static (current, _) => current with { Accumulated = 0 });
 
     internal int Depth => SafeInvokeDepth(Volatile.Read(ref _snapshot).Active?.Depth);
 
     internal int? Capacity => Volatile.Read(ref _snapshot).Capacity;
 
-    internal long TotalDropped
-    {
-        get
-        {
-            var snapshot = Volatile.Read(ref _snapshot);
-
-            // Reset stores a negative Accumulated that the same provider adds back on the next read,
-            // so clamp: a provider that throws reports 0 and would surface the sum as negative.
-            return Math.Max(0, snapshot.Accumulated + SafeInvokeDropped(snapshot.Active?.Dropped));
-        }
-    }
+    internal long TotalDropped => Volatile.Read(ref _snapshot).Accumulated;
 
     private static int SafeInvokeDepth(Func<int>? depth)
     {
@@ -128,38 +113,18 @@ public sealed class QueueMetrics
         }
     }
 
-    private static long SafeInvokeDropped(Func<long>? dropped)
-    {
-        if (dropped is null)
-        {
-            return 0;
-        }
-
-        try
-        {
-            return dropped();
-        }
-        catch
-        {
-            return 0;
-        }
-    }
-
     private sealed class Registration : IDisposable
     {
         private QueueMetrics? _owner;
 
-        internal Registration(QueueMetrics owner, Func<int> depth, Func<long>? dropped, int? capacity)
+        internal Registration(QueueMetrics owner, Func<int> depth, int? capacity)
         {
             _owner = owner;
             Depth = depth;
-            Dropped = dropped;
             Capacity = capacity;
         }
 
         internal Func<int> Depth { get; }
-
-        internal Func<long>? Dropped { get; }
 
         internal int? Capacity { get; }
 
@@ -177,10 +142,7 @@ public sealed class QueueMetrics
                 return;
             }
 
-            var updated = new Snapshot(
-                current.Accumulated + SafeInvokeDropped(registration.Dropped),
-                Active: null,
-                current.Capacity);
+            var updated = new Snapshot(current.Accumulated, Active: null, current.Capacity);
             if (ReferenceEquals(Interlocked.CompareExchange(ref _snapshot, updated, current), current))
             {
                 return;
