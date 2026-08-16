@@ -46,7 +46,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
                 return;
             }
 
-            var operation = new AttachOperation();
+            var operation = new AttachOperation(_attachedSubjects.ContainsKey(subject));
             _attachingSubjects.Add(subject, operation);
             try
             {
@@ -102,6 +102,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
                     _processedProperties[stagedProperty.Property] = stagedProperty.Reconciliation.State;
                 }
 
+                operation.HasReachedRootAttach = true;
                 if (!_attachedSubjects.ContainsKey(subject))
                 {
                     AttachToContext(subject, subject.Context);
@@ -113,7 +114,26 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
                     return;
                 }
 
-                DispatchInitialRelationshipGroups(stagedProperties);
+                var relationshipException = DispatchInitialRelationshipGroups(
+                    subject,
+                    operation,
+                    stagedProperties);
+                if (!IsAttachActive(subject, operation))
+                {
+                    try
+                    {
+                        AbortAttach(subject, operation, stagedProperties);
+                    }
+                    catch (Exception exception)
+                    {
+                        relationshipException ??= ExceptionDispatchInfo.Capture(exception);
+                    }
+
+                    relationshipException?.Throw();
+                    return;
+                }
+
+                relationshipException?.Throw();
             }
             finally
             {
@@ -136,6 +156,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
                 if (_attachingSubjects.TryGetValue(subject, out var attachingSubject))
                 {
                     attachingSubject.IsCancelled = true;
+                    if (!attachingSubject.WasAttachedAtStart &&
+                        !attachingSubject.HasReachedRootAttach)
+                    {
+                        return;
+                    }
                 }
 
                 if (!_attachedSubjects.ContainsKey(subject))
@@ -185,8 +210,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
         };
 
         var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlers(subject, context, change);
-        if (!IsSubjectAttachTransitionActive(subject))
+        if (!InvokeAddedLifecycleHandlers(subject, context, change, subject))
         {
             return;
         }
@@ -199,8 +223,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
 
         foreach (var propertyName in properties)
         {
-            subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
-            if (!IsSubjectAttachTransitionActive(subject))
+            if (!AttachSubjectProperty(
+                    subject,
+                    new PropertyReference(subject, propertyName),
+                    subject))
             {
                 return;
             }
@@ -234,8 +260,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
             relationship);
 
         var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlers(subject, context, change);
-        if (!IsStructuralParentActive(property.Subject))
+        if (!InvokeAddedLifecycleHandlers(subject, context, change, property.Subject))
         {
             return true;
         }
@@ -250,8 +275,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
 
             foreach (var propertyName in properties)
             {
-                subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
-                if (!IsStructuralParentActive(property.Subject))
+                if (!AttachSubjectProperty(
+                        subject,
+                        new PropertyReference(subject, propertyName),
+                        property.Subject))
                 {
                     return true;
                 }
@@ -261,19 +288,61 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
         return true;
     }
     
-    private static void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
+    private bool InvokeAddedLifecycleHandlers(
+        IInterceptorSubject subject,
+        IInterceptorSubjectContext context,
+        SubjectLifecycleChange change,
+        IInterceptorSubject structuralParent)
     {
         var array = context.GetServices<ILifecycleHandler>();
         for (var index = 0; index < array.Length; index++)
         {
             var handler = array[index];
             handler.HandleLifecycleChange(change);
+            if (!IsStructuralParentActive(structuralParent))
+            {
+                return false;
+            }
         }
 
         if (subject is ILifecycleHandler subjectHandler)
         {
             subjectHandler.HandleLifecycleChange(change);
+            if (!IsStructuralParentActive(structuralParent))
+            {
+                return false;
+            }
         }
+
+        return true;
+    }
+
+    private bool AttachSubjectProperty(
+        IInterceptorSubject subject,
+        PropertyReference property,
+        IInterceptorSubject structuralParent)
+    {
+        var change = new SubjectPropertyLifecycleChange(subject, property);
+        var handlers = subject.Context.GetServices<IPropertyLifecycleHandler>();
+        for (var index = 0; index < handlers.Length; index++)
+        {
+            handlers[index].AttachProperty(change);
+            if (!IsStructuralParentActive(structuralParent))
+            {
+                return false;
+            }
+        }
+
+        if (subject is IPropertyLifecycleHandler subjectHandler)
+        {
+            subjectHandler.AttachProperty(change);
+            if (!IsStructuralParentActive(structuralParent))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -750,31 +819,66 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
         return _attachedSubjects.ContainsKey(subject);
     }
 
-    private void DispatchInitialRelationshipGroups(List<StagedProperty> stagedProperties)
+    private ExceptionDispatchInfo? DispatchInitialRelationshipGroups(
+        IInterceptorSubject subject,
+        AttachOperation operation,
+        List<StagedProperty> stagedProperties)
     {
         ExceptionDispatchInfo? firstException = null;
         foreach (var stagedProperty in stagedProperties)
         {
+            if (!IsAttachActive(subject, operation))
+            {
+                return firstException;
+            }
+
             if (!stagedProperty.MaterializeRelationships ||
                 !stagedProperty.Reconciliation.HasRelationshipGeneration)
             {
                 continue;
             }
 
-            try
+            var relationships = stagedProperty.Reconciliation.State.Relationships.AsSpan();
+            for (var index = 0; index < stagedProperty.RelationshipHandlers.Length; index++)
             {
-                stagedProperty.Property.Subject.ReconcileChildRelationships(
-                    stagedProperty.RelationshipHandlers,
-                    stagedProperty.Property,
-                    stagedProperty.Reconciliation.State.Relationships.AsSpan());
+                try
+                {
+                    stagedProperty.RelationshipHandlers[index].ReconcileChildRelationships(
+                        stagedProperty.Property,
+                        relationships);
+                }
+                catch (Exception exception)
+                {
+                    firstException ??= ExceptionDispatchInfo.Capture(exception);
+                }
+
+                if (!IsAttachActive(subject, operation))
+                {
+                    return firstException;
+                }
             }
-            catch (Exception exception)
+
+            if (stagedProperty.Property.Subject is IPropertyRelationshipHandler subjectHandler)
             {
-                firstException ??= ExceptionDispatchInfo.Capture(exception);
+                try
+                {
+                    subjectHandler.ReconcileChildRelationships(
+                        stagedProperty.Property,
+                        relationships);
+                }
+                catch (Exception exception)
+                {
+                    firstException ??= ExceptionDispatchInfo.Capture(exception);
+                }
+
+                if (!IsAttachActive(subject, operation))
+                {
+                    return firstException;
+                }
             }
         }
 
-        firstException?.Throw();
+        return firstException;
     }
 
     private void AbortAttach(
@@ -937,9 +1041,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
         LifecycleInterceptor Authority,
         PropertyReference Property);
 
-    private sealed class AttachOperation
+    private sealed class AttachOperation(bool wasAttachedAtStart)
     {
+        public bool WasAttachedAtStart { get; } = wasAttachedAtStart;
+
         public bool IsCancelled { get; set; }
+
+        public bool HasReachedRootAttach { get; set; }
 
         public List<AppliedMembership>? AppliedAdditions { get; set; }
     }
