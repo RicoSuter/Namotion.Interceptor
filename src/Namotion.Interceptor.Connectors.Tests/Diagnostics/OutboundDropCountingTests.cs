@@ -304,7 +304,7 @@ public class OutboundDropCountingTests
     }
 
     [Fact]
-    public async Task WhenARunningSourceStops_ThenItsOutboundChangeQueueIsDeregistered()
+    public async Task WhenARunningSourceStops_ThenItsOutboundChangeQueueRegistrationIsReleased()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry().WithPropertyChangeSubscriptions();

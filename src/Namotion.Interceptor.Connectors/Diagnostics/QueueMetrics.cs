@@ -192,7 +192,7 @@ public sealed class QueueMetrics
 
     private void Swap<TState>(TState state, Func<Snapshot, TState, Snapshot> update)
     {
-        // Reference equality, not Snapshot's record-generated value equality: a Register/Deregister
+        // Reference equality, not Snapshot's record-generated value equality: a registration/release
         // cycle can produce a value-equal instance, so == would read a failed exchange as success.
         SpinWait spin = default;
         while (true)
