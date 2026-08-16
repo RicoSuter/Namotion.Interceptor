@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Reactive.Concurrency;
 using System.Reflection;
 
 namespace Namotion.Interceptor.Tracking.Change;
@@ -79,6 +80,95 @@ public static class PropertyChangeSubscriptionExtensions
         // Wrapping first would bypass the observer null guard and fail on a writer thread at dispatch time.
         ArgumentNullException.ThrowIfNull(callback);
         return subject.SubscribeToPropertyInline(propertySelector, new DelegateObserver(callback));
+    }
+
+    /// <summary>
+    /// Subscribes to changes of one property and delivers them serially on <paramref name="scheduler"/>.
+    /// Observer and scheduler exceptions are isolated from the writer and reported to
+    /// <paramref name="onError"/> when supplied.
+    /// </summary>
+    /// <remarks>
+    /// Serialization is per subscription. An observer shared by several subscriptions may be invoked
+    /// concurrently. The queue is unbounded, and disposal drops queued work while allowing an observer call
+    /// already in progress to finish. Changes queued before a subject detaches still drain. Writer
+    /// <see cref="ExecutionContext"/> state does not flow to scheduled work.
+    /// </remarks>
+    public static ScheduledPropertySubscription Subscribe(
+        this PropertyReference property,
+        IPropertyChangeObserver observer,
+        IScheduler scheduler,
+        Action<Exception>? onError = null)
+    {
+        ArgumentNullException.ThrowIfNull(observer);
+        ArgumentNullException.ThrowIfNull(scheduler);
+        ThrowIfSynchronous(scheduler);
+
+        return ScheduledPropertySubscription.Create(property, observer, scheduler, onError);
+    }
+
+    /// <summary>
+    /// Delegate overload of
+    /// <see cref="Subscribe(PropertyReference, IPropertyChangeObserver, IScheduler, Action{Exception})"/>.
+    /// </summary>
+    public static ScheduledPropertySubscription Subscribe(
+        this PropertyReference property,
+        PropertyChangeCallback callback,
+        IScheduler scheduler,
+        Action<Exception>? onError = null)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        return property.Subscribe(new DelegateObserver(callback), scheduler, onError);
+    }
+
+    /// <summary>
+    /// Strongly-typed scheduled subscription to a direct property of <paramref name="subject"/>.
+    /// </summary>
+    /// <remarks>
+    /// This has the same delivery contract as
+    /// <see cref="Subscribe(PropertyReference, IPropertyChangeObserver, IScheduler, Action{Exception})"/>
+    /// and the same selector restrictions as
+    /// <see cref="SubscribeToPropertyInline{TSubject,TValue}(TSubject, Expression{Func{TSubject,TValue}}, IPropertyChangeObserver)"/>.
+    /// </remarks>
+    public static ScheduledPropertySubscription SubscribeToProperty<TSubject, TValue>(
+        this TSubject subject,
+        Expression<Func<TSubject, TValue>> propertySelector,
+        IPropertyChangeObserver observer,
+        IScheduler scheduler,
+        Action<Exception>? onError = null)
+        where TSubject : IInterceptorSubject
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(propertySelector);
+
+        var name = ResolveDirectPropertyName(propertySelector);
+        return new PropertyReference(subject, name).Subscribe(observer, scheduler, onError);
+    }
+
+    /// <summary>
+    /// Delegate overload of
+    /// <see cref="SubscribeToProperty{TSubject,TValue}(TSubject, Expression{Func{TSubject,TValue}}, IPropertyChangeObserver, IScheduler, Action{Exception})"/>.
+    /// </summary>
+    public static ScheduledPropertySubscription SubscribeToProperty<TSubject, TValue>(
+        this TSubject subject,
+        Expression<Func<TSubject, TValue>> propertySelector,
+        PropertyChangeCallback callback,
+        IScheduler scheduler,
+        Action<Exception>? onError = null)
+        where TSubject : IInterceptorSubject
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        return subject.SubscribeToProperty(propertySelector, new DelegateObserver(callback), scheduler, onError);
+    }
+
+    private static void ThrowIfSynchronous(IScheduler scheduler)
+    {
+        if (ReferenceEquals(scheduler, ImmediateScheduler.Instance) ||
+            ReferenceEquals(scheduler, CurrentThreadScheduler.Instance))
+        {
+            throw new ArgumentException(
+                "Use SubscribeInline for writer-thread delivery. Scheduled subscriptions require an asynchronous scheduler.",
+                nameof(scheduler));
+        }
     }
 
     private static string ResolveDirectPropertyName<TSubject, TValue>(Expression<Func<TSubject, TValue>> propertySelector)

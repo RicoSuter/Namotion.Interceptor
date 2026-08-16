@@ -46,8 +46,14 @@ namespace Namotion.Interceptor.Tracking.Change
     }
     public static class PropertyChangeSubscriptionExtensions
     {
+        public static Namotion.Interceptor.Tracking.Change.ScheduledPropertySubscription Subscribe(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.Tracking.Change.IPropertyChangeObserver observer, System.Reactive.Concurrency.IScheduler scheduler, System.Action<System.Exception>? onError = null) { }
+        public static Namotion.Interceptor.Tracking.Change.ScheduledPropertySubscription Subscribe(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.Tracking.Change.PropertyChangeCallback callback, System.Reactive.Concurrency.IScheduler scheduler, System.Action<System.Exception>? onError = null) { }
         public static System.IDisposable SubscribeInline(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.Tracking.Change.IPropertyChangeObserver observer) { }
         public static System.IDisposable SubscribeInline(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.Tracking.Change.PropertyChangeCallback callback) { }
+        public static Namotion.Interceptor.Tracking.Change.ScheduledPropertySubscription SubscribeToProperty<TSubject, TValue>(this TSubject subject, System.Linq.Expressions.Expression<System.Func<TSubject, TValue>> propertySelector, Namotion.Interceptor.Tracking.Change.IPropertyChangeObserver observer, System.Reactive.Concurrency.IScheduler scheduler, System.Action<System.Exception>? onError = null)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject { }
+        public static Namotion.Interceptor.Tracking.Change.ScheduledPropertySubscription SubscribeToProperty<TSubject, TValue>(this TSubject subject, System.Linq.Expressions.Expression<System.Func<TSubject, TValue>> propertySelector, Namotion.Interceptor.Tracking.Change.PropertyChangeCallback callback, System.Reactive.Concurrency.IScheduler scheduler, System.Action<System.Exception>? onError = null)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject { }
         public static System.IDisposable SubscribeToPropertyInline<TSubject, TValue>(this TSubject subject, System.Linq.Expressions.Expression<System.Func<TSubject, TValue>> propertySelector, Namotion.Interceptor.Tracking.Change.IPropertyChangeObserver observer)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
         public static System.IDisposable SubscribeToPropertyInline<TSubject, TValue>(this TSubject subject, System.Linq.Expressions.Expression<System.Func<TSubject, TValue>> propertySelector, Namotion.Interceptor.Tracking.Change.PropertyChangeCallback callback)
@@ -57,6 +63,12 @@ namespace Namotion.Interceptor.Tracking.Change
     {
         public int Count { get; }
         public System.ReadOnlySpan<Namotion.Interceptor.PropertyReference> Items { get; }
+    }
+    public sealed class ScheduledPropertySubscription : System.IDisposable
+    {
+        public bool IsFaulted { get; }
+        public int PendingCount { get; }
+        public void Dispose() { }
     }
     public static class SubjectChangeContextExtensions
     {
