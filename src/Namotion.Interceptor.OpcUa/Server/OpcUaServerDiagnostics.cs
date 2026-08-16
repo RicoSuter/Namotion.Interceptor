@@ -24,7 +24,7 @@ public sealed class OpcUaServerDiagnostics : ConnectorDiagnostics
     /// <summary>
     /// Gets the number of currently active client sessions.
     /// </summary>
-    public int ActiveSessionCount => _server.ActiveSessionCount;
+    public uint ActiveSessionCount => _server.ActiveSessionCount;
 
     /// <summary>
     /// Gets the number of consecutive startup failures, reset on a successful start.

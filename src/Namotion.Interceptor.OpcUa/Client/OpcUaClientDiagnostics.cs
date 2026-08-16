@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Connectors.Diagnostics;
+using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
@@ -42,7 +43,7 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     /// <summary>
     /// Gets the current session identifier, or <c>null</c> if there is no session.
     /// </summary>
-    public string? SessionId => ActiveSessionManager?.CurrentSession?.SessionId?.ToString();
+    public NodeId? SessionId => ActiveSessionManager?.CurrentSession?.SessionId;
 
     /// <summary>
     /// Gets the number of active OPC UA subscriptions.

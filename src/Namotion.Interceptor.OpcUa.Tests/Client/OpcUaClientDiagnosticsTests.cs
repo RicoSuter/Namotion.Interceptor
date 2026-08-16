@@ -4,6 +4,9 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Testing;
+using Opc.Ua;
+using Xunit.Abstractions;
+using Xunit.Extensions.AssemblyFixture;
 using static Namotion.Interceptor.OpcUa.Tests.Client.ClientSourceTestFactory;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
@@ -25,6 +28,7 @@ public class OpcUaClientDiagnosticsTests
 
         // Act
         var diagnostics = source.Diagnostics;
+        NodeId? sessionId = diagnostics.SessionId;
 
         // Assert
         Assert.False(diagnostics.IsOperational);
@@ -32,7 +36,7 @@ public class OpcUaClientDiagnosticsTests
         Assert.Null(diagnostics.LastError);
         Assert.Null(diagnostics.StartTime);
         Assert.False(diagnostics.IsReconnecting);
-        Assert.Null(diagnostics.SessionId);
+        Assert.Null(sessionId);
         Assert.Equal(0, diagnostics.SubscriptionCount);
         Assert.Equal(0, diagnostics.MonitoredItemCount);
         Assert.Equal(0, diagnostics.ClaimedPropertyCount);
@@ -212,5 +216,37 @@ public class OpcUaClientDiagnosticsTests
         {
             spin.SpinOnce();
         }
+    }
+}
+
+/// <summary>
+/// Covers session-backed diagnostics against the shared OPC UA server.
+/// </summary>
+[Trait("Category", "Integration")]
+public class OpcUaClientSessionDiagnosticsTests : IAssemblyFixture<SharedOpcUaServerFixture>
+{
+    private readonly SharedOpcUaServerFixture _serverFixture;
+    private readonly ITestOutputHelper _output;
+
+    public OpcUaClientSessionDiagnosticsTests(
+        SharedOpcUaServerFixture serverFixture,
+        ITestOutputHelper output)
+    {
+        _serverFixture = serverFixture;
+        _output = output;
+    }
+
+    [Fact]
+    public async Task WhenConnected_ThenSessionIdIsTheCurrentSessionNodeId()
+    {
+        // Arrange
+        await using var client = await _serverFixture.CreateClientAsync(new TestLogger(_output));
+        var source = client.Source!;
+
+        // Act
+        NodeId? sessionId = source.Diagnostics.SessionId;
+
+        // Assert
+        Assert.Same(source.CurrentSession!.SessionId, sessionId);
     }
 }

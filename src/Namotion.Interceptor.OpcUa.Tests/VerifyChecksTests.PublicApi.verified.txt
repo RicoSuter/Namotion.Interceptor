@@ -141,7 +141,7 @@ namespace Namotion.Interceptor.OpcUa.Client
         public Namotion.Interceptor.OpcUa.Client.PollingDiagnostics? Polling { get; }
         public Namotion.Interceptor.OpcUa.Client.ReadAfterWriteDiagnostics? ReadAfterWrite { get; }
         public Namotion.Interceptor.OpcUa.Client.ReconnectDiagnostics Reconnects { get; }
-        public string? SessionId { get; }
+        public Opc.Ua.NodeId? SessionId { get; }
         public int SubscriptionCount { get; }
     }
     public sealed class OpcUaCurrentSessionChangedEventArgs : System.EventArgs
@@ -374,7 +374,7 @@ namespace Namotion.Interceptor.OpcUa.Server
     }
     public sealed class OpcUaServerDiagnostics : Namotion.Interceptor.Connectors.Diagnostics.ConnectorDiagnostics
     {
-        public int ActiveSessionCount { get; }
+        public uint ActiveSessionCount { get; }
         public int ConsecutiveFailures { get; }
     }
 }

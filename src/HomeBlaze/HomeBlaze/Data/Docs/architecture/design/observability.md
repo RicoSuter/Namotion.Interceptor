@@ -68,13 +68,13 @@ The Blazor UI provides a health page that:
 2. Subscribes to health changed events on the message bus for live updates
 3. Displays aggregated health status across the entire knowledge graph
 
-No special aggregator subject is needed — the page queries and subscribes directly. AI agents can do the same via MCP tools (query by interface type, subscribe to events).
+No special aggregator subject is needed; the page queries and subscribes directly. AI agents can do the same via MCP tools (query by interface type, subscribe to events).
 
 ## Health Subjects
 
-Each instance also exposes instance-level health as subjects in the knowledge graph — node role, property count, changes per second, uptime, last heartbeat. These are separate from per-subject health checks; they describe the health of the platform itself rather than individual subjects.
+Each instance also exposes instance-level health as subjects in the knowledge graph: node role, property count, changes per second, uptime, last heartbeat. These are separate from per-subject health checks; they describe the health of the platform itself rather than individual subjects.
 
-AI agents can monitor both levels using the standard MCP tools — no separate monitoring integration needed. Operators see health information in the Blazor UI alongside business subjects.
+AI agents can monitor both levels using the standard MCP tools; no separate monitoring integration is needed. Operators see health information in the Blazor UI alongside business subjects.
 
 ## Key Decisions
 
@@ -88,4 +88,4 @@ AI agents can monitor both levels using the standard MCP tools — no separate m
 
 - Which metrics and traces are essential for v1
 - Health subject schema standardization across instances
-- Alerting integration (separate from alarms — see [Alarms](alarms.md))
+- Alerting integration (separate from alarms; see [Alarms](alarms.md))

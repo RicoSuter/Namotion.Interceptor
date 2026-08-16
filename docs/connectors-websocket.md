@@ -269,10 +269,10 @@ The server registers the connection for broadcasts **before** building and sendi
 
 1. **Register**: Connection is added to the broadcast list. Any concurrent property changes are **queued per-connection** along with their sequence numbers (not sent yet). The client does not receive any messages until the Welcome is sent.
 2. **Snapshot**: The server builds the complete state snapshot under `_applyUpdateLock`, the same lock used when applying client updates. This ensures the snapshot is a consistent cut: every update applied before the lock is included, every update applied after will be sent as a separate Update message.
-3. **Welcome**: The snapshot is sent to the client with the current sequence number. Immediately after (under the same send lock), queued updates are flushed — but only those with a sequence **greater than** the Welcome sequence are sent, since the snapshot already includes all earlier changes. After Welcome, any further broadcasts whose sequence is ≤ the Welcome sequence are also skipped. The client always sees Welcome as the first message, followed by only the updates that were not yet included in the snapshot.
+3. **Welcome**: The snapshot is sent to the client with the current sequence number. Immediately after (under the same send lock), queued updates are flushed, but only those with a sequence **greater than** the Welcome sequence are sent, since the snapshot already includes all earlier changes. After Welcome, any further broadcasts whose sequence is ≤ the Welcome sequence are also skipped. The client always sees Welcome as the first message, followed by only the updates that were not yet included in the snapshot.
 4. **Buffer replay**: The client applies the snapshot as a baseline, then replays all buffered updates (received between connection and snapshot application) to catch up to current state.
 
-The snapshot does not need to be fully up-to-date — it is just a baseline. The buffered updates are what guarantee correctness. After replay, the client is fully caught up and subsequent updates flow directly.
+The snapshot does not need to be fully up-to-date; it is just a baseline. The buffered updates are what guarantee correctness. After replay, the client is fully caught up and subsequent updates flow directly.
 
 ### Payload Structures
 
@@ -303,7 +303,7 @@ The snapshot does not need to be fully up-to-date — it is just a baseline. The
 }
 ```
 
-- `sequence`: Server's current sequence number (last broadcast batch). Does **not** increment the counter — it reflects the current value.
+- `sequence`: Server's current sequence number (last broadcast batch). Does **not** increment the counter; it reflects the current value.
 
 Example wire format: `[4, {"sequence": 42}]`
 
@@ -374,7 +374,7 @@ The server maintains a monotonically increasing sequence counter that is increme
 **Client behavior:**
 - On receiving an Update: the client reads the sequence from the `UpdatePayload`. If `sequence != expectedNextSequence`, the client logs a warning and exits the receive loop, triggering reconnection via the existing recovery flow.
 - On receiving a Heartbeat: if `heartbeat.sequence >= expectedNextSequence`, the server has sent updates the client never received. The client exits the receive loop and reconnects.
-- A heartbeat with `sequence < expectedNextSequence` means the client is fully caught up — no action needed.
+- A heartbeat with `sequence < expectedNextSequence` means the client is fully caught up; no action is needed.
 - A null or zero sequence is treated as "unassigned" for client-to-server messages which do not carry sequence numbers.
 
 **Recovery flow on gap detection:**
@@ -459,13 +459,13 @@ Both connector types are public but are registered under a private key, so pick 
 
 ## Lifecycle Management
 
-Unlike MQTT and OPC UA connectors which maintain per-property topic/node caches that require cleanup on subject detach (see [Subject Lifecycle Tracking](tracking.md#subject-lifecycle-tracking)), the WebSocket connector synchronizes the entire subject graph as a unit. There are no per-property caches to clean up — the server builds a fresh snapshot for each new client connection, and broadcast updates are derived from the change tracking layer. Connection-level resources (WebSocket, send lock, cancellation tokens) are cleaned up when a client disconnects or the server stops.
+Unlike MQTT and OPC UA connectors which maintain per-property topic/node caches that require cleanup on subject detach (see [Subject Lifecycle Tracking](tracking.md#subject-lifecycle-tracking)), the WebSocket connector synchronizes the entire subject graph as a unit. There are no per-property caches to clean up. The server builds a fresh snapshot for each new client connection, and broadcast updates are derived from the change tracking layer. Connection-level resources (WebSocket, send lock, cancellation tokens) are cleaned up when a client disconnects or the server stops.
 
 ## Known Limitations
 
 - **Snapshot lock during client connection**: When a new client connects, the server builds a full state snapshot under the same lock used for applying updates. This blocks incoming updates for the duration of the snapshot, which is proportional to graph size. This is acceptable because new-client connections are infrequent relative to the update rate, but could become a concern with very large subject graphs and frequent client reconnections.
 
-- **Broadcast timeout**: A slow client can delay broadcast completion for other clients. Broadcasts have a 10-second timeout to mitigate this — sends that haven't completed continue in the background, and zombie detection cleans up persistently slow connections. However, very slow clients may still cause temporary backpressure before being removed. This should be revisited if it becomes a bottleneck in high-throughput scenarios.
+- **Broadcast timeout**: A slow client can delay broadcast completion for other clients. Broadcasts have a 10-second timeout to mitigate this. Sends that haven't completed continue in the background, and zombie detection cleans up persistently slow connections. However, very slow clients may still cause temporary backpressure before being removed. This should be revisited if it becomes a bottleneck in high-throughput scenarios.
 
 ## Future Extensibility
 
