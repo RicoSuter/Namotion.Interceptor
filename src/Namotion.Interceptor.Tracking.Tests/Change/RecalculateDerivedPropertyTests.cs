@@ -543,26 +543,39 @@ public class RecalculateDerivedPropertyTests
         var secondContext = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithTransactions();
+        var ordinaryReadContext = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithTransactions();
         var first = new TransactionCascadeSubject(firstContext) { Plain = "model-1" };
         var second = new TransactionCascadeSubject(secondContext) { Plain = "model-2" };
+        var ordinaryReadSubject = new TransactionCascadeSubject(ordinaryReadContext) { Plain = "ordinary-model" };
         using var evaluationsEntered = new CountdownEvent(2);
         using var releaseEvaluations = new ManualResetEventSlim();
 
         first.ProbeEvaluator = value =>
         {
             evaluationsEntered.Signal();
-            releaseEvaluations.Wait();
+            if (!releaseEvaluations.Wait(TimeSpan.FromSeconds(10)))
+            {
+                throw new TimeoutException("first derived evaluation was not released");
+            }
+
             return $"{value.Plain}|evaluated";
         };
         second.ProbeEvaluator = value =>
         {
             evaluationsEntered.Signal();
-            releaseEvaluations.Wait();
+            if (!releaseEvaluations.Wait(TimeSpan.FromSeconds(10)))
+            {
+                throw new TimeoutException("second derived evaluation was not released");
+            }
+
             return $"{value.Plain}|evaluated";
         };
 
         string? firstTrackedValue = null;
         string? secondTrackedValue = null;
+        string? ordinaryPendingRead = null;
         using var firstSubscription = firstContext
             .GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Where(change => change.Property.Name == nameof(TransactionCascadeSubject.Probe))
@@ -593,6 +606,11 @@ public class RecalculateDerivedPropertyTests
         try
         {
             Assert.True(evaluationsEntered.Wait(TimeSpan.FromSeconds(10)), "parallel evaluations did not overlap");
+            using (await ordinaryReadContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+            {
+                ordinaryReadSubject.Plain = "ordinary-pending";
+                ordinaryPendingRead = ordinaryReadSubject.Plain;
+            }
         }
         finally
         {
@@ -604,5 +622,6 @@ public class RecalculateDerivedPropertyTests
         // Assert
         Assert.Equal("model-1|evaluated", firstTrackedValue);
         Assert.Equal("model-2|evaluated", secondTrackedValue);
+        Assert.Equal("ordinary-pending", ordinaryPendingRead);
     }
 }
