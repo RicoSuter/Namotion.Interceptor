@@ -13,6 +13,9 @@ public sealed class SubjectTransaction : IDisposable
     private static readonly AsyncLocal<SubjectTransaction?> CurrentTransaction = new();
     private static int _activeTransactionCount;
 
+    [ThreadStatic]
+    private static SubjectTransaction? _commitModelAccessTransaction;
+
     /// <summary>
     /// Gets a value indicating whether any transaction is currently active across all contexts.
     /// This is a fast-path check using a volatile read; it may briefly return true after
@@ -74,9 +77,19 @@ public sealed class SubjectTransaction : IDisposable
     internal bool IsCommitting => _isCommitting;
 
     /// <summary>
+    /// Gets a value indicating whether the transaction has reached a terminal committed state.
+    /// </summary>
+    internal bool IsCommitted => _isCommitted;
+
+    /// <summary>
     /// Gets a value indicating whether the transaction has been disposed.
     /// </summary>
     internal bool IsDisposed => Volatile.Read(ref _isDisposed) != 0;
+
+    /// <summary>
+    /// Gets a value indicating whether this thread is synchronously replaying this transaction's model work.
+    /// </summary>
+    internal bool IsCommitModelAccessAuthorized => ReferenceEquals(_commitModelAccessTransaction, this);
 
     /// <summary>
     /// Gets the interceptor this transaction is bound to (for cross-context validation).
@@ -102,7 +115,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            if (Volatile.Read(ref _isDisposed) != 0 || _pendingChanges is null)
+            if (Volatile.Read(ref _isDisposed) != 0 || _isCommitted || _pendingChanges is null)
             {
                 value = default!;
                 return false;
@@ -138,7 +151,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            if (Volatile.Read(ref _isDisposed) != 0)
+            if (Volatile.Read(ref _isDisposed) != 0 || _isCommitted || _pendingChanges is null)
             {
                 return false;
             }
@@ -155,6 +168,25 @@ public sealed class SubjectTransaction : IDisposable
                 isFirstWrite ? currentValue : existingChange.GetOldValue<TProperty>(),
                 newValue);
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Rechecks an interceptor's lock-free state observation. Returns true when the transaction became
+    /// inactive, throws while a live commit still owns the model, and otherwise returns false so the caller
+    /// can continue the live non-committing path.
+    /// </summary>
+    internal bool IsInactiveUnderLockOrThrowIfCommitting()
+    {
+        lock (_pendingChangesLock)
+        {
+            if (Volatile.Read(ref _isDisposed) != 0 || _isCommitted || _pendingChanges is null)
+            {
+                return true;
+            }
+
+            ThrowIfCommittingConcurrently();
+            return false;
         }
     }
 
@@ -340,21 +372,24 @@ public sealed class SubjectTransaction : IDisposable
             var (rented, changes) = StartCommitAndSnapshotChanges();
             rentedArray = rented;
 
-            ThrowIfConflictsDetected(changes.Span);
-
-            var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null);
-
             SubjectTransactionException? failure = null;
-            if (applyFailed.Count > 0)
+            using (EnterCommitModelAccess())
             {
-                if (_failureHandling == TransactionFailureHandling.Rollback)
+                ThrowIfConflictsDetected(changes.Span);
+
+                var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null);
+
+                if (applyFailed.Count > 0)
                 {
-                    var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
-                    failure = CreateFailureException([], SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed), SubjectPropertyChangeOperations.Concat(applyErrors, revertErrors));
-                }
-                else
-                {
-                    failure = CreateFailureException(applied, applyFailed, applyErrors);
+                    if (_failureHandling == TransactionFailureHandling.Rollback)
+                    {
+                        var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
+                        failure = CreateFailureException([], SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed), SubjectPropertyChangeOperations.Concat(applyErrors, revertErrors));
+                    }
+                    else
+                    {
+                        failure = CreateFailureException(applied, applyFailed, applyErrors);
+                    }
                 }
             }
 
@@ -384,7 +419,10 @@ public sealed class SubjectTransaction : IDisposable
             var (rented, changes) = StartCommitAndSnapshotChanges();
             rentedArray = rented;
 
-            ThrowIfConflictsDetected(changes.Span);
+            using (EnterCommitModelAccess())
+            {
+                ThrowIfConflictsDetected(changes.Span);
+            }
 
             using var timeoutCts = CreateCommitTimeoutCts();
             var commitToken = timeoutCts?.Token ?? CancellationToken.None;
@@ -458,14 +496,25 @@ public sealed class SubjectTransaction : IDisposable
         // Apply the whole snapshot except the source-write failures in a single pass. With no source
         // failure, this is the entire snapshot, and ApplyAllChanges returns an empty Successful set.
         var exclude = failedSource.Count == 0 ? null : failedSource;
-        var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude);
+        IReadOnlyList<SubjectPropertyChange> applied;
+        IReadOnlyList<SubjectPropertyChange> applyFailed;
+        IReadOnlyList<Exception> applyErrors;
+        IReadOnlyList<SubjectPropertyChange> revertFailed = [];
+        IReadOnlyList<Exception> revertErrors = [];
+        using (EnterCommitModelAccess())
+        {
+            (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude);
+            if (applyFailed.Count > 0 && _failureHandling == TransactionFailureHandling.Rollback)
+            {
+                (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
+            }
+        }
 
         if (applyFailed.Count > 0)
         {
             if (_failureHandling == TransactionFailureHandling.Rollback)
             {
                 // All-or-nothing: revert local applies, then the source writes.
-                var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
                 var sourceRevert = await RevertSourceWritesSafelyAsync(writer, written, revertState, cancellationToken).ConfigureAwait(false);
                 // The no-source local changes were applied then reverted; under all-or-nothing they did not
                 // commit, so report them as failed too (consistent with the source-write-failure branch and
@@ -565,9 +614,8 @@ public sealed class SubjectTransaction : IDisposable
         lock (_pendingChangesLock)
         {
             _pendingChanges?.Clear();
+            _isCommitted = true;
         }
-
-        _isCommitted = true;
     }
 
     /// <summary>
@@ -694,6 +742,28 @@ public sealed class SubjectTransaction : IDisposable
         return _commitTimeout == Timeout.InfiniteTimeSpan
             ? null
             : new CancellationTokenSource(_commitTimeout);
+    }
+
+    private CommitModelAccessScope EnterCommitModelAccess() => new(this);
+
+    /// <summary>
+    /// Grants model access only to synchronous commit-owned work on this thread. The previous identity is
+    /// restored for nested/reentrant use. Callers must dispose the scope before awaiting external code.
+    /// </summary>
+    private readonly struct CommitModelAccessScope : IDisposable
+    {
+        private readonly SubjectTransaction? _previousTransaction;
+
+        public CommitModelAccessScope(SubjectTransaction transaction)
+        {
+            _previousTransaction = _commitModelAccessTransaction;
+            _commitModelAccessTransaction = transaction;
+        }
+
+        public void Dispose()
+        {
+            _commitModelAccessTransaction = _previousTransaction;
+        }
     }
 
     private SubjectTransactionException CreateFailureException(

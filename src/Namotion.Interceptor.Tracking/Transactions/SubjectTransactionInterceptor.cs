@@ -36,9 +36,32 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         var transaction = SubjectTransaction.Current;
-        if (transaction is { IsCommitting: false, IsDisposed: false } &&
-            !DerivedPropertyChangeHandler.IsRecordingDerivedProperty &&
-            transaction.TryGetPendingValue<TProperty>(context.Property, out var pendingValue))
+        if (transaction is null || transaction.IsDisposed || transaction.IsCommitted)
+        {
+            return next(ref context);
+        }
+
+        if (transaction.IsCommitting)
+        {
+            if (transaction.IsCommitModelAccessAuthorized)
+            {
+                return next(ref context);
+            }
+
+            if (transaction.IsInactiveUnderLockOrThrowIfCommitting())
+            {
+                return next(ref context);
+            }
+        }
+
+        // Recorder-active reads are the landed-model view. This access linearizes at the non-committing
+        // observation above; do not hold the transaction lock while a user getter executes.
+        if (DerivedPropertyChangeHandler.IsRecordingDerivedProperty)
+        {
+            return next(ref context);
+        }
+
+        if (transaction.TryGetPendingValue<TProperty>(context.Property, out var pendingValue))
         {
             return pendingValue;
         }
@@ -57,35 +80,61 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         var transaction = SubjectTransaction.Current;
-        if (transaction is { IsCommitting: false, IsDisposed: false } && !context.Property.Metadata.IsDerived)
+        if (transaction is null || transaction.IsDisposed || transaction.IsCommitted)
         {
-            var subjectInterceptors = context.Property.Subject.Context
-                .GetServices<SubjectTransactionInterceptor>();
-            var isBoundToThisContext = subjectInterceptors.Length == 1
-                ? ReferenceEquals(subjectInterceptors[0], transaction.Interceptor)
-                : ContainsByReference(subjectInterceptors, transaction.Interceptor);
+            next(ref context);
+            return;
+        }
 
-            if (!isBoundToThisContext)
+        if (transaction.IsCommitting)
+        {
+            if (transaction.IsCommitModelAccessAuthorized)
             {
-                throw new InvalidOperationException(
-                    $"Cannot modify property '{context.Property.Metadata.Name}': Transaction is bound to a different context.");
-            }
-
-            // Origin comparison can run user equality code, so resolve it before taking the transaction lock.
-            var resolvedOrigin = context.GetFinalOrigin();
-            var changedTimestamp = context.WriteTimestampForPublishing;
-            var receivedTimestamp = SubjectChangeContext.Current.ReceivedTimestamp;
-
-            if (transaction.TryCaptureChange(
-                    context.Property,
-                    resolvedOrigin,
-                    changedTimestamp,
-                    receivedTimestamp,
-                    context.CurrentValue,
-                    context.NewValue))
-            {
+                next(ref context);
                 return;
             }
+
+            if (transaction.IsInactiveUnderLockOrThrowIfCommitting())
+            {
+                next(ref context);
+                return;
+            }
+        }
+
+        // Settable-derived writes are immediate and outside the transaction. This access linearizes at the
+        // non-committing observation above; do not hold the transaction lock while a user setter executes.
+        if (context.Property.Metadata.IsDerived)
+        {
+            next(ref context);
+            return;
+        }
+
+        var subjectInterceptors = context.Property.Subject.Context
+            .GetServices<SubjectTransactionInterceptor>();
+        var isBoundToThisContext = subjectInterceptors.Length == 1
+            ? ReferenceEquals(subjectInterceptors[0], transaction.Interceptor)
+            : ContainsByReference(subjectInterceptors, transaction.Interceptor);
+
+        if (!isBoundToThisContext)
+        {
+            throw new InvalidOperationException(
+                $"Cannot modify property '{context.Property.Metadata.Name}': Transaction is bound to a different context.");
+        }
+
+        // Origin comparison can run user equality code, so resolve it before taking the transaction lock.
+        var resolvedOrigin = context.GetFinalOrigin();
+        var changedTimestamp = context.WriteTimestampForPublishing;
+        var receivedTimestamp = SubjectChangeContext.Current.ReceivedTimestamp;
+
+        if (transaction.TryCaptureChange(
+                context.Property,
+                resolvedOrigin,
+                changedTimestamp,
+                receivedTimestamp,
+                context.CurrentValue,
+                context.NewValue))
+        {
+            return;
         }
 
         next(ref context);

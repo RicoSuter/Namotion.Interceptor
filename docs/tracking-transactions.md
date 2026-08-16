@@ -521,6 +521,8 @@ Note that concurrent `CommitAsync` calls on the same transaction are rejected: o
 - Exclusive transactions use a per-context semaphore
 - Each async execution context has its own transaction scope
 - `Dispose()` clears the transaction only for the disposing flow. A flow that captured its execution context earlier can retain the disposed transaction in its slot; reads and writes on that flow treat it as inactive.
+- A successful or terminally failed commit is inactive for property interception even before disposal. Later reads and writes use the landed model normally; retryable failures remain active.
+- While `CommitAsync()` is in progress, property access carrying that live ambient transaction is rejected unless it is synchronous model replay owned by the commit. This authorization does not extend into the external writer or child tasks.
 - A transaction must be begun, used, committed, and disposed within the same async flow; committing from another flow throws
 - Concurrent `CommitAsync` calls on the same transaction instance are rejected
 

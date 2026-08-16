@@ -267,6 +267,109 @@ public class SubjectTransactionTests
     }
 
     [Fact]
+    public async Task WhenEmptyCommitIsTerminal_ThenLaterAccessUsesTheModel()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+        var person = new Person(context);
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Act
+        person.FirstName = "landed-after-empty-commit";
+        string? landedValue = null;
+        await RunWithoutAsyncLocalFlowAsync(() => landedValue = person.FirstName);
+        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "external-after-empty-commit");
+
+        // Assert
+        Assert.Equal("landed-after-empty-commit", landedValue);
+        Assert.Equal("external-after-empty-commit", person.FirstName);
+        Assert.Empty(transaction.GetPendingChanges());
+    }
+
+    [Fact]
+    public async Task WhenSuccessfulCommitIsTerminal_ThenLaterAccessUsesTheModel()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+        var person = new Person(context) { FirstName = "model" };
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "committed";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Act
+        person.LastName = "landed-after-commit";
+        string? landedValue = null;
+        await RunWithoutAsyncLocalFlowAsync(() => landedValue = person.LastName);
+        await RunWithoutAsyncLocalFlowAsync(() => person.LastName = "external-after-commit");
+
+        // Assert
+        Assert.Equal("committed", person.FirstName);
+        Assert.Equal("landed-after-commit", landedValue);
+        Assert.Equal("external-after-commit", person.LastName);
+        Assert.Empty(transaction.GetPendingChanges());
+    }
+
+    [Fact]
+    public async Task WhenCommitFailureIsTerminal_ThenLaterAccessUsesTheModel()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+        var subject = new TransactionCascadeSubject(context) { Plain = "model" };
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        subject.Plain = "applied";
+        subject.Failing = "fails";
+        subject.ThrowOnFailingWrite = true;
+        await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Act
+        subject.SideEffect = "landed-after-terminal-failure";
+        string? landedValue = null;
+        await RunWithoutAsyncLocalFlowAsync(() => landedValue = subject.SideEffect);
+        await RunWithoutAsyncLocalFlowAsync(() => subject.SideEffect = "external-after-terminal-failure");
+
+        // Assert
+        Assert.Equal("applied", subject.Plain);
+        Assert.Equal("landed-after-terminal-failure", landedValue);
+        Assert.Equal("external-after-terminal-failure", subject.SideEffect);
+        Assert.Empty(transaction.GetPendingChanges());
+    }
+
+    [Fact]
+    public async Task WhenCommitFailureIsRetryable_ThenLaterWritesRemainCaptured()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+        var person = new Person(context) { FirstName = "original" };
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
+            TransactionLocking.Optimistic,
+            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
+        person.FirstName = "pending";
+        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "external");
+        await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Act
+        person.LastName = "captured-after-conflict";
+
+        // Assert
+        Assert.Equal("captured-after-conflict", person.LastName);
+        Assert.Contains(transaction.GetPendingChanges(),
+            change => change.Property.Name == nameof(Person.LastName));
+
+        string? modelLastName = null;
+        await RunWithoutAsyncLocalFlowAsync(() => modelLastName = person.LastName);
+        Assert.Null(modelLastName);
+
+        await RunWithoutAsyncLocalFlowAsync(() => person.FirstName = "original");
+        await transaction.CommitAsync(CancellationToken.None);
+        Assert.Equal("pending", person.FirstName);
+        Assert.Equal("captured-after-conflict", person.LastName);
+    }
+
+    [Fact]
     public async Task WhenTransactionDisposed_ThenCommitThrows()
     {
         // Arrange
@@ -948,6 +1051,175 @@ public class SubjectTransactionTests
     }
 
     [Fact]
+    public async Task WhenCommitIsBlockedInWriter_ThenCallerAccessCannotEscapeTheSnapshot()
+    {
+        // Arrange
+        var writer = new ControllableTransactionWriter();
+        var context = CreateTransactionContext();
+        context.AddService<ITransactionWriter>(writer);
+        var subject = new TransactionCascadeSubject(context)
+        {
+            Plain = "model",
+            SideEffect = "side-model",
+            DerivedWithSetter = "d0"
+        };
+        _ = subject.CombinedAgain;
+        var sideEffectSubject = new SideEffectWritePerson(context) { Name = "before" };
+        var sideEffectBeforeCommit = sideEffectSubject.SideEffectTarget;
+
+        var derivedChanges = new List<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => change.Property.Name is
+                nameof(TransactionCascadeSubject.Combined) or
+                nameof(TransactionCascadeSubject.CombinedAgain))
+            .Subscribe(derivedChanges.Add);
+
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        subject.Plain = "snapshot";
+        sideEffectSubject.Name = "committed-name";
+        var commitTask = transaction.CommitAsync(CancellationToken.None).AsTask();
+
+        try
+        {
+            Assert.True(writer.CommitStarted.Wait(TimeSpan.FromSeconds(10)), "commit did not reach the writer");
+
+            // Act & Assert
+            Assert.Throws<InvalidOperationException>(() => _ = subject.Plain);
+            Assert.Throws<InvalidOperationException>(() => subject.SideEffect = "outside-snapshot");
+            Assert.Throws<InvalidOperationException>(() => subject.DerivedWithSetter = "outside-snapshot");
+
+            var frozenChanges = transaction.GetPendingChanges();
+            Assert.Equal(2, frozenChanges.Count);
+            Assert.Contains(frozenChanges, change =>
+                change.Property.Name == nameof(TransactionCascadeSubject.Plain) &&
+                change.GetNewValue<string>() == "snapshot");
+            Assert.Contains(frozenChanges, change =>
+                change.Property.Name == nameof(SideEffectWritePerson.Name) &&
+                change.GetNewValue<string>() == "committed-name");
+
+            string? modelPlain = null;
+            string? modelSideEffect = null;
+            string? modelDerivedWithSetter = null;
+            await RunWithoutAsyncLocalFlowAsync(() =>
+            {
+                modelPlain = subject.Plain;
+                modelSideEffect = subject.SideEffect;
+                modelDerivedWithSetter = subject.DerivedWithSetter;
+            });
+            Assert.Equal("model", modelPlain);
+            Assert.Equal("side-model", modelSideEffect);
+            Assert.Equal("d0", modelDerivedWithSetter);
+        }
+        finally
+        {
+            writer.Release();
+            await commitTask.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        Assert.Equal("snapshot", subject.Plain);
+        Assert.Equal("side-model", subject.SideEffect);
+        Assert.Equal("d0", subject.DerivedWithSetter);
+        Assert.Equal("[snapshot|d0]", subject.CombinedAgain);
+        Assert.Equal("committed-name", sideEffectSubject.Name);
+        Assert.NotEqual(sideEffectBeforeCommit, sideEffectSubject.SideEffectTarget);
+        Assert.Contains(derivedChanges, change =>
+            change.Property.Name == nameof(TransactionCascadeSubject.Combined) &&
+            change.GetNewValue<string>() == "snapshot|d0");
+        Assert.Contains(derivedChanges, change =>
+            change.Property.Name == nameof(TransactionCascadeSubject.CombinedAgain) &&
+            change.GetNewValue<string>() == "[snapshot|d0]");
+        Assert.Empty(transaction.GetPendingChanges());
+    }
+
+    [Fact]
+    public async Task WhenCommitIsBlockedInWriter_ThenForkedAmbientAccessIsRejected()
+    {
+        // Arrange
+        var writer = new ControllableTransactionWriter();
+        var context = CreateTransactionContext();
+        context.AddService<ITransactionWriter>(writer);
+        var subject = new TransactionCascadeSubject(context)
+        {
+            Plain = "model",
+            SideEffect = "side-model",
+            DerivedWithSetter = "d0"
+        };
+
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        subject.Plain = "snapshot";
+        var commitTask = transaction.CommitAsync(CancellationToken.None).AsTask();
+
+        try
+        {
+            Assert.True(writer.CommitStarted.Wait(TimeSpan.FromSeconds(10)), "commit did not reach the writer");
+
+            // Act
+            var accessTask = Task.Run(() =>
+            {
+                var readException = CaptureException(() => _ = subject.Plain);
+                var writeException = CaptureException(() => subject.SideEffect = "forked-outside-snapshot");
+                var derivedWriteException = CaptureException(
+                    () => subject.DerivedWithSetter = "forked-outside-snapshot");
+                return (readException, writeException, derivedWriteException);
+            });
+            var exceptions = await accessTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Assert
+            Assert.IsType<InvalidOperationException>(exceptions.readException);
+            Assert.IsType<InvalidOperationException>(exceptions.writeException);
+            Assert.IsType<InvalidOperationException>(exceptions.derivedWriteException);
+
+            var frozenChange = Assert.Single(transaction.GetPendingChanges());
+            Assert.Equal(nameof(TransactionCascadeSubject.Plain), frozenChange.Property.Name);
+            Assert.Equal("snapshot", frozenChange.GetNewValue<string>());
+
+            string? modelPlain = null;
+            string? modelSideEffect = null;
+            string? modelDerivedWithSetter = null;
+            await RunWithoutAsyncLocalFlowAsync(() =>
+            {
+                modelPlain = subject.Plain;
+                modelSideEffect = subject.SideEffect;
+                modelDerivedWithSetter = subject.DerivedWithSetter;
+            });
+            Assert.Equal("model", modelPlain);
+            Assert.Equal("side-model", modelSideEffect);
+            Assert.Equal("d0", modelDerivedWithSetter);
+        }
+        finally
+        {
+            writer.Release();
+            await commitTask.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        Assert.Equal("snapshot", subject.Plain);
+        Assert.Equal("side-model", subject.SideEffect);
+        Assert.Equal("d0", subject.DerivedWithSetter);
+    }
+
+    [Fact]
+    public async Task WhenWriterAccessesAmbientPropertyDuringCommit_ThenCommitReportsConcurrentAccess()
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+        var subject = new TransactionCascadeSubject(context) { Plain = "model" };
+        context.AddService<ITransactionWriter>(new PropertyAccessingTransactionWriter(() => _ = subject.Plain));
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        subject.Plain = "pending";
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        var error = Assert.IsType<InvalidOperationException>(Assert.Single(exception.Errors));
+        Assert.Contains("commit is in progress", error.Message);
+        Assert.Equal("model", subject.Plain);
+        Assert.Empty(transaction.GetPendingChanges());
+    }
+
+    [Fact]
     public async Task WhenSourceValueIsTransformedBeforeCapture_ThenTheCapturedOriginIsLocal()
     {
         // Arrange
@@ -1215,6 +1487,37 @@ public class SubjectTransactionTests
             => new(new SourceRevertResult([], []));
 
         public void Release() => _release.TrySetResult();
+    }
+
+    private sealed class PropertyAccessingTransactionWriter(Action accessProperty) : ITransactionWriter
+    {
+        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            Memory<SubjectPropertyChange> changes,
+            TransactionRequirement requirement,
+            CancellationToken cancellationToken)
+        {
+            accessProperty();
+            return new ValueTask<SourceWriteResult>(new SourceWriteResult([], [], [], RevertState: null));
+        }
+
+        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written,
+            object? revertState,
+            CancellationToken cancellationToken)
+            => new(new SourceRevertResult([], []));
+    }
+
+    private static Exception? CaptureException(Action action)
+    {
+        try
+        {
+            action();
+            return null;
+        }
+        catch (Exception exception)
+        {
+            return exception;
+        }
     }
 
     /// <summary>
