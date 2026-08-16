@@ -663,12 +663,20 @@ public class DerivedPropertyChangeHandlerTests
             subject.DerivedWithSetter = "d1";
 
             // Assert
-            Assert.Contains(changes, change =>
-                change.Property.Name == nameof(TransactionCascadeSubject.Combined) &&
-                change.GetNewValue<string>() == "committed|d1");
-            Assert.Contains(changes, change =>
-                change.Property.Name == nameof(TransactionCascadeSubject.CombinedAgain) &&
-                change.GetNewValue<string>() == "[committed|d1]");
+            Assert.Collection(
+                changes,
+                change =>
+                {
+                    Assert.Equal(nameof(TransactionCascadeSubject.Combined), change.Property.Name);
+                    Assert.Equal("committed|d0", change.GetOldValue<string>());
+                    Assert.Equal("committed|d1", change.GetNewValue<string>());
+                },
+                change =>
+                {
+                    Assert.Equal(nameof(TransactionCascadeSubject.CombinedAgain), change.Property.Name);
+                    Assert.Equal("[committed|d0]", change.GetOldValue<string>());
+                    Assert.Equal("[committed|d1]", change.GetNewValue<string>());
+                });
 
             await transaction.CommitAsync(CancellationToken.None);
         }

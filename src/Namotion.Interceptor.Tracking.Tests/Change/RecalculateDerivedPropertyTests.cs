@@ -470,12 +470,20 @@ public class RecalculateDerivedPropertyTests
             outerProperty.RecalculateDerivedProperty();
 
             // Assert
-            Assert.Contains(changes, change =>
-                change.Property.Name == nameof(TransactionCascadeSubject.ManualCombined) &&
-                change.GetNewValue<string>() == "plain-model|after");
-            Assert.Contains(changes, change =>
-                change.Property.Name == nameof(TransactionCascadeSubject.Probe) &&
-                change.GetNewValue<string>() == "plain-model|side-model");
+            Assert.Collection(
+                changes,
+                change =>
+                {
+                    Assert.Equal(nameof(TransactionCascadeSubject.ManualCombined), change.Property.Name);
+                    Assert.Equal("plain-model|before", change.GetOldValue<string>());
+                    Assert.Equal("plain-model|after", change.GetNewValue<string>());
+                },
+                change =>
+                {
+                    Assert.Equal(nameof(TransactionCascadeSubject.Probe), change.Property.Name);
+                    Assert.Equal("plain-model", change.GetOldValue<string>());
+                    Assert.Equal("plain-model|side-model", change.GetNewValue<string>());
+                });
         }
     }
 
@@ -591,7 +599,7 @@ public class RecalculateDerivedPropertyTests
             releaseEvaluations.Set();
         }
 
-        await Task.WhenAll(firstTask, secondTask);
+        await Task.WhenAll(firstTask, secondTask).WaitAsync(TimeSpan.FromSeconds(10));
 
         // Assert
         Assert.Equal("model-1|evaluated", firstTrackedValue);
