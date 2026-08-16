@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
@@ -8,6 +9,38 @@ using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Transactions;
+
+[InterceptorSubject]
+internal partial class DisposalCaptureGateSubject
+{
+    public partial DisposalCaptureGateValue? Value { get; set; }
+}
+
+internal sealed class DisposalCaptureGateValue(
+    string value,
+    ManualResetEventSlim? comparisonEntered = null,
+    ManualResetEventSlim? continueComparison = null) : IEquatable<DisposalCaptureGateValue>
+{
+    private readonly string _value = value;
+
+    public bool Equals(DisposalCaptureGateValue? other)
+    {
+        if (comparisonEntered is not null)
+        {
+            comparisonEntered.Set();
+            if (!continueComparison!.Wait(TimeSpan.FromSeconds(10)))
+            {
+                throw new TimeoutException("The test did not release the origin comparison within 10 seconds.");
+            }
+        }
+
+        return other is not null && _value == other._value;
+    }
+
+    public override bool Equals(object? obj) => obj is DisposalCaptureGateValue other && Equals(other);
+
+    public override int GetHashCode() => _value.GetHashCode(StringComparison.Ordinal);
+}
 
 public class SubjectTransactionTests
 {
@@ -859,59 +892,62 @@ public class SubjectTransactionTests
     }
 
     [Fact]
-    public async Task WhenAmbientTransactionIsDisposedWhileAnotherThreadWrites_ThenNoExceptionEscapesTheSetterAndTheWriteLands()
+    public async Task WhenDisposeWinsAfterThePublicWritePassedItsAmbientCheck_ThenTheWriteLandsWithoutAnException()
     {
-        // Arrange: a thread born inside a transaction keeps that transaction in its ambient slot for life
-        // (an Rx EventLoopScheduler worker, for example). Writing on that thread while another flow disposes
-        // the transaction races the interceptor's disposed check against the capture itself. An exception
-        // escaping the setter there is unhandled on a bare thread and terminates the process, so the write
-        // has to fall through to the model instead, exactly as if no transaction were ambient.
+        // Arrange: final-origin resolution invokes user equality immediately before TryCaptureChange. Park
+        // there so Dispose deterministically wins after the interceptor's lock-free ambient-state check.
+        // Regression mutation: throwing instead of returning false from TryCaptureChange when disposal wins
+        // lets ObjectDisposedException escape this public write path instead of falling through to the model.
         var context = CreateTransactionContext();
-        var person = new Person(context) { LastName = "Model" };
-
-        // The race is reachable within a handful of iterations; bounded so the test always terminates.
-        for (var iteration = 0; iteration < 50; iteration++)
+        var subject = new DisposalCaptureGateSubject(context)
         {
-            var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-            var frozenFlow = ExecutionContext.Capture()
-                ?? throw new InvalidOperationException("Execution context flow must not be suppressed in this test.");
+            Value = new DisposalCaptureGateValue("Model")
+        };
+        var property = new PropertyReference(subject, nameof(DisposalCaptureGateSubject.Value));
+        using var comparisonEntered = new ManualResetEventSlim();
+        using var continueComparison = new ManualResetEventSlim();
+        var sentValue = new DisposalCaptureGateValue("AfterDispose", comparisonEntered, continueComparison);
+        var valueWrittenAfterDispose = new DisposalCaptureGateValue("AfterDispose");
 
-            var writerStarted = new ManualResetEventSlim();
-            var disposeCompleted = false;
-            Exception? escapedException = null;
-            var valueWrittenAfterDispose = $"AfterDispose{iteration}";
-
-            var writerThread = new Thread(() => ExecutionContext.Run(frozenFlow, _ =>
+        var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        var frozenFlow = ExecutionContext.Capture()
+            ?? throw new InvalidOperationException("Execution context flow must not be suppressed in this test.");
+        Exception? escapedException = null;
+        var writerThread = new Thread(() => ExecutionContext.Run(frozenFlow, _ =>
+        {
+            try
             {
-                try
-                {
-                    writerStarted.Set();
-                    var writeCount = 0;
-                    while (!Volatile.Read(ref disposeCompleted))
-                    {
-                        // Distinct values so the equality check never short-circuits the chain.
-                        person.LastName = $"Racing{writeCount++}";
-                    }
+                property.SetValueFromOrigin(
+                    ChangeOrigin.FromSource(new object()),
+                    changedTimestamp: null,
+                    receivedTimestamp: null,
+                    value: valueWrittenAfterDispose,
+                    sentValue: sentValue);
+            }
+            catch (Exception exception)
+            {
+                escapedException = exception;
+            }
+        }, null));
 
-                    person.LastName = valueWrittenAfterDispose;
-                }
-                catch (Exception exception)
-                {
-                    escapedException = exception;
-                }
-            }, null));
-
-            // Act
+        // Act
+        try
+        {
             writerThread.Start();
-            Assert.True(writerStarted.Wait(TimeSpan.FromSeconds(10)), "writer did not start");
+            Assert.True(comparisonEntered.Wait(TimeSpan.FromSeconds(10)), "write did not reach origin comparison");
             transaction.Dispose();
-            Volatile.Write(ref disposeCompleted, true);
-            Assert.True(writerThread.Join(TimeSpan.FromSeconds(10)), "writer did not stop");
-
-            // Assert
-            Assert.Null(escapedException);
-            Assert.Equal(valueWrittenAfterDispose, person.LastName);
         }
+        finally
+        {
+            transaction.Dispose();
+            continueComparison.Set();
+            Assert.True(writerThread.Join(TimeSpan.FromSeconds(10)), "writer did not stop");
+        }
+
+        // Assert
+        Assert.Null(escapedException);
+        Assert.Same(valueWrittenAfterDispose, subject.Value);
+        Assert.Empty(transaction.GetPendingChanges());
     }
 
     [Fact]
@@ -1048,6 +1084,43 @@ public class SubjectTransactionTests
             writer.Release();
             await commitTask.WaitAsync(TimeSpan.FromSeconds(10));
         }
+    }
+
+    [Fact]
+    public async Task WhenDisposedDuringExternalWriterCommit_ThenRawWriteLandsBeforeFrozenReplayOverwritesIt()
+    {
+        // Arrange
+        var writer = new ControllableTransactionWriter();
+        var context = CreateTransactionContext();
+        context.AddService<ITransactionWriter>(writer);
+        var person = new Person(context) { FirstName = "Model" };
+        var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "FrozenReplay";
+        var commitTask = transaction.CommitAsync(CancellationToken.None).AsTask();
+
+        try
+        {
+            Assert.True(writer.CommitStarted.Wait(TimeSpan.FromSeconds(10)), "commit did not reach the writer");
+            transaction.Dispose();
+            Assert.Null(SubjectTransaction.Current);
+
+            // Act: disposal makes the ambient transaction inactive even though its frozen commit continues.
+            person.FirstName = "RawAfterDispose";
+
+            // Assert: observe the landed model outside any ambient transaction before replay is released.
+            string? intermediateModelValue = null;
+            await RunWithoutAsyncLocalFlowAsync(() => intermediateModelValue = person.FirstName);
+            Assert.Equal("RawAfterDispose", intermediateModelValue);
+        }
+        finally
+        {
+            transaction.Dispose();
+            writer.Release();
+            await commitTask.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        // Assert: transaction disposal is not isolation from an already-frozen commit snapshot.
+        Assert.Equal("FrozenReplay", person.FirstName);
     }
 
     [Fact]

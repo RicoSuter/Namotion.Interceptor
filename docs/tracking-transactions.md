@@ -13,7 +13,7 @@ Use transactions when you need guarantees about what was actually persisted to e
 Transactions provide:
 - **Configurable commit modes**: Choose between best-effort or rollback behavior on partial failures
 - **Read-your-writes consistency**: Reading a property inside a transaction returns the pending value
-- **Notification suppression**: Change notifications are suppressed during the transaction and fired after commit
+- **Notification suppression**: Captured non-derived writes stay silent until commit replay applies them
 - **External source integration**: Changes can be written to external sources before being applied to the local model
 - **Rollback on dispose**: Uncommitted changes are discarded when the transaction is disposed
 
@@ -521,6 +521,7 @@ Note that concurrent `CommitAsync` calls on the same transaction are rejected: o
 - Exclusive transactions use a per-context semaphore
 - Each async execution context has its own transaction scope
 - `Dispose()` clears the transaction only for the disposing flow. A flow that captured its execution context earlier can retain the disposed transaction in its slot; reads and writes on that flow treat it as inactive.
+- After `Dispose()`, ambient access is ordinary raw model access even while an already-started external-writer commit completes. Such a raw write is not isolated from the commit and can be overwritten when its frozen snapshot replays.
 - A successful or terminally failed commit is inactive for property interception even before disposal. Later reads and writes use the landed model normally; retryable failures remain active.
 - While `CommitAsync()` is in progress, property access carrying that live ambient transaction is rejected unless it is synchronous model replay owned by the commit. This authorization does not extend into the external writer or child tasks.
 - A transaction must be begun, used, committed, and disposed within the same async flow; committing from another flow throws

@@ -171,11 +171,12 @@ When a source property is written, `WriteProperty` triggers recalculation of all
 ```
 WriteProperty(FirstName = "Jane")
   next(ref context)                              // write the value
+  if !context.IsWritten → return                 // vetoed write did not land
   Interlocked.Increment(_writeGeneration)        // signal for AttachProperty/RecalculateDerivedProperty
   data = FirstName.TryGetDerivedPropertyData()
   if data is null → return                       // fast path: no tracking data
   // Self-recalculation: if this is a derived-with-setter property, recalculate it
-  if data.HasRequiredProperties && Metadata.SetValue != null:
+  if Volatile.Read(ref data.IsDerived) && Metadata.SetValue != null:
     RecalculateDerivedProperty(FirstName, timestamp)
   // Cascade: recalculate all dependent derived properties
   usedByItems = data.GetUsedByProperties()                      // Volatile.Read + Items span
@@ -186,7 +187,7 @@ WriteProperty(FirstName = "Jane")
 
 The `_writeGeneration` increment uses `Interlocked.Increment` (full fence) so that each concurrent writer produces a unique counter value: no lost increments. `AttachProperty`/`RecalculateDerivedProperty` detect concurrent writes via `Volatile.Read` (acquire semantics). The full fence from `Interlocked.Increment` pairs with `Volatile.Read`'s acquire semantics to guarantee that committed property values are visible when the counter change is observed.
 
-**Derived properties with setters** (created via `AddDerivedProperty<T>(name, getValue, setValue)`) have both a getter and a setter. The setter modifies internal state as a side effect, but the actual property value is always determined by the getter. When the setter is called, `WriteProperty` detects `HasRequiredProperties && SetValue != null` and triggers recalculation to re-evaluate the getter and fire a change notification with the correct computed value.
+**Derived properties with setters** (created via `AddDerivedProperty<T>(name, getValue, setValue)`) have both a getter and a setter. The setter modifies internal state as a side effect, but the actual property value is always determined by the getter. After confirming that the write landed, `WriteProperty` detects `IsDerived && SetValue != null` and triggers recalculation to re-evaluate the getter and fire a change notification with the correct computed value.
 
 ### 4. Recalculation
 
