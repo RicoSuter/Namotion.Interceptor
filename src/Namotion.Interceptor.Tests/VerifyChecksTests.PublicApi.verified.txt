@@ -79,6 +79,7 @@ namespace Namotion.Interceptor
     {
         void RaisePropertyChanged(string propertyName);
     }
+    public interface IUniqueContextService<TContract> { }
     public class InterceptorSubjectContext : Namotion.Interceptor.IInterceptorSubjectContext
     {
         public virtual bool AddFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
