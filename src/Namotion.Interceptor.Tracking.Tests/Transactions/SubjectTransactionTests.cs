@@ -51,12 +51,12 @@ public class SubjectTransactionTests
     }
 
     [Fact]
-    public async Task WhenTheContextResolvesTwoTransactionInterceptors_ThenTheWriteIsCapturedInsteadOfThrowing()
+    public async Task WhenTheBoundTransactionInterceptorIsInheritedAndSecond_ThenTheWriteIsCapturedInsteadOfThrowing()
     {
         // Arrange: context inheritance adds another context as a fallback on attach, so a subject built on
-        // one transaction-enabled context and attached into a graph rooted on another resolves two.
-        // Requiring exactly one threw out of the property setter, which on a scheduler thread ends the
-        // process; the question being asked is only whether the transaction belongs to this context.
+        // one transaction-enabled context and attached into a graph rooted on another resolves two. The
+        // subject's own interceptor is first and the fallback's interceptor is second, so binding must scan
+        // all resolved instances by reference rather than accepting only the first one.
         var context = CreateTransactionContext();
         var fallbackContext = CreateTransactionContext();
 
@@ -64,7 +64,7 @@ public class SubjectTransactionTests
         ((IInterceptorSubject)person).Context.AddFallbackContext(fallbackContext);
 
         // Act
-        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        using (var transaction = await fallbackContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             person.FirstName = "John";
 
@@ -77,6 +77,25 @@ public class SubjectTransactionTests
         }
 
         Assert.Equal("John", person.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenTransactionIsBoundToAnUnrelatedContext_ThenWriteThrows()
+    {
+        // Arrange
+        var subjectContext = CreateTransactionContext();
+        var transactionContext = CreateTransactionContext();
+        var person = new Person(subjectContext);
+
+        using var transaction = await transactionContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+
+        // Act
+        var exception = Assert.Throws<InvalidOperationException>(() => person.FirstName = "John");
+
+        // Assert
+        Assert.Contains("Transaction is bound to a different context", exception.Message);
+        Assert.Empty(transaction.GetPendingChanges());
+        Assert.Null(person.FirstName);
     }
 
     [Fact]

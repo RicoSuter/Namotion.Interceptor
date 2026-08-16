@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
@@ -58,9 +59,11 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         var transaction = SubjectTransaction.Current;
         if (transaction is { IsCommitting: false, IsDisposed: false } && !context.Property.Metadata.IsDerived)
         {
-            var isBoundToThisContext = context.Property.Subject.Context
-                .GetServices<SubjectTransactionInterceptor>()
-                .Contains(transaction.Interceptor);
+            var subjectInterceptors = context.Property.Subject.Context
+                .GetServices<SubjectTransactionInterceptor>();
+            var isBoundToThisContext = subjectInterceptors.Length == 1
+                ? ReferenceEquals(subjectInterceptors[0], transaction.Interceptor)
+                : ContainsByReference(subjectInterceptors, transaction.Interceptor);
 
             if (!isBoundToThisContext)
             {
@@ -86,6 +89,22 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         next(ref context);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool ContainsByReference(
+        ImmutableArray<SubjectTransactionInterceptor> interceptors,
+        SubjectTransactionInterceptor target)
+    {
+        for (var index = 0; index < interceptors.Length; index++)
+        {
+            if (ReferenceEquals(interceptors[index], target))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private sealed class LockReleaser(SemaphoreSlim semaphore) : IDisposable
