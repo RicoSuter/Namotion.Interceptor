@@ -4,8 +4,11 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
+[Collection(PerPropertySubscriptionCollection.Name)]
 public class PerPropertySubscriptionConventionsTests
 {
+    public PerPropertySubscriptionConventionsTests() => PropertyChangeSubscriptions.ResetForTests();
+
     // SubscribeToPath (PR #381) builds on per-property subscriptions; listed ahead of its arrival.
     private static readonly string[] SensitiveMarkers =
     [
@@ -52,9 +55,8 @@ public class PerPropertySubscriptionConventionsTests
     public void WhenTestFileUsesPerPropertySubscriptionState_ThenItResetsProcessWideState()
     {
         // Arrange
-        var conventionsFileName = $"{nameof(PerPropertySubscriptionConventionsTests)}.cs";
-        var resetMarker =
-            $"{nameof(PropertyChangeSubscriptions)}.{nameof(PropertyChangeSubscriptions.ResetForTests)}()";
+        const string resetConstructorSuffix =
+            "() => PropertyChangeSubscriptions.ResetForTests();";
 
         // Act
         var offenders = Directory
@@ -63,8 +65,17 @@ public class PerPropertySubscriptionConventionsTests
                         && !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
             .Select(file => (Name: Path.GetFileName(file), Content: File.ReadAllText(file)))
             .Where(file => SensitiveMarkers.Any(file.Content.Contains))
-            .Where(file => file.Name != conventionsFileName)
-            .Where(file => !file.Content.Contains(resetMarker))
+            .Where(file =>
+            {
+                var className = Path.GetFileNameWithoutExtension(file.Name);
+                var requiredResetConstructor = $"public {className}{resetConstructorSuffix}";
+                return !file.Content
+                    .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                    .Any(line => string.Equals(
+                        line.Trim(),
+                        requiredResetConstructor,
+                        StringComparison.Ordinal));
+            })
             .Select(file => file.Name)
             .ToArray();
 
@@ -72,9 +83,10 @@ public class PerPropertySubscriptionConventionsTests
         Assert.True(
             offenders.Length == 0,
             "These test files use per-property subscriptions or the process-wide subscription count " +
-            $"but do not call {resetMarker} from their test-class constructor: " +
-            $"{string.Join(", ", offenders)}. Only {conventionsFileName} is exempt because it scans " +
-            "sensitive markers but creates no subscription.");
+            "but do not use the standardized public expression-bodied reset constructor " +
+            "'public <ClassName>() => PropertyChangeSubscriptions.ResetForTests();': " +
+            $"{string.Join(", ", offenders)}. The convention requires one public test class named " +
+            "for its file. Future fixture constructors require an explicit redesign of this convention.");
     }
 
     private static string GetTestProjectDirectory([CallerFilePath] string thisFile = "")
