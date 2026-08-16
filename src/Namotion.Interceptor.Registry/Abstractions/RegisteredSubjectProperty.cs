@@ -1,4 +1,5 @@
-﻿using System.Collections.Immutable;
+﻿using System.Collections;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
@@ -10,11 +11,110 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubjectProperty
 {
+    [ThreadStatic]
+    private static Dictionary<IInterceptorSubject, int>? _reusableCollectionPositions;
+
     private const byte ContainerKindUnresolved = 0;
     private const byte ContainerKindNone = 1;
     private const byte ContainerKindReference = 2;
     private const byte ContainerKindCollection = 3;
     private const byte ContainerKindDictionary = 4;
+
+    /// <summary>
+    /// Syncs children's integer indices and ordering with the current collection value.
+    /// Dictionary properties are deliberately ignored because their keys are opaque metadata.
+    /// </summary>
+    internal void RefreshCollectionIndices(object? collectionValue, ISubjectRegistry registry)
+    {
+        if (!IsSubjectCollection)
+        {
+            return;
+        }
+
+        lock (_children)
+        {
+            var collectionPositions = BuildCollectionPositions(collectionValue, _children.Count);
+            if (collectionPositions is null)
+            {
+                return;
+            }
+
+            for (var index = 0; index < _children.Count; index++)
+            {
+                var child = _children[index];
+                if (!collectionPositions.TryGetValue(child.Subject, out var newIndex) ||
+                    child.Index is int oldIndex && oldIndex == newIndex)
+                {
+                    continue;
+                }
+
+                var boxedNewIndex = (object)newIndex;
+                _children[index] = child with { Index = boxedNewIndex };
+                registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, boxedNewIndex);
+            }
+
+            _children.Sort(static (left, right) => ((int)left.Index!).CompareTo((int)right.Index!));
+            _childrenCache = default;
+            collectionPositions.Clear();
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Dictionary<IInterceptorSubject, int>? BuildCollectionPositions(object? value, int capacityHint)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        var collectionPositions = _reusableCollectionPositions;
+        collectionPositions?.Clear();
+
+        if (value is IList list)
+        {
+            for (var index = 0; index < list.Count; index++)
+            {
+                if (list[index] is IInterceptorSubject subject)
+                {
+                    collectionPositions ??= _reusableCollectionPositions =
+                        new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
+                    collectionPositions.TryAdd(subject, index);
+                }
+            }
+        }
+        else if (value is ICollection collection)
+        {
+            var index = 0;
+            foreach (var item in collection)
+            {
+                if (item is IInterceptorSubject subject)
+                {
+                    collectionPositions ??= _reusableCollectionPositions =
+                        new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
+                    collectionPositions.TryAdd(subject, index);
+                }
+
+                index++;
+            }
+        }
+        else if (value is IEnumerable enumerable and not string)
+        {
+            var index = 0;
+            foreach (var item in enumerable)
+            {
+                if (item is IInterceptorSubject subject)
+                {
+                    collectionPositions ??= _reusableCollectionPositions =
+                        new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
+                    collectionPositions.TryAdd(subject, index);
+                }
+
+                index++;
+            }
+        }
+
+        return collectionPositions;
+    }
 
     /// <summary>
     /// How many children may be found away from their slot, or not found at all, before the rest are placed

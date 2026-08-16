@@ -83,12 +83,6 @@ internal static class SubjectPropertyRelationshipReconciler
             relationshipKinds,
             descriptors.Count);
 
-        var children = ImmutableArray.CreateBuilder<SubjectChildReference>(descriptors.Count);
-        foreach (var descriptor in descriptors)
-        {
-            children.Add(new SubjectChildReference(descriptor.Subject, property, descriptor.Index));
-        }
-
         var additions = ImmutableArray.CreateBuilder<ProcessedSubjectMembership>();
         var newSubjects = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
         foreach (var membership in state.Memberships)
@@ -132,8 +126,7 @@ internal static class SubjectPropertyRelationshipReconciler
             state,
             removals.ToImmutable(),
             additions.ToImmutable(),
-            removedRelationships,
-            children.MoveToImmutable());
+            removedRelationships);
     }
 
     private static ImmutableArray<SubjectPropertyRelationship> ReconcileRelationships(
@@ -248,6 +241,23 @@ internal static class SubjectPropertyRelationshipReconciler
                 }
                 return;
 
+            case string:
+                return;
+
+            case IEnumerable enumerable when property.Metadata.Type.IsSubjectDictionaryType():
+                foreach (var item in enumerable)
+                {
+                    if (item is not null &&
+                        SubjectLookup.TryGetSubjectFromKeyValuePair(item, out var key, out var child))
+                    {
+                        descriptors.Add(new SubjectOccurrenceDescriptor(
+                            child,
+                            key,
+                            RelationshipIndexKind.DictionaryKey));
+                    }
+                }
+                return;
+
             case ICollection collection:
             {
                 var position = 0;
@@ -265,23 +275,6 @@ internal static class SubjectPropertyRelationshipReconciler
                 }
                 return;
             }
-
-            case string:
-                return;
-
-            case IEnumerable enumerable when property.Metadata.Type.IsSubjectDictionaryType():
-                foreach (var item in enumerable)
-                {
-                    if (item is not null &&
-                        SubjectLookup.TryGetSubjectFromKeyValuePair(item, out var key, out var child))
-                    {
-                        descriptors.Add(new SubjectOccurrenceDescriptor(
-                            child,
-                            key,
-                            RelationshipIndexKind.DictionaryKey));
-                    }
-                }
-                return;
 
             case IEnumerable enumerable:
             {
@@ -371,14 +364,12 @@ internal sealed class StagedPropertyReconciliation
         ProcessedPropertyState state,
         ImmutableArray<ProcessedSubjectMembership> membershipRemovals,
         ImmutableArray<ProcessedSubjectMembership> membershipAdditions,
-        ImmutableArray<SubjectPropertyRelationship> removedRelationships,
-        ImmutableArray<SubjectChildReference> children)
+        ImmutableArray<SubjectPropertyRelationship> removedRelationships)
     {
         State = state;
         MembershipRemovals = membershipRemovals;
         MembershipAdditions = membershipAdditions;
         RemovedRelationships = removedRelationships;
-        Children = children;
     }
 
     public ProcessedPropertyState State { get; }
@@ -388,6 +379,4 @@ internal sealed class StagedPropertyReconciliation
     public ImmutableArray<ProcessedSubjectMembership> MembershipAdditions { get; }
 
     public ImmutableArray<SubjectPropertyRelationship> RemovedRelationships { get; }
-
-    public ImmutableArray<SubjectChildReference> Children { get; }
 }

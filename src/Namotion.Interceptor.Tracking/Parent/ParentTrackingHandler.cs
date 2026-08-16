@@ -41,13 +41,30 @@ public class ParentTrackingHandler : ILifecycleHandler, IPropertyLifecycleHandle
     /// Moves the tracked parent index of the retained children, which the add/remove events cannot do
     /// because a retained child raises neither.
     /// </summary>
-    void IPropertyLifecycleHandler.RefreshChildIndices(PropertyReference property, ReadOnlySpan<SubjectChildReference> children)
+    void IPropertyLifecycleHandler.RefreshCollectionProperty(PropertyReference property, object? value)
     {
-        // Applied back to front so a subject held at several indices keeps the first one, which is the
-        // index attach recorded.
-        for (var i = children.Length - 1; i >= 0; i--)
+        if (!property.Metadata.Type.IsSubjectCollectionType() || value is not System.Collections.IEnumerable enumerable)
         {
-            children[i].Subject.UpdateParentIndex(property, children[i].Index);
+            return;
+        }
+
+        var children = new List<(IInterceptorSubject Subject, int Index)>();
+        var index = 0;
+        foreach (var item in enumerable)
+        {
+            if (item is IInterceptorSubject child)
+            {
+                children.Add((child, index));
+            }
+
+            index++;
+        }
+
+        // Applied back to front so a subject held at several positions keeps the first one, which is the
+        // position attach recorded.
+        for (var childIndex = children.Count - 1; childIndex >= 0; childIndex--)
+        {
+            children[childIndex].Subject.UpdateParentIndex(property, children[childIndex].Index);
         }
     }
 }

@@ -122,13 +122,17 @@ public class PropertyLifecycleRefreshTests
     {
         // Nested reconciliation of the same baseline would let the inner generation be overwritten by the outer one.
         // Arrange
+        var firstLifecycle = new LifecycleInterceptor();
+        var secondLifecycle = new LifecycleInterceptor();
         var relationshipHandler = new ReentrantRelationshipHandler();
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithLifecycle();
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(firstLifecycle);
+        context.AddService(secondLifecycle);
         context.AddService<IPropertyRelationshipHandler>(relationshipHandler);
 
         var garage = new Garage(context);
+        var child = new Car { Name = "child" };
+        var writtenValue = new List<Car> { child };
         relationshipHandler.Callback = property =>
         {
             if (property.Name == nameof(Garage.MutableCars))
@@ -139,7 +143,13 @@ public class PropertyLifecycleRefreshTests
 
         // Act & Assert
         Assert.Throws<InvalidOperationException>(() =>
-            garage.MutableCars = [new Car { Name = "child" }]);
+            garage.MutableCars = writtenValue);
+        Assert.Same(writtenValue, garage.MutableCars);
+        Assert.Equal(2, relationshipHandler.Generations.Count);
+        Assert.All(
+            relationshipHandler.Generations,
+            generation => Assert.Same(child, Assert.Single(generation).Child));
+        Assert.Equal(2, child.GetReferenceCount());
     }
 
     [Fact]
@@ -208,11 +218,14 @@ public class PropertyLifecycleRefreshTests
 
         public List<string> Properties { get; } = [];
 
+        public List<SubjectPropertyRelationship[]> Generations { get; } = [];
+
         public void ReconcileChildRelationships(
             PropertyReference property,
             ReadOnlySpan<SubjectPropertyRelationship> relationships)
         {
             Properties.Add(property.Name);
+            Generations.Add(relationships.ToArray());
             if (!_hasInvokedCallback)
             {
                 _hasInvokedCallback = true;

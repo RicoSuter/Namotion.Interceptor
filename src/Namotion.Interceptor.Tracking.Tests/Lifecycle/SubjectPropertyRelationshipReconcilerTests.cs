@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Specialized;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -268,6 +269,73 @@ public class SubjectPropertyRelationshipReconcilerTests
     }
 
     [Fact]
+    public void WhenOpaqueDictionaryKeysAreRetainedAndRekeyed_ThenLifecycleCallbacksDoNotUseKeyEquality()
+    {
+        // Collection refresh callbacks must not compare dictionary keys after lifecycle state has committed.
+        // Arrange
+        var relationshipHandler = new RecordingRelationshipHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+        context.AddService<IPropertyRelationshipHandler>(relationshipHandler);
+
+        var garage = new Garage(context);
+        var child = new Car { Name = "child" };
+        var firstKey = new HostileKey();
+        var secondKey = new HostileKey();
+        garage.CarsByOpaqueKey = new IdentityReadOnlyDictionary<object, Car>((firstKey, child));
+
+        // Act
+        garage.CarsByOpaqueKey = new IdentityReadOnlyDictionary<object, Car>((firstKey, child));
+        garage.CarsByOpaqueKey = new IdentityReadOnlyDictionary<object, Car>((secondKey, child));
+
+        // Assert
+        var relationship = Assert.Single(relationshipHandler.Generations[^1]);
+        Assert.Same(secondKey, relationship.Index);
+        Assert.Equal(1, child.GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenASetterOnlySubjectContainerIsWritten_ThenTheWrittenValueIsReconciled()
+    {
+        // Setter-only generated metadata has no getter, so the committed write value is the only structural input.
+        // Arrange
+        var (garage, relationshipHandler) = CreateGarage();
+        var child = new Car { Name = "child" };
+
+        // Act
+        garage.SetterOnlyCars = [child];
+
+        // Assert
+        AssertRelationships(
+            Assert.Single(relationshipHandler.Generations),
+            nameof(Garage.SetterOnlyCars),
+            (child, 0));
+        Assert.Equal(1, child.GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenAReadOnlyDictionaryAlsoImplementsICollection_ThenDictionaryKeysAndSubjectsAreRetained()
+    {
+        // Declared dictionary shape takes precedence over incidental non-generic collection implementation.
+        // Arrange
+        var (garage, relationshipHandler) = CreateGarage();
+        var child = new Car { Name = "child" };
+        var key = new object();
+        var dictionary = new CollectionReadOnlyDictionary<object, Car>((key, child));
+
+        // Act
+        garage.CarsByOpaqueKey = dictionary;
+
+        // Assert
+        AssertRelationships(
+            Assert.Single(relationshipHandler.Generations),
+            nameof(Garage.CarsByOpaqueKey),
+            (child, key));
+        Assert.Equal(1, child.GetReferenceCount());
+    }
+
+    [Fact]
     public void WhenAHostileSubjectAppearsMoreThanOnce_ThenReferenceIdentityAvoidsItsEqualityMembers()
     {
         // Any default subject comparer in membership or occurrence matching invokes these throwing members.
@@ -455,6 +523,58 @@ public class SubjectPropertyRelationshipReconcilerTests
 
             value = default!;
             return false;
+        }
+
+        public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator()
+        {
+            foreach (var entry in entries)
+            {
+                yield return new KeyValuePair<TKey, TValue>(entry.Key, entry.Value);
+            }
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class CollectionReadOnlyDictionary<TKey, TValue>(params (TKey Key, TValue Value)[] entries)
+        : IReadOnlyDictionary<TKey, TValue>, ICollection
+        where TKey : class
+    {
+        public int Count => entries.Length;
+
+        public IEnumerable<TKey> Keys => entries.Select(entry => entry.Key);
+
+        public IEnumerable<TValue> Values => entries.Select(entry => entry.Value);
+
+        public TValue this[TKey key] => entries.First(entry => ReferenceEquals(entry.Key, key)).Value;
+
+        public bool IsSynchronized => false;
+
+        public object SyncRoot { get; } = new();
+
+        public bool ContainsKey(TKey key) => entries.Any(entry => ReferenceEquals(entry.Key, key));
+
+        public bool TryGetValue(TKey key, out TValue value)
+        {
+            foreach (var entry in entries)
+            {
+                if (ReferenceEquals(entry.Key, key))
+                {
+                    value = entry.Value;
+                    return true;
+                }
+            }
+
+            value = default!;
+            return false;
+        }
+
+        public void CopyTo(Array array, int index)
+        {
+            foreach (var entry in entries)
+            {
+                array.SetValue(new KeyValuePair<TKey, TValue>(entry.Key, entry.Value), index++);
+            }
         }
 
         public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator()

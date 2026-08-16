@@ -163,7 +163,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
     {
         void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
         void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
-        void RefreshChildIndices(Namotion.Interceptor.PropertyReference property, System.ReadOnlySpan<Namotion.Interceptor.Tracking.Lifecycle.SubjectChildReference> children);
+        void RefreshCollectionProperty(Namotion.Interceptor.PropertyReference property, object? value);
     }
     public interface IPropertyRelationshipHandler
     {

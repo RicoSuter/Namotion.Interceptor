@@ -21,6 +21,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
 
         public partial List<Car> MutableCars { get; set; }
 
+        public partial Car[] SetterOnlyCars { set; }
+
         public partial ICollection CollectionItems { get; set; }
 
         public partial IEnumerable<object?> EnumerableItems { get; set; }
