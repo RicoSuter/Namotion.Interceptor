@@ -20,8 +20,8 @@ public class PerPropertySubscriptionLifecycleTests
         var person = new Person(context);
         var firstNameHits = 0;
         var lastNameHits = 0;
-        using var a = new PropertyReference(person, nameof(Person.FirstName)).Subscribe((in SubjectPropertyChange _) => firstNameHits++);
-        using var b = new PropertyReference(person, nameof(Person.LastName)).Subscribe((in SubjectPropertyChange _) => lastNameHits++);
+        using var a = new PropertyReference(person, nameof(Person.FirstName)).SubscribeInline((in SubjectPropertyChange _) => firstNameHits++);
+        using var b = new PropertyReference(person, nameof(Person.LastName)).SubscribeInline((in SubjectPropertyChange _) => lastNameHits++);
 
         // Act
         person.FirstName = "John";
@@ -41,9 +41,9 @@ public class PerPropertySubscriptionLifecycleTests
         var person = new Person(context);
         var lastNameHits = 0;
         using var first = new PropertyReference(person, nameof(Person.FirstName))
-            .Subscribe((in SubjectPropertyChange _) => person.LastName = "Doe");
+            .SubscribeInline((in SubjectPropertyChange _) => person.LastName = "Doe");
         using var last = new PropertyReference(person, nameof(Person.LastName))
-            .Subscribe((in SubjectPropertyChange _) => lastNameHits++);
+            .SubscribeInline((in SubjectPropertyChange _) => lastNameHits++);
 
         // Act
         person.FirstName = "John";
@@ -59,7 +59,7 @@ public class PerPropertySubscriptionLifecycleTests
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
-        var s = new PropertyReference(person, nameof(Person.FirstName)).Subscribe((in SubjectPropertyChange _) => { });
+        var s = new PropertyReference(person, nameof(Person.FirstName)).SubscribeInline((in SubjectPropertyChange _) => { });
 
         // Subscribe raised the live count, so a later "returns to zero" is distinguishable from
         // "never left zero".
@@ -83,7 +83,7 @@ public class PerPropertySubscriptionLifecycleTests
         var root = new Person(context);
         var child = new Person(); // no context yet -> dormant
         var hits = 0;
-        using var s = new PropertyReference(child, nameof(Person.FirstName)).Subscribe((in SubjectPropertyChange _) => hits++);
+        using var s = new PropertyReference(child, nameof(Person.FirstName)).SubscribeInline((in SubjectPropertyChange _) => hits++);
 
         // Act 1: dormant (not attached) -> no delivery
         child.FirstName = "A";
@@ -115,7 +115,7 @@ public class PerPropertySubscriptionLifecycleTests
         childCtx.AddFallbackContext(parent);
         var person = new Person(childCtx);
         var hits = 0;
-        using var s = new PropertyReference(person, nameof(Person.FirstName)).Subscribe((in SubjectPropertyChange _) => hits++);
+        using var s = new PropertyReference(person, nameof(Person.FirstName)).SubscribeInline((in SubjectPropertyChange _) => hits++);
 
         // Act
         person.FirstName = "John";
@@ -136,7 +136,7 @@ public class PerPropertySubscriptionLifecycleTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithTransactions();
         var person = new Person(context);
         var hits = 0;
-        using var s = new PropertyReference(person, nameof(Person.FirstName)).Subscribe((in SubjectPropertyChange _) => hits++);
+        using var s = new PropertyReference(person, nameof(Person.FirstName)).SubscribeInline((in SubjectPropertyChange _) => hits++);
 
         // Act & Assert
         using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
@@ -169,7 +169,7 @@ public class PerPropertySubscriptionLifecycleTests
         child.AddFallbackContext(parent);
         var person = new Person(child);
         var hits = 0;
-        using var s = new PropertyReference(person, nameof(Person.FirstName)).Subscribe((in SubjectPropertyChange _) => hits++);
+        using var s = new PropertyReference(person, nameof(Person.FirstName)).SubscribeInline((in SubjectPropertyChange _) => hits++);
 
         // Act & Assert
         using (var transaction = await child.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
@@ -195,9 +195,9 @@ public class PerPropertySubscriptionLifecycleTests
         var person = new Person(context);
         var property = new PropertyReference(person, nameof(Person.FirstName));
         using var queue = context.CreatePropertyChangeQueueSubscription();
-        using var throwing = property.Subscribe((in SubjectPropertyChange _) => throw new InvalidOperationException("boom"));
+        using var throwing = property.SubscribeInline((in SubjectPropertyChange _) => throw new InvalidOperationException("boom"));
         var laterHits = 0;
-        using var later = property.Subscribe((in SubjectPropertyChange _) => laterHits++);
+        using var later = property.SubscribeInline((in SubjectPropertyChange _) => laterHits++);
 
         // Act & Assert: dispatch is fail-fast, so the observer installed after the throwing one
         // is silently skipped; the queue is served before listeners, so it already has the change.
@@ -215,7 +215,7 @@ public class PerPropertySubscriptionLifecycleTests
         var person = new Person(context);
         string? captured = null;
         using var s = new PropertyReference(person, nameof(Person.FullName))
-            .Subscribe((in SubjectPropertyChange c) => captured = c.GetNewValue<string?>());
+            .SubscribeInline((in SubjectPropertyChange c) => captured = c.GetNewValue<string?>());
 
         // Act: writing a dependency recalculates FullName, which re-enters the write chain as its own
         // (fresh, unclaimed) write context.
@@ -233,7 +233,7 @@ public class PerPropertySubscriptionLifecycleTests
         var person = new Person(context);
         var hits = 0;
         using var s = new PropertyReference(person, nameof(Person.FullName))
-            .Subscribe((in SubjectPropertyChange _) => hits++);
+            .SubscribeInline((in SubjectPropertyChange _) => hits++);
 
         // Act: the dependency write never re-enters to recalc FullName, and manual RecalculateDerivedProperty
         // is also a no-op without the attached DerivedPropertyData.
@@ -253,8 +253,8 @@ public class PerPropertySubscriptionLifecycleTests
         var firstHits = 0;
         var secondHits = 0;
         var property = new PropertyReference(person, nameof(Person.FirstName));
-        using var first = property.Subscribe((in SubjectPropertyChange _) => firstHits++);
-        using var second = property.Subscribe((in SubjectPropertyChange _) => secondHits++);
+        using var first = property.SubscribeInline((in SubjectPropertyChange _) => firstHits++);
+        using var second = property.SubscribeInline((in SubjectPropertyChange _) => secondHits++);
 
         // Act
         person.FirstName = "John";
@@ -272,7 +272,7 @@ public class PerPropertySubscriptionLifecycleTests
         var person = new Person(context);
 
         // Act: create a subscription and drop the returned handle without ever disposing it.
-        _ = new PropertyReference(person, nameof(Person.FirstName)).Subscribe((in SubjectPropertyChange _) => { });
+        _ = new PropertyReference(person, nameof(Person.FirstName)).SubscribeInline((in SubjectPropertyChange _) => { });
 
         // Assert: only Dispose decrements the process-wide live count, so a dropped, undisposed
         // subscription leaves it positive. No GC assertion is made.
@@ -287,7 +287,7 @@ public class PerPropertySubscriptionLifecycleTests
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         var subscription = new PropertyReference(person, nameof(Person.FirstName))
-            .Subscribe((in SubjectPropertyChange _) => { });
+            .SubscribeInline((in SubjectPropertyChange _) => { });
         using var start = new ManualResetEventSlim(false);
 
         // Act & Assert: writers fan out and race the dispatch against a concurrent Dispose. Parallel.For
@@ -321,7 +321,7 @@ public class PerPropertySubscriptionLifecycleTests
         for (var i = 0; i < permanent.Length; i++)
         {
             var index = i;
-            permanent[i] = property.Subscribe((in SubjectPropertyChange _) => Interlocked.Increment(ref permanentHits[index]));
+            permanent[i] = property.SubscribeInline((in SubjectPropertyChange _) => Interlocked.Increment(ref permanentHits[index]));
         }
 
         using var start = new ManualResetEventSlim(false);
@@ -330,7 +330,7 @@ public class PerPropertySubscriptionLifecycleTests
         var churn = Task.Run(() => Parallel.For(0, 500, _ =>
         {
             start.Wait();
-            using var churned = property.Subscribe((in SubjectPropertyChange _) => { });
+            using var churned = property.SubscribeInline((in SubjectPropertyChange _) => { });
             person.FirstName = "x";
         }));
         var writers = Task.Run(() => Parallel.For(0, 500, _ =>
@@ -366,7 +366,7 @@ public class PerPropertySubscriptionLifecycleTests
         bool? childHadInterceptor = null;
         bool? childWasRegistered = null;
         using var subscription = new PropertyReference(root, nameof(Person.Mother))
-            .Subscribe((in SubjectPropertyChange change) =>
+            .SubscribeInline((in SubjectPropertyChange change) =>
             {
                 var newChild = change.GetNewValue<Person?>();
                 childHadInterceptor = newChild is not null &&
@@ -393,9 +393,9 @@ public class PerPropertySubscriptionLifecycleTests
         var child = new Person();
         var childHits = 0;
         using var childSubscription = new PropertyReference(child, nameof(Person.FirstName))
-            .Subscribe((in SubjectPropertyChange _) => childHits++);
+            .SubscribeInline((in SubjectPropertyChange _) => childHits++);
         using var rootSubscription = new PropertyReference(root, nameof(Person.Mother))
-            .Subscribe((in SubjectPropertyChange change) =>
+            .SubscribeInline((in SubjectPropertyChange change) =>
             {
                 var newChild = change.GetNewValue<Person?>();
                 if (newChild is not null)
@@ -425,9 +425,9 @@ public class PerPropertySubscriptionLifecycleTests
 
         var childHits = 0;
         using var childSubscription = new PropertyReference(child, nameof(Person.FirstName))
-            .Subscribe((in SubjectPropertyChange _) => childHits++);
+            .SubscribeInline((in SubjectPropertyChange _) => childHits++);
         using var rootSubscription = new PropertyReference(root, nameof(Person.Mother))
-            .Subscribe((in SubjectPropertyChange change) =>
+            .SubscribeInline((in SubjectPropertyChange change) =>
             {
                 var departing = change.GetOldValue<Person?>();
                 if (departing is not null)
@@ -457,9 +457,9 @@ public class PerPropertySubscriptionLifecycleTests
         var child = new Person();
         var childHits = 0;
         using var childSubscription = new PropertyReference(child, nameof(Person.FirstName))
-            .Subscribe((in SubjectPropertyChange _) => childHits++);
+            .SubscribeInline((in SubjectPropertyChange _) => childHits++);
         using var subscription = new PropertyReference(root, nameof(Person.Mother))
-            .Subscribe((in SubjectPropertyChange change) =>
+            .SubscribeInline((in SubjectPropertyChange change) =>
             {
                 var newChild = change.GetNewValue<Person?>();
                 if (newChild is not null)
@@ -489,7 +489,7 @@ public class PerPropertySubscriptionLifecycleTests
         var queue = context.CreatePropertyChangeQueueSubscription();
         var hits = 0;
         using var listener = new PropertyReference(person, nameof(Person.FirstName))
-            .Subscribe((in SubjectPropertyChange _) => hits++);
+            .SubscribeInline((in SubjectPropertyChange _) => hits++);
 
         // Act
         person.FirstName = "John";
@@ -521,7 +521,7 @@ public class PerPropertySubscriptionLifecycleTests
         Assert.True(blocking.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)));
 
         using var listener = new PropertyReference(person, nameof(Person.FirstName))
-            .Subscribe((in SubjectPropertyChange _) => hits++);
+            .SubscribeInline((in SubjectPropertyChange _) => hits++);
         var queue = context.CreatePropertyChangeQueueSubscription();
 
         blocking.ProceedWithCommit.Set();
