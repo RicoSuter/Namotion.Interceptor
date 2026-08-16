@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// <summary>
 /// Tests that verify recursive discovery of descendants when subjects enter the graph.
 /// Discovery happens through ContextInheritanceHandler → AttachSubjectToContext, which
-/// seeds _lastProcessedValues and recursively attaches children.
+/// seeds canonical processed-property state and recursively attaches children.
 ///
 /// WithLifecycle() alone does NOT discover grandchildren — subjects must have the
 /// context (via inheritance or manual assignment) for the lifecycle interceptor to
@@ -14,6 +14,38 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// </summary>
 public class RecursiveAttachTests
 {
+    [Fact]
+    public void WhenAPrepopulatedRootIsAttached_ThenChildrenAttachInPropertyAndSourceOrderBeforeTheRoot()
+    {
+        // Attaching the root before its staged children, or grouping children by identity, would change master's order.
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+        var lifecycleInterceptor = context.TryGetLifecycleInterceptor()!;
+        var father = new Person { FirstName = "Father" };
+        var mother = new Person { FirstName = "Mother" };
+        var firstChild = new Person { FirstName = "First" };
+        var secondChild = new Person { FirstName = "Second" };
+        var parent = new Person
+        {
+            FirstName = "Parent",
+            Father = father,
+            Mother = mother,
+            Children = [firstChild, secondChild]
+        };
+        var attached = new List<IInterceptorSubject>();
+        lifecycleInterceptor.SubjectAttached += change => attached.Add(change.Subject);
+
+        // Act
+        ((IInterceptorSubject)parent).Context.AddFallbackContext(context);
+
+        // Assert
+        Assert.Equal(
+            new IInterceptorSubject[] { father, mother, firstChild, secondChild, parent },
+            attached);
+    }
+
     // ──────────────────────────────────────────────
     // Context inheritance discovers all descendants
     // ──────────────────────────────────────────────
@@ -286,23 +318,23 @@ public class RecursiveAttachTests
         child.Mother = grandmother;
         parent.Mother = child;
 
-        // Detach child → isLastDetach → _lastProcessedValues entries removed,
+        // Detach child → isLastDetach → processed-property entries removed,
         // grandmother detached via cascade
         parent.Mother = null;
 
         // Re-attach child — no ContextInheritanceHandler, so no AttachSubjectToContext,
-        // no re-seeding of _lastProcessedValues for child's properties
+        // no re-seeding of processed-property state for child's properties
         parent.Mother = child;
 
         // At this point: child.Mother backing store = grandmother, but
-        // _lastProcessedValues[child.Mother] doesn't exist (removed during detach).
+        // Processed state for child.Mother doesn't exist (removed during detach).
         // grandmother was detached and is NOT currently tracked.
 
         var attached = new List<IInterceptorSubject>();
         lifecycleInterceptor.SubjectAttached += change => attached.Add(change.Subject);
 
         // Act — re-write the same value to child.Mother (no equality interceptor to block it).
-        // This triggers WriteProperty with no _lastProcessedValues entry → fallback fires.
+        // This triggers WriteProperty with no processed-property entry → fallback fires.
         //
         // With context.CurrentValue fallback: old = grandmother, new = grandmother
         //   → ReferenceEquals → early return → grandmother NOT re-attached (BUG)

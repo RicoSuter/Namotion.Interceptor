@@ -379,4 +379,8 @@ internal sealed class StagedPropertyReconciliation
     public ImmutableArray<ProcessedSubjectMembership> MembershipAdditions { get; }
 
     public ImmutableArray<SubjectPropertyRelationship> RemovedRelationships { get; }
+
+    public bool HasRelationshipGeneration =>
+        State.OccurrenceCount > 0 ||
+        MembershipRemovals.Length > 0;
 }

@@ -492,6 +492,40 @@ public class LifecycleEventsTests
         Assert.Equal(0, child.GetReferenceCount());
     }
 
+    [Fact]
+    public void WhenAParentDetaches_ThenSubjectDetachingSeesTheOldRelationshipGroupBeforeItIsCleared()
+    {
+        // Clearing full groups before SubjectDetaching would hide the graph from observers of the existing event contract.
+        // Arrange
+        var relationshipHandler = new CurrentRelationshipHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle();
+        context.AddService<IPropertyRelationshipHandler>(relationshipHandler);
+        var parent = new Person(context) { FirstName = "Parent" };
+        var child = new Person { FirstName = "Child" };
+        parent.Children = [child, child];
+        var property = new PropertyReference(parent, nameof(Person.Children));
+        var lifecycleInterceptor = context.TryGetLifecycleInterceptor()!;
+        SubjectPropertyRelationship[]? relationshipsDuringEvent = null;
+        lifecycleInterceptor.SubjectDetaching += change =>
+        {
+            if (ReferenceEquals(change.Subject, parent))
+            {
+                relationshipsDuringEvent = relationshipHandler.GetCurrent(property);
+            }
+        };
+
+        // Act
+        ((IInterceptorSubject)parent).Context.RemoveFallbackContext(context);
+
+        // Assert
+        Assert.NotNull(relationshipsDuringEvent);
+        Assert.Equal(2, relationshipsDuringEvent.Length);
+        Assert.All(relationshipsDuringEvent, relationship => Assert.Same(child, relationship.Child));
+        Assert.Empty(relationshipHandler.GetCurrent(property));
+    }
+
     private class EventOrderTracker : ILifecycleHandler
     {
         private readonly List<(string source, string eventType, IInterceptorSubject subject)> _events;
@@ -505,6 +539,24 @@ public class LifecycleEventsTests
             {
                 _events.Add(("Handler", type, change.Subject));
             }
+        }
+    }
+
+    private sealed class CurrentRelationshipHandler : IPropertyRelationshipHandler
+    {
+        private readonly Dictionary<PropertyReference, SubjectPropertyRelationship[]> _relationships =
+            new(PropertyReference.Comparer);
+
+        public void ReconcileChildRelationships(
+            PropertyReference property,
+            ReadOnlySpan<SubjectPropertyRelationship> relationships)
+        {
+            _relationships[property] = relationships.ToArray();
+        }
+
+        public SubjectPropertyRelationship[] GetCurrent(PropertyReference property)
+        {
+            return _relationships.GetValueOrDefault(property) ?? [];
         }
     }
 }
