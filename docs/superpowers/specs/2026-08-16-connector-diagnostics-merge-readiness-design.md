@@ -4,7 +4,7 @@
 
 PR #454 introduces one grouped diagnostics model for every connector, adds queue and drop diagnostics, and aligns connector liveness and error reporting. The branch also contains extensive connector-specific tests and documentation. The latest `master`, including #468 and #469, was merged before this design was written. The merged baseline passes the repository's non-integration test suite.
 
-The review found that the architecture is generally sound. The main design defect is narrower: `QueueMetrics` exposes a registration state machine that is easy to misuse and is not fully correct under concurrency. There are also avoidable public API breaks and some constructor plumbing that should be simplified before merge.
+The review found that the architecture is generally sound. The main design defect is narrower: `QueueMetrics` exposes a registration state machine that is easy to misuse and is not fully correct under concurrency. There is also public API and constructor plumbing that should be simplified before merge. None of the affected APIs requires backward compatibility, so the final surface should be judged only by correctness, clarity, performance, and connector-authoring usability.
 
 ## Architecture Decision
 
@@ -61,13 +61,14 @@ This reduces the public state machine, fixes the concurrent registration race, a
 Perform a line-by-line review of the new public API with these decisions:
 
 - Keep the grouped diagnostics types, metrics types, `SubjectConnectorBase`, `ConnectorRunAttempt`, `StateChangeTime`, and queue diagnostic blocks.
-- Keep the intentional removal of the old flat connector-specific diagnostic members. Obsolete forwarding aliases would leave two competing models and make the grouped API harder to understand.
+- Keep the removal of the old flat connector-specific diagnostic members. Do not add obsolete forwarding aliases, because backward compatibility is not required and aliases would leave two competing models.
 - Keep the intentional replacement of `ISubjectSource.PendingWriteCount` with `Diagnostics.OutboundRetries.Depth`.
-- Restore the existing two-argument `SubjectPropertyWriter` constructor as the public constructor. Add or retain an internal overload for metrics wiring so a diagnostics implementation detail does not expand the public constructor.
-- Restore the existing five-parameter `SubjectSourceBase` constructor signature. Add a separate protected overload with explicit throughput parameters for built-in and external sources that need them.
+- Make the `SubjectPropertyWriter` constructor internal. Connector authors receive the writer through `StartListeningAsync`; they do not need to construct one or supply its metrics.
+- Keep one clear `SubjectSourceBase` constructor surface with the parameters required by custom sources. Do not add overloads solely to preserve the previous binary signature.
+- Remove or narrow any new public member that exists only for built-in wiring or tests. Keep public members that form a useful, documented connector-authoring contract.
 - Update public API snapshots only for intentional final API changes.
 
-The compatibility overloads avoid unnecessary binary breaks while retaining the deliberately redesigned diagnostics surface.
+No compatibility alias or overload is required. A smaller, coherent final API takes priority over preserving an unreleased or unused shape.
 
 ## Simplification and Performance Review
 
@@ -115,4 +116,4 @@ After the cleanup:
 
 ## Expected Result
 
-PR #454 retains its shared diagnostic model and operational behavior. Its core registration API becomes smaller and linearizable, unnecessary binary breaks are removed, connector state semantics remain covered, and no new diagnostics work is added to steady-state message or property delivery.
+PR #454 retains its shared diagnostic model and operational behavior. Its core registration API becomes smaller and linearizable, unnecessary public plumbing is removed, connector state semantics remain covered, and no new diagnostics work is added to steady-state message or property delivery.
