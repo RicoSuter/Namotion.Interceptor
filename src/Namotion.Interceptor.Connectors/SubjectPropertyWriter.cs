@@ -50,7 +50,7 @@ public sealed class SubjectPropertyWriter
     /// drives the source's state transitions, which only <see cref="SubjectSourceBase"/> defines. A
     /// source implementing the interface directly owns its own write path and its own transitions.
     /// </remarks>
-    public SubjectPropertyWriter(SubjectSourceBase source, ILogger logger, QueueMetrics? inboundBufferMetrics = null)
+    internal SubjectPropertyWriter(SubjectSourceBase source, ILogger logger, QueueMetrics? inboundBufferMetrics = null)
     {
         _source = source;
         _logger = logger;
@@ -68,7 +68,7 @@ public sealed class SubjectPropertyWriter
     /// close an ABBA cycle, since <see cref="StartBuffering"/> holds that lock while transitioning the
     /// source's state, which reaches registered monitors synchronously.
     /// </remarks>
-    public int BufferedUpdateCount => Volatile.Read(ref _bufferedUpdateCount);
+    internal int BufferedUpdateCount => Volatile.Read(ref _bufferedUpdateCount);
 
     /// <summary>
     /// Starts buffering updates instead of applying them directly.

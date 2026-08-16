@@ -120,8 +120,6 @@ namespace Namotion.Interceptor.Connectors
     }
     public sealed class SubjectPropertyWriter
     {
-        public SubjectPropertyWriter(Namotion.Interceptor.Connectors.SubjectSourceBase source, Microsoft.Extensions.Logging.ILogger logger, Namotion.Interceptor.Connectors.Diagnostics.QueueMetrics? inboundBufferMetrics = null) { }
-        public int BufferedUpdateCount { get; }
         public System.Threading.Tasks.Task LoadInitialStateAndResumeAsync(System.Threading.CancellationToken cancellationToken) { }
         public void StartBuffering() { }
         public void Write<TState>(TState state, System.Action<TState> update) { }
