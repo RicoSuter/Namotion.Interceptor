@@ -1,3 +1,6 @@
+using System.Collections.Immutable;
+using System.Runtime.ExceptionServices;
+
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public static class LifecycleInterceptorExtensions
@@ -40,6 +43,41 @@ public static class LifecycleInterceptorExtensions
     internal static int DecrementReferenceCount(this IInterceptorSubject subject)
     {
         return (int)(subject.Data.AddOrUpdate((null, ReferenceCountKey), 0, (_, count) => Math.Max(0, (int)(count ?? 0) - 1)) ?? 0);
+    }
+
+    internal static void ReconcileChildRelationships(
+        this IInterceptorSubject subject,
+        ImmutableArray<IPropertyRelationshipHandler> contextHandlers,
+        PropertyReference property,
+        ReadOnlySpan<SubjectPropertyRelationship> relationships)
+    {
+        ExceptionDispatchInfo? firstException = null;
+
+        for (var index = 0; index < contextHandlers.Length; index++)
+        {
+            try
+            {
+                contextHandlers[index].ReconcileChildRelationships(property, relationships);
+            }
+            catch (Exception exception)
+            {
+                firstException ??= ExceptionDispatchInfo.Capture(exception);
+            }
+        }
+
+        if (subject is IPropertyRelationshipHandler subjectHandler)
+        {
+            try
+            {
+                subjectHandler.ReconcileChildRelationships(property, relationships);
+            }
+            catch (Exception exception)
+            {
+                firstException ??= ExceptionDispatchInfo.Capture(exception);
+            }
+        }
+
+        firstException?.Throw();
     }
 
     public static void AttachSubjectProperty(this IInterceptorSubject subject, PropertyReference property)

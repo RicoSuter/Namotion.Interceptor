@@ -165,6 +165,10 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
         void RefreshChildIndices(Namotion.Interceptor.PropertyReference property, System.ReadOnlySpan<Namotion.Interceptor.Tracking.Lifecycle.SubjectChildReference> children);
     }
+    public interface IPropertyRelationshipHandler
+    {
+        void ReconcileChildRelationships(Namotion.Interceptor.PropertyReference property, System.ReadOnlySpan<Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyRelationship> relationships);
+    }
     public class LifecycleInterceptor : Namotion.Interceptor.Interceptors.ILifecycleInterceptor, Namotion.Interceptor.Interceptors.IWriteInterceptor
     {
         public LifecycleInterceptor() { }
@@ -197,6 +201,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public bool IsPropertyReferenceRemoved { get; init; }
         public Namotion.Interceptor.PropertyReference? Property { get; init; }
         public required int ReferenceCount { get; init; }
+        public Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyRelationship? Relationship { get; }
         public required Namotion.Interceptor.IInterceptorSubject Subject { get; init; }
     }
     public struct SubjectPropertyLifecycleChange : System.IEquatable<Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange>
@@ -204,6 +209,12 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public SubjectPropertyLifecycleChange(Namotion.Interceptor.IInterceptorSubject Subject, Namotion.Interceptor.PropertyReference Property) { }
         public Namotion.Interceptor.PropertyReference Property { get; set; }
         public Namotion.Interceptor.IInterceptorSubject Subject { get; set; }
+    }
+    public sealed class SubjectPropertyRelationship
+    {
+        public Namotion.Interceptor.IInterceptorSubject Child { get; }
+        public object? Index { get; }
+        public Namotion.Interceptor.PropertyReference Parent { get; }
     }
 }
 namespace Namotion.Interceptor.Tracking.Parent

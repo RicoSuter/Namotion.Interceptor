@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
     /// Handles its own property lifecycle, which the interceptor dispatches to besides the context services.
     /// </summary>
     [InterceptorSubject]
-    public partial class SelfHandlingContainer : IPropertyLifecycleHandler
+    public partial class SelfHandlingContainer : IPropertyLifecycleHandler, IPropertyRelationshipHandler
     {
         public SelfHandlingContainer()
         {
@@ -21,6 +21,13 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
         /// </summary>
         public List<SubjectChildReference[]> Refreshes { get; } = [];
 
+        /// <summary>
+        /// The relationships of each reconciliation, copied out because the span does not outlive the call.
+        /// </summary>
+        public List<SubjectPropertyRelationship[]> RelationshipReconciliations { get; } = [];
+
+        public List<string>? RelationshipHandlerCallOrder { get; set; }
+
         public void AttachProperty(SubjectPropertyLifecycleChange change)
         {
         }
@@ -32,6 +39,12 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
         public void RefreshChildIndices(PropertyReference property, ReadOnlySpan<SubjectChildReference> children)
         {
             Refreshes.Add(children.ToArray());
+        }
+
+        public void ReconcileChildRelationships(PropertyReference property, ReadOnlySpan<SubjectPropertyRelationship> relationships)
+        {
+            RelationshipHandlerCallOrder?.Add("subject");
+            RelationshipReconciliations.Add(relationships.ToArray());
         }
     }
 }
