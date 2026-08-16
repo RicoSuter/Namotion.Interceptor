@@ -84,7 +84,7 @@ public static class PropertyChangeSubscriptionExtensions
 
     /// <summary>
     /// Subscribes to changes of one property and delivers them serially on <paramref name="scheduler"/>.
-    /// Observer and scheduler exceptions are isolated from the writer and reported to
+    /// Observer and scheduler exceptions do not escape to the writer and are reported to
     /// <paramref name="onError"/> when supplied.
     /// </summary>
     /// <remarks>
@@ -92,6 +92,15 @@ public static class PropertyChangeSubscriptionExtensions
     /// concurrently. The queue is unbounded, and disposal drops queued work. A delivery already in flight may
     /// still invoke the observer or finish after Dispose returns. Changes queued before a subject detaches
     /// still drain.
+    /// Observer failures invoke <paramref name="onError"/> on the scheduler execution thread. A synchronous
+    /// <see cref="IScheduler.Schedule{TState}(TState, Func{IScheduler, TState, IDisposable})"/> failure invokes it
+    /// immediately on the thread calling the scheduler. When scheduling occurs while accepting a change, this
+    /// is the writing thread and the handler completes before the setter returns, so a slow handler delays the
+    /// setter. Error handlers shared by subscriptions may be invoked concurrently and must be thread-safe.
+    /// Exceptions thrown by <paramref name="onError"/> are swallowed. A synchronous scheduling failure faults
+    /// the subscription only if it wins the terminal transition; concurrent or reentrant disposal may win
+    /// instead, while the failure is still reported and <see cref="ScheduledPropertySubscription.IsFaulted"/>
+    /// remains <see langword="false"/>.
     /// <see cref="ImmediateScheduler.Instance"/> and <see cref="CurrentThreadScheduler.Instance"/> are rejected,
     /// but a custom or wrapped scheduler may still invoke work inline and cannot be detected. In that case the
     /// observer runs inside the setter, its latency affects the writer, and it sees the writer's current ambient
