@@ -1,6 +1,6 @@
 # Container Relationship Reconciliation Design
 
-Status: Design approved; awaiting written-spec review
+Status: Design approved; independently reviewed; ready for implementation planning
 
 ## Context
 
@@ -12,7 +12,7 @@ That approach has three problems:
 2. The adaptive scan mutates relationships before reconciliation is known to succeed. A later dictionary key operation can throw and leave a permanently partial update.
 3. A container occurrence is collapsed to one relationship per child and parent property. A dictionary that contains the same subject under two keys therefore cannot be represented faithfully.
 
-The replacement models every subject-valued container occurrence as a graph relationship. Each executing lifecycle interceptor enumerates the container once and owns its canonical relationship handles. Registry and parent tracking replace their ordered handle groups from those full sequences and derive their public snapshots from them.
+The replacement models every subject-valued container occurrence as a graph relationship. Each executing lifecycle interceptor enumerates the container once and owns its canonical immutable relationship objects. Registry and parent tracking replace their ordered relationship groups from those full sequences and derive their public snapshots from them.
 
 This is a breaking release, but the commonly consumed registry and parent snapshot APIs will retain their existing names, return types, and value semantics.
 
@@ -24,7 +24,7 @@ Current master permits zero, one, or several resolved `ILifecycleInterceptor` se
 
 - Every resolved lifecycle interceptor remains in the write pipeline in current service order.
 - Each `LifecycleInterceptor` owns and locks its own processed-property state.
-- Same-instance structural refresh takes one resolver snapshot and refreshes every lifecycle interceptor in it exactly once.
+- Same-instance structural refresh takes one resolver snapshot and invokes every built-in lifecycle structural-refresh capability in it exactly once.
 - Lifecycle and relationship handlers remain ordered multi-service contracts and retain current subject-handler dispatch.
 - No #419 unique-service, graph-owner, inherited-context, or explicit-root API is required.
 
@@ -38,9 +38,9 @@ PR #458 should therefore remain based on `master`, not stacked on #419 or #440. 
 - Represent every subject-valued dictionary, collection, and direct-property occurrence, including duplicate references to the same subject.
 - Preserve container enumeration order and exact dictionary key or collection index metadata.
 - Keep lifecycle membership distinct from occurrence relationships so duplicate entries do not duplicate attach and detach callbacks.
-- Have one authoritative mutable index per lifecycle-owned relationship handle rather than independent registry and parent-tracking index stores.
+- Share one immutable relationship object between the lifecycle sequence and its consumers rather than maintaining independently mutable registry and parent-tracking index stores.
 - Use one linear reconciliation algorithm based only on subject reference identity.
-- Preserve thread safety, lock-free cached public reads, existing lifecycle handler ordering, and existing detach visibility.
+- Preserve thread safety, cached public snapshot behavior, existing lifecycle handler ordering, and existing detach visibility.
 - Finish enumeration and all failure-prone container inspection before mutating relationship state.
 - Keep the final pull request focused and substantially smaller than the current adaptive implementation.
 - Keep lifecycle-authority iteration at one boundary and preserve current master's zero-or-many service resolution and dispatch semantics.
@@ -56,15 +56,16 @@ PR #458 should therefore remain based on `master`, not stacked on #419 or #440. 
 - Include the unrelated container-kind cache optimization or parent-lookup scenarios not reached by this relationship redesign.
 - Implement context cardinality, graph movement, parent-context inheritance, or hosting state machines from #419 or #440.
 - Redefine the pre-existing ownership semantics of a subject concurrently attached through several independently removable lifecycle contexts. This pull request preserves master's dispatch model; it does not absorb #419's cardinality problem.
+- Guarantee correct public graph ownership after independently removing one of several lifecycle authorities that still overlap on the same subject. Master already removes lifecycle and registry contributions without a producer identity in this topology. PR #458 documents and preserves that limitation.
 - Preserve state inside a custom lifecycle handler that violates the documented exception-free handler contract.
 
 ## Terminology
 
 - **Occurrence**: One subject-valued entry produced by enumerating a structural property. Two dictionary keys that point to the same subject are two occurrences.
-- **Relationship**: The graph edge for one occurrence. It contains the parent `PropertyReference`, child `IInterceptorSubject`, and current dictionary key, collection index, or `null` for a direct property.
+- **Relationship**: The immutable graph edge for one occurrence. It contains the parent `PropertyReference`, child `IInterceptorSubject`, and dictionary key, collection index, or `null` observed in one successful reconciliation.
 - **Membership**: The fact that a child is reachable through a parent property at least once. Membership is unique per `(parent property, child subject)` pair.
 - **Relationship snapshot**: A public immutable value such as `SubjectParent`, `SubjectPropertyParent`, or `SubjectPropertyChild`, derived from the current relationship state.
-- **Canonical relationship sequence**: The ordered live handles owned by one `LifecycleInterceptor` for one property. Current master can have an equivalent sequence in more than one lifecycle interceptor.
+- **Canonical relationship sequence**: The ordered immutable relationship objects owned by one `LifecycleInterceptor` for one property. Current master can have an equivalent sequence in more than one lifecycle interceptor.
 - **Quiescent**: No structural write, context attach, or context detach is in progress, no interceptor invocation has written a backing value and is still waiting to reconcile it, and no structural value has been changed outside an intercepted assignment since its last successful reconciliation.
 
 ## Behavioral Contract
@@ -142,55 +143,58 @@ The existing record structs retain their constructors, properties, and value equ
 
 ## Required Invariants
 
-When the graph is quiescent after successful enumeration and exception-free attach and detach callbacks, all of these invariants hold:
+When the graph is quiescent after successful enumeration and exception-free attach and detach callbacks, all of these invariants hold for each lifecycle interceptor and for public consumers whose currently contributing lifecycle callbacks agree on the property's attachment state:
 
 1. **Property agreement**: each lifecycle interceptor's processed membership state for a structural property equals the distinct subjects in one complete enumeration of the property's current backing value. When relationship consumers are enabled, that interceptor's canonical relationship sequence also equals every ordered subject occurrence in that enumeration.
-2. **Occurrence preservation**: when relationship consumers are enabled, every subject-valued occurrence has exactly one relationship in each executing lifecycle interceptor's processed sequence, including repeated references to the same subject.
+2. **Occurrence preservation**: when relationship consumers are enabled, every subject-valued occurrence has exactly one immutable relationship in each executing lifecycle interceptor's processed sequence, including repeated references to the same subject.
 3. **Outgoing and incoming bijection**: each enabled built-in consumer installs one complete relationship sequence per parent property. Its outgoing and incoming views each contain every relationship from that installed sequence exactly once; it never appends equivalent sequences from multiple lifecycle callbacks.
 4. **View agreement**: registry children, registry parents, and tracking parents project the same relationship subject and index values when those features are enabled.
 5. **Order agreement**: outgoing registry relationships have the same order as source enumeration. Incoming relationships within one parent property have that same relative order.
 6. **Membership agreement**: `(property, child)` membership exists if and only if at least one relationship for that pair exists.
 7. **Reference-count agreement**: each executing lifecycle interceptor contributes at most one reference for a distinct `(property, child)` membership, exactly as on master. The subject's total count remains the sum of those current-master lifecycle contributions; duplicate occurrences within one membership never increment it.
 8. **Lifecycle and registry agreement**: existing lifecycle attach and detach transitions continue to govern registry membership. Adding or removing a duplicate occurrence alone never causes a context attach, context detach, registration, or unregistration.
-9. **No dangling state**: detached parents and children leave no canonical relationships, registry edges, parent-tracking edges, or processed-property entries behind.
+9. **No dangling state**: when the lifecycle callbacks agree that a parent or child is detached, it leaves no canonical relationships, registry edges, parent-tracking edges, or processed-property entries behind.
 10. **Snapshot coherence**: each returned immutable array was built from one internally synchronized view. It is never mutated after publication.
 11. **Safe publication**: readers observe an old coherent snapshot or a newer coherent snapshot, never partially initialized arrays or torn index references.
 12. **Event ordering**: existing ancestor-registration guarantees, handler ordering, and `SubjectDetaching` graph visibility remain intact.
 
 The backing property and metadata may temporarily differ while a write is between its backing-store update and serialized reconciliation. All writes that reach that window are considered in progress for the definition of quiescence.
 
+Current master's source-less lifecycle callbacks cannot represent independent ownership contributions. If one of several overlapping lifecycle interceptors detaches while another remains attached, built-in consumers retain master's last-callback behavior and the relationship-agreement invariants above do not apply until the lifecycle callbacks agree again. PR #458 adds no new failure in that topology, but it also does not claim to repair it. The master-compatibility tests document this boundary explicitly.
+
 ## Architecture
 
-### Canonical relationship handle
+### Canonical immutable relationship
 
-The Tracking assembly introduces a sealed `SubjectPropertyRelationship` reference type. It has an internal constructor and exposes read-only properties:
+The Tracking assembly introduces a sealed immutable `SubjectPropertyRelationship` reference type. It has an internal constructor and exposes read-only properties:
 
 ```csharp
 public sealed class SubjectPropertyRelationship
 {
-    private object? _index;
-
     public PropertyReference Parent { get; }
     public IInterceptorSubject Child { get; }
-    public object? Index => Volatile.Read(ref _index);
-
-    internal void SetIndex(object? index) => Volatile.Write(ref _index, index);
+    public object? Index { get; }
 }
 ```
 
-`Parent` and `Child` never change. `Index` is changed internally with `Volatile.Write` and read with `Volatile.Read`, so the object reference is never torn and successful publication establishes the required memory ordering. The class retains reference-identity equality. It is not a record and is not suitable as a value-based hash key.
+`Parent`, `Child`, and `Index` never change. The class retains reference-identity equality. It is not a record and is not suitable as a value-based hash key. Immutability lets every consumer safely share a relationship while its old and new ordered groups are published independently.
 
-One handle exists per live occurrence in each executing `LifecycleInterceptor` when at least one relationship consumer is enabled. A retained occurrence reuses its handle within that interceptor. A removed handle is never pooled or reused because an advanced custom handler may retain it. Once removed, its final state remains readable but it is no longer present in that interceptor's current relationship sequence.
+One relationship object exists per live occurrence in each executing `LifecycleInterceptor` when at least one relationship consumer is enabled. A retained occurrence may reuse its relationship only when its index metadata is known unchanged without calling user equality:
 
-These handles are live advanced-handler objects, not public relationship snapshots. A retained handle's `Index` can change during a later reconciliation. The high-level immutable arrays described above copy the current handle values and remain frozen.
+- Direct relationships reuse the old object while both indices are `null`.
+- Positional collection relationships reuse it when the integer position is unchanged.
+- Dictionary relationships reuse it only when the exact key object is reference-equal.
+- Otherwise reconciliation creates a new immutable relationship for that occurrence.
+
+This intentionally allocates a replacement for value-type dictionary keys that are boxed again during enumeration. It never invokes key equality merely to retain object identity. Removed or replaced relationships are never pooled because an advanced custom handler may retain them. A retained relationship remains a frozen occurrence snapshot; it never changes after callback return.
 
 ### Processed property state
 
-`LifecycleInterceptor` replaces `_lastProcessedValues` as the structural baseline with processed-property state. Every state records the distinct child memberships produced by the last completed reconciliation. When a relationship consumer is enabled, it additionally contains the ordered canonical relationship handles.
+`LifecycleInterceptor` replaces `_lastProcessedValues` as the structural baseline with processed-property state. Every state records the distinct child memberships produced by the last completed reconciliation. When a relationship consumer is enabled, it additionally contains the ordered canonical immutable relationships.
 
 This state, rather than a previous mutable container reference, is the old side of the next reconciliation. It therefore supports an in-place-mutated dictionary or collection that is assigned back through the property setter. It is also the exact state to detach if the parent leaves the graph.
 
-Lifecycle-only configurations do not allocate a relationship object per occurrence. They retain only the distinct child membership references required for later diff and detach, using an inline-first representation for the common direct-child case. Full occurrence handles are materialized only when the context or subject has an `IPropertyRelationshipHandler`. This is a storage optimization, not a second reconciliation algorithm.
+Lifecycle-only configurations do not allocate a relationship object per occurrence. Their compact membership record retains the child plus the first and last old occurrence indices. The first index preserves initial-add and context-detach callback semantics; the last index preserves master's reverse-order ordinary-removal semantics. An inline-first representation covers the common direct-child case. Full occurrence relationships are materialized only when the context or subject has an `IPropertyRelationshipHandler`. This is a storage optimization, not a second reconciliation algorithm.
 
 A direct subject property retains a reference-equality no-op when its canonical membership already matches. Enumerable container writes always reconcile, even when the container instance is reference-equal to the previously observed value.
 
@@ -201,12 +205,21 @@ The descriptor enumeration and matching algorithm live in a focused internal rel
 `PropertyValueEqualityCheckHandler` currently sits outside lifecycle tracking and suppresses a setter call when the old and new container are the same reference. The new behavior treats such a setter call as an explicit structural refresh without turning it into a value change:
 
 1. Before calling `EqualityComparer<TProperty>.Default`, the equality handler checks whether the current and new values are the same non-string `IEnumerable` reference and the declared property can contain subjects.
-2. If so, it invokes a dedicated lifecycle refresh entry point through the current-master lifecycle-resolution adapter and then returns without calling the remaining write chain.
+2. If so, it resolves the internal structural-refresh capability implemented by every built-in `LifecycleInterceptor`, invokes each resolved capability exactly once, and then returns without calling the remaining write chain.
 3. Lifecycle refresh re-reads the backing value under its writer lock and runs normal relationship reconciliation.
 4. Otherwise the equality handler retains its existing comparison and write-suppression behavior.
 5. For a structural refresh, the terminal setter is not invoked, `PropertyWriteContext.IsWritten` remains false, and property-change, derived-change, transaction, and connector-write behavior remains suppressed exactly as for other equal values.
 
-The refresh adapter takes one immutable snapshot of all `ILifecycleInterceptor` services resolved by current master and invokes each entry exactly once in resolver order. Each concrete `LifecycleInterceptor` independently locks and reconciles its own processed state. The adapter owns iteration only; it does not combine lifecycle state or choose a preferred interceptor. Other equality-suppressed values retain their existing no-op behavior.
+The Tracking assembly defines a small internal structural-refresh capability implemented by `LifecycleInterceptor` and resolved through the existing assignable-service mechanism:
+
+```csharp
+internal interface IStructuralPropertyRefreshHandler
+{
+    void RefreshStructuralProperty(PropertyReference property);
+}
+```
+
+The equality handler takes one immutable snapshot of these capabilities and invokes each entry exactly once in resolver order. Each implementation independently locks and reconciles its own processed state. A custom `ILifecycleInterceptor` that does not implement structural property processing has nothing to refresh and is not promised a callback. This avoids expanding the public `ILifecycleInterceptor` contract. Other equality-suppressed values retain their existing no-op behavior.
 
 ### Relationship consumers
 
@@ -231,31 +244,43 @@ It replaces `IPropertyLifecycleHandler.RefreshCollectionProperty` from master an
 
 For an ordinary intercepted structural write, each `LifecycleInterceptor` resolves and captures its relationship-handler sequence before calling `next(ref context)`. Any service-resolution failure already visible to that interceptor therefore happens before the backing setter. The captured sequence is used for that reconciliation even if context topology changes concurrently; a later operation observes the newer context state. Attach and detach retain current master's handler-resolution and subject-handler ordering.
 
-When current master resolves several lifecycle interceptors, the same relationship handler can receive an equivalent full-property sequence from each one. Built-in consumers treat full-group replacement as idempotent by relationship values, so repeated authority callbacks do not duplicate public edges. Each lifecycle interceptor still owns independent canonical handles and processed state; no callback is invoked twice by the same interceptor for one reconciliation.
+When current master resolves several lifecycle interceptors, the same relationship handler can receive an equivalent full-property sequence from each one. Built-in consumers unconditionally replace the full group and never compare relationship indices, so equivalent authority callbacks produce the same public sequence rather than duplicate edges. Each lifecycle interceptor still owns independent canonical relationships and processed state; no callback is invoked twice by the same interceptor for one reconciliation.
 
-Registry and parent tracking implement this interface and store ordered relationship handles internally. They do not own mutable index values. Their existing public immutable arrays remain lazily cached projections of those handles and are invalidated under the same consumer lock that protects relationship-list replacement.
+Registry and parent tracking implement this interface and store ordered immutable relationships internally. Their existing public immutable arrays remain lazily cached projections and are invalidated under the same consumer lock that protects relationship-list replacement. A handler may retain an individual immutable relationship after the call, but the `ReadOnlySpan` itself is valid only for the synchronous callback and must not be retained.
 
 The dispatcher invokes every relationship consumer even if one throws, records the first exception, completes built-in reconciliation, and then rethrows the first exception with its original stack. This prevents one custom consumer from stranding later built-in consumers. A failing custom consumer remains responsible for its own state, consistent with the lifecycle handler contract.
 
 Relationship handlers run synchronously while the executing lifecycle interceptor's structural lock is held. They must be fast, must not block, and must not re-enter lifecycle operations. They can update their own bounded structural state but cannot start asynchronous work or invoke arbitrary user collection logic.
 
-`SubjectLifecycleChange` gains an optional `Relationship` property. For a membership addition or removal, it identifies the first occurrence that drives that membership transition. Registry and parent tracking use it to preserve the relationship that existing `SubjectAttached` and `SubjectDetaching` observers can see before the final full-property reconciliation. Root context changes have no relationship.
+`SubjectLifecycleChange` gains an optional `Relationship` property. For a membership addition or removal, it identifies the exact materialized occurrence whose `Index` drives that lifecycle transition. `Index` is always supplied; `Relationship` is supplied only when occurrence relationships were materialized because at least one relationship consumer is present. Registry and parent tracking use it to preserve the relationship that existing `SubjectAttached` and `SubjectDetaching` observers can see before the final full-property reconciliation. Root context changes have no relationship.
+
+The exact callback contract is:
+
+| Transition | Occurrence metadata | Dispatch order |
+| --- | --- | --- |
+| Ordinary membership addition | First new occurrence in source order; `Index` always and `Relationship` when materialized | Context `ILifecycleHandler` services in current order, subject lifecycle handler, optional `SubjectAttached` and subtree descent |
+| Ordinary membership removal | Last old occurrence, matching master's reverse traversal; `Index` always and `Relationship` when materialized | Optional `SubjectDetaching`, subject lifecycle handler, context `ILifecycleHandler` services in current order |
+| Context detach of a property membership | First old occurrence, matching master's forward property scan; `Index` always and `Relationship` when materialized | Existing context-detach lifecycle order |
+| Full relationship reconciliation | Complete new source-ordered sequence | Context `IPropertyRelationshipHandler` services in resolver order, then the parent subject handler when implemented |
+| Property detach while its subject leaves the lifecycle | Empty sequence after `SubjectDetaching` has observed the old graph and before removal lifecycle handlers remove the subject from built-in consumers | Context relationship handlers in resolver order, then the parent subject handler when implemented |
+
+The relationship dispatcher continues after an exception and rethrows the first exception only after every captured context and subject relationship handler has run. Existing lifecycle-handler exception ordering is unchanged.
 
 ### Registry storage
 
-`RegisteredSubjectProperty` stores the ordered outgoing relationship handles. Its `Children` cache projects each handle to `SubjectPropertyChild`.
+`RegisteredSubjectProperty` stores the ordered outgoing relationships. Its `Children` cache projects each one to `SubjectPropertyChild`.
 
-`RegisteredSubject` stores incoming relationship handles grouped by registered parent property. Its `Parents` cache projects them to `SubjectPropertyParent`. Reconciliation replaces the complete group for the changed parent property, preserving other property groups and their attachment order.
+`RegisteredSubject` stores incoming relationships grouped by registered parent property. Its `Parents` cache projects them to `SubjectPropertyParent`. Reconciliation replaces the complete group for the changed parent property, preserving other property groups and their attachment order.
 
-The registry relationship callback first resolves all subjects and the registered parent property while holding the registry's known-subject lock. It then releases that lock and updates individual outgoing and incoming collections without nesting their locks. Lifecycle serialization guarantees a single relationship writer, while each collection lock prevents a reader from publishing a stale cache after the corresponding replacement.
+`SubjectRegistry` has one private relationship-reconciliation gate. Its relationship callback holds that gate for the complete full-group operation, briefly takes the registry's known-subject lock to resolve all subjects and the registered parent property, releases the known-subject lock, and then updates individual outgoing and incoming collections without nesting their view locks. The gate prevents callbacks from different lifecycle interceptors from interleaving one property's outgoing replacement with another callback's incoming replacement. Each view lock prevents a reader from publishing a stale cache after its corresponding replacement.
 
-The registry never acquires the lifecycle writer lock. Lock order remains lifecycle, registry known-subject state, then individual relationship-view locks, with no reverse acquisition.
+The registry never acquires the lifecycle writer lock. Lock order remains lifecycle, registry relationship-reconciliation gate, registry known-subject state while resolving, then individual relationship-view locks during replacement, with no reverse acquisition.
 
 ### Parent-tracking storage
 
-Parent tracking replaces its `HashSet<SubjectParent>` with ordered relationship-handle groups. A group is identified by `PropertyReference.Comparer`, and occurrences within the group retain container order. `GetParents()` projects those handles to the existing `SubjectParent` values.
+Parent tracking replaces its `HashSet<SubjectParent>` with ordered relationship groups. A group is identified by `PropertyReference.Comparer`, and occurrences within the group retain container order. `GetParents()` projects those relationships to the existing `SubjectParent` values. `ParentTrackingHandler` likewise holds one private relationship-reconciliation gate across a complete callback that can update several children's parent groups.
 
-The common empty and single-parent cases retain inline-first storage, with ordered overflow storage allocated for additional relationships. No adaptive threshold or alternate reconciliation algorithm is permitted.
+The common empty and single-parent cases retain inline-first storage, with ordered overflow storage allocated for additional relationships. No adaptive threshold or alternate reconciliation algorithm is permitted. The consumer-wide gates add no contention in the common one-lifecycle configuration because that lifecycle already serializes relationship writes; they exist for master's several-lifecycle case.
 
 ## Reconciliation Algorithm
 
@@ -264,27 +289,43 @@ All structural reconciliation performed by one `LifecycleInterceptor` runs under
 ### Stage phase
 
 1. Re-read the property's actual backing value after acquiring the lifecycle lock. This preserves the existing last-writer convergence behavior when `next()` calls race outside the lock.
-2. If the parent is no longer attached, discard the write without creating relationship state. The lock prevents it from becoming attached or detached between this check and reconciliation.
+2. For an ordinary write, if the parent is no longer attached, discard the write without creating relationship state. Initial attach instead requires its matching attach-in-progress token. The lock prevents this lifecycle interceptor's attached or attaching state from changing concurrently, while re-entrant changes are detected by the later commit checks.
 3. Enumerate the value exactly once into an ordered temporary descriptor list. No graph state changes during enumeration.
 4. Build the new distinct-membership set by subject reference identity and compare it with the processed property's old membership state.
-5. When relationship consumers are enabled, match old relationship handles to new descriptors by child reference identity and occurrence number. The first new occurrence of a child matches its first old occurrence, the second matches the second, and so on.
-6. Stage new handles for unmatched descriptors, removed handles left unmatched, pending index assignments for retained handles, the new ordered relationship sequence, and all membership transitions.
+5. When relationship consumers are enabled, match old relationships to new descriptors by child reference identity and occurrence number. The first new occurrence of a child matches its first old occurrence, the second matches the second, and so on.
+6. Reuse a matched immutable relationship only when its index is known unchanged by the rules above. Stage replacement relationships for moved or re-keyed matches, new relationships for unmatched descriptors, removed old relationships, the new ordered relationship sequence, and all membership transitions.
 
-Matching is linear and uses only reference-identity hashing for subjects. It never invokes subject equality, dictionary-key equality, or dictionary-key hashing. Temporary maps and lists may be pooled after correctness is established, but the implementation has one algorithm for all collection sizes.
+Matching is linear and uses only reference-identity hashing for subjects. Every reconciliation-reachable subject-keyed dictionary, set, and immutable snapshot in lifecycle and registry storage uses `ReferenceEqualityComparer`; `PropertyReference.Comparer` already compares its subject by reference. Reconciliation therefore never invokes subject equality, dictionary-key equality, or dictionary-key hashing. Temporary maps and lists may be pooled after correctness is established, but the implementation has one algorithm for all collection sizes.
 
 ### Commit phase
 
-1. Process membership removals in the existing reverse-detach order. `SubjectDetaching` still observes the old graph, and lifecycle removal handlers remove all occurrences for the departing `(property, child)` membership.
-2. Process membership additions in source order. The first new occurrence supplies the lifecycle change's index. Existing registry-before-descent ordering remains unchanged.
-3. Apply staged index assignments to retained handles and publish the new canonical ordered relationship sequence when relationship consumers are enabled. Otherwise publish only the new distinct-membership state.
-4. When enabled, invoke all relationship consumers with the full sequence. Consumers replace their complete group for this property, so provisional first-occurrence entries from membership callbacks become the exact occurrence set.
-5. If re-entrant activity detached the parent, do not restore its processed-property state. The detach path owns cleanup in that case.
+1. Check that the parent remains attached after all user getter and enumerator code from staging. If it was re-entrantly detached, invoke the abort path below and stop before any membership transition.
+2. Process membership removals in the existing reverse-detach order. `SubjectDetaching` still observes the old graph, and lifecycle removal handlers remove all occurrences for the departing `(property, child)` membership.
+3. After every callback-bearing transition, check whether the parent remains attached to this lifecycle interceptor. If it was re-entrantly detached, invoke the abort path below and stop.
+4. Process membership additions in source order, recording each successfully applied addition. The first new occurrence supplies the lifecycle change's index. Existing registry-before-descent ordering remains unchanged. Repeat the parent-attached check after every addition.
+5. Check parent attachment once more, then publish the new canonical ordered relationship sequence when relationship consumers are enabled. Otherwise publish only the new compact membership state.
+6. When enabled, invoke all relationship consumers with the full sequence. Consumers replace their complete group for this property, so provisional first-occurrence entries from membership callbacks become the exact occurrence set.
+
+The re-entrant-detach abort path never publishes staged state. It detaches every successfully applied new membership in reverse order, invokes the captured relationship-handler sequence with an empty span, and removes any processed-property entry left by the outer operation. Removals already applied do not need restoration because this lifecycle interceptor no longer contains the parent. Cleanup operations are idempotent with the re-entrant detach path. This closes the window in which a new child could otherwise remain attached without canonical state capable of removing it.
 
 No collection enumeration, key equality, key hashing, or subject equality runs in the commit phase. Existing lifecycle callbacks retain their current support for writes to different properties. Relationship handlers cannot re-enter lifecycle operations. A same-property reconciliation guard throws a clear `InvalidOperationException` instead of allowing baseline corruption.
 
 ### Initial attach
 
-Initial attachment runs the same stage and commit pipeline from empty old state. The first occurrence of each unique child drives membership attachment and subtree descent. When relationship consumers are enabled, the final relationship callback publishes all occurrences, including duplicates, in exact source order.
+Initial attachment uses the same descriptor and membership logic with an attach-specific state transition:
+
+1. Under the lifecycle lock, create a private attach-in-progress token for the parent. The token is not visible as graph membership and produces no callbacks.
+2. Enumerate and stage every structural property of the parent before mutating membership or consumer state. If any getter, enumerator, or dictionary projection throws, remove the token and leave no processed state, child membership, or relationship group.
+3. Commit the staged unique child memberships in master's property and source order, recording every successful addition in the token's undo ledger. The first occurrence of each unique child drives membership attachment and subtree descent.
+4. After a property's memberships succeed, publish its canonical processed state provisionally. Do not invoke its full relationship callback yet.
+5. After all child memberships succeed, perform master's existing explicit context attach for the parent. This preserves child-before-root lifecycle callback order and existing ancestor registration behavior.
+6. If the parent remains attached, invoke each property's full relationship callback in property order, publishing duplicates and exact source order, then remove the attach-in-progress token.
+
+The general commit predicate accepts either an already attached parent or the matching active attach token. A re-entrant `DetachSubjectFromContext(parent)` recognizes and cancels that token even before the parent enters `_attachedSubjects`. The outer attach then reverses every ledgered child addition, clears provisionally published processed states, invokes captured relationship handlers with empty groups, removes the token, and never performs or retains the root attach. If re-entrant detach occurs after the root attach, normal detach reads the provisionally published canonical states and performs the same cleanup. Concurrent attach calls are serialized by the lifecycle lock and cannot create a second token.
+
+This stages all of the parent's own structural enumeration before the first lifecycle callback, matching master's collect-before-attach order and strengthening its failure behavior by avoiding partially seeded `_lastProcessedValues`. Failures thrown later by child attachment or arbitrary lifecycle callbacks remain governed by #384.
+
+The attach method removes its attach-in-progress token in a `finally` block on every exit, including callback exceptions. A callback failure after lifecycle mutation does not attempt unsafe rollback through more arbitrary callbacks. Provisionally published processed states remain as the best available baseline, and no later uncommitted property state or full relationship sequence is published. A later attach attempt is not blocked: it stages all properties again, treats any retained provisional state and idempotent lifecycle membership as its old baseline, and replaces full relationship groups after successful completion. This can restore built-in relationship convergence, but it does not replay arbitrary lifecycle handlers skipped by the original exception; that limitation remains #384. If the parent entered `_attachedSubjects` before the exception, an explicit detach uses the retained processed state for cleanup.
 
 ### Detach
 
@@ -304,14 +345,15 @@ When a write races with parent detach, the operation that acquires the lifecycle
 
 ### Lock-free readers
 
-Public parent and child getters retain their cached immutable-array model:
+Public parent and child getters retain their cached immutable-array model and existing read-lock behavior:
 
-- Cache references are read and published with `Volatile.Read` and `Volatile.Write`.
-- Cache construction and relationship-list replacement use the same per-view lock.
+- Registry-parent and tracked-parent cache references are read and published with `Volatile.Read` and `Volatile.Write`, preserving their lock-free cached fast path.
+- `RegisteredSubjectProperty.Children` retains its existing per-view lock on reads.
+- Cache construction and relationship-list replacement use each view's existing lock.
 - Published arrays are never changed in place.
-- A relationship's current index reference uses volatile access.
+- Relationship objects are immutable, so an old group cannot observe index changes from a newer generation.
 
-A reader overlapping reconciliation may receive the previous snapshot or a newly built snapshot while the write is active. The writer invalidates or replaces every affected cache before returning. A later reader after quiescence therefore obtains metadata derived from the committed relationship sequence.
+A reader overlapping reconciliation may receive the previous snapshot or a newly built snapshot while the write is active. Each individual snapshot projects one immutable ordered relationship group and therefore cannot combine old ordering with new indices. The writer invalidates or replaces every affected cache before returning. A later reader after quiescence therefore obtains metadata derived from the committed relationship sequence.
 
 Different public views are not published as one global transaction. During a write, a registry child reader and a parent-tracking reader can temporarily observe different generations. After the serialized write and all callbacks finish, the view-agreement invariant holds. This is the repository's established quiescent-consistency model.
 
@@ -322,12 +364,16 @@ PR #458 uses only current master's lifecycle structural lock and introduces no H
 The compatible lock branches are:
 
 ```text
-lifecycle structural lock -> registry known-subject or relationship-view lock
+lifecycle structural lock -> registry relationship gate
+                          -> registry known-subject lock (released)
+                          -> registry relationship-view lock
+lifecycle structural lock -> parent-tracking relationship gate
+                          -> tracked-parent view lock
 lifecycle structural lock -> per-subject hosting state lock (released)
                           -> hosting handler lock -> target lock
 ```
 
-Registry and parent getters never acquire the lifecycle lock. Registry and relationship-view code never enters Hosting. Hosting transition bodies run after structural locks are released and never call relationship handlers. A custom relationship handler that tries to enter Hosting or lifecycle operations violates the synchronous handler contract.
+The new consumer gates are acquired only by their relationship callbacks; no lifecycle callback or public getter acquires them and then enters lifecycle. Registry and parent getters never acquire the lifecycle lock. Registry and relationship-view code never enters Hosting. Hosting transition bodies run after structural locks are released and never call relationship handlers. A custom relationship handler that tries to enter Hosting or lifecycle operations violates the synchronous handler contract.
 
 ### External container mutation
 
@@ -351,6 +397,8 @@ Lifecycle handlers are already documented as exception-free. Relationship dispat
 
 Existing attach and detach handler exception behavior is unchanged. Expanding transactional guarantees across arbitrary external lifecycle handlers is outside this pull request.
 
+The no-partial-mutation guarantee applies to container enumeration, dictionary projection, descriptor construction, matching, and other pre-commit inspection. It does not apply after lifecycle or relationship callbacks begin. The explicit re-entrant-detach abort path is guaranteed for exception-free callbacks, but arbitrary throwing lifecycle handlers retain master's #384 failure semantics.
+
 ### Lifecycle membership failures
 
 The relationship reconciler does not duplicate context or lifecycle validation. Each executing `LifecycleInterceptor` uses its current-master operations to add or remove distinct parent-property membership and publishes its new canonical relationship sequence only after those operations return successfully.
@@ -369,7 +417,7 @@ Relative to master:
 
 - Remove `IPropertyLifecycleHandler.RefreshCollectionProperty(PropertyReference, object?)`.
 - Add the focused `IPropertyRelationshipHandler` interface with `ReconcileChildRelationships(PropertyReference, ReadOnlySpan<SubjectPropertyRelationship>)`.
-- Add the public, internally constructed `SubjectPropertyRelationship` handle type.
+- Add the public, internally constructed immutable `SubjectPropertyRelationship` type.
 - Add the optional `SubjectLifecycleChange.Relationship` property for membership transitions.
 - Clarify `GetReferenceCount()` documentation to specify parent-property lifecycle contributions and distinguish them from occurrence relationships.
 
@@ -386,6 +434,32 @@ The primary read APIs and value types remain source compatible:
 
 Their contents change intentionally when duplicate subject occurrences exist: callers now receive one value per occurrence instead of one per parent property and child pair.
 
+Subject-keyed lifecycle and registry storage now uses reference identity consistently. Two distinct `IInterceptorSubject` instances that override value equality and were incorrectly collapsed by master are represented independently. This is an intentional correctness change and receives a public-behavior regression test.
+
+## Behavior Changes Relative to Master
+
+The intentional observable changes are:
+
+- Registry children, registry parents, and tracked parents contain one entry per occurrence rather than one per distinct `(property, child)` membership.
+- Those entries mirror source enumeration order. Reordering or re-keying can therefore change singular path selection to the first current occurrence.
+- Enumerable structural writes reconcile even when the container reference is unchanged. With equality tracking, same-instance assignment becomes an explicit refresh whose backing setter and value-change notifications remain suppressed. Without equality tracking, the normal setter still runs as before, but lifecycle processing no longer exits only because the reference is equal. Either path can now spend enumeration work or propagate an enumeration or relationship-handler exception where master skipped lifecycle processing.
+- Detach uses the last successfully processed state rather than re-enumerating a mutable container. Unassigned in-place mutations remain invisible and cannot change which memberships detach.
+- Same-property reconciliation re-entrancy throws `InvalidOperationException` instead of risking baseline corruption.
+- Relationship-handler dispatch continues to later handlers and rethrows the first handler exception after dispatch, unlike the removed refresh callback's stop-at-first behavior.
+- Distinct subjects that override value equality are no longer collapsed in lifecycle or registry subject-keyed state.
+
+The following master behavior is intentionally preserved:
+
+- Lifecycle reference counts and attach or detach callbacks remain per distinct parent-property membership within each lifecycle interceptor, not per occurrence.
+- The first new occurrence supplies ordinary membership-add metadata, the last old occurrence supplies ordinary reverse-removal metadata, and the first old occurrence supplies context-detach metadata.
+- Equality-suppressed structural refresh does not set `IsWritten`, publish property-change or derived-change notifications, participate in a transaction, or send connector writes.
+- Direct container mutation without an intercepted assignment remains invisible.
+- Previously returned public immutable arrays remain frozen.
+- Zero, one, or several lifecycle services retain master's resolution and dispatch behavior, including its pre-existing independently removable authority limitation.
+- Public views are quiescent-consistent rather than one atomic graph-wide transaction.
+
+The compatibility audit must specifically inspect consumers that treat `Children.Length` or `Parents.Length` as a membership count, assume only one path per `(property, child)`, or implement the removed refresh method. OPC UA, HomeBlaze, serialization, path, and UI code are the known review targets. The same-instance enumeration cost and per-occurrence immutable relationship allocations are measured before merge.
+
 ## Performance and Allocation Strategy
 
 Correctness is established before pooling or inline-storage optimization. The required complexity is:
@@ -397,7 +471,7 @@ Correctness is established before pooling or inline-storage optimization. The re
 - no user equality or hashing in reconciliation,
 - cached zero-allocation public reads after snapshot construction.
 
-One relationship object per occurrence and executing lifecycle interceptor is the main possible regression for registry and parent-tracking graphs. In the common single-lifecycle `WithParents().WithRegistry()` configuration, it replaces independently owned index state and the parent-tracking hash-set entries. Lifecycle-only graphs retain compact distinct-membership state and do not pay the per-occurrence object cost. Removed relationship handles are collected normally and are not pooled because external relationship handlers can retain them.
+One relationship object per occurrence and executing lifecycle interceptor is the main possible regression for registry and parent-tracking graphs. In the common single-lifecycle `WithParents().WithRegistry()` configuration, it replaces independently owned index state and the parent-tracking hash-set entries. Re-keyed or moved occurrences allocate new immutable objects; unchanged relationships are reused only without user equality. Lifecycle-only graphs retain compact membership state and do not pay the per-occurrence object cost. Removed relationships are collected normally and are not pooled because external relationship handlers can retain them.
 
 After functional verification, temporary descriptor lists and reference-identity maps may reuse existing thread-local pools if measured allocation data justifies it. Pooling must clear all retained subject, property, key, and relationship references before return. The final code must retain one reconciliation path regardless of collection size.
 
@@ -431,7 +505,7 @@ Parameterized tests cover direct properties, arrays, mutable lists, `ICollection
 - cycles and self-references,
 - context detach and reattach,
 - previously captured public arrays remaining frozen after re-keying or reordering,
-- a retained advanced relationship handle exposing its safely published current index,
+- a retained advanced relationship remaining frozen after its occurrence is re-keyed or reordered,
 - singular path selection through the first current occurrence.
 
 Every test asserts all enabled views together: registry children, registry parents, tracking parents, reference count, known-subject membership, and path output.
@@ -443,6 +517,10 @@ Every test asserts all enabled views together: registry children, registry paren
 - A successful retry after an enumeration failure proves canonical state was not advanced.
 - A throwing relationship consumer proves later built-in consumers still reconcile before the exception propagates.
 - Same-property re-entrancy proves the explicit guard fails without corrupting canonical state.
+- A lifecycle callback that re-entrantly detaches the parent during a new membership addition proves applied additions are undone and consumers remain empty.
+- A subject with two structural properties whose second enumerator throws proves neither property publishes processed state, membership, or relationships and a later successful retry attaches both.
+- A lifecycle callback failure during initial attach proves the attach-in-progress token is always cleared and does not block a later attach attempt, without claiming rollback of arbitrary handler side effects.
+- Distinct subjects with hostile value equality prove all reconciliation-reachable subject storage uses reference identity.
 
 ### Concurrency tests
 
@@ -453,6 +531,7 @@ Tests use barriers, events, and `AsyncTestHelpers.WaitUntilAsync`, never timing 
 - write racing with parent detach,
 - context detach racing with a descendant write,
 - readers repeatedly taking children and parent snapshots while writers reorder and re-key,
+- a reader forced into the first-cache-build window while a relationship moves, proving it receives one immutable generation rather than new indices in old order,
 - duplicate occurrence add/remove under concurrent replacement.
 
 After worker completion, tests assert every quiescent invariant. During concurrency, each individual returned immutable array must be safe to enumerate and internally initialized. Cross-view equality is asserted after quiescence, not while a writer is active.
@@ -470,12 +549,12 @@ This prevents the shared relationship design from accidentally requiring either 
 
 Master-compatibility cases additionally cover zero lifecycle services and an aggregated context resolving two lifecycle interceptors. They prove that:
 
-- a same-instance structural refresh invokes each resolved lifecycle interceptor exactly once,
+- a same-instance structural refresh invokes each resolved built-in lifecycle structural-refresh capability exactly once while unrelated custom `ILifecycleInterceptor` services remain untouched,
 - each interceptor converges its independent processed state to the final backing value,
 - a shared built-in relationship consumer replaces equivalent full sequences without duplicating public relationships, and
 - existing lifecycle, property-handler, and subject-handler ordering is unchanged.
 
-These tests exercise master's existing aggregation dispatch. They do not import #419's proposed unique-authority, graph-movement, or explicit-root rules.
+These tests exercise master's existing aggregation dispatch. An additional test removes one of several independently contributing lifecycle authorities and pins master's existing last-callback ownership limitation so #458 cannot accidentally claim stronger semantics or make them worse. The tests do not import #419's proposed unique-authority, graph-movement, or explicit-root rules.
 
 ### Repository verification
 
@@ -501,7 +580,7 @@ The branch will be organized into reviewable commits:
 
 1. Add tests that define occurrence, ordering, duplicate, failure, and concurrency semantics.
 2. Add canonical relationship state and linear lifecycle reconciliation.
-3. Move parent tracking and registry to relationship-handle storage and derived snapshots.
+3. Move parent tracking and registry to immutable relationship storage and derived snapshots.
 4. Remove the old refresh paths and update public API snapshots and documentation.
 5. Add or retain only the targeted refresh benchmarks needed to validate this design.
 
