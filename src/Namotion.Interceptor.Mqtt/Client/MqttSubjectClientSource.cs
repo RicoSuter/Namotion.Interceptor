@@ -152,6 +152,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 async ct => await OnReconnectedAsync(ct).ConfigureAwait(false),
                 () =>
                 {
+                    Metrics.MarkNotOperational();
                     _propertyWriter?.StartBuffering();
                     return Task.CompletedTask;
                 },

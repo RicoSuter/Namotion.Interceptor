@@ -95,6 +95,8 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
         {
             try
             {
+                var connectionLost = false;
+
                 // Wait for either: Disconnect event signal OR periodic health check timeout
                 var signaled = await _reconnectSignal.WaitAsync(healthCheckInterval, cancellationToken).ConfigureAwait(false);
                 if (signaled)
@@ -112,7 +114,7 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
                     }
 
                     _logger.LogWarning("MQTT disconnect event received.");
-                    await _onDisconnected().ConfigureAwait(false);
+                    connectionLost = true;
                 }
                 else
                 {
@@ -126,6 +128,28 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
                     }
 
                     _logger.LogWarning("MQTT health check failed.");
+                    connectionLost = true;
+                }
+
+                await _onDisconnected().ConfigureAwait(false);
+
+                // A failed ping is authoritative even when the client's cached IsConnected flag has
+                // not caught up. Terminate that unhealthy transport before attempting a reconnect.
+                if (_client.IsConnected)
+                {
+                    try
+                    {
+                        await _client.DisconnectAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception exception)
+                    {
+                        _onError(exception);
+                        _logger.LogWarning(exception, "Failed to terminate the unhealthy MQTT transport.");
+                    }
                 }
 
                 // Stall detection: Check if reconnection is hung
@@ -149,7 +173,7 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
                     }
                 }
 
-                if (!_client.IsConnected)
+                if (connectionLost || !_client.IsConnected)
                 {
                     if (Interlocked.Exchange(ref _isReconnecting, 1) == 1)
                     {

@@ -127,6 +127,65 @@ public class MqttConnectionMonitorTests
     }
 
     [Fact]
+    public async Task WhenPeriodicPingFailsWhileClientReportsConnected_ThenTransportIsTerminatedAndReconnected()
+    {
+        // Arrange
+        var client = new Mock<IMqttClient>();
+        var isConnected = true;
+        var isOperational = true;
+        var isBuffering = false;
+        var transportTerminated = false;
+        var reconnectAttempted = false;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        client.Setup(c => c.IsConnected).Returns(() => isConnected);
+        SetupPingUnhealthy(client);
+        client
+            .Setup(c => c.DisconnectAsync(
+                It.IsAny<MqttClientDisconnectOptions>(), It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                transportTerminated = true;
+                isConnected = false;
+            })
+            .Returns(Task.CompletedTask);
+        client
+            .Setup(c => c.ConnectAsync(It.IsAny<MqttClientOptions>(), It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                reconnectAttempted = true;
+                isConnected = true;
+                SetupPingHealthy(client);
+            })
+            .ReturnsAsync(new MqttClientConnectResult());
+
+        var monitor = new MqttConnectionMonitor(
+            client.Object,
+            CreateConfiguration(
+                healthCheckInterval: TimeSpan.FromMilliseconds(10),
+                reconnectDelay: TimeSpan.Zero),
+            CreateOptions,
+            onReconnected: _ => cancellation.CancelAsync(),
+            onDisconnected: () =>
+            {
+                isOperational = false;
+                isBuffering = true;
+                return Task.CompletedTask;
+            },
+            onError: _ => { },
+            NullLogger.Instance);
+
+        // Act
+        await monitor.MonitorConnectionAsync(cancellation.Token);
+
+        // Assert
+        Assert.False(isOperational);
+        Assert.True(isBuffering);
+        Assert.True(transportTerminated);
+        Assert.True(reconnectAttempted);
+    }
+
+    [Fact]
     public async Task DisconnectSignal_TriggersReconnection()
     {
         // Arrange
