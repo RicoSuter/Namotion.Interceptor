@@ -14,6 +14,29 @@ pwsh scripts/benchmark.ps1 -Filter "*RegistryBenchmark*","*ServiceOrderResolverB
 
 The script header lists every flag. The one with a trap is `-Filter`: several patterns are matched as OR, but they must be a PowerShell array rather than a comma joined string, and the array form needs a PowerShell caller, since from bash `"a","b"` collapses into one argument that matches nothing. Output is `benchmark_<timestamp>.md` in the working directory.
 
+### Relationship reconciliation benchmarks
+
+Registry relationship work is spread across structural writes, Registry construction, and cached parent reads. Compare these together, plus an unrelated resolver row as the noise reference:
+
+```
+pwsh scripts/benchmark.ps1 -Filter "*ChildIndexRefreshBenchmark*","*RegistryBenchmark*","*ParentLookupBenchmark*","*ServiceOrderResolverBenchmark.LinearChain*" -LaunchCount 3
+```
+
+Despite its historical class name, `ChildIndexRefreshBenchmark` measures complete ordered relationship reconciliation. A structural write enumerates the source once and publishes one relationship per subject-valued occurrence in exact collection or dictionary enumeration order. Repeated references to the same child remain separate relationship occurrences, while lifecycle reference counts and attach or detach transitions remain unique per parent property and child membership.
+
+Interpret its rows according to the operation they perform:
+
+- replacement removes memberships and relationships that have no retained occurrence;
+- reordering and re-keying publish a new ordered generation while retaining membership where the child remains present;
+- duplicate-occurrence rows change relationship count without multiplying lifecycle membership;
+- same-instance assignment is an explicit structural refresh, even when value-equality tracking suppresses the backing setter and change notifications;
+- the lifecycle-only control performs the same structural enumeration and membership work without allocating immutable relationship objects per occurrence;
+- enabling Registry or parent tracking materializes occurrence relationships, and enabling both projects the same immutable relationship objects into both public views.
+
+Direct in-place mutation without an intercepted assignment is intentionally absent from the benchmark contract because it is invisible to relationship tracking. Parent-read rows consume cached immutable snapshots. Previously returned snapshots stay frozen, and readers overlapping reconciliation can receive an old or newer coherent generation. Cross-view agreement is required after writes become quiescent, not while a writer is active.
+
+Allocation columns and scaling shape are the primary acceptance signals. Expect relationship-enabled configurations to retain one immutable relationship object per live occurrence and lifecycle authority. Lifecycle-only configurations should not pay that per-occurrence cost. Use identical benchmark definitions on both refs, especially because `ChildIndexRefreshBenchmark` and `ParentLookupBenchmark` do not exist on the historical base branch.
+
 ### Where it goes wrong
 
 The script checks the base branch out **in your working tree**, so:
