@@ -165,7 +165,26 @@ public class UniqueContextServiceTests
     }
 
     [Fact]
-    public async Task WhenFailedValidationRacesWithRemovingTheConflict_ThenTheRepairedStateSucceeds()
+    public void WhenAValidatedRootSeesAReachableDescendantGainAConflictingAuthority_ThenTheNextQueryThrows()
+    {
+        // Arrange
+        var descendant = InterceptorSubjectContext.Create();
+        descendant.AddService(new UniqueAlpha("first"));
+        var root = InterceptorSubjectContext.Create();
+        root.AddFallbackContext(descendant);
+        _ = root.GetServices<object>();
+
+        // Act
+        descendant.AddService(new UniqueAlpha("second"));
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => root.GetServices<object>());
+
+        // Assert
+        Assert.Contains(typeof(IUniqueAlpha).FullName!, exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenOldConflictingStateIsValidatedWhileRemovalPublishesARepairedState_ThenOnlyTheRepairedStateSucceeds()
     {
         // Arrange
         var first = InterceptorSubjectContext.Create();

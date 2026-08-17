@@ -8,6 +8,28 @@ namespace Namotion.Interceptor.Registry.Tests;
 public class ContextConfigurationCompositionTests
 {
     [Fact]
+    public void WhenRegistryIsConfiguredAfterCompositionWithCustomAuthorities_ThenItReusesBothAuthorities()
+    {
+        // Arrange
+        var registry = new CustomSubjectRegistry();
+        var lifecycle = new CustomLifecycleInterceptor();
+        var parent = InterceptorSubjectContext.Create();
+        parent.AddService<ISubjectRegistry>(registry);
+        parent.AddService<ILifecycleInterceptor>(lifecycle);
+        var child = InterceptorSubjectContext.Create();
+        child.AddFallbackContext(parent);
+
+        // Act
+        child.WithRegistry();
+
+        // Assert
+        Assert.Same(registry, child.GetService<ISubjectRegistry>());
+        Assert.Single(child.GetServices<ISubjectRegistry>());
+        Assert.Same(lifecycle, child.GetService<ILifecycleInterceptor>());
+        Assert.Single(child.GetServices<ILifecycleInterceptor>());
+    }
+
+    [Fact]
     public void WhenRegistryContextsShareRegistryBeforeComposition_ThenLifecycleResolutionThrows()
     {
         // Arrange
@@ -47,5 +69,27 @@ public class ContextConfigurationCompositionTests
 
         // Assert
         Assert.Contains(typeof(ISubjectRegistry).FullName!, exception.Message);
+    }
+
+    private sealed class CustomSubjectRegistry : ISubjectRegistry
+    {
+        public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects { get; } =
+            new Dictionary<IInterceptorSubject, RegisteredSubject>();
+
+        public RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject)
+        {
+            return null;
+        }
+    }
+
+    private sealed class CustomLifecycleInterceptor : ILifecycleInterceptor
+    {
+        public void AttachSubjectToContext(IInterceptorSubject subject)
+        {
+        }
+
+        public void DetachSubjectFromContext(IInterceptorSubject subject)
+        {
+        }
     }
 }

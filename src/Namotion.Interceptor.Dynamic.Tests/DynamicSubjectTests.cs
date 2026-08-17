@@ -73,7 +73,7 @@ public class DynamicSubjectTests
             .Create()
             .WithService(() => new TestInterceptor("a", logs), _ => false)
             .WithService(() => new TestInterceptor("b", logs), _ => false)
-            .WithService(() => new TestLifecycleInterceptor(logs, "a", "b"), _ => false);
+            .WithService(() => new TestLifecycleInterceptor("lifecycle", logs), _ => false);
 
         var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor), typeof(ISensor));
         subject.Context.AddFallbackContext(context);
@@ -166,28 +166,22 @@ public class DynamicSubjectTests
     public class TestLifecycleInterceptor : ILifecycleInterceptor
     {
         private readonly List<string> _logs;
-        private readonly string[] _names;
+        private readonly string _name;
 
-        public TestLifecycleInterceptor(List<string> logs, params string[] names)
+        public TestLifecycleInterceptor(string name, List<string> logs)
         {
             _logs = logs;
-            _names = names;
+            _name = name;
         }
 
         public void AttachSubjectToContext(IInterceptorSubject subject)
         {
-            foreach (var name in _names)
-            {
-                _logs.Add($"{name}: Attached");
-            }
+            _logs.Add($"{_name}: Attached");
         }
 
         public void DetachSubjectFromContext(IInterceptorSubject subject)
         {
-            foreach (var name in _names)
-            {
-                _logs.Add($"{name}: Detached");
-            }
+            _logs.Add($"{_name}: Detached");
         }
     }
 }

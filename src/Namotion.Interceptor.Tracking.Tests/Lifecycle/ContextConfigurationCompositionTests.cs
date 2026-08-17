@@ -1,6 +1,7 @@
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
+using Namotion.Interceptor.Tracking.Tests.Models;
 using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Validation;
 
@@ -70,6 +71,24 @@ public class ContextConfigurationCompositionTests
     }
 
     [Fact]
+    public void WhenLifecycleIsConfiguredAfterCompositionWithACustomAuthority_ThenItReusesThatAuthority()
+    {
+        // Arrange
+        var lifecycle = new CustomLifecycleInterceptor();
+        var parent = InterceptorSubjectContext.Create();
+        parent.AddService<ILifecycleInterceptor>(lifecycle);
+        var child = InterceptorSubjectContext.Create();
+        child.AddFallbackContext(parent);
+
+        // Act
+        child.WithLifecycle();
+
+        // Assert
+        Assert.Same(lifecycle, child.GetService<ILifecycleInterceptor>());
+        Assert.Single(child.GetServices<ILifecycleInterceptor>());
+    }
+
+    [Fact]
     public void WhenTransactionContextsAreConfiguredBeforeComposition_ThenResolutionThrows()
     {
         // Arrange
@@ -83,6 +102,34 @@ public class ContextConfigurationCompositionTests
 
         // Assert
         Assert.Contains(typeof(SubjectTransactionInterceptor).FullName!, exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenTransactionsAreConfiguredAfterComposition_ThenTheyReuseTheCoordinatorAndCommit()
+    {
+        // Arrange
+        var parent = InterceptorSubjectContext.Create().WithTransactions();
+        var child = InterceptorSubjectContext.Create();
+        child.AddFallbackContext(parent);
+        child.WithTransactions();
+        var person = new Person(child);
+
+        // Act
+        using (var transaction = await child.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+
+            // Assert
+            Assert.Same(
+                parent.GetService<SubjectTransactionInterceptor>(),
+                child.GetService<SubjectTransactionInterceptor>());
+            Assert.Single(transaction.GetPendingChanges());
+
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert
+        Assert.Equal("John", person.FirstName);
     }
 
     [Theory]
@@ -139,5 +186,16 @@ public class ContextConfigurationCompositionTests
             NonUniqueConfiguration.DataAnnotationValidation => context.WithDataAnnotationValidation(),
             _ => throw new ArgumentOutOfRangeException(nameof(configuration))
         };
+    }
+
+    private sealed class CustomLifecycleInterceptor : ILifecycleInterceptor
+    {
+        public void AttachSubjectToContext(IInterceptorSubject subject)
+        {
+        }
+
+        public void DetachSubjectFromContext(IInterceptorSubject subject)
+        {
+        }
     }
 }

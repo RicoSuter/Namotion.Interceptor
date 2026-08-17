@@ -137,7 +137,8 @@ public class PerPropertySubscriptionLifecycleTests
         // the target-side [RunsAfter] ordering (PropertyChangeInterceptor after SubjectTransactionInterceptor):
         // staged writes stay silent during capture and replay once at commit. The aggregated counterpart is
         // WhenAggregatedWithSingleTransactionContext...; only the symmetric aggregation (both contexts
-        // .WithTransactions()) is inexpressible, because capture's TryGetService<SubjectTransactionInterceptor>
+        // .WithTransactions()) is inexpressible only when both contexts independently configure
+        // transaction authorities, because capture's TryGetService<SubjectTransactionInterceptor>
         // throws when two aggregated contexts each contribute one.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithTransactions();
         var person = new Person(context);
@@ -163,9 +164,9 @@ public class PerPropertySubscriptionLifecycleTests
     [Fact]
     public async Task WhenAggregatedWithSingleTransactionContext_ThenStagedWritesStaySilentAndDeliverOnceAtCommit()
     {
-        // Arrange: an ASYMMETRIC aggregation. A symmetric one (both contexts .WithTransactions()) cannot be
-        // expressed because capture resolves the interceptor via TryGetService, which throws when two
-        // aggregated contexts each contribute a SubjectTransactionInterceptor. Here only the parent fallback
+        // Arrange: an ASYMMETRIC aggregation. An aggregation where both contexts independently configure
+        // transactions cannot be expressed because capture resolves the interceptor via TryGetService, which
+        // throws when two aggregated contexts each contribute a SubjectTransactionInterceptor. Here only the parent fallback
         // adds transactions, so SubjectTransactionInterceptor resolves to exactly one instance while
         // PropertyChangeInterceptor aggregates to two (one per context). This pins the target-side
         // [RunsAfter] ordering across aggregated change interceptors: neither aggregated instance leaks a
