@@ -13,17 +13,15 @@ namespace HomeBlaze.Services;
 /// <summary>
 /// Thread-safe service that resolves subjects from paths and builds paths from subjects.
 /// Supports canonical notation (/Items[0]/Name) and route notation (/Items/0/Name).
-/// Implements lifecycle handling to invalidate caches when subjects are attached/detached.
+/// Implements lifecycle and relationship handling to invalidate caches when the subject graph changes.
 /// </summary>
-public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
+public class SubjectPathResolver : ILifecycleHandler, IPropertyRelationshipHandler, ISubjectPathResolver
 {
     private readonly RootManager _rootManager;
 
-    // Subject → canonical paths cache (with leading /)
-    private readonly ConcurrentDictionary<IInterceptorSubject, IReadOnlyList<string>> _canonicalPathsCache = new();
-
-    // (path, style) → Subject resolve cache (absolute paths only)
-    private readonly ConcurrentDictionary<(string Path, PathStyle Style), IInterceptorSubject?> _resolveCache = new();
+    // Replacing the complete generation prevents a reader that overlaps invalidation from republishing
+    // an old path into the caches used by later readers.
+    private PathCacheGeneration _cacheGeneration = new();
 
     /// <summary>
     /// Initializes a new subject path resolver.
@@ -69,7 +67,10 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
                 return null;
 
             var remainingPath = path[1..];
-            return _resolveCache.GetOrAdd((path, style), _ => ResolveInternal(root, remainingPath, style));
+            var cacheGeneration = Volatile.Read(ref _cacheGeneration);
+            return cacheGeneration.ResolvedSubjects.GetOrAdd(
+                (path, style),
+                _ => ResolveInternal(root, remainingPath, style));
         }
 
         // Explicit relative: ./...
@@ -130,7 +131,8 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
         IInterceptorSubject subject,
         PathStyle style)
     {
-        var canonicalPaths = _canonicalPathsCache.GetOrAdd(subject, ComputeCanonicalPaths);
+        var cacheGeneration = Volatile.Read(ref _cacheGeneration);
+        var canonicalPaths = cacheGeneration.CanonicalPaths.GetOrAdd(subject, ComputeCanonicalPaths);
 
         if (style == PathStyle.Canonical)
             return canonicalPaths;
@@ -166,10 +168,18 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
         ClearCaches();
     }
 
+    void IPropertyRelationshipHandler.ReconcileChildRelationships(
+        PropertyReference property,
+        ReadOnlySpan<SubjectPropertyRelationship> relationships)
+    {
+        // Full-group publication is the invalidation boundary. Do not inspect relationship keys here
+        // because they are opaque metadata and can run user equality, hashing, or formatting code.
+        ClearCaches();
+    }
+
     private void ClearCaches()
     {
-        _canonicalPathsCache.Clear();
-        _resolveCache.Clear();
+        Volatile.Write(ref _cacheGeneration, new PathCacheGeneration());
     }
 
     /// <summary>
@@ -403,5 +413,12 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
         {
             visited.Remove(currentSubject);
         }
+    }
+
+    private sealed class PathCacheGeneration
+    {
+        public ConcurrentDictionary<IInterceptorSubject, IReadOnlyList<string>> CanonicalPaths { get; } = new();
+
+        public ConcurrentDictionary<(string Path, PathStyle Style), IInterceptorSubject?> ResolvedSubjects { get; } = new();
     }
 }
