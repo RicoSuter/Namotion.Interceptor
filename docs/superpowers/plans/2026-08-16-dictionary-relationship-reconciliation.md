@@ -392,7 +392,7 @@
   docs(registry): document ordered occurrence relationships
   ```
 
-## Task 10: Retain only targeted comparative benchmarks
+## Task 10: Retain targeted comparative benchmarks and hand off the runtime comparison
 
 **Files:**
 - Modify: `src/Namotion.Interceptor.Benchmark/ChildIndexRefreshBenchmark.cs`
@@ -401,30 +401,199 @@
 - Review: `src/Namotion.Interceptor.Benchmark/ServiceOrderResolverBenchmark.cs`
 - Modify: `docs/benchmarking.md`
 
-- [ ] Read `docs/benchmarking.md` immediately before benchmarking and use `superpowers:using-git-worktrees` for an external worktree outside the repository.
+- [ ] Keep the already validated definitions focused on five structural writes across lifecycle-only, Registry, and Registry-plus-parent consumers; Registry construction; both cached parent reads; and one unchanged service-resolver noise row.
 
-- [ ] Keep benchmark definitions focused on replacement, reorder, re-key, duplicate occurrence, same-instance refresh, registry construction, registry parent reads, tracked parent reads, and one unchanged service-resolver noise reference. Remove rows unrelated to the redesigned storage or read paths.
+- [ ] Confirm that every structural benchmark target has its own setup and fresh subject set, and that both parent snapshots are pre-read before the measured loop.
 
-- [ ] Include a lifecycle-only control that performs the same structural writes without registry or parent relationship consumers. Use its allocation results to confirm the compact processed state does not allocate one relationship object per occurrence.
+- [ ] Build and list the exact matrix on the implementation branch.
 
-- [ ] Build identical new benchmark definitions on a temporary base branch rooted at pinned `origin/master`. Do not compare a class that exists only on the implementation branch.
+  Run: `dotnet build src/Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj -c Release`
 
-- [ ] Create the validated temporary base branch `benchmark/pr458-base-868a4d10`, temporary head branch `benchmark/pr458-head-final`, and external worktree `/Users/ricosuter/Projects/GitHub/Namotion.Interceptor-pr458-benchmark`. Abort if any name or path already exists unexpectedly. Never force-update the PR branch and never remove an unverified path.
+  Run: `dotnet run --project src/Namotion.Interceptor.Benchmark -c Release --no-build -- --filter "*ChildIndexRefreshBenchmark*" "*RegistryBenchmark.AddLotsOfPreviousCars*" "*ParentLookupBenchmark*" "*ServiceOrderResolverBenchmark.LinearChain*" --list flat`
 
-- [ ] Run the agreed three-launch comparison from the external worktree.
+  Expected: nine methods and 35 parameterized cases; zero build warnings and errors.
 
-  Run: `pwsh scripts/benchmark.ps1 -Filter "*ChildIndexRefreshBenchmark*","*RegistryBenchmark*","*ParentLookupBenchmark*","*ServiceOrderResolverBenchmark.LinearChain*" -LaunchCount 3 -BaseBranch benchmark/pr458-base-868a4d10`
+- [ ] Preserve the exact other-machine comparison instructions rather than running the long benchmark in this worktree. The user explicitly owns execution on another machine.
 
-  The temporary base branch name must be recorded in the benchmark log before running. Expect approximately 75 minutes. Keep the user updated at least once per hour.
+- [ ] Record the production base hash `868a4d109d53b24805c9ee180efbf5029ee12c1a`, final head hash, the requirement for byte-identical benchmark definitions on the benchmark-only base commit, and this exact command in the PR handoff:
 
-- [ ] Inspect allocations, linear scaling shape, raw launch variance, exact base/head commit hashes, and the unchanged noise row. Treat small timing movement inside noise as inconclusive. Investigate unexplained allocation growth before proceeding.
+  Run: `pwsh scripts/benchmark.ps1 -Filter "*ChildIndexRefreshBenchmark*","*RegistryBenchmark.AddLotsOfPreviousCars*","*ParentLookupBenchmark*","*ServiceOrderResolverBenchmark.LinearChain*" -LaunchCount 3 -BaseBranch benchmark/pr458-base-868a4d10`
 
-- [ ] Record the exact benchmark command, commit hashes, and concise results in the eventual PR description. Clean up only the validated temporary worktree and temporary benchmark branches after results are preserved.
+- [ ] State the external acceptance checks: inspect allocations first, then linear scaling, raw launch variance, exact hashes, and the unchanged noise row. Treat timing movement inside noise as inconclusive. Same-instance, re-key, and duplicate rows compare newly required work with master's missing behavior and are not pure regression rows.
+
+- [ ] Keep runtime benchmark results marked as pending external execution until the user supplies them. Do not claim measured performance locally.
 
 - [ ] Commit benchmark definition cleanup if it changed.
 
   ```text
   perf(registry): benchmark relationship reconciliation
+  ```
+
+## Task 10A: Remove quadratic provisional Registry publication and dead reconciliation allocations
+
+**Files:**
+- Modify: `src/Namotion.Interceptor.Registry/Abstractions/RegisteredSubjectProperty.cs`
+- Create: `src/Namotion.Interceptor.Registry.Tests/ProvisionalRelationshipAllocationTests.cs`
+- Modify: `src/Namotion.Interceptor.Registry.Tests/RelationshipReconciliationTests.cs`
+- Modify: `src/Namotion.Interceptor.Registry.Tests/RelationshipFailureTests.cs`
+- Modify: `src/Namotion.Interceptor.Tracking/Lifecycle/SubjectPropertyRelationshipReconciler.cs`
+- Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/SubjectPropertyRelationshipReconcilerTests.cs`
+
+**Interfaces:**
+- Consumes: the existing internal `AddChildRelationship`, `RemoveChildRelationships`, and `ReplaceChildRelationships` calls from `SubjectRegistry`.
+- Produces: the same public `RegisteredSubjectProperty.Children` API and lifecycle-visible behavior with average O(1) provisional membership updates and O(n) unobserved full replacement.
+
+- [ ] Add an allocation-scaling regression that prepares relationships outside the measurement window, measures only provisional removal and addition with `GC.GetAllocatedBytesForCurrentThread`, and compares 128 with 1,024 unique memberships on the same thread.
+
+  ```csharp
+  [Fact]
+  public void WhenProvisionalRelationshipCountScalesByEight_ThenAllocationsRemainLinear()
+  {
+      _ = MeasureProvisionalMutationAllocations(128); // JIT warm-up
+
+      var smallAllocation = MeasureProvisionalMutationAllocations(128);
+      var largeAllocation = MeasureProvisionalMutationAllocations(1024);
+
+      Assert.True(largeAllocation < smallAllocation * 20,
+          $"Expected linear allocation scaling, got {smallAllocation} and {largeAllocation} bytes.");
+  }
+  ```
+
+  The helper must construct the registered property, old/new subjects, relationship objects, and immutable seed group before reading the allocation counter. Inside the measured window it calls only the existing internal provisional removal/addition methods. It must keep all objects alive until after the second counter read.
+
+- [ ] Run the new allocation test against the current implementation.
+
+  Run: `dotnet test src/Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj --filter "FullyQualifiedName~ProvisionalRelationshipAllocationTests.WhenProvisionalRelationshipCountScalesByEight_ThenAllocationsRemainLinear"`
+
+  Expected RED: the 1,024-member mutation copies immutable arrays per event and grows far beyond the permitted linear ratio.
+
+- [ ] Extend lifecycle behavior tests before production changes. Cover an old duplicate group, retained committed occurrences, a removed membership, two provisional additions, removal and re-addition of one provisional subject, a cached provisional snapshot, final full replacement, and frozen old/provisional snapshots. Assert reference identity and exact order throughout.
+
+- [ ] Implement the overlay under the existing `_childrenLock`.
+
+  ```csharp
+  private Dictionary<IInterceptorSubject, ProvisionalChildState>? _provisionalChildren;
+  private LinkedList<SubjectPropertyRelationship>? _provisionalAdditions;
+
+  private sealed class ProvisionalChildState
+  {
+      public bool HasCommittedRelationships { get; init; }
+      public bool IncludeCommittedRelationships { get; set; }
+      public LinkedListNode<SubjectPropertyRelationship>? AdditionNode { get; set; }
+  }
+  ```
+
+  Initialize one state per distinct committed child on the first provisional mutation using `ReferenceEqualityComparer.Instance`. Removal suppresses committed occurrences and unlinks an active addition in O(1). Addition suppresses any committed occurrences, replaces an existing active node, and appends the new first-occurrence relationship. Delete a state only when it has no committed occurrence and no active addition. Never compare or hash `relationship.Index`.
+
+- [ ] Change `Children` cache construction to scan committed relationships in order, include only states whose committed occurrences remain visible, then append active provisional additions in linked-list order. Cache and return one immutable array exactly as today.
+
+- [ ] Change `ReplaceChildRelationships` to replace the committed immutable group, clear both overlay containers, and invalidate the cache in the same lock scope. Do not mutate any previously returned array or relationship.
+
+- [ ] Run the allocation and lifecycle/failure tests.
+
+  Run: `dotnet test src/Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj --filter "FullyQualifiedName~ProvisionalRelationshipAllocationTests|FullyQualifiedName~WhenDuplicateMembershipAttachesAndDetaches|FullyQualifiedName~RelationshipFailureTests"`
+
+  Expected GREEN with frozen snapshots, exact lifecycle visibility, no retry tombstones, and linear allocation scaling.
+
+- [ ] Remove dead reconciliation scratch without changing membership or occurrence ordering.
+
+  Delete `StagedPropertyReconciliation.RemovedRelationships`, the `removedRelationships` out parameter, `reusedOldRelationships`, and its removal-array construction. Replace the duplicate `newSubjects` set lookup with `membershipIndexes.ContainsKey(previousMembership.Subject)`. Keep the reverse-old-occurrence removal array because it defines detach order.
+
+- [ ] Run focused reconciler, full Tracking, and full Registry tests.
+
+  Run: `dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --filter "FullyQualifiedName~SubjectPropertyRelationshipReconcilerTests|FullyQualifiedName~RelationshipAttachDetachTests"`
+
+  Run: `dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj`
+
+  Run: `dotnet test src/Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj`
+
+- [ ] Review the resulting algorithm statically. Confirm one O(n) overlay initialization, average O(1) provisional updates, one lazy O(n) projection only when read, and one O(n) final replacement. Confirm no new public API and no HomeBlaze, gate, fan-in, or multi-authority optimization.
+
+- [ ] Commit the bounded performance fix.
+
+  ```text
+  perf(registry): make provisional relationships linear
+  ```
+
+## Task 10B: Minimize the cumulative PR without weakening its proof
+
+**Files:**
+- Delete: `docs/superpowers/plans/2026-08-16-dictionary-relationship-reconciliation.md` after all remaining task briefs are copied to the ignored SDD workspace
+- Restore to master: `src/Namotion.Interceptor.Benchmark/Program.cs`
+- Restore to master: `src/Namotion.Interceptor.Benchmark/RegistryBenchmark.cs`
+- Restore to master: `src/Namotion.Interceptor.Benchmark/ServiceOrderResolverBenchmark.cs`
+- Modify: `docs/benchmarking.md`
+- Modify: `docs/superpowers/specs/2026-08-16-dictionary-relationship-reconciliation-design.md`
+- Modify: `src/Namotion.Interceptor.Registry.Tests/Paths/PathExtensionsTests.cs`
+- Modify: `src/Namotion.Interceptor.Registry.Tests/SubjectRegistryTests.cs`
+- Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/PropertyLifecycleRefreshTests.cs`
+- Review: every remaining file in `git diff --name-only origin/master...HEAD`
+- Preserve: all production behavior and public API snapshots
+
+**Interfaces:**
+- Consumes: the complete tested implementation after Task 10A.
+- Produces: a smaller `origin/master...HEAD` review surface with identical production semantics and retained unique proof for every acceptance invariant.
+
+- [ ] Before deleting the tracked plan, generate Task 11, Task 12, and Task 13 briefs into `.superpowers/sdd/2026-08-16-dictionary-relationship-reconciliation/` and confirm each file is non-empty.
+
+- [ ] Produce a changed-file inventory with additions/deletions and classify every file as production/API, unique semantic test, unique failure/concurrency test, required documentation, benchmark, process artifact, or redundant/superseded material.
+
+  Run: `git diff --numstat origin/master...HEAD`
+
+  Run: `git diff --name-status origin/master...HEAD`
+
+- [ ] Delete the tracked implementation plan. Keep the approved design spec because it defines public semantics and concurrency/failure boundaries.
+
+- [ ] Restore `Program.cs`, `RegistryBenchmark.cs`, and `ServiceOrderResolverBenchmark.cs` byte-for-byte to master. The dedicated structural and parent-lookup classes already isolate new workloads; deleting unrelated pre-existing benchmark rows creates review churn. Change the relationship benchmark filter and guide to select `RegistryBenchmark.AddLotsOfPreviousCars` and `ServiceOrderResolverBenchmark.LinearChain` explicitly while keeping the nine-method, 35-case matrix.
+
+- [ ] Remove the added `PathExtensionsTests.WhenDuplicateDictionaryOccurrencesAreRekeyed_ThenTryGetPathUsesTheFirstCurrentOccurrence`; `RelationshipReconciliationTests.WhenADuplicateDictionaryGroupIsRekeyed_ThenSnapshotsAndSingularPathUseTheirOwnGeneration` already asserts the same singular-path invariant together with all relationship views.
+
+- [ ] Remove these two dominated `PropertyLifecycleRefreshTests` methods:
+
+  - `WhenSeveralLifecycleInterceptorsRefreshAnEqualContainer_ThenEachRunsOnceInResolverOrder`, covered by `MultipleLifecycleRelationshipTests.WhenTwoBuiltInLifecyclesRefreshTheSameContainer_ThenEachAuthorityRunsOnceAndSharedConsumersReplace`.
+  - `WhenARelationshipHandlerWritesTheSameProperty_ThenReconciliationThrowsBeforeNestedProcessing`, covered by `ConcurrentStructuralWriteLeakTests.WhenARelationshipCallbackReentersTheSameProperty_ThenTheCommittedGenerationRemainsCanonical`, which also asserts recovery and all public views.
+
+- [ ] Remove these 12 dominated `SubjectRegistryTests` methods and no others:
+
+  - `WhenMovingDictionaryItemToAnotherKey_ThenKeysAreCorrect`
+  - `WhenMovingDictionaryItemToAnotherKeyInAReadOnlyDictionary_ThenKeysAreCorrect`
+  - `WhenASubjectHeldTwiceInOneCollectionIsRemoved_ThenNoParentEntryIsLeftBehind`
+  - `WhenACollectionIsReordered_ThenBothParentIndexCopiesAgree`
+  - `WhenARetainedItemMoves_ThenTheTrackedParentsAgreeWithTheRegistry`
+  - `WhenACollectionItemIsReorderedAndThenRemoved_ThenItKeepsNoTrackedParent`
+  - `WhenReorderingAndRekeyingDictionaryInOneWrite_ThenKeysFollowTheItems`
+  - `WhenReorderingDictionary_ThenKeysAreUnchanged`
+  - `WhenASubjectUnderTwoKeysIsRewrittenUnchanged_ThenBothOccurrencesRemain`
+  - `WhenACollectionHoldsTheSameSubjectTwice_ThenItKeepsBothOccurrences`
+  - `WhenACollectionIsReordered_ThenTheChildrenFollowTheNewOrder`
+  - `WhenADictionaryIsRewrittenInAnotherOrder_ThenTheChildrenFollowIt`
+
+  The retained `RelationshipReconciliationTests` cover exact array/dictionary generations, duplicates, opaque keys, frozen snapshots, Registry/tracked parents, paths, and detach cleanup. Run the named dominating tests explicitly before and after deletion.
+
+- [ ] Condense the design spec without removing normative architecture. Replace repeated public-behavior blocks with a link to `docs/registry.md`; reduce parallel-PR compatibility history to one master-first paragraph; remove the branch-relative behavior recap, enumerated test inventory, commit choreography, and PR-process checklist. Retain invariants, architecture, reconciliation flow, concurrency/lock model, failures, API impact, bounded performance design, and acceptance criteria.
+
+- [ ] Apply no further deletion unless it is backed by a named equivalent test or a superseding implementation. When consolidating repeated setup, use private test helpers in the same test class and preserve Arrange/Act/Assert sections, synchronization gates, and exact assertions.
+
+- [ ] Do not remove any unique test for opaque keys, duplicate occurrence ordering, lifecycle visibility, attach abort/retry, relationship-handler continuation, multiple lifecycle authorities, frozen snapshots, cache-generation races, same/different-property concurrency, detach cleanup, or reattach convergence.
+
+- [ ] Run every project whose test files changed, then run the full Tracking and Registry projects even if their tests were only consolidated.
+
+  Run: `dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj`
+
+  Run: `dotnet test src/Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj`
+
+- [ ] Compare before/after cumulative size and record exact savings by category. Reject a consolidation if it adds indirection without removing meaningful review surface.
+
+  Run: `git diff --shortstat origin/master...HEAD`
+
+  Run: `git diff --stat origin/master...HEAD`
+
+  Run: `git diff --check origin/master...HEAD`
+
+- [ ] Commit the reviewability cleanup.
+
+  ```text
+  test: reduce relationship reconciliation review surface
   ```
 
 ## Task 11: Run full verification before review
@@ -488,7 +657,7 @@
 - Create temporarily: `/private/tmp/pr-458-body.md`
 - Modify remotely: PR #458 title and body
 
-- [ ] Confirm the branch is clean, final commits are reviewable, the benchmark evidence is preserved, and the unbiased review has no unresolved Critical or Important findings.
+- [ ] Confirm the branch is clean, final commits are reviewable, the benchmark handoff is preserved, and the unbiased review has no unresolved Critical or Important findings. Runtime comparison results may remain explicitly pending because the user will run them on another machine.
 
 - [ ] Push `fix/dictionary-key-refresh` to `origin` without force.
 
@@ -510,7 +679,7 @@
 
 - [ ] If remote checks start, inspect their current state. Do not claim they passed unless the reported status is complete and successful.
 
-- [ ] Report the final head SHA, pushed branch, PR URL, exact local verification, benchmark comparison, intentional public API and behavior changes, independent-review verdict, and any remote checks still pending.
+- [ ] Report the final head SHA, pushed branch, PR URL, exact local verification, benchmark command and pending or supplied external result, intentional public API and behavior changes, independent-review verdict, and any remote checks still pending.
 
 ## Final Acceptance Checklist
 
@@ -524,7 +693,7 @@
 - [ ] Lifecycle-only configurations do not allocate per-occurrence relationship objects.
 - [ ] Master multi-lifecycle semantics and their known ownership limitation are preserved and tested.
 - [ ] No adaptive algorithm, threshold-only code, or obsolete refresh API remains.
-- [ ] Build, non-integration tests, API verification, concurrency repeats, and targeted benchmarks have current evidence.
+- [ ] Build, non-integration tests, API verification, concurrency repeats, benchmark definitions, and the static allocation-scaling test have current local evidence. Runtime benchmark results are either supplied from the user's benchmark machine or stated as pending.
 - [ ] A fresh independent reviewer reports no unresolved Critical or Important findings.
 - [ ] The pushed PR title and description match the final implementation and evidence.
 
@@ -533,7 +702,7 @@
 | Design requirement | Implementation and proof |
 | --- | --- |
 | Immutable occurrence relationships and ordered dispatch | Tasks 1 and 2 |
-| Compact lifecycle-only membership state | Tasks 2 and 10 |
+| Compact lifecycle-only membership state | Tasks 2 and 10A |
 | Same-instance equality-suppressed refresh | Tasks 2 and 6 |
 | Staged enumeration, canonical detach, and re-entrant abort | Tasks 2 and 3 |
 | Ordered parent-tracking storage and coherent publication | Task 4 |
@@ -542,7 +711,9 @@
 | Quiescent consistency and race coverage | Task 7 |
 | Public API break and removal of adaptive PR code | Task 8 |
 | Behavior, compatibility, and concurrency documentation | Task 9 |
-| Allocation and scaling acceptance | Task 10 |
+| Benchmark matrix and external handoff | Task 10 |
+| Linear provisional Registry updates and dead-allocation removal | Task 10A |
+| Minimal cumulative review surface | Task 10B |
 | Full repository evidence | Task 11 |
 | Independent merge-readiness review | Task 12 |
 | Final push and accurate PR metadata | Task 13 |
