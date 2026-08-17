@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 using Microsoft.Extensions.Logging.Abstractions;
+using MQTTnet;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Mqtt.Client;
@@ -105,6 +107,50 @@ public partial class MqttClientLivenessTests
         }
     }
 
+    [Fact]
+    public async Task WhenTheClientIsForceKilled_ThenLivenessCyclesAndTheTransportIsReplaced()
+    {
+        // Arrange
+        var brokerPort = GetFreeTcpPort();
+        await using var broker = CreateBroker(brokerPort);
+        await using var source = CreateClientSource(brokerPort, reconnectDelay: TimeSpan.FromSeconds(1));
+
+        await broker.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational,
+                message: "The client should report operational once it has connected to the broker.");
+
+            var firstClient = GetCurrentClient(source);
+
+            // Act
+            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => !source.Diagnostics.IsOperational,
+                timeout: TimeSpan.FromSeconds(3),
+                message: "A force-killed client should report the transport outage.");
+            var downAt = source.Diagnostics.OperationalChangeTime;
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational,
+                message: "A force-killed client should become operational on a replacement transport.");
+
+            Assert.NotSame(firstClient, GetCurrentClient(source));
+            Assert.False(firstClient.IsConnected);
+            Assert.True(source.Diagnostics.OperationalChangeTime > downAt);
+            Assert.Null(source.Diagnostics.LastError);
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+            await broker.StopAsync(CancellationToken.None);
+        }
+    }
+
     private static MqttSubjectServer CreateBroker(int brokerPort)
     {
         var context = InterceptorSubjectContext
@@ -146,6 +192,15 @@ public partial class MqttClientLivenessTests
     private static MqttCompositeMapper CreateMapper() => new(
         new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
         new MqttAttributeMapper("mqtt"));
+
+    private static IMqttClient GetCurrentClient(MqttSubjectClientSource source)
+    {
+        var client = typeof(MqttSubjectClientSource)
+            .GetField("_client", BindingFlags.Instance | BindingFlags.NonPublic)?
+            .GetValue(source);
+
+        return client as IMqttClient ?? throw new InvalidOperationException("The source has no active MQTT client.");
+    }
 
     private static int GetFreeTcpPort()
     {
