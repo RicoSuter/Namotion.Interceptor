@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using MQTTnet;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Mqtt.Client;
 using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Mqtt.Server;
@@ -152,6 +153,89 @@ public partial class MqttClientLivenessTests
         }
     }
 
+    [Fact]
+    public async Task WhenDisconnectCallbackArrivesAfterReconnect_ThenHealthyConnectionRemainsOperational()
+    {
+        // Arrange
+        var brokerPort = GetFreeTcpPort();
+        await using var broker = CreateBroker(brokerPort);
+        await using var source = CreateClientSource(brokerPort, reconnectDelay: TimeSpan.FromMilliseconds(200));
+        using var stateRecorder = SourceStateRecorder.SubscribeTo(source);
+
+        await broker.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational,
+                message: "The client should report operational once it has connected to the broker.");
+            await stateRecorder.WaitForStatesAsync(
+                TimeSpan.FromSeconds(30),
+                "The initial subscription should complete.",
+                SourceState.Synchronized);
+
+            var client = GetCurrentClient(source);
+            var monitor = GetConnectionMonitor(source);
+            var delayedDisconnectedHandler = GetDisconnectedHandler(source);
+            var disconnectedArgs = new TaskCompletionSource<MqttClientDisconnectedEventArgs>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            Task CaptureDisconnectedArgsAsync(MqttClientDisconnectedEventArgs args)
+            {
+                disconnectedArgs.TrySetResult(args);
+                return Task.CompletedTask;
+            }
+
+            // Hold the raw MQTTnet callback while the monitor handles the confirmed transport loss.
+            client.DisconnectedAsync -= delayedDisconnectedHandler;
+            client.DisconnectedAsync += CaptureDisconnectedArgsAsync;
+            try
+            {
+                await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
+                var delayedArgs = await disconnectedArgs.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+                // The monitor detects the loss independently, buffers, and reconnects before
+                // MQTTnet is allowed to deliver its delayed raw callback.
+                monitor.SignalReconnectNeeded();
+
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => !source.Diagnostics.IsOperational,
+                    message: "The confirmed disconnect should mark the client non-operational.");
+                await stateRecorder.WaitForStatesAsync(
+                    TimeSpan.FromSeconds(15),
+                    "The confirmed disconnect should start buffering.",
+                    SourceState.Synchronized,
+                    SourceState.Synchronizing);
+
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => source.Diagnostics.IsOperational,
+                    message: "The client should report operational again once the monitor has reconnected.");
+                await stateRecorder.WaitForStatesAsync(
+                    TimeSpan.FromSeconds(30),
+                    "The client should finish synchronizing after reconnecting.",
+                    SourceState.Synchronized,
+                    SourceState.Synchronizing,
+                    SourceState.Synchronized);
+
+                // Act
+                await delayedDisconnectedHandler(delayedArgs);
+
+                // Assert
+                Assert.True(source.Diagnostics.IsOperational);
+                Assert.True(client.IsConnected);
+            }
+            finally
+            {
+                client.DisconnectedAsync -= CaptureDisconnectedArgsAsync;
+                client.DisconnectedAsync += delayedDisconnectedHandler;
+            }
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+            await broker.StopAsync(CancellationToken.None);
+        }
+    }
+
     private static MqttSubjectServer CreateBroker(int brokerPort)
     {
         var context = InterceptorSubjectContext
@@ -172,7 +256,9 @@ public partial class MqttClientLivenessTests
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry()
-            .WithLifecycle();
+            .WithLifecycle()
+            .WithSourceTransactions()
+            .WithSourceMonitoring();
 
         return new MqttSubjectClientSource(
             new LivenessTestRoot(context),
@@ -201,6 +287,26 @@ public partial class MqttClientLivenessTests
             .GetValue(source);
 
         return client as IMqttClient ?? throw new InvalidOperationException("The source has no active MQTT client.");
+    }
+
+    private static MqttConnectionMonitor GetConnectionMonitor(MqttSubjectClientSource source)
+    {
+        var monitor = typeof(MqttSubjectClientSource)
+            .GetField("_connectionMonitor", BindingFlags.Instance | BindingFlags.NonPublic)?
+            .GetValue(source);
+
+        return monitor as MqttConnectionMonitor ??
+            throw new InvalidOperationException("The source has no active MQTT connection monitor.");
+    }
+
+    private static Func<MqttClientDisconnectedEventArgs, Task> GetDisconnectedHandler(
+        MqttSubjectClientSource source)
+    {
+        var method = typeof(MqttSubjectClientSource)
+            .GetMethod("OnDisconnectedAsync", BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The source has no disconnected handler.");
+
+        return method.CreateDelegate<Func<MqttClientDisconnectedEventArgs, Task>>(source);
     }
 
     private static int GetFreeTcpPort()

@@ -624,16 +624,15 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
     private Task OnDisconnectedAsync(MqttClientDisconnectedEventArgs e)
     {
-        // Before the disposal guard below, which would otherwise return early and leave a disconnected
-        // client reporting that it is serving until disposal latches the terminal state.
-        Metrics.MarkNotOperational();
-
         if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1)
         {
             return Task.CompletedTask;
         }
 
         _logger.LogWarning(e.Exception, "MQTT client disconnected. Reason: {Reason}.", e.Reason);
+
+        // The callback can arrive after the monitor has already reconnected this client. Let the
+        // monitor confirm the loss before it marks the source down and starts buffering.
         _connectionMonitor?.SignalReconnectNeeded();
 
         return Task.CompletedTask;
