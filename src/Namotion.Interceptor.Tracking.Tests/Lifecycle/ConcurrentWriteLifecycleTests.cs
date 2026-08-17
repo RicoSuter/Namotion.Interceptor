@@ -250,6 +250,73 @@ public class ConcurrentWriteLifecycleTests
 
     [Fact]
     [Trait("Category", "Concurrency")]
+    public async Task WhenAnOlderSetterOnlyWriteResumesAfterANewerReconciliation_ThenTheNewerCommittedGenerationRemainsCanonical()
+    {
+        // Reconciling a getterless property from an older invocation after a newer commit would overwrite
+        // canonical membership because the lifecycle authority cannot re-read the actual backing value.
+        // Arrange
+        var first = new Car { Name = "First" };
+        var second = new Car { Name = "Second" };
+        var firstGeneration = new[] { first };
+        var secondGeneration = new[] { second };
+        using var writeGate = new AfterCommitWriteGate(
+            nameof(Garage.SetterOnlyCars),
+            firstGeneration);
+        var relationshipHandler = new RecordingRelationshipHandler(nameof(Garage.SetterOnlyCars));
+        var context = InterceptorSubjectContext.Create();
+        context.AddService<IWriteInterceptor>(writeGate);
+        context.WithLifecycle();
+        context.AddService<IPropertyRelationshipHandler>(relationshipHandler);
+        var garage = new Garage(context);
+        relationshipHandler.Generations.Clear();
+
+        // Act: park the first write after its terminal commit, then let the newer write reconcile completely.
+        var firstWriter = Task.Factory.StartNew(
+            () => garage.SetterOnlyCars = firstGeneration,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+        ExceptionDispatchInfo? workerFailure = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => writeGate.BackingCommitted.IsSet || firstWriter.IsCompleted,
+                message: "The older setter-only write should commit before the newer write starts.");
+            if (!writeGate.BackingCommitted.IsSet)
+            {
+                await firstWriter;
+            }
+            Assert.True(writeGate.BackingCommitted.IsSet);
+            Assert.False(firstWriter.IsCompleted);
+
+            garage.SetterOnlyCars = secondGeneration;
+
+            Assert.Equal(0, first.GetReferenceCount());
+            Assert.Equal(1, second.GetReferenceCount());
+            Assert.Same(second, Assert.Single(Assert.Single(relationshipHandler.Generations)).Child);
+        }
+        catch (Exception exception)
+        {
+            workerFailure = ExceptionDispatchInfo.Capture(exception);
+        }
+        finally
+        {
+            writeGate.Release.Set();
+            workerFailure = await ObserveWorkerAsync(
+                firstWriter,
+                workerFailure,
+                "The older setter-only writer should complete after its commit gate is released.");
+        }
+        workerFailure?.Throw();
+
+        // Assert
+        Assert.Equal(0, first.GetReferenceCount());
+        Assert.Equal(1, second.GetReferenceCount());
+        Assert.Same(second, Assert.Single(relationshipHandler.Generations[^1]).Child);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
     public async Task WhenContextDetachRacesADescendantWrite_ThenDetachClearsAndReattachUsesTheBackingGeneration()
     {
         // Walking the descendant's newer backing value during detach would strand the old membership,
@@ -416,6 +483,21 @@ public class ConcurrentWriteLifecycleTests
         {
             BackingCommitted.Dispose();
             Release.Dispose();
+        }
+    }
+
+    private sealed class RecordingRelationshipHandler(string propertyName) : IPropertyRelationshipHandler
+    {
+        public List<SubjectPropertyRelationship[]> Generations { get; } = [];
+
+        public void ReconcileChildRelationships(
+            PropertyReference property,
+            ReadOnlySpan<SubjectPropertyRelationship> relationships)
+        {
+            if (property.Name == propertyName)
+            {
+                Generations.Add(relationships.ToArray());
+            }
         }
     }
 }

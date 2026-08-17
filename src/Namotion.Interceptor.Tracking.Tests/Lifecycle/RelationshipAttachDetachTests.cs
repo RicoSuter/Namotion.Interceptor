@@ -78,6 +78,84 @@ public class RelationshipAttachDetachTests
     }
 
     [Fact]
+    public void WhenInitialAttachEnumerationWritesThePropertyBeingStaged_ThenTheWriteIsRejectedBeforeBackingMutation()
+    {
+        // Allowing the nested setter to commit would let initial attach publish the stale enumeration while
+        // the backing property already points at the nested generation.
+        // Arrange
+        var relationshipHandler = new RecordingRelationshipHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle();
+        context.AddService<IPropertyRelationshipHandler>(relationshipHandler);
+        var enumerated = new Person { FirstName = "enumerated" };
+        var replacement = new Person { FirstName = "replacement" };
+        var replacementGeneration = new object?[] { replacement };
+        var parent = new ThrowingStructuralContainer();
+        var stagedEnumerable = new ReentrantEnumerable<object?>(
+            () => parent.FirstItems = replacementGeneration,
+            enumerated);
+        parent.FirstItems = stagedEnumerable;
+
+        // Act
+        var exception = Record.Exception(() =>
+            ((IInterceptorSubject)parent).Context.AddFallbackContext(context));
+
+        // Assert
+        var invalidOperationException = Assert.IsType<InvalidOperationException>(exception);
+        Assert.Contains("initial structural properties are being staged", invalidOperationException.Message);
+        Assert.Same(stagedEnumerable, parent.FirstItems);
+        Assert.Equal(0, enumerated.GetReferenceCount());
+        Assert.Equal(0, replacement.GetReferenceCount());
+        Assert.Empty(relationshipHandler.Generations);
+
+        // Act: the staging guard must be cleared after the failed attach.
+        var laterException = Record.Exception(() => parent.FirstItems = replacementGeneration);
+
+        // Assert
+        Assert.Null(laterException);
+        Assert.Same(replacementGeneration, parent.FirstItems);
+    }
+
+    [Fact]
+    public void WhenInitialAttachEnumerationWritesAnEarlierStagedProperty_ThenTheWriteIsRejectedBeforeBackingMutation()
+    {
+        // Allowing a later getter to rewrite an earlier staged property would publish that earlier stale
+        // snapshot after its backing generation has already changed.
+        // Arrange
+        var relationshipHandler = new RecordingRelationshipHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle();
+        context.AddService<IPropertyRelationshipHandler>(relationshipHandler);
+        var first = new Person { FirstName = "first" };
+        var second = new Person { FirstName = "second" };
+        var replacement = new Person { FirstName = "replacement" };
+        var firstGeneration = new object?[] { first };
+        var replacementGeneration = new object?[] { replacement };
+        var parent = new ThrowingStructuralContainer
+        {
+            FirstItems = firstGeneration
+        };
+        parent.SecondItems = new ReentrantEnumerable<object?>(
+            () => parent.FirstItems = replacementGeneration,
+            second);
+
+        // Act
+        var exception = Record.Exception(() =>
+            ((IInterceptorSubject)parent).Context.AddFallbackContext(context));
+
+        // Assert
+        var invalidOperationException = Assert.IsType<InvalidOperationException>(exception);
+        Assert.Contains("initial structural properties are being staged", invalidOperationException.Message);
+        Assert.Same(firstGeneration, parent.FirstItems);
+        Assert.Equal(0, first.GetReferenceCount());
+        Assert.Equal(0, second.GetReferenceCount());
+        Assert.Equal(0, replacement.GetReferenceCount());
+        Assert.Empty(relationshipHandler.Generations);
+    }
+
+    [Fact]
     public void WhenBackingStorageChangesBeforeContextDetach_ThenCanonicalChildrenAndFirstOccurrenceMetadataAreDetached()
     {
         // Enumerating the mutated list would detach the replacement and lose the relationship that was actually attached.
@@ -535,6 +613,17 @@ public class RelationshipAttachDetachTests
                 throw new InvalidOperationException("Enumeration failed.");
             }
 
+            return ((IEnumerable<T>)items).GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class ReentrantEnumerable<T>(Action callback, params T[] items) : IEnumerable<T>
+    {
+        public IEnumerator<T> GetEnumerator()
+        {
+            callback();
             return ((IEnumerable<T>)items).GetEnumerator();
         }
 

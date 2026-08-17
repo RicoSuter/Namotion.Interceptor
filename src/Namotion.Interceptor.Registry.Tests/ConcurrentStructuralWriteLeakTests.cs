@@ -38,10 +38,12 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
         // Arrange
         var firstLifecycle = new LifecycleInterceptor();
         var secondLifecycle = new LifecycleInterceptor();
+        var thirdLifecycle = new LifecycleInterceptor();
         var reentrantHandler = new SamePropertyReentrantRelationshipHandler();
         var context = InterceptorSubjectContext.Create();
         context.AddService(firstLifecycle);
         context.AddService(secondLifecycle);
+        context.AddService(thirdLifecycle);
         context.AddService<IPropertyRelationshipHandler>(reentrantHandler);
         context
             .WithFullPropertyTracking()
@@ -62,7 +64,7 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
         Assert.Contains("already being reconciled", exception.Message);
         Assert.Same(writtenValue, parent.Children);
         AssertSingleRelationshipGeneration(parent, first, registry);
-        Assert.Equal(2, first.GetReferenceCount());
+        Assert.Equal(3, first.GetReferenceCount());
 
         // Act: a later write must diff from the retained canonical generation.
         var replacement = new Person { FirstName = "Replacement" };
@@ -73,7 +75,7 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
         Assert.Null(registry.TryGetRegisteredSubject(first));
         Assert.Empty(first.GetParents());
         Assert.Equal(0, first.GetReferenceCount());
-        Assert.Equal(2, replacement.GetReferenceCount());
+        Assert.Equal(3, replacement.GetReferenceCount());
     }
 
     private static void AssertSingleRelationshipGeneration(

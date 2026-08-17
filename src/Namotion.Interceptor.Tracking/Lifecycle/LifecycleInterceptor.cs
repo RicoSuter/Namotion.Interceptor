@@ -21,6 +21,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
     private static Dictionary<LifecycleInterceptor, HashSet<PropertyReference>>? _activeReconciliations;
 
     [ThreadStatic]
+    private static Dictionary<LifecycleInterceptor, HashSet<IInterceptorSubject>>? _attachStagingSubjects;
+
+    [ThreadStatic]
     private static Stack<List<ProcessedSubjectReference>>? _listPool;
 
     /// <summary>
@@ -490,11 +493,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
             return;
         }
 
+        var property = context.Property;
+        ThrowIfAttachStagingWrite(property);
+
         var relationshipHandlers = context.Property.Subject.Context.GetServices<IPropertyRelationshipHandler>();
         var materializeRelationships = relationshipHandlers.Length > 0 ||
                                        context.Property.Subject is IPropertyRelationshipHandler;
 
-        var property = context.Property;
         EnterReconciliation(property);
         try
         {
@@ -504,7 +509,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
                 next(ref context);
             }
             catch (InvalidOperationException exception)
-                when (IsSamePropertyReconciliationException(exception, this, property) && context.IsWritten)
+                when (IsSamePropertyReconciliationException(exception, property) && context.IsWritten)
             {
                 // A downstream lifecycle authority may already have committed the outer value before its
                 // relationship callback attempts the nested write. Finish this authority's outer generation
@@ -520,6 +525,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
                     relationshipHandlers,
                     materializeRelationships,
                     context.NewValue,
+                    context.Revision,
                     useWrittenValueWhenGetterMissing: true);
             }
 
@@ -551,6 +557,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
                 relationshipHandlers,
                 materializeRelationships,
                 writtenValue: null,
+                writtenRevision: 0,
                 useWrittenValueWhenGetterMissing: false);
         }
         finally
@@ -565,6 +572,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
         ImmutableArray<IPropertyRelationshipHandler> relationshipHandlers,
         bool materializeRelationships,
         object? writtenValue,
+        long writtenRevision,
         bool useWrittenValueWhenGetterMissing)
     {
         lock (_attachedSubjects)
@@ -577,15 +585,24 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
             // The terminal write runs outside this lock. Re-read the actual backing value after acquiring
             // the writer lock so racing writes converge to the latest value visible to this authority.
             // Setter-only generated properties have no getter, so their committed write value is authoritative.
+            var hasGetter = metadata.GetValue is { };
             var value = metadata.GetValue is { } getValue
                 ? getValue(property.Subject)
                 : useWrittenValueWhenGetterMissing ? writtenValue : null;
             _processedProperties.TryGetValue(property, out var previousState);
+            if (!hasGetter &&
+                previousState is not null &&
+                writtenRevision < previousState.Revision)
+            {
+                return;
+            }
+
             var reconciliation = SubjectPropertyRelationshipReconciler.Stage(
                 property,
                 value,
                 previousState,
-                materializeRelationships);
+                materializeRelationships,
+                Math.Max(writtenRevision, previousState?.Revision ?? 0));
             List<AppliedMembership>? appliedAdditions = null;
 
             // Enumeration can run user code which re-enters lifecycle operations because Monitor is
@@ -683,7 +700,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
         {
             var exception = new InvalidOperationException(
                 $"Property '{property.Name}' on '{property.Subject.GetType().Name}' is already being reconciled.");
-            exception.Data[SamePropertyExceptionKey] = new SamePropertyReconciliationMarker(this, property);
+            exception.Data[SamePropertyExceptionKey] = new SamePropertyReconciliationMarker(property);
             throw exception;
         }
     }
@@ -701,35 +718,43 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
 
     private List<StagedProperty> StageSubjectProperties(IInterceptorSubject subject)
     {
-        var relationshipHandlers = subject.Context.GetServices<IPropertyRelationshipHandler>();
-        var materializeRelationships = relationshipHandlers.Length > 0 ||
-                                       subject is IPropertyRelationshipHandler;
-        var stagedProperties = new List<StagedProperty>();
-        foreach (var property in subject.Properties)
+        EnterAttachStaging(subject);
+        try
         {
-            var metadata = property.Value;
-            if (!metadata.IsIntercepted ||
-                !metadata.Type.CanContainSubjects())
+            var relationshipHandlers = subject.Context.GetServices<IPropertyRelationshipHandler>();
+            var materializeRelationships = relationshipHandlers.Length > 0 ||
+                                           subject is IPropertyRelationshipHandler;
+            var stagedProperties = new List<StagedProperty>();
+            foreach (var property in subject.Properties)
             {
-                continue;
+                var metadata = property.Value;
+                if (!metadata.IsIntercepted ||
+                    !metadata.Type.CanContainSubjects())
+                {
+                    continue;
+                }
+
+                var propertyReference = new PropertyReference(subject, property.Key);
+                var value = metadata.GetValue?.Invoke(subject);
+                _processedProperties.TryGetValue(propertyReference, out var previousState);
+                var reconciliation = SubjectPropertyRelationshipReconciler.Stage(
+                    propertyReference,
+                    value,
+                    previousState,
+                    materializeRelationships);
+                stagedProperties.Add(new StagedProperty(
+                    propertyReference,
+                    relationshipHandlers,
+                    materializeRelationships,
+                    reconciliation));
             }
 
-            var propertyReference = new PropertyReference(subject, property.Key);
-            var value = metadata.GetValue?.Invoke(subject);
-            _processedProperties.TryGetValue(propertyReference, out var previousState);
-            var reconciliation = SubjectPropertyRelationshipReconciler.Stage(
-                propertyReference,
-                value,
-                previousState,
-                materializeRelationships);
-            stagedProperties.Add(new StagedProperty(
-                propertyReference,
-                relationshipHandlers,
-                materializeRelationships,
-                reconciliation));
+            return stagedProperties;
         }
-
-        return stagedProperties;
+        finally
+        {
+            ExitAttachStaging(subject);
+        }
     }
 
     private List<DetachedProperty> CaptureDetachedProperties(
@@ -1004,17 +1029,49 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
 
     private static bool IsSamePropertyReconciliationException(
         InvalidOperationException exception,
-        LifecycleInterceptor authority,
         PropertyReference property)
     {
         return exception.Data[SamePropertyExceptionKey] is SamePropertyReconciliationMarker marker &&
-               ReferenceEquals(marker.Authority, authority) &&
                PropertyReference.Comparer.Equals(marker.Property, property);
     }
 
-    private sealed record SamePropertyReconciliationMarker(
-        LifecycleInterceptor Authority,
-        PropertyReference Property);
+    private void ThrowIfAttachStagingWrite(PropertyReference property)
+    {
+        if (_attachStagingSubjects is not null &&
+            _attachStagingSubjects.TryGetValue(this, out var subjects) &&
+            subjects.Contains(property.Subject))
+        {
+            throw new InvalidOperationException(
+                $"Structural property '{property.Name}' on '{property.Subject.GetType().Name}' cannot be written " +
+                "while that subject's initial structural properties are being staged.");
+        }
+    }
+
+    private void EnterAttachStaging(IInterceptorSubject subject)
+    {
+        _attachStagingSubjects ??=
+            new Dictionary<LifecycleInterceptor, HashSet<IInterceptorSubject>>(ReferenceEqualityComparer.Instance);
+        if (!_attachStagingSubjects.TryGetValue(this, out var subjects))
+        {
+            subjects = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
+            _attachStagingSubjects.Add(this, subjects);
+        }
+
+        subjects.Add(subject);
+    }
+
+    private void ExitAttachStaging(IInterceptorSubject subject)
+    {
+        var attachStagingSubjects = _attachStagingSubjects!;
+        var subjects = attachStagingSubjects[this];
+        subjects.Remove(subject);
+        if (subjects.Count == 0)
+        {
+            attachStagingSubjects.Remove(this);
+        }
+    }
+
+    private sealed record SamePropertyReconciliationMarker(PropertyReference Property);
 
     private sealed class AttachOperation(bool wasAttachedAtStart)
     {

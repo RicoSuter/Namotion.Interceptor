@@ -9,7 +9,8 @@ internal static class SubjectPropertyRelationshipReconciler
         PropertyReference property,
         object? value,
         ProcessedPropertyState? previousState,
-        bool materializeRelationships)
+        bool materializeRelationships,
+        long revision = 0)
     {
         var descriptors = new List<SubjectOccurrenceDescriptor>();
         EnumerateDescriptors(property, value, descriptors);
@@ -78,7 +79,8 @@ internal static class SubjectPropertyRelationshipReconciler
             memberships.MoveToImmutable(),
             relationships,
             relationshipKinds,
-            descriptors.Count);
+            descriptors.Count,
+            revision);
 
         var additions = ImmutableArray.CreateBuilder<ProcessedSubjectMembership>();
         var oldSubjects = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
@@ -318,12 +320,14 @@ internal sealed class ProcessedPropertyState
         ImmutableArray<ProcessedSubjectMembership> memberships,
         ImmutableArray<SubjectPropertyRelationship> relationships,
         ImmutableArray<RelationshipIndexKind> relationshipKinds,
-        int occurrenceCount)
+        int occurrenceCount,
+        long revision = 0)
     {
         Memberships = memberships;
         Relationships = relationships;
         RelationshipKinds = relationshipKinds;
         OccurrenceCount = occurrenceCount;
+        Revision = revision;
     }
 
     public ImmutableArray<ProcessedSubjectMembership> Memberships { get; }
@@ -333,6 +337,8 @@ internal sealed class ProcessedPropertyState
     public ImmutableArray<RelationshipIndexKind> RelationshipKinds { get; }
 
     public int OccurrenceCount { get; }
+
+    public long Revision { get; }
 }
 
 internal sealed class StagedPropertyReconciliation
