@@ -65,6 +65,14 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
     /// </summary>
     internal int ConnectedClientCount => Volatile.Read(ref _numberOfClients);
 
+    internal Task[] GetRunningInitialStateTasksSnapshot()
+    {
+        lock (_initialStateTasksLock)
+        {
+            return _runningInitialStateTasks?.ToArray() ?? [];
+        }
+    }
+
     public MqttSubjectServer(
         IInterceptorSubject subject,
         MqttServerConfiguration configuration,
@@ -167,7 +175,10 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
             ClientConnectedAsync(args, server, shutdownCts, initialStateTasks);
 
         _mqttServer = server;
-        _runningInitialStateTasks = initialStateTasks;
+        lock (_initialStateTasksLock)
+        {
+            _runningInitialStateTasks = initialStateTasks;
+        }
 
         if (lifecycleInterceptor is not null)
         {
@@ -315,9 +326,12 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
             _mqttServer = null;
         }
 
-        if (ReferenceEquals(_runningInitialStateTasks, initialStateTasks))
+        lock (_initialStateTasksLock)
         {
-            _runningInitialStateTasks = null;
+            if (ReferenceEquals(_runningInitialStateTasks, initialStateTasks))
+            {
+                _runningInitialStateTasks = null;
+            }
         }
 
         _propertyToTopic.Clear();

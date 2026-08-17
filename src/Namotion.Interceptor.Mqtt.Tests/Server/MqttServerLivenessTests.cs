@@ -253,10 +253,7 @@ public partial class MqttServerLivenessTests
             ?? throw new InvalidOperationException("The server has no active MQTT broker."));
 
     private static Task[] GetInitialStateTasks(MqttSubjectServer server) =>
-        ((List<Task>)typeof(MqttSubjectServer)
-            .GetField("_runningInitialStateTasks", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetValue(server)!)
-        .ToArray();
+        server.GetRunningInitialStateTasksSnapshot();
 
     private static int GetSubjectDetachingHandlerCount(LifecycleInterceptor lifecycleInterceptor) =>
         ((Delegate?)typeof(LifecycleInterceptor)
