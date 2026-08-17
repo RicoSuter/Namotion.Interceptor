@@ -650,41 +650,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
 
             _processedProperties[property] = reconciliation.State;
 
-            if (metadata.Type.IsSubjectCollectionType() &&
-                reconciliation.State.Memberships.Length > reconciliation.MembershipAdditions.Length)
-            {
-                var lifecycleHandlers = property.Subject.Context.GetServices<IPropertyLifecycleHandler>();
-                for (var index = 0; index < lifecycleHandlers.Length; index++)
-                {
-                    lifecycleHandlers[index].RefreshCollectionProperty(property, value);
-
-                    if (!_attachedSubjects.ContainsKey(property.Subject))
-                    {
-                        AbortPropertyReconciliation(
-                            property,
-                            relationshipHandlers,
-                            materializeRelationships,
-                            appliedAdditions);
-                        return;
-                    }
-                }
-
-                if (property.Subject is IPropertyLifecycleHandler subjectHandler)
-                {
-                    subjectHandler.RefreshCollectionProperty(property, value);
-
-                    if (!_attachedSubjects.ContainsKey(property.Subject))
-                    {
-                        AbortPropertyReconciliation(
-                            property,
-                            relationshipHandlers,
-                            materializeRelationships,
-                            appliedAdditions);
-                        return;
-                    }
-                }
-            }
-
             if (materializeRelationships)
             {
                 property.Subject.ReconcileChildRelationships(

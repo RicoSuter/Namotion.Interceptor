@@ -17,11 +17,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
         public partial Person[] Items { get; set; }
 
         /// <summary>
-        /// The collection values supplied to each structural refresh.
-        /// </summary>
-        public List<object?> Refreshes { get; } = [];
-
-        /// <summary>
         /// The relationships of each reconciliation, copied out because the span does not outlive the call.
         /// </summary>
         public List<SubjectPropertyRelationship[]> RelationshipReconciliations { get; } = [];
@@ -34,11 +29,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
 
         public void DetachProperty(SubjectPropertyLifecycleChange change)
         {
-        }
-
-        public void RefreshCollectionProperty(PropertyReference property, object? value)
-        {
-            Refreshes.Add(value);
         }
 
         public void ReconcileChildRelationships(PropertyReference property, ReadOnlySpan<SubjectPropertyRelationship> relationships)

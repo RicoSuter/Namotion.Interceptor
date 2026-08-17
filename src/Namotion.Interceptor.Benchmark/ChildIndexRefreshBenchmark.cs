@@ -54,11 +54,7 @@ public class ChildIndexRefreshBenchmark
 
     private bool _flip;
 
-    /// <summary>
-    /// 64 is the first size above the floor below which placement never leaves the scan, so it is where a
-    /// wrongly chosen floor shows up.
-    /// </summary>
-    [Params(4, 64, 1000)]
+    [Params(4, 1000)]
     public int Count;
 
     /// <summary>

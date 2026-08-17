@@ -164,7 +164,6 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
     {
         void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
         void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
-        void RefreshCollectionProperty(Namotion.Interceptor.PropertyReference property, object? value);
     }
     public interface IPropertyRelationshipHandler
     {
@@ -185,13 +184,6 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public static void DetachSubjectProperty(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.PropertyReference property) { }
         public static int GetReferenceCount(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor? TryGetLifecycleInterceptor(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
-    }
-    public readonly struct SubjectChildReference : System.IEquatable<Namotion.Interceptor.Tracking.Lifecycle.SubjectChildReference>
-    {
-        public SubjectChildReference(Namotion.Interceptor.IInterceptorSubject Subject, Namotion.Interceptor.PropertyReference Property, object? Index) { }
-        public object? Index { get; init; }
-        public Namotion.Interceptor.PropertyReference Property { get; init; }
-        public Namotion.Interceptor.IInterceptorSubject Subject { get; init; }
     }
     public readonly struct SubjectLifecycleChange
     {
