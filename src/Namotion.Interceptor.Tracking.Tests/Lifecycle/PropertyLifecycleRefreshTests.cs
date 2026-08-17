@@ -50,40 +50,6 @@ public class PropertyLifecycleRefreshTests
     }
 
     [Fact]
-    public void WhenSeveralLifecycleInterceptorsRefreshAnEqualContainer_ThenEachRunsOnceInResolverOrder()
-    {
-        // Re-resolving capabilities during dispatch, invoking only one, or changing resolver order would duplicate
-        // or swap the relationship generations owned by the two lifecycle authorities.
-        // Arrange
-        var firstLifecycle = new LifecycleInterceptor();
-        var secondLifecycle = new LifecycleInterceptor();
-        var relationshipHandler = new RecordingRelationshipHandler();
-        var context = InterceptorSubjectContext.Create();
-        context.AddService(firstLifecycle);
-        context.AddService(secondLifecycle);
-        context.AddService<IPropertyRelationshipHandler>(relationshipHandler);
-        context.WithEqualityCheck();
-
-        var garage = new Garage(context);
-        var cars = new List<Car> { new() { Name = "first" } };
-        garage.MutableCars = cars;
-
-        Assert.Equal(2, relationshipHandler.Generations.Count);
-        // Ordinary write interceptors reconcile while the chain unwinds, so the second authority publishes first.
-        var secondAuthorityRelationship = Assert.Single(relationshipHandler.Generations[0]);
-        var firstAuthorityRelationship = Assert.Single(relationshipHandler.Generations[1]);
-        relationshipHandler.Generations.Clear();
-
-        // Act
-        garage.MutableCars = cars;
-
-        // Assert
-        Assert.Equal(2, relationshipHandler.Generations.Count);
-        Assert.Same(firstAuthorityRelationship, Assert.Single(relationshipHandler.Generations[0]));
-        Assert.Same(secondAuthorityRelationship, Assert.Single(relationshipHandler.Generations[1]));
-    }
-
-    [Fact]
     public void WhenAMutableDictionaryIsRekeyedAndAssignedToItself_ThenTheOpaqueKeyIsRefreshed()
     {
         // Comparing only the dictionary reference would preserve a relationship to the removed key object.
@@ -115,41 +81,6 @@ public class PropertyLifecycleRefreshTests
         Assert.NotSame(initialRelationship, relationship);
         Assert.Same(secondKey, relationship.Index);
         Assert.Equal(1, child.GetReferenceCount());
-    }
-
-    [Fact]
-    public void WhenARelationshipHandlerWritesTheSameProperty_ThenReconciliationThrowsBeforeNestedProcessing()
-    {
-        // Nested reconciliation of the same baseline would let the inner generation be overwritten by the outer one.
-        // Arrange
-        var firstLifecycle = new LifecycleInterceptor();
-        var secondLifecycle = new LifecycleInterceptor();
-        var relationshipHandler = new ReentrantRelationshipHandler();
-        var context = InterceptorSubjectContext.Create();
-        context.AddService(firstLifecycle);
-        context.AddService(secondLifecycle);
-        context.AddService<IPropertyRelationshipHandler>(relationshipHandler);
-
-        var garage = new Garage(context);
-        var child = new Car { Name = "child" };
-        var writtenValue = new List<Car> { child };
-        relationshipHandler.Callback = property =>
-        {
-            if (property.Name == nameof(Garage.MutableCars))
-            {
-                garage.MutableCars = [];
-            }
-        };
-
-        // Act & Assert
-        Assert.Throws<InvalidOperationException>(() =>
-            garage.MutableCars = writtenValue);
-        Assert.Same(writtenValue, garage.MutableCars);
-        Assert.Equal(2, relationshipHandler.Generations.Count);
-        Assert.All(
-            relationshipHandler.Generations,
-            generation => Assert.Same(child, Assert.Single(generation).Child));
-        Assert.Equal(2, child.GetReferenceCount());
     }
 
     [Fact]

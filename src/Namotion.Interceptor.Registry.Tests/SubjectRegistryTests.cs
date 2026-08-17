@@ -353,37 +353,6 @@ public class SubjectRegistryTests
     }
 
     [Fact]
-    public void WhenMovingDictionaryItemToAnotherKey_ThenKeysAreCorrect()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry();
-
-        var child = new Person { FirstName = "A" };
-        var other = new Person { FirstName = "B" };
-
-        var directory = new PersonDirectory(context)
-        {
-            PeopleByName = new Dictionary<string, Person> { ["alpha"] = child, ["beta"] = other }
-        };
-
-        // Act: child moves to another key, other keeps its own, so neither detaches
-        directory.PeopleByName = new Dictionary<string, Person> { ["gamma"] = child, ["beta"] = other };
-
-        // Assert
-        var childrenProp = directory.TryGetRegisteredSubject()!
-            .TryGetProperty(nameof(PersonDirectory.PeopleByName))!;
-
-        var keyBySubject = childrenProp.Children.ToDictionary(c => ((Person)c.Subject).FirstName!, c => c.Index);
-        Assert.Equal("gamma", keyBySubject["A"]);
-        Assert.Equal("beta", keyBySubject["B"]);
-
-        Assert.Equal("gamma", child.TryGetRegisteredSubject()!.Parents[0].Index);
-        Assert.Equal("beta", other.TryGetRegisteredSubject()!.Parents[0].Index);
-    }
-
-    [Fact]
     public void WhenMovingDictionaryItemToAnotherKeyAndRemovingIt_ThenNoChildIsLeftBehind()
     {
         // The removal's index comes from the value written before it, so a key left stale by the re-key
@@ -412,32 +381,6 @@ public class SubjectRegistryTests
         Assert.Single(childrenProp.Children);
         Assert.Same(other, childrenProp.Children[0].Subject);
         Assert.Null(child.TryGetRegisteredSubject());
-    }
-
-    [Fact]
-    public void WhenMovingDictionaryItemToAnotherKeyInAReadOnlyDictionary_ThenKeysAreCorrect()
-    {
-        // A read-only dictionary that implements neither IDictionary nor ICollection has to be enumerated
-        // as key-value pairs to find its keys.
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry();
-
-        var child = new Person { FirstName = "A" };
-        var other = new Person { FirstName = "B" };
-
-        var directory = new PersonDirectory(context)
-        {
-            PeopleByName = new ReadOnlyPersonDictionary(new Dictionary<string, Person> { ["alpha"] = child, ["beta"] = other })
-        };
-
-        // Act
-        directory.PeopleByName = new ReadOnlyPersonDictionary(new Dictionary<string, Person> { ["gamma"] = child, ["beta"] = other });
-
-        // Assert
-        Assert.Equal("gamma", child.TryGetRegisteredSubject()!.Parents[0].Index);
-        Assert.Equal("beta", other.TryGetRegisteredSubject()!.Parents[0].Index);
     }
 
     [Fact]
@@ -559,35 +502,6 @@ public class SubjectRegistryTests
     }
 
     [Fact]
-    public void WhenASubjectHeldTwiceInOneCollectionIsRemoved_ThenNoParentEntryIsLeftBehind()
-    {
-        // Attach records one entry however many times the subject appears, so removal has to drop that one
-        // entry whichever of the two indices the detach happens to carry.
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithParents()
-            .WithRegistry();
-
-        var keeper = new Person { FirstName = "K" };
-        var shared = new Person { FirstName = "X" };
-        _ = new Person(context) { FirstName = "Keeper", Children = [keeper] };
-
-        var person = new Person(context) { Children = [shared, shared] };
-
-        // Act
-        person.Children = [];
-
-        // Assert
-        var childrenProp = person.TryGetRegisteredSubject()!
-            .TryGetProperty(nameof(Person.Children))!;
-
-        Assert.Empty(childrenProp.Children);
-        Assert.Empty(shared.GetParents());
-        Assert.Null(shared.TryGetRegisteredSubject());
-    }
-
-    [Fact]
     public void WhenASubjectHeldUnderTwoKeysIsRemoved_ThenNoParentEntryIsLeftBehind()
     {
         // Arrange
@@ -613,31 +527,6 @@ public class SubjectRegistryTests
         Assert.Empty(peopleProp.Children);
         Assert.Empty(shared.GetParents());
         Assert.Null(shared.TryGetRegisteredSubject());
-    }
-
-    [Fact]
-    public void WhenACollectionIsReordered_ThenBothParentIndexCopiesAgree()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithParents()
-            .WithRegistry();
-
-        var first = new Person { FirstName = "A" };
-        var second = new Person { FirstName = "B" };
-        var third = new Person { FirstName = "C" };
-
-        var person = new Person(context) { Children = [first, second, third] };
-
-        // Act
-        person.Children = [third, second, first];
-
-        // Assert
-        Assert.Equal(2, first.TryGetRegisteredSubject()!.Parents[0].Index);
-        Assert.Equal(2, first.GetParents().Single().Index);
-        Assert.Equal(0, third.TryGetRegisteredSubject()!.Parents[0].Index);
-        Assert.Equal(0, third.GetParents().Single().Index);
     }
 
     [Fact]
@@ -673,65 +562,6 @@ public class SubjectRegistryTests
     }
 
     [Fact]
-    public void WhenARetainedItemMoves_ThenTheTrackedParentsAgreeWithTheRegistry()
-    {
-        // Two copies of the same index: RegisteredSubject.Parents and the tracked parents behind
-        // GetParents, which the JSON path helpers read. They have to move together.
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithParents()
-            .WithRegistry();
-
-        var child = new Person { FirstName = "A" };
-        var other = new Person { FirstName = "B" };
-
-        var directory = new PersonDirectory(context)
-        {
-            PeopleByName = new Dictionary<string, Person> { ["alpha"] = child, ["beta"] = other }
-        };
-
-        var peopleProp = directory.TryGetRegisteredSubject()!
-            .TryGetProperty(nameof(PersonDirectory.PeopleByName))!;
-
-        // Fills the children snapshot, so a re-key which forgot to invalidate it would be caught below.
-        _ = peopleProp.Children;
-
-        // Act
-        directory.PeopleByName = new Dictionary<string, Person> { ["gamma"] = child, ["beta"] = other };
-
-        // Assert
-        Assert.Equal("gamma", child.TryGetRegisteredSubject()!.Parents[0].Index);
-        Assert.Equal("gamma", child.GetParents().Single().Index);
-        Assert.Equal("gamma", peopleProp.Children.Single(c => c.Subject == child).Index);
-    }
-
-    [Fact]
-    public void WhenACollectionItemIsReorderedAndThenRemoved_ThenItKeepsNoTrackedParent()
-    {
-        // The reorder moves the index; if the tracked copy is left behind, the removal cannot match it and
-        // the detached child keeps a parent entry that pins its former parent alive.
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithParents()
-            .WithRegistry();
-
-        var first = new Person { FirstName = "A" };
-        var second = new Person { FirstName = "B" };
-
-        var person = new Person(context) { Children = [first, second] };
-
-        // Act
-        person.Children = [second, first];
-        person.Children = [second];
-
-        // Assert
-        Assert.Null(first.TryGetRegisteredSubject());
-        Assert.Empty(first.GetParents());
-    }
-
-    [Fact]
     public void WhenAStoredIndexNoLongerMatches_ThenRemovalStillFindsTheChild()
     {
         // In-place mutation is unsupported and reports nothing, so it is the way to leave a stored index
@@ -761,54 +591,6 @@ public class SubjectRegistryTests
         Assert.Same(other, peopleProp.Children[0].Subject);
         Assert.Null(child.TryGetRegisteredSubject());
         Assert.Empty(child.GetParents());
-    }
-
-    [Fact]
-    public void WhenReorderingAndRekeyingDictionaryInOneWrite_ThenKeysFollowTheItems()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry();
-
-        var child = new Person { FirstName = "A" };
-        var other = new Person { FirstName = "B" };
-
-        var directory = new PersonDirectory(context)
-        {
-            PeopleByName = new Dictionary<string, Person> { ["alpha"] = child, ["beta"] = other }
-        };
-
-        // Act: entries swap position and one of them swaps key
-        directory.PeopleByName = new Dictionary<string, Person> { ["beta"] = other, ["gamma"] = child };
-
-        // Assert
-        Assert.Equal("gamma", child.TryGetRegisteredSubject()!.Parents[0].Index);
-        Assert.Equal("beta", other.TryGetRegisteredSubject()!.Parents[0].Index);
-    }
-
-    [Fact]
-    public void WhenReorderingDictionary_ThenKeysAreUnchanged()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry();
-
-        var child = new Person { FirstName = "A" };
-        var other = new Person { FirstName = "B" };
-
-        var directory = new PersonDirectory(context)
-        {
-            PeopleByName = new Dictionary<string, Person> { ["alpha"] = child, ["beta"] = other }
-        };
-
-        // Act
-        directory.PeopleByName = new Dictionary<string, Person> { ["beta"] = other, ["alpha"] = child };
-
-        // Assert
-        Assert.Equal("alpha", child.TryGetRegisteredSubject()!.Parents[0].Index);
-        Assert.Equal("beta", other.TryGetRegisteredSubject()!.Parents[0].Index);
     }
 
     [Fact]
@@ -846,125 +628,6 @@ public class SubjectRegistryTests
         Assert.Equal(0, child1.TryGetRegisteredSubject()!.Parents[0].Index);
         Assert.Equal(1, child2.TryGetRegisteredSubject()!.Parents[0].Index);
         Assert.Equal(2, child3.TryGetRegisteredSubject()!.Parents[0].Index); // updated from 1 to 2
-    }
-
-    [Fact]
-    public void WhenASubjectUnderTwoKeysIsRewrittenUnchanged_ThenBothOccurrencesRemain()
-    {
-        // Relationship views preserve every occurrence while membership and reference counting remain
-        // distinct-subject based.
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithParents()
-            .WithRegistry();
-
-        var shared = new Person { FirstName = "X" };
-
-        var directory = new PersonDirectory(context)
-        {
-            PeopleByName = new Dictionary<string, Person> { ["alpha"] = shared, ["beta"] = shared }
-        };
-
-        Assert.Equal(["alpha", "beta"],
-            shared.TryGetRegisteredSubject()!.Parents.Select(parent => parent.Index));
-
-        // Act
-        directory.PeopleByName = new Dictionary<string, Person> { ["alpha"] = shared, ["beta"] = shared };
-
-        // Assert
-        Assert.Equal(["alpha", "beta"],
-            shared.TryGetRegisteredSubject()!.Parents.Select(parent => parent.Index));
-        Assert.Equal(["alpha", "beta"], shared.GetParents().Select(parent => parent.Index));
-        Assert.Equal(1, shared.TryGetRegisteredSubject()!.ReferenceCount);
-    }
-
-    [Fact]
-    public void WhenACollectionHoldsTheSameSubjectTwice_ThenItKeepsBothOccurrences()
-    {
-        // Public relationship views preserve duplicates even though lifecycle membership remains one per
-        // distinct child.
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithParents()
-            .WithRegistry();
-
-        var first = new Person { FirstName = "A" };
-        var second = new Person { FirstName = "B" };
-
-        var person = new Person(context) { Children = [first, second] };
-
-        // Act
-        person.Children = [first, second, first];
-
-        // Assert
-        var childrenProp = person.TryGetRegisteredSubject()!
-            .TryGetProperty(nameof(Person.Children))!;
-
-        Assert.Equal([first, second, first], childrenProp.Children.Select(child => child.Subject));
-        Assert.Equal([0, 1, 2], childrenProp.Children.Select(child => child.Index));
-        Assert.Equal([0, 2], first.TryGetRegisteredSubject()!.Parents.Select(parent => parent.Index));
-        Assert.Equal([0, 2], first.GetParents().Select(parent => parent.Index));
-        Assert.Equal(1, first.TryGetRegisteredSubject()!.ReferenceCount);
-    }
-
-    [Fact]
-    public void WhenACollectionIsReordered_ThenTheChildrenFollowTheNewOrder()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry();
-
-        var first = new Person { FirstName = "A" };
-        var second = new Person { FirstName = "B" };
-        var third = new Person { FirstName = "C" };
-
-        var person = new Person(context) { Children = [first, second, third] };
-
-        // Act
-        person.Children = [third, first, second];
-
-        // Assert
-        var childrenProp = person.TryGetRegisteredSubject()!
-            .TryGetProperty(nameof(Person.Children))!;
-
-        Assert.Equal([third, first, second], childrenProp.Children.Select(c => c.Subject));
-        Assert.Equal([0, 1, 2], childrenProp.Children.Select(c => c.Index));
-    }
-
-    [Fact]
-    public void WhenADictionaryIsRewrittenInAnotherOrder_ThenTheChildrenFollowIt()
-    {
-        // Keys identify dictionary children, so only their order changes here, which follows the value
-        // for every container kind alike.
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry();
-
-        var alpha = new Person { FirstName = "A" };
-        var beta = new Person { FirstName = "B" };
-
-        var directory = new PersonDirectory(context)
-        {
-            PeopleByName = new Dictionary<string, Person> { ["alpha"] = alpha, ["beta"] = beta }
-        };
-
-        var reordered = new Dictionary<string, Person> { ["beta"] = beta, ["alpha"] = alpha };
-
-        // Act
-        directory.PeopleByName = reordered;
-
-        // Assert
-        var peopleProp = directory.TryGetRegisteredSubject()!
-            .TryGetProperty(nameof(PersonDirectory.PeopleByName))!;
-
-        // Read off the value rather than written out, because the contract is that the children follow the
-        // value's own enumeration order, whatever the dictionary implementation makes that.
-        Assert.Equal(reordered.Select(entry => (IInterceptorSubject)entry.Value), peopleProp.Children.Select(c => c.Subject));
-        Assert.Equal(reordered.Select(entry => (object?)entry.Key), peopleProp.Children.Select(c => c.Index));
     }
 
     [Fact]

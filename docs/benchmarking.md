@@ -19,7 +19,7 @@ The script header lists every flag. The one with a trap is `-Filter`: several pa
 Registry relationship work is spread across structural writes, Registry construction, and cached parent reads. Compare these together, plus an unrelated resolver row as the noise reference:
 
 ```
-pwsh scripts/benchmark.ps1 -Filter "*ChildIndexRefreshBenchmark*","*RegistryBenchmark*","*ParentLookupBenchmark*","*ServiceOrderResolverBenchmark.LinearChain*" -LaunchCount 3
+pwsh scripts/benchmark.ps1 -Filter "*ChildIndexRefreshBenchmark*","*RegistryBenchmark.AddLotsOfPreviousCars*","*ParentLookupBenchmark*","*ServiceOrderResolverBenchmark.LinearChain*" -LaunchCount 3
 ```
 
 Despite its historical class name, `ChildIndexRefreshBenchmark` measures complete ordered relationship reconciliation. A structural write enumerates the source once. When relationship consumers are enabled, it publishes one relationship per subject-valued occurrence in exact collection or dictionary enumeration order. Its duplicate row repeats each distinct child twice and reverses the occurrence sequence without changing membership.
@@ -34,7 +34,7 @@ Its current rows measure these operations:
 - reversing duplicate occurrences, with each distinct subject appearing twice; and
 - mutating and assigning the same collection instance to request an explicit structural refresh.
 
-`RegistryBenchmark` retains only child-graph construction, at 4 and 1000 children. `ParentLookupBenchmark` retains only the cached Registry-parent and tracked-parent read paths. Previously returned snapshots stay frozen, and readers overlapping reconciliation can receive an old or newer coherent generation. Cross-view agreement is required after writes become quiescent, not while a writer is active. `ServiceOrderResolverBenchmark.LinearChain` is the one unrelated noise row.
+The filter selects `RegistryBenchmark.AddLotsOfPreviousCars` for child-graph construction and `ServiceOrderResolverBenchmark.LinearChain` as the unrelated noise row without removing the other pre-existing benchmark rows from their classes. `ParentLookupBenchmark` contributes the cached Registry-parent and tracked-parent read paths. Together the filter selects nine methods and 34 parameterized cases. Previously returned snapshots stay frozen, and readers overlapping reconciliation can receive an old or newer coherent generation. Cross-view agreement is required after writes become quiescent, not while a writer is active.
 
 Allocation columns and scaling shape are the primary acceptance signals. Compare lifecycle only with Registry to isolate relationship materialization, then Registry with Registry and parents to isolate the additional tracked-parent projection. Use identical benchmark source definitions on both refs, especially because `ChildIndexRefreshBenchmark` and `ParentLookupBenchmark` do not exist on the historical base branch. A compatibility adaptation may invoke the implementation available on each ref, but it must not change the measured operations or parameters.
 
@@ -58,7 +58,7 @@ Allocation columns survive all of this far better than timings and are usually t
 
 **Read the noise off a row the change cannot reach.** What that row does in the run is what the harness does to unchanged code, and a real delta has to clear it. Take it from your own run, and note that shorter benchmarks are more sensitive to code placement, so a slow reference understates the floor for fast rows.
 
-Choose the reference carefully: `[GlobalSetup]` is per class and heap randomization re-runs it after every iteration, so a row is only insulated when its **class** setup also avoids your change. `ServiceOrderResolverBenchmark` avoids subjects in both its benchmark and setup. Its retained `LinearChain` row is the noise reference for relationship comparisons.
+Choose the reference carefully: `[GlobalSetup]` is per class and heap randomization re-runs it after every iteration, so a row is only insulated when its **class** setup also avoids your change. `ServiceOrderResolverBenchmark` avoids subjects in both its benchmark and setup. The filter selects its `LinearChain` row as the noise reference for relationship comparisons.
 
 **The Error column is not a significance test.** It says how precisely one run measured itself, not whether tomorrow's run agrees, and a reference row can move many times its error bar with provably unchanged code. `-LaunchCount N` does not fix that: each arm keeps its own binary, so a placement difference reproduces on every launch instead of averaging out.
 
