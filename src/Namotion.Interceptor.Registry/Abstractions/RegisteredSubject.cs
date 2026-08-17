@@ -15,11 +15,10 @@ public class RegisteredSubject
 
     private volatile FrozenDictionary<string, RegisteredSubjectProperty> _properties;
 
-    // Most subjects have exactly one parent, so the first is stored inline and the
-    // overflow list is allocated only on the second. Empty sentinel:
-    // _firstParent.Property is null (a real entry never has a null Property).
-    private SubjectPropertyParent _firstParent;
-    private List<SubjectPropertyParent>? _additionalParents;
+    // Most subjects have exactly one parent property, so the first relationship group is stored inline
+    // and overflow storage is allocated only for additional parent properties.
+    private ParentRelationshipGroup? _firstParentGroup;
+    private List<ParentRelationshipGroup>? _additionalParentGroups;
 
     // Raw array instead of ImmutableArray because the struct can't be read atomically;
     // the Volatile.Write publish (under _lock) pairs with the lock-free Volatile.Read
@@ -68,16 +67,46 @@ public class RegisteredSubject
     // lock-free readers rely on it: mutators invalidate and the next reader rebuilds.
     private SubjectPropertyParent[] BuildParentsSnapshot()
     {
-        if (_firstParent.Property is null)
+        if (_firstParentGroup is null)
             return [];
 
-        if (_additionalParents is null || _additionalParents.Count == 0)
-            return [_firstParent];
+        var count = _firstParentGroup.Relationships.Length;
+        if (_additionalParentGroups is not null)
+        {
+            foreach (var group in _additionalParentGroups)
+            {
+                count += group.Relationships.Length;
+            }
+        }
 
-        var array = new SubjectPropertyParent[1 + _additionalParents.Count];
-        array[0] = _firstParent;
-        _additionalParents.CopyTo(array, 1);
+        var array = new SubjectPropertyParent[count];
+        var offset = AddParentRelationships(array, 0, _firstParentGroup);
+        if (_additionalParentGroups is not null)
+        {
+            foreach (var group in _additionalParentGroups)
+            {
+                offset = AddParentRelationships(array, offset, group);
+            }
+        }
+
         return array;
+    }
+
+    private static int AddParentRelationships(
+        SubjectPropertyParent[] destination,
+        int offset,
+        ParentRelationshipGroup group)
+    {
+        foreach (var relationship in group.Relationships)
+        {
+            destination[offset++] = new SubjectPropertyParent
+            {
+                Property = group.Property,
+                Index = relationship.Index
+            };
+        }
+
+        return offset;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -144,132 +173,142 @@ public class RegisteredSubject
                     this, p.Key, p.Value.Type, p.Value.Attributes));
     }
 
-    internal void AddParent(RegisteredSubjectProperty parent, object? index)
+    internal void AddParentRelationship(
+        RegisteredSubjectProperty property,
+        SubjectPropertyRelationship relationship)
     {
         lock (_lock)
         {
-            var entry = new SubjectPropertyParent { Property = parent, Index = index };
-            if (_firstParent.Property is null)
+            if (FindParentGroup(property) >= 0)
             {
-                _firstParent = entry;
+                return;
             }
-            else
-            {
-                _additionalParents ??= [];
-                _additionalParents.Add(entry);
-            }
+
+            AddParentGroup(new ParentRelationshipGroup(property, [relationship]));
             InvalidateParentsSnapshot();
         }
     }
 
-    /// <summary>
-    /// Removes this subject's parent entry for the given property. Matched on the property alone: attach adds
-    /// at most one entry per property, and the stored index can differ from the one the detach carries, which
-    /// would leave the entry behind.
-    /// </summary>
-    internal void RemoveParent(RegisteredSubjectProperty parent)
+    internal void ReplaceParentGroup(
+        RegisteredSubjectProperty property,
+        ImmutableArray<SubjectPropertyRelationship> relationships)
     {
         lock (_lock)
         {
-            if (_firstParent.Property == parent)
+            if (relationships.IsEmpty)
             {
-                PromoteFirstParentFromAdditional();
+                RemoveParentGroupCore(property);
                 return;
             }
 
-            if (_additionalParents is not null)
+            var group = new ParentRelationshipGroup(property, relationships);
+            var groupIndex = FindParentGroup(property);
+            if (groupIndex == 0)
             {
-                for (var index = _additionalParents.Count - 1; index >= 0; index--)
-                {
-                    if (_additionalParents[index].Property == parent)
-                    {
-                        _additionalParents.RemoveAt(index);
-                        InvalidateParentsSnapshot();
-                        return;
-                    }
-                }
+                _firstParentGroup = group;
             }
+            else if (groupIndex > 0)
+            {
+                _additionalParentGroups![groupIndex - 1] = group;
+            }
+            else
+            {
+                AddParentGroup(group);
+            }
+
+            InvalidateParentsSnapshot();
         }
     }
 
-    internal void RemoveParentsByProperty(RegisteredSubjectProperty parent)
+    internal void RemoveParentGroup(RegisteredSubjectProperty property)
     {
         lock (_lock)
         {
-            var changed = false;
-
-            if (_additionalParents is not null && _additionalParents.Count > 0)
-            {
-                for (var i = _additionalParents.Count - 1; i >= 0; i--)
-                {
-                    if (_additionalParents[i].Property == parent)
-                    {
-                        _additionalParents.RemoveAt(i);
-                        changed = true;
-                    }
-                }
-            }
-
-            if (_firstParent.Property == parent)
-            {
-                PromoteFirstParentFromAdditional();
-                changed = true;
-            }
-
-            if (changed)
-            {
-                InvalidateParentsSnapshot();
-            }
+            RemoveParentGroupCore(property);
         }
     }
 
-    /// <summary>
-    /// Moves this subject's parent entry for the given property to a new index. Matched on the property
-    /// alone, as <see cref="RemoveParent"/> is and as the tracked parents are: attach adds at most one entry
-    /// per property, so it is unambiguous, it repairs an entry whose index somehow drifted rather than
-    /// silently missing it, and it keeps arbitrary caller equality on an index key out of a method that runs
-    /// while the children lock is held.
-    /// </summary>
-    internal void UpdateParentIndex(RegisteredSubjectProperty property, object? newIndex)
+    private void RemoveParentGroupCore(RegisteredSubjectProperty property)
     {
-        lock (_lock)
+        var groupIndex = FindParentGroup(property);
+        if (groupIndex < 0)
         {
-            if (_firstParent.Property == property)
-            {
-                _firstParent = new SubjectPropertyParent { Property = property, Index = newIndex };
-                InvalidateParentsSnapshot();
-                return;
-            }
+            return;
+        }
 
-            if (_additionalParents is not null)
+        if (groupIndex == 0)
+        {
+            if (_additionalParentGroups is { Count: > 0 } additionalGroups)
             {
-                for (var index = 0; index < _additionalParents.Count; index++)
+                _firstParentGroup = additionalGroups[0];
+                additionalGroups.RemoveAt(0);
+                if (additionalGroups.Count == 0)
                 {
-                    if (_additionalParents[index].Property == property)
-                    {
-                        _additionalParents[index] = new SubjectPropertyParent { Property = property, Index = newIndex };
-                        InvalidateParentsSnapshot();
-                        return;
-                    }
+                    _additionalParentGroups = null;
                 }
             }
-        }
-    }
-
-    // Promotes the head (not the tail) of the overflow list so the surviving parents
-    // keep their insertion order. Caller must hold _lock.
-    private void PromoteFirstParentFromAdditional()
-    {
-        if (_additionalParents is not null && _additionalParents.Count > 0)
-        {
-            _firstParent = _additionalParents[0];
-            _additionalParents.RemoveAt(0);
+            else
+            {
+                _firstParentGroup = null;
+            }
         }
         else
         {
-            _firstParent = default;
+            _additionalParentGroups!.RemoveAt(groupIndex - 1);
+            if (_additionalParentGroups.Count == 0)
+            {
+                _additionalParentGroups = null;
+            }
         }
+
         InvalidateParentsSnapshot();
+    }
+
+    private int FindParentGroup(RegisteredSubjectProperty property)
+    {
+        if (_firstParentGroup is null)
+        {
+            return -1;
+        }
+
+        if (ReferenceEquals(_firstParentGroup.Property, property))
+        {
+            return 0;
+        }
+
+        if (_additionalParentGroups is not null)
+        {
+            for (var index = 0; index < _additionalParentGroups.Count; index++)
+            {
+                if (ReferenceEquals(_additionalParentGroups[index].Property, property))
+                {
+                    return index + 1;
+                }
+            }
+        }
+
+        return -1;
+    }
+
+    private void AddParentGroup(ParentRelationshipGroup group)
+    {
+        if (_firstParentGroup is null)
+        {
+            _firstParentGroup = group;
+            return;
+        }
+
+        _additionalParentGroups ??= [];
+        _additionalParentGroups.Add(group);
+    }
+
+    private sealed class ParentRelationshipGroup(
+        RegisteredSubjectProperty property,
+        ImmutableArray<SubjectPropertyRelationship> relationships)
+    {
+        public RegisteredSubjectProperty Property { get; } = property;
+
+        public ImmutableArray<SubjectPropertyRelationship> Relationships { get; } = relationships;
     }
 
     /// <summary>

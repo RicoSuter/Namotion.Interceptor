@@ -1,4 +1,4 @@
-﻿using System.Collections.Immutable;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -20,9 +20,19 @@ namespace Namotion.Interceptor.Registry;
 /// Descent" in docs/design/tracking-lifecycle.md.
 /// </remarks>
 [RunsBefore(typeof(ParentTrackingHandler), typeof(ContextInheritanceHandler))]
-public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
+public class SubjectRegistry :
+    ISubjectRegistry,
+    ISubjectIdRegistry,
+    ISubjectIdRegistryWriter,
+    ILifecycleHandler,
+    IPropertyLifecycleHandler,
+    IPropertyRelationshipHandler
 {
-    private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
+    private readonly Lock _relationshipReconciliationGate = new();
+    private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects =
+        new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<PropertyReference, IInterceptorSubject[]> _childrenByProperty =
+        new(PropertyReference.Comparer);
     private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
     private ImmutableDictionary<IInterceptorSubject, RegisteredSubject>? _knownSubjectsSnapshot;
 
@@ -45,7 +55,9 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
             if (snapshot is not null)
                 return snapshot;
 
-            snapshot = _knownSubjects.ToImmutableDictionary();
+            snapshot = ImmutableDictionary.CreateRange(
+                ReferenceEqualityComparer.Instance,
+                _knownSubjects);
             Volatile.Write(ref _knownSubjectsSnapshot, snapshot);
             return snapshot;
         }
@@ -127,107 +139,191 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     /// <inheritdoc />
     void ILifecycleHandler.HandleLifecycleChange(SubjectLifecycleChange change)
     {
+        lock (_relationshipReconciliationGate)
+        {
+            HandleLifecycleChange(change);
+        }
+    }
+
+    private void HandleLifecycleChange(SubjectLifecycleChange change)
+    {
+        RegisteredSubject? registeredSubject = null;
+        RegisteredSubjectProperty? registeredProperty = null;
+
         lock (_knownSubjects)
         {
             if (change.IsContextAttach || change.IsPropertyReferenceAdded)
             {
-                if (!_knownSubjects.TryGetValue(change.Subject, out var registeredSubject))
+                if (!_knownSubjects.TryGetValue(change.Subject, out registeredSubject))
                 {
                     registeredSubject = RegisterSubject(change.Subject);
                 }
 
                 if (change.IsContextAttach)
                 {
-                    // Auto-register pre-assigned subject ID in reverse index;
-                    // skip silently on conflict to avoid aborting the lifecycle.
-                    var subjectId = change.Subject.TryGetSubjectId();
-                    if (subjectId is not null)
-                    {
-                        if (!_subjectIdToSubject.TryGetValue(subjectId, out var existingSubject)
-                            || ReferenceEquals(existingSubject, change.Subject))
-                        {
-                            _subjectIdToSubject[subjectId] = change.Subject;
-                        }
-                    }
+                    RegisterPreassignedSubjectId(change.Subject);
                 }
 
                 if (change is { IsPropertyReferenceAdded: true, Property: { } property })
                 {
-                    if (!_knownSubjects.TryGetValue(property.Subject, out var parentRegisteredSubject))
+                    if (!_knownSubjects.TryGetValue(property.Subject, out var registeredParent))
                     {
-                        parentRegisteredSubject = RegisterSubject(property.Subject);
+                        registeredParent = RegisterSubject(property.Subject);
                     }
 
-                    var registeredProperty = parentRegisteredSubject.TryGetProperty(property.Name) ??
+                    registeredProperty = registeredParent.TryGetProperty(property.Name) ??
                         throw new InvalidOperationException($"Property '{property.Name}' not found.");
-
-                    registeredSubject.AddParent(registeredProperty, change.Index);
-                    registeredProperty.AddChild(new SubjectPropertyChild
-                    {
-                        Index = change.Index,
-                        Subject = change.Subject,
-                    });
+                }
+            }
+            else if (change.IsPropertyReferenceRemoved || change.IsContextDetach)
+            {
+                registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
+                if (change is { IsPropertyReferenceRemoved: true, Property: { } property })
+                {
+                    registeredProperty = _knownSubjects
+                        .GetValueOrDefault(property.Subject)?
+                        .TryGetProperty(property.Name);
                 }
 
+                if (change.IsContextDetach && registeredSubject is not null)
+                {
+                    _knownSubjects.Remove(change.Subject);
+                    Volatile.Write(ref _knownSubjectsSnapshot, null);
+
+                    if (_subjectIdToSubject.Count > 0)
+                    {
+                        var subjectId = change.Subject.TryGetSubjectId();
+                        if (subjectId is not null)
+                        {
+                            _subjectIdToSubject.Remove(subjectId);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Known-subject state is deliberately released before taking either relationship-view lock.
+        if (change.IsPropertyReferenceAdded && registeredSubject is not null && registeredProperty is not null)
+        {
+            var relationship = change.Relationship ??
+                throw new InvalidOperationException("A registry relationship addition requires occurrence metadata.");
+            registeredProperty.AddChildRelationship(relationship);
+            registeredSubject.AddParentRelationship(registeredProperty, relationship);
+        }
+        else if (change.IsPropertyReferenceRemoved && registeredProperty is not null)
+        {
+            registeredProperty.RemoveChildRelationships(change.Subject);
+            registeredSubject?.RemoveParentGroup(registeredProperty);
+        }
+    }
+
+    private void RegisterPreassignedSubjectId(IInterceptorSubject subject)
+    {
+        var subjectId = subject.TryGetSubjectId();
+        if (subjectId is not null &&
+            (!_subjectIdToSubject.TryGetValue(subjectId, out var existingSubject) ||
+             ReferenceEquals(existingSubject, subject)))
+        {
+            _subjectIdToSubject[subjectId] = subject;
+        }
+    }
+
+    public void ReconcileChildRelationships(
+        PropertyReference property,
+        ReadOnlySpan<SubjectPropertyRelationship> relationships)
+    {
+        lock (_relationshipReconciliationGate)
+        {
+            ReconcileChildRelationshipsCore(property, relationships);
+        }
+    }
+
+    private void ReconcileChildRelationshipsCore(
+        PropertyReference property,
+        ReadOnlySpan<SubjectPropertyRelationship> relationships)
+    {
+        RegisteredSubjectProperty? registeredProperty;
+        var resolvedRelationships = new List<SubjectPropertyRelationship>(relationships.Length);
+        var groupIndexes = new Dictionary<IInterceptorSubject, int>(ReferenceEqualityComparer.Instance);
+        var groups = new List<ResolvedRelationshipGroup>();
+        var removedParents = new List<RegisteredSubject>();
+
+        lock (_knownSubjects)
+        {
+            registeredProperty = _knownSubjects
+                .GetValueOrDefault(property.Subject)?
+                .TryGetProperty(property.Name);
+            if (registeredProperty is null)
+            {
+                _childrenByProperty.Remove(property);
                 return;
             }
 
-            if (change.IsPropertyReferenceRemoved || change.IsContextDetach)
+            foreach (var relationship in relationships)
             {
-                var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
-                if (registeredSubject is not null)
+                if (!_knownSubjects.TryGetValue(relationship.Child, out var registeredChild))
                 {
-                    if (change is { IsPropertyReferenceRemoved: true, Property: not null })
+                    continue;
+                }
+
+                resolvedRelationships.Add(relationship);
+                if (!groupIndexes.TryGetValue(relationship.Child, out var groupIndex))
+                {
+                    groupIndex = groups.Count;
+                    groupIndexes.Add(relationship.Child, groupIndex);
+                    groups.Add(new ResolvedRelationshipGroup(relationship.Child, registeredChild));
+                }
+
+                groups[groupIndex].Relationships.Add(relationship);
+            }
+
+            if (_childrenByProperty.TryGetValue(property, out var previousChildren))
+            {
+                foreach (var previousChild in previousChildren)
+                {
+                    if (!groupIndexes.ContainsKey(previousChild) &&
+                        _knownSubjects.TryGetValue(previousChild, out var registeredChild))
                     {
-                        var property = _knownSubjects
-                            .GetValueOrDefault(change.Property.Value.Subject)?
-                            .TryGetProperty(change.Property.Value.Name);
-
-                        if (property is not null)
-                        {
-                            registeredSubject.RemoveParent(property);
-                         
-                            property.RemoveChild(new SubjectPropertyChild
-                            {
-                                Subject = change.Subject,
-                                Index = change.Index
-                            });
-                        }
-                    }
-                    
-                    if (change.IsContextDetach)
-                    {
-                        // Remove stale parent references from children and clear
-                        // children lists before this subject leaves _knownSubjects.
-                        foreach (var property in registeredSubject.Properties)
-                        {
-                            if (!property.CanContainSubjects)
-                                continue;
-
-                            foreach (var child in property.Children)
-                            {
-                                var childRegistered = _knownSubjects.GetValueOrDefault(child.Subject);
-                                childRegistered?.RemoveParentsByProperty(property);
-                            }
-
-                            property.ClearChildren();
-                        }
-
-                        _knownSubjects.Remove(change.Subject);
-                        Volatile.Write(ref _knownSubjectsSnapshot, null);
-
-                        // Clean up subject ID reverse index
-                        if (_subjectIdToSubject.Count > 0)
-                        {
-                            var subjectId = change.Subject.TryGetSubjectId();
-                            if (subjectId is not null)
-                            {
-                                _subjectIdToSubject.Remove(subjectId);
-                            }
-                        }
+                        removedParents.Add(registeredChild);
                     }
                 }
             }
+        }
+
+        // Complete every allocation before mutating a view. Allocation failure is not recoverable, but this
+        // keeps ordinary exceptions from leaving a partially replaced relationship generation.
+        var outgoingRelationships = resolvedRelationships.ToImmutableArray();
+        foreach (var group in groups)
+        {
+            group.Seal();
+        }
+
+        // Never nest relationship-view locks. The operation-level gate prevents another callback from
+        // interleaving its outgoing replacement with these incoming group replacements.
+        registeredProperty.ReplaceChildRelationships(outgoingRelationships);
+        foreach (var removedParent in removedParents)
+        {
+            removedParent.RemoveParentGroup(registeredProperty);
+        }
+
+        foreach (var group in groups)
+        {
+            group.RegisteredChild.ReplaceParentGroup(registeredProperty, group.SealedRelationships);
+        }
+
+        if (groups.Count == 0)
+        {
+            _childrenByProperty.Remove(property);
+        }
+        else
+        {
+            var currentChildren = new IInterceptorSubject[groups.Count];
+            for (var groupIndex = 0; groupIndex < groups.Count; groupIndex++)
+            {
+                currentChildren[groupIndex] = groups[groupIndex].Child;
+            }
+
+            _childrenByProperty[property] = currentChildren;
         }
     }
 
@@ -236,18 +332,20 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
         var property = TryGetRegisteredProperty(change.Property);
         if (property is not null)
         {
-            // handle property initializers from attributes
             foreach (var attribute in property.ReflectionAttributes.OfType<ISubjectPropertyInitializer>())
             {
                 attribute.InitializeProperty(property);
             }
 
-            // handle property initializers from context
             foreach (var initializer in change.Subject.Context.GetServices<ISubjectPropertyInitializer>())
             {
                 initializer.InitializeProperty(property);
             }
         }
+    }
+
+    void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change)
+    {
     }
 
     private RegisteredSubject RegisterSubject(IInterceptorSubject subject)
@@ -258,28 +356,24 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
         return registeredSubject;
     }
 
-    void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change)
-    {
-    }
-
-    void IPropertyLifecycleHandler.RefreshCollectionProperty(PropertyReference property, object? value)
-    {
-        RegisteredSubjectProperty? registeredProperty;
-        lock (_knownSubjects)
-        {
-            registeredProperty = _knownSubjects
-                .GetValueOrDefault(property.Subject)?
-                .TryGetProperty(property.Name);
-        }
-
-        // Call outside lock — RefreshCollectionIndices updates parent entries;
-        // holding _knownSubjects would risk deadlock.
-        registeredProperty?.RefreshCollectionIndices(value, registry: this);
-    }
-    
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private RegisteredSubjectProperty? TryGetRegisteredProperty(PropertyReference property)
     {
         return TryGetRegisteredSubject(property.Subject)?.TryGetProperty(property.Name);
+    }
+
+    private sealed class ResolvedRelationshipGroup(
+        IInterceptorSubject child,
+        RegisteredSubject registeredChild)
+    {
+        public IInterceptorSubject Child { get; } = child;
+
+        public RegisteredSubject RegisteredChild { get; } = registeredChild;
+
+        public List<SubjectPropertyRelationship> Relationships { get; } = [];
+
+        public ImmutableArray<SubjectPropertyRelationship> SealedRelationships { get; private set; }
+
+        public void Seal() => SealedRelationships = Relationships.ToImmutableArray();
     }
 }

@@ -641,11 +641,10 @@ public class SubjectRegistryTests
     }
 
     [Fact]
-    public void WhenAStrandedChildKeepsAKeyAndTheValueBecomesACollection_ThenItIsKeptAtTheEnd()
+    public void WhenCanonicalChildWasHiddenByInPlaceRemoval_ThenTheNextWriteRemovesIt()
     {
-        // The stranded child is in no value the refresh sees, so it has to survive the reordering rather
-        // than be dropped: its parent entry is only reachable for cleanup while it stays a child.
-        // In-place mutation is unsupported, but it must not turn a write into an exception either.
+        // Canonical relationship state still contains the hidden child. A later successful write reconciles
+        // from that state and must remove it instead of preserving a stale registry-only edge.
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
@@ -668,8 +667,9 @@ public class SubjectRegistryTests
         var untypedProp = directory.TryGetRegisteredSubject()!
             .TryGetProperty(nameof(PersonDirectory.Untyped))!;
 
-        Assert.Equal([kept, stranded], untypedProp.Children.Select(c => c.Subject));
-        Assert.Equal([0, "alpha"], untypedProp.Children.Select(c => c.Index));
+        Assert.Equal([kept], untypedProp.Children.Select(c => c.Subject));
+        Assert.Equal([0], untypedProp.Children.Select(c => c.Index));
+        Assert.Null(stranded.TryGetRegisteredSubject());
     }
 
     [Fact]
@@ -849,10 +849,10 @@ public class SubjectRegistryTests
     }
 
     [Fact]
-    public void WhenASubjectUnderTwoKeysIsRewrittenUnchanged_ThenItsIndexDoesNotMove()
+    public void WhenASubjectUnderTwoKeysIsRewrittenUnchanged_ThenBothOccurrencesRemain()
     {
-        // Attach records the first of the two keys, so a rewrite which changes nothing must not hand the
-        // subject the other one and move its path.
+        // Relationship views preserve every occurrence while membership and reference counting remain
+        // distinct-subject based.
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
@@ -866,21 +866,24 @@ public class SubjectRegistryTests
             PeopleByName = new Dictionary<string, Person> { ["alpha"] = shared, ["beta"] = shared }
         };
 
-        Assert.Equal("alpha", shared.TryGetRegisteredSubject()!.Parents[0].Index);
+        Assert.Equal(["alpha", "beta"],
+            shared.TryGetRegisteredSubject()!.Parents.Select(parent => parent.Index));
 
         // Act
         directory.PeopleByName = new Dictionary<string, Person> { ["alpha"] = shared, ["beta"] = shared };
 
         // Assert
-        Assert.Equal("alpha", shared.TryGetRegisteredSubject()!.Parents[0].Index);
-        Assert.Equal("alpha", shared.GetParents().Single().Index);
+        Assert.Equal(["alpha", "beta"],
+            shared.TryGetRegisteredSubject()!.Parents.Select(parent => parent.Index));
+        Assert.Equal(["alpha", "beta"], shared.GetParents().Select(parent => parent.Index));
+        Assert.Equal(1, shared.TryGetRegisteredSubject()!.ReferenceCount);
     }
 
     [Fact]
-    public void WhenACollectionHoldsTheSameSubjectTwice_ThenItKeepsTheFirstPosition()
+    public void WhenACollectionHoldsTheSameSubjectTwice_ThenItKeepsBothOccurrences()
     {
-        // One child exists per subject, so only one of the two positions can be stored: the first, as
-        // attach records it.
+        // Public relationship views preserve duplicates even though lifecycle membership remains one per
+        // distinct child.
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
@@ -899,10 +902,11 @@ public class SubjectRegistryTests
         var childrenProp = person.TryGetRegisteredSubject()!
             .TryGetProperty(nameof(Person.Children))!;
 
-        Assert.Equal(2, childrenProp.Children.Length);
-        Assert.Equal(0, childrenProp.Children[0].Index);
-        Assert.Same(first, childrenProp.Children[0].Subject);
-        Assert.Equal(0, first.GetParents().Single().Index);
+        Assert.Equal([first, second, first], childrenProp.Children.Select(child => child.Subject));
+        Assert.Equal([0, 1, 2], childrenProp.Children.Select(child => child.Index));
+        Assert.Equal([0, 2], first.TryGetRegisteredSubject()!.Parents.Select(parent => parent.Index));
+        Assert.Equal([0, 2], first.GetParents().Select(parent => parent.Index));
+        Assert.Equal(1, first.TryGetRegisteredSubject()!.ReferenceCount);
     }
 
     [Fact]
@@ -964,11 +968,10 @@ public class SubjectRegistryTests
     }
 
     [Fact]
-    public void WhenTheValueHoldsASubjectWhichWasNeverAttached_ThenItIsSkipped()
+    public void WhenInPlaceMutationHidAnAddition_ThenTheNextWriteAttachesItFromCanonicalState()
     {
-        // In-place mutation hides an addition from the interceptor: the subject is in both the old and the new
-        // value, so neither the detach nor the attach loop touches it and no child exists for it. The refresh
-        // then meets an entry with nothing to update, which must not throw or invent a child.
+        // The lifecycle compares the next generation with canonical state, not the already mutated backing
+        // value, so the hidden addition is still a real membership addition on the next successful write.
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
@@ -991,7 +994,9 @@ public class SubjectRegistryTests
         var untypedProp = directory.TryGetRegisteredSubject()!
             .TryGetProperty(nameof(PersonDirectory.Untyped))!;
 
-        Assert.Equal([attached], untypedProp.Children.Select(c => c.Subject));
-        Assert.Equal(0, untypedProp.Children.Single().Index);
+        Assert.Equal([attached, hidden], untypedProp.Children.Select(c => c.Subject));
+        Assert.Equal([0, 1], untypedProp.Children.Select(c => c.Index));
+        Assert.Equal(1, hidden.TryGetRegisteredSubject()!.ReferenceCount);
+        Assert.NotNull(hidden.TryGetRegisteredSubject());
     }
 }

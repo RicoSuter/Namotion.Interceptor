@@ -770,6 +770,35 @@ public class PathExtensionsTests
         // Assert
         Assert.Equal("Items[1].Name", path);
     }
+
+    [Fact]
+    public void WhenDuplicateDictionaryOccurrencesAreRekeyed_ThenTryGetPathUsesTheFirstCurrentOccurrence()
+    {
+        // Selecting a provisional or stale parent entry would retain "alpha" after the full group moves.
+        // Arrange
+        var context = CreateContext();
+        var shared = new Models.Person { FirstName = "Shared" };
+        var directory = new Models.PersonDirectory(context)
+        {
+            PeopleByName = new Dictionary<string, Models.Person>
+            {
+                ["alpha"] = shared,
+                ["beta"] = shared
+            }
+        };
+        var nameProperty = shared.TryGetRegisteredSubject()!.TryGetProperty(nameof(Models.Person.FirstName))!;
+
+        // Act
+        directory.PeopleByName = new Dictionary<string, Models.Person>
+        {
+            ["gamma"] = shared,
+            ["delta"] = shared
+        };
+        var path = nameProperty.TryGetPath(DefaultPathProvider.Instance, directory);
+
+        // Assert
+        Assert.Equal("PeopleByName[gamma].FirstName", path);
+    }
 }
 
 [Namotion.Interceptor.Attributes.InterceptorSubject]
