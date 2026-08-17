@@ -51,6 +51,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
 
             var operation = new AttachOperation(_attachedSubjects.ContainsKey(subject));
             _attachingSubjects.Add(subject, operation);
+            EnterAttachStaging(subject);
             try
             {
                 var stagedProperties = StageSubjectProperties(subject);
@@ -140,6 +141,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
             }
             finally
             {
+                ExitAttachStaging(subject);
                 if (_attachingSubjects.TryGetValue(subject, out var activeOperation) &&
                     ReferenceEquals(activeOperation, operation))
                 {
@@ -721,43 +723,35 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
 
     private List<StagedProperty> StageSubjectProperties(IInterceptorSubject subject)
     {
-        EnterAttachStaging(subject);
-        try
+        var relationshipHandlers = subject.Context.GetServices<IPropertyRelationshipHandler>();
+        var materializeRelationships = relationshipHandlers.Length > 0 ||
+                                       subject is IPropertyRelationshipHandler;
+        var stagedProperties = new List<StagedProperty>();
+        foreach (var property in subject.Properties)
         {
-            var relationshipHandlers = subject.Context.GetServices<IPropertyRelationshipHandler>();
-            var materializeRelationships = relationshipHandlers.Length > 0 ||
-                                           subject is IPropertyRelationshipHandler;
-            var stagedProperties = new List<StagedProperty>();
-            foreach (var property in subject.Properties)
+            var metadata = property.Value;
+            if (!metadata.IsIntercepted ||
+                !metadata.Type.CanContainSubjects())
             {
-                var metadata = property.Value;
-                if (!metadata.IsIntercepted ||
-                    !metadata.Type.CanContainSubjects())
-                {
-                    continue;
-                }
-
-                var propertyReference = new PropertyReference(subject, property.Key);
-                var value = metadata.GetValue?.Invoke(subject);
-                _processedProperties.TryGetValue(propertyReference, out var previousState);
-                var reconciliation = SubjectPropertyRelationshipReconciler.Stage(
-                    propertyReference,
-                    value,
-                    previousState,
-                    materializeRelationships);
-                stagedProperties.Add(new StagedProperty(
-                    propertyReference,
-                    relationshipHandlers,
-                    materializeRelationships,
-                    reconciliation));
+                continue;
             }
 
-            return stagedProperties;
+            var propertyReference = new PropertyReference(subject, property.Key);
+            var value = metadata.GetValue?.Invoke(subject);
+            _processedProperties.TryGetValue(propertyReference, out var previousState);
+            var reconciliation = SubjectPropertyRelationshipReconciler.Stage(
+                propertyReference,
+                value,
+                previousState,
+                materializeRelationships);
+            stagedProperties.Add(new StagedProperty(
+                propertyReference,
+                relationshipHandlers,
+                materializeRelationships,
+                reconciliation));
         }
-        finally
-        {
-            ExitAttachStaging(subject);
-        }
+
+        return stagedProperties;
     }
 
     private List<DetachedProperty> CaptureDetachedProperties(
@@ -1046,7 +1040,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
         {
             throw new InvalidOperationException(
                 $"Structural property '{property.Name}' on '{property.Subject.GetType().Name}' cannot be written " +
-                "while that subject's initial structural properties are being staged.");
+                "while that subject's initial attach is reconciling structural properties.");
         }
     }
 

@@ -103,7 +103,7 @@ public class RelationshipAttachDetachTests
 
         // Assert
         var invalidOperationException = Assert.IsType<InvalidOperationException>(exception);
-        Assert.Contains("initial structural properties are being staged", invalidOperationException.Message);
+        Assert.Contains("initial attach is reconciling structural properties", invalidOperationException.Message);
         Assert.Same(stagedEnumerable, parent.FirstItems);
         Assert.Equal(0, enumerated.GetReferenceCount());
         Assert.Equal(0, replacement.GetReferenceCount());
@@ -147,12 +147,109 @@ public class RelationshipAttachDetachTests
 
         // Assert
         var invalidOperationException = Assert.IsType<InvalidOperationException>(exception);
-        Assert.Contains("initial structural properties are being staged", invalidOperationException.Message);
+        Assert.Contains("initial attach is reconciling structural properties", invalidOperationException.Message);
         Assert.Same(firstGeneration, parent.FirstItems);
         Assert.Equal(0, first.GetReferenceCount());
         Assert.Equal(0, second.GetReferenceCount());
         Assert.Equal(0, replacement.GetReferenceCount());
         Assert.Empty(relationshipHandler.Generations);
+    }
+
+    [Fact]
+    public void WhenInitialMembershipCallbackWritesALaterStructuralProperty_ThenTheWriteIsRejectedBeforeBackingMutation()
+    {
+        // Letting the callback commit would leave the later property's backing generation newer than
+        // the canonical generation which the outer initial attach publishes afterwards.
+        // Arrange
+        var firstRelationshipHandler = new RecordingRelationshipHandler();
+        var secondRelationshipHandler = new RecordingRelationshipHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle();
+        var first = new Person { FirstName = "first" };
+        var initialSecond = new Person { FirstName = "initial-second" };
+        var replacementSecond = new Person { FirstName = "replacement-second" };
+        var initialSecondGeneration = new object?[] { initialSecond };
+        var replacementSecondGeneration = new object?[] { replacementSecond };
+        var parent = new ThrowingStructuralContainer
+        {
+            FirstItems = [first],
+            SecondItems = initialSecondGeneration
+        };
+        Exception? callbackException = null;
+        var lifecycleHandler = new CallbackLifecycleHandler(change =>
+        {
+            if (callbackException is null &&
+                ReferenceEquals(change.Subject, first) &&
+                change.IsPropertyReferenceAdded)
+            {
+                callbackException = Record.Exception(() => parent.SecondItems = replacementSecondGeneration);
+            }
+        });
+        context.AddService<IPropertyRelationshipHandler>(firstRelationshipHandler);
+        context.AddService<IPropertyRelationshipHandler>(secondRelationshipHandler);
+        context.AddService<ILifecycleHandler>(lifecycleHandler);
+
+        // Act
+        ((IInterceptorSubject)parent).Context.AddFallbackContext(context);
+
+        // Assert
+        var invalidOperationException = Assert.IsType<InvalidOperationException>(callbackException);
+        Assert.Contains("initial attach is reconciling structural properties", invalidOperationException.Message);
+        Assert.Same(initialSecondGeneration, parent.SecondItems);
+        Assert.Equal(1, first.GetReferenceCount());
+        Assert.Equal(1, initialSecond.GetReferenceCount());
+        Assert.Equal(0, replacementSecond.GetReferenceCount());
+        AssertInitialRelationshipGenerations(firstRelationshipHandler, parent, first, initialSecond);
+        AssertInitialRelationshipGenerations(secondRelationshipHandler, parent, first, initialSecond);
+    }
+
+    [Fact]
+    public void WhenInitialRelationshipCallbackWritesALaterStructuralProperty_ThenTheWriteIsRejectedBeforeBackingMutation()
+    {
+        // Letting the nested reconciliation finish would update canonical membership before the outer
+        // dispatcher publishes its older staged generation to every relationship handler.
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle();
+        var first = new Person { FirstName = "first" };
+        var initialSecond = new Person { FirstName = "initial-second" };
+        var replacementSecond = new Person { FirstName = "replacement-second" };
+        var initialSecondGeneration = new object?[] { initialSecond };
+        var replacementSecondGeneration = new object?[] { replacementSecond };
+        var parent = new ThrowingStructuralContainer
+        {
+            FirstItems = [first],
+            SecondItems = initialSecondGeneration
+        };
+        Exception? callbackException = null;
+        var firstRelationshipHandler = new RecordingRelationshipHandler
+        {
+            Callback = property =>
+            {
+                if (property.Name == nameof(ThrowingStructuralContainer.FirstItems))
+                {
+                    callbackException = Record.Exception(() => parent.SecondItems = replacementSecondGeneration);
+                }
+            }
+        };
+        var secondRelationshipHandler = new RecordingRelationshipHandler();
+        context.AddService<IPropertyRelationshipHandler>(firstRelationshipHandler);
+        context.AddService<IPropertyRelationshipHandler>(secondRelationshipHandler);
+
+        // Act
+        ((IInterceptorSubject)parent).Context.AddFallbackContext(context);
+
+        // Assert
+        var invalidOperationException = Assert.IsType<InvalidOperationException>(callbackException);
+        Assert.Contains("initial attach is reconciling structural properties", invalidOperationException.Message);
+        Assert.Same(initialSecondGeneration, parent.SecondItems);
+        Assert.Equal(1, first.GetReferenceCount());
+        Assert.Equal(1, initialSecond.GetReferenceCount());
+        Assert.Equal(0, replacementSecond.GetReferenceCount());
+        AssertInitialRelationshipGenerations(firstRelationshipHandler, parent, first, initialSecond);
+        AssertInitialRelationshipGenerations(secondRelationshipHandler, parent, first, initialSecond);
     }
 
     [Fact]
@@ -397,6 +494,9 @@ public class RelationshipAttachDetachTests
         Assert.Throws<InvalidOperationException>(() =>
             ((IInterceptorSubject)parent).Context.AddFallbackContext(context));
 
+        // Act & Assert: a failed attach must clear the guard before a retry.
+        Assert.Null(Record.Exception(() => parent.SecondItems = []));
+
         // Act
         lifecycleInterceptor.AttachSubjectToContext(parent);
 
@@ -451,6 +551,10 @@ public class RelationshipAttachDetachTests
 
     private sealed class RecordingRelationshipHandler : IPropertyRelationshipHandler
     {
+        private bool _hasInvokedCallback;
+
+        public Action<PropertyReference>? Callback { get; init; }
+
         public List<RelationshipGeneration> Generations { get; } = [];
 
         public void ReconcileChildRelationships(
@@ -458,6 +562,11 @@ public class RelationshipAttachDetachTests
             ReadOnlySpan<SubjectPropertyRelationship> relationships)
         {
             Generations.Add(new RelationshipGeneration(property, relationships.ToArray()));
+            if (!_hasInvokedCallback)
+            {
+                _hasInvokedCallback = true;
+                Callback?.Invoke(property);
+            }
         }
 
         public SubjectPropertyRelationship[] GetLastRelationships(PropertyReference property)
@@ -466,6 +575,21 @@ public class RelationshipAttachDetachTests
                 .Last(generation => PropertyReference.Comparer.Equals(generation.Property, property))
                 .Relationships;
         }
+    }
+
+    private static void AssertInitialRelationshipGenerations(
+        RecordingRelationshipHandler handler,
+        ThrowingStructuralContainer parent,
+        IInterceptorSubject first,
+        IInterceptorSubject second)
+    {
+        Assert.Equal(
+            [nameof(ThrowingStructuralContainer.FirstItems), nameof(ThrowingStructuralContainer.SecondItems)],
+            handler.Generations.Select(generation => generation.Property.Name));
+        Assert.Same(first, Assert.Single(handler.Generations[0].Relationships).Child);
+        Assert.Same(second, Assert.Single(handler.Generations[1].Relationships).Child);
+        Assert.Same(second, Assert.Single(handler.GetLastRelationships(
+            new PropertyReference(parent, nameof(ThrowingStructuralContainer.SecondItems)))).Child);
     }
 
     private sealed class DetachParentRelationshipHandler(
