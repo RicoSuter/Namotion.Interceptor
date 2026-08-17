@@ -10,13 +10,13 @@ namespace Namotion.Interceptor;
 
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
-    // All topology (services, fallback contexts) and everything derived from it (delegation
-    // target, caches, compiled chains) lives in one immutable snapshot per context, published
-    // atomically.
+    // All topology (services, public fallback contexts, internal ownership route) and everything
+    // derived from it (delegation target, caches, compiled chains) lives in one immutable snapshot
+    // per context, published atomically.
     //
     // R1: queries take no context lock. A query pins one snapshot with a single volatile read and
     // walks other contexts' snapshots the same way, so the downward service walk and the upward
-    // invalidation walk cannot form a lock cycle, including in cyclic fallback graphs.
+    // invalidation walk cannot form a lock cycle, including in cyclic relationship graphs.
     //
     // Lock order: _mutationLock -> a _usedByContexts set lock, never reverse. A set lock is a leaf,
     // touching only that set and calling into no other context, so two contexts registering into
@@ -95,6 +95,21 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return new InterceptorSubjectContext();
     }
 
+    internal sealed class ContextOwnershipRoute
+    {
+        internal ContextOwnershipRoute(
+            InterceptorSubjectContext target,
+            InterceptorSubjectContext ownershipDomain)
+        {
+            Target = target;
+            OwnershipDomain = ownershipDomain;
+        }
+
+        internal InterceptorSubjectContext Target { get; }
+
+        internal InterceptorSubjectContext OwnershipDomain { get; }
+    }
+
     private static InterceptorSubjectContext CreateCyclicDelegationMarker()
     {
         var marker = new InterceptorSubjectContext();
@@ -127,18 +142,18 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 return false;
             }
 
+            var replacementState = CreateContextState(
+                state.Services,
+                state.FallbackContexts.Add(contextImpl),
+                GetOwnershipRoute(state));
+
             // R4: register into the fallback BEFORE publishing, so its _usedByContexts is always a
             // superset of the true using set. A missing entry leaves a compiled chain above
             // permanently stale. An extra entry costs a spurious invalidation and lets the
             // invalidation walk arrive out of chain order, which is why no walk may trust what a
             // context further down recorded (see ResolveDelegationChain).
-            var usedByContexts = contextImpl.GetOrCreateUsedByContexts();
-            lock (usedByContexts)
-            {
-                usedByContexts.Add(this);
-            }
-
-            PublishState(new ContextState(state.Services, state.FallbackContexts.Add(contextImpl)));
+            RegisterUsingContext(contextImpl);
+            PublishState(replacementState);
         }
 
         InvalidateUsingContexts();
@@ -164,22 +179,70 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 return false;
             }
 
-            PublishState(new ContextState(state.Services, state.FallbackContexts.RemoveAt(index)));
+            var replacementState = CreateContextState(
+                state.Services,
+                state.FallbackContexts.RemoveAt(index),
+                GetOwnershipRoute(state));
+            PublishState(replacementState);
 
             // R4: unregister from the fallback only AFTER publishing so that its _usedByContexts
             // stays a superset of the true using set for the whole transition (see
             // AddFallbackContext).
-            var usedByContexts = Volatile.Read(ref contextImpl._usedByContexts);
-            if (usedByContexts is not null)
+            if (!UsesTarget(replacementState, contextImpl))
             {
-                lock (usedByContexts)
-                {
-                    usedByContexts.Remove(this);
-                }
+                UnregisterUsingContext(contextImpl);
             }
         }
 
         InvalidateUsingContexts();
+        return true;
+    }
+
+    internal bool TryChangeOwnershipRoute(
+        ContextOwnershipRoute? expected,
+        ContextOwnershipRoute? replacement)
+    {
+        var changed = false;
+
+        lock (_mutationLock)
+        {
+            var state = Volatile.Read(ref _state);
+            var current = GetOwnershipRoute(state);
+            if (!ReferenceEquals(current, expected))
+            {
+                return false;
+            }
+
+            if (ReferenceEquals(current, replacement))
+            {
+                return true;
+            }
+
+            var replacementState = CreateContextState(state.Services, state.FallbackContexts, replacement);
+
+            if (replacement is not null &&
+                !ReferenceEquals(current?.Target, replacement.Target))
+            {
+                RegisterUsingContext(replacement.Target);
+            }
+
+            PublishState(replacementState);
+
+            if (current is not null &&
+                !ReferenceEquals(current.Target, replacement?.Target) &&
+                !UsesTarget(replacementState, current.Target))
+            {
+                UnregisterUsingContext(current.Target);
+            }
+
+            changed = true;
+        }
+
+        if (changed)
+        {
+            InvalidateUsingContexts();
+        }
+
         return true;
     }
 
@@ -202,7 +265,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             // the state to not lose it. Mutating a different context from here is forbidden, see
             // the lock order note at the top of the class.
             state = Volatile.Read(ref _state);
-            PublishState(new ContextState(state.Services.Add(service!), state.FallbackContexts));
+            var replacementState = CreateContextState(
+                state.Services.Add(service!),
+                state.FallbackContexts,
+                GetOwnershipRoute(state));
+            PublishState(replacementState);
         }
 
         InvalidateUsingContexts();
@@ -214,7 +281,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         lock (_mutationLock)
         {
             var state = Volatile.Read(ref _state);
-            PublishState(new ContextState(state.Services.Add(service!), state.FallbackContexts));
+            var replacementState = CreateContextState(
+                state.Services.Add(service!),
+                state.FallbackContexts,
+                GetOwnershipRoute(state));
+            PublishState(replacementState);
         }
 
         InvalidateUsingContexts();
@@ -275,8 +346,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     /// <summary>
     /// Resolves the context that answers for this one and replaces <paramref name="state"/> with
-    /// the state that context was pinned on. A context with no own service and exactly one fallback
-    /// resolves everything through it, so the chain is as deep as the subject graph.
+    /// the state that context was pinned on. A context with no own service and exactly one public
+    /// fallback or an internal ownership route resolves everything through it, so the chain is as
+    /// deep as the subject graph.
     ///
     /// Walked once per state rather than once per query, which is what makes depth free. The record
     /// holds the terminal CONTEXT and never its state: a context's state is replaced whenever
@@ -544,8 +616,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// </summary>
     private ImmutableArray<TInterface> GetServicesFromState<TInterface>(ContextState state)
     {
-        // An empty context allocates no service cache. The compiled chain arrays are unaffected:
-        // an empty state that answers intercepted access still fills those.
+        // A route-only source always has DelegationTarget and every caller resolves that delegation
+        // before reaching this empty-state check. An empty context allocates no service cache. The
+        // compiled chain arrays are unaffected: an empty state that answers intercepted access
+        // still fills those.
         if (state.IsEmpty)
         {
             return ImmutableArray<TInterface>.Empty;
@@ -587,14 +661,16 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     /// <summary>
     /// Collects the services of the given type from the pinned snapshot and every context it
-    /// reaches, with an explicit worklist rather than recursion: the fallback graph is as deep as
-    /// the subject graph, so recursion died on an uncatchable <see cref="StackOverflowException"/>.
+    /// reaches, with an explicit worklist rather than recursion: the public fallback plus internal
+    /// ownership-route graph is as deep as the subject graph, so recursion died on an uncatchable
+    /// <see cref="StackOverflowException"/>.
     ///
     /// The shape of the recursive walk is preserved exactly, because the result order is
     /// observable: <see cref="ServiceOrderResolver.OrderByDependencies"/> keeps input order among
     /// services no ordering attribute separates. So the walk stays depth first and left to right,
-    /// each context contributes its own services first, and the result is made distinct and
-    /// reordered once per context rather than once at the end.
+    /// each context contributes its own services first, then public fallbacks, then its internal
+    /// ownership route, and the result is made distinct and reordered once per context rather than
+    /// once at the end.
     ///
     /// It terminates because a context is entered only when <c>visited</c> did not hold it, which
     /// is also what makes the walk safe on a cyclic graph.
@@ -644,6 +720,24 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 continue;
             }
 
+            if (!frame.OwnershipRouteEntered)
+            {
+                frame.OwnershipRouteEntered = true;
+                frames[frameIndex] = frame;
+
+                var ownershipRoute = GetOwnershipRoute(frame.State);
+                if (ownershipRoute is not null &&
+                    TryEnterContext(
+                        ownershipRoute.Target,
+                        Volatile.Read(ref ownershipRoute.Target._state),
+                        visited,
+                        out var ownershipRouteState))
+                {
+                    PushFrame(frames, collected, type, ownershipRouteState);
+                    continue;
+                }
+            }
+
             frames.RemoveAt(frameIndex);
             ReduceFrame(collected, frame.ResultStart, distinctServices);
         }
@@ -689,7 +783,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     /// <summary>
     /// Opens the buffer region of a context and appends its own matching services to it, which the
-    /// recursive walk placed ahead of everything its fallback contexts contribute.
+    /// recursive walk placed ahead of everything its public fallbacks and internal ownership route
+    /// contribute.
     /// </summary>
     private static void PushFrame(List<ServiceWalkFrame> frames, List<object> collected, Type type, ContextState state)
     {
@@ -750,19 +845,22 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     /// <summary>
     /// One context on the walk stack: the snapshot it was pinned on, the index at which its region
-    /// of the shared buffer begins, and the cursor over its fallback contexts.
+    /// of the shared buffer begins, the cursor over its public fallback contexts, and whether its
+    /// internal ownership route was entered.
     /// </summary>
     private struct ServiceWalkFrame
     {
         internal readonly ContextState State;
         internal readonly int ResultStart;
         internal int NextFallbackIndex;
+        internal bool OwnershipRouteEntered;
 
         internal ServiceWalkFrame(ContextState state, int resultStart)
         {
             State = state;
             ResultStart = resultStart;
             NextFallbackIndex = 0;
+            OwnershipRouteEntered = false;
         }
     }
 
@@ -802,6 +900,33 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         Interlocked.CompareExchange(ref _state, current.WithoutCaches(), current);
     }
 
+    private void RegisterUsingContext(InterceptorSubjectContext target)
+    {
+        var usedByContexts = target.GetOrCreateUsedByContexts();
+        lock (usedByContexts)
+        {
+            usedByContexts.Add(this);
+        }
+    }
+
+    private void UnregisterUsingContext(InterceptorSubjectContext target)
+    {
+        var usedByContexts = Volatile.Read(ref target._usedByContexts);
+        if (usedByContexts is not null)
+        {
+            lock (usedByContexts)
+            {
+                usedByContexts.Remove(this);
+            }
+        }
+    }
+
+    private static bool UsesTarget(ContextState state, InterceptorSubjectContext target)
+    {
+        return state.FallbackContexts.Contains(target) ||
+               ReferenceEquals(GetOwnershipRoute(state)?.Target, target);
+    }
+
     /// <summary>
     /// Returns the canonical using set of this context, creating it on first use. The CAS keeps
     /// one instance when two contexts register concurrently, which is what lets callers use the
@@ -821,8 +946,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     /// <summary>
     /// Invalidates every context that resolves through this one, with an explicit worklist rather
-    /// than recursion: the using graph is the fallback graph reversed and therefore as deep as the
-    /// subject graph, where recursion died on an uncatchable <see cref="StackOverflowException"/>.
+    /// than recursion: the using graph is the public fallback plus internal ownership-route graph
+    /// reversed and therefore as deep as the subject graph, where recursion died on an uncatchable
+    /// <see cref="StackOverflowException"/>.
     ///
     /// It terminates because a context is queued only when <c>visited</c> did not hold it, which is
     /// also what makes the walk safe on a cyclic graph.
@@ -935,7 +1061,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
     }
 
-    private sealed class ContextState
+    private class ContextState
     {
         // Insertion order is kept and duplicate references tolerated: dedup moved from
         // registration into the service walk, which keeps the same occurrence under the same
@@ -945,8 +1071,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         internal readonly ImmutableArray<object> Services;
         internal readonly ImmutableArray<InterceptorSubjectContext> FallbackContexts;
 
-        // Derived in the constructor from the two fields above, so no reader can ever observe
-        // it disagreeing with them.
+        // Derived in the constructor from the fields above and the internal ownership-route target,
+        // so no reader can ever observe it disagreeing with them.
         internal readonly InterceptorSubjectContext? DelegationTarget;
 
         // Caches belong to the state that produced them, created lazily via CAS. A topology change
@@ -965,11 +1091,27 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         // one's caches.
         private InterceptorSubjectContext? _resolvedTerminal;
 
-        internal ContextState(ImmutableArray<object> services, ImmutableArray<InterceptorSubjectContext> fallbackContexts)
+        internal ContextState(
+            ImmutableArray<object> services,
+            ImmutableArray<InterceptorSubjectContext> fallbackContexts,
+            InterceptorSubjectContext? ownershipRouteTarget = null)
         {
             Services = services;
             FallbackContexts = fallbackContexts;
-            DelegationTarget = services.IsEmpty && fallbackContexts.Length == 1 ? fallbackContexts[0] : null;
+
+            if (!services.IsEmpty)
+            {
+                DelegationTarget = null;
+            }
+            else if (fallbackContexts.IsEmpty)
+            {
+                DelegationTarget = ownershipRouteTarget;
+            }
+            else if (fallbackContexts.Length == 1 &&
+                     (ownershipRouteTarget is null || ReferenceEquals(fallbackContexts[0], ownershipRouteTarget)))
+            {
+                DelegationTarget = fallbackContexts[0];
+            }
         }
 
         internal bool IsEmpty => Services.IsEmpty && FallbackContexts.IsEmpty;
@@ -999,7 +1141,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         /// </summary>
         internal ContextState WithoutCaches()
         {
-            return new ContextState(Services, FallbackContexts);
+            return CreateContextState(Services, FallbackContexts, GetOwnershipRoute(this));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1084,5 +1226,34 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             return Interlocked.CompareExchange(ref _methodInvocationFunction, function, null) ?? function;
         }
+    }
+
+    private sealed class RoutedContextState : ContextState
+    {
+        internal RoutedContextState(
+            ImmutableArray<object> services,
+            ImmutableArray<InterceptorSubjectContext> fallbackContexts,
+            ContextOwnershipRoute ownershipRoute)
+            : base(services, fallbackContexts, ownershipRoute.Target)
+        {
+            OwnershipRoute = ownershipRoute;
+        }
+
+        internal readonly ContextOwnershipRoute OwnershipRoute;
+    }
+
+    private static ContextOwnershipRoute? GetOwnershipRoute(ContextState state)
+    {
+        return state is RoutedContextState routedState ? routedState.OwnershipRoute : null;
+    }
+
+    private static ContextState CreateContextState(
+        ImmutableArray<object> services,
+        ImmutableArray<InterceptorSubjectContext> fallbackContexts,
+        ContextOwnershipRoute? ownershipRoute)
+    {
+        return ownershipRoute is null
+            ? new ContextState(services, fallbackContexts)
+            : new RoutedContextState(services, fallbackContexts, ownershipRoute);
     }
 }

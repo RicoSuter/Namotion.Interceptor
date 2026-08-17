@@ -81,7 +81,8 @@ public class ContextServiceWalkOrderTests
         // otherwise this test could pass by never producing one.
         Assert.True(coverage.DelegationChains > 0, "No graph contained a delegating context.");
         Assert.True(coverage.DelegationCycles > 0, "No graph contained a delegation cycle.");
-        Assert.True(coverage.FallbackCycles > 0, "No graph contained a fallback cycle.");
+        Assert.True(coverage.OwnershipRoutes > 0, "No graph contained an ownership route.");
+        Assert.True(coverage.RelationshipCycles > 0, "No graph contained a relationship cycle.");
         Assert.True(coverage.MultiFallbackNodes > 0, "No graph contained a context with several fallback contexts.");
         Assert.True(coverage.SharedNodes > 0, "No graph contained a context reachable over more than one path.");
         Assert.True(coverage.DuplicateServices > 0, "No graph contained a service instance registered twice.");
@@ -128,6 +129,11 @@ public class ContextServiceWalkOrderTests
         foreach (var fallback in node.Fallbacks)
         {
             collected.AddRange(CollectWithReference(fallback, visited));
+        }
+
+        if (node.OwnershipRoute is not null)
+        {
+            collected.AddRange(CollectWithReference(node.OwnershipRoute, visited));
         }
 
         return ServiceOrderResolver
@@ -187,6 +193,20 @@ public class ContextServiceWalkOrderTests
             source.Context.AddFallbackContext(target.Context);
         }
 
+        var ownershipDomain = InterceptorSubjectContext.Create();
+        foreach (var source in nodes)
+        {
+            if (random.Next(2) == 0)
+            {
+                continue;
+            }
+
+            var target = nodes[random.Next(nodes.Length)];
+            source.OwnershipRoute = target;
+            var route = new InterceptorSubjectContext.ContextOwnershipRoute(target.Context, ownershipDomain);
+            Assert.True(source.Context.TryChangeOwnershipRoute(null, route));
+        }
+
         return nodes;
     }
 
@@ -210,9 +230,11 @@ public class ContextServiceWalkOrderTests
         builder.AppendLine($"Seed {seed}, graph {graphIndex}:");
         foreach (var node in nodes)
         {
+            var ownershipRoute = node.OwnershipRoute;
             builder.AppendLine(
                 $"  c{node.Index} services [{string.Join(", ", node.Services)}] " +
-                $"fallbacks [{string.Join(", ", node.Fallbacks.Select(fallback => $"c{fallback.Index}"))}]");
+                $"fallbacks [{string.Join(", ", node.Fallbacks.Select(fallback => $"c{fallback.Index}"))}] " +
+                $"route [{(ownershipRoute is null ? string.Empty : $"c{ownershipRoute.Index}")}]");
         }
 
         builder.AppendLine($"  expected: [{string.Join(", ", expected)}]");
@@ -224,7 +246,8 @@ public class ContextServiceWalkOrderTests
     {
         internal int DelegationChains;
         internal int DelegationCycles;
-        internal int FallbackCycles;
+        internal int OwnershipRoutes;
+        internal int RelationshipCycles;
         internal int MultiFallbackNodes;
         internal int SharedNodes;
         internal int DuplicateServices;
@@ -248,14 +271,19 @@ public class ContextServiceWalkOrderTests
                     DuplicateServices++;
                 }
 
-                if (nodes.Count(other => other.Fallbacks.Contains(node)) > 1)
+                if (node.OwnershipRoute is not null)
+                {
+                    OwnershipRoutes++;
+                }
+
+                if (nodes.SelectMany(other => other.Relationships).Count(target => ReferenceEquals(target, node)) > 1)
                 {
                     SharedNodes++;
                 }
 
                 if (ReachesItself(node))
                 {
-                    FallbackCycles++;
+                    RelationshipCycles++;
                 }
             }
         }
@@ -263,11 +291,11 @@ public class ContextServiceWalkOrderTests
         private static bool ReachesItself(Node node)
         {
             var visited = new HashSet<Node>();
-            var pending = new Stack<Node>(node.Fallbacks);
+            var pending = new Stack<Node>(node.Relationships);
             while (pending.Count != 0)
             {
                 var current = pending.Pop();
-                if (current == node)
+                if (ReferenceEquals(current, node))
                 {
                     return true;
                 }
@@ -277,9 +305,9 @@ public class ContextServiceWalkOrderTests
                     continue;
                 }
 
-                foreach (var fallback in current.Fallbacks)
+                foreach (var relationship in current.Relationships)
                 {
-                    pending.Push(fallback);
+                    pending.Push(relationship);
                 }
             }
 
@@ -297,8 +325,36 @@ public class ContextServiceWalkOrderTests
 
         internal List<Node> Fallbacks { get; } = [];
 
+        internal Node? OwnershipRoute { get; set; }
+
+        internal IEnumerable<Node> Relationships =>
+            OwnershipRoute is null ? Fallbacks : Fallbacks.Append(OwnershipRoute!);
+
         /// <summary>Mirrors <c>ContextState.DelegationTarget</c>.</summary>
-        internal Node? DelegationTarget => Services.Count == 0 && Fallbacks.Count == 1 ? Fallbacks[0] : null;
+        internal Node? DelegationTarget
+        {
+            get
+            {
+                if (Services.Count != 0)
+                {
+                    return null;
+                }
+
+                if (OwnershipRoute is null)
+                {
+                    return Fallbacks.Count == 1 ? Fallbacks[0] : null;
+                }
+
+                if (Fallbacks.Count == 0)
+                {
+                    return OwnershipRoute;
+                }
+
+                return Fallbacks.Count == 1 && ReferenceEquals(Fallbacks[0], OwnershipRoute)
+                    ? OwnershipRoute
+                    : null;
+            }
+        }
     }
 
     // The attributes never contradict each other, so no subset of these types can make the resolver
