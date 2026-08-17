@@ -715,53 +715,7 @@ What a server author must implement:
 
 A connector whose transport work runs in a task the loop does not await, such as a client's reconnect monitor, is outside `RunAsync` too, and has to report its own failures for the same reason.
 
-A connector that also implements `IFaultInjectable` runs each loop iteration under a `ConnectorRunAttempt`, which holds that iteration's cancellation together with the flag saying an injected kill cancelled it. The flag has to belong to the iteration rather than to the connector, because a kill can arrive after the iteration it was meant for has torn down: a connector-level flag stays set across that boundary, and the next iteration then reads a kill that never reached it and swallows a genuine fault as an injected one.
-
-```csharp
-private volatile ConnectorRunAttempt? _currentAttempt;
-
-async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
-{
-    // No current attempt means the loop is between iterations, so the restart this fault stands for
-    // is already under way and there is nothing to kill.
-    var attempt = _currentAttempt;
-    if (attempt is not null)
-    {
-        await attempt.ForceKillAsync();
-    }
-}
-
-protected override async Task RunAsync(CancellationToken stoppingToken)
-{
-    while (!stoppingToken.IsCancellationRequested)
-    {
-        var attempt = new ConnectorRunAttempt(stoppingToken);
-        _currentAttempt = attempt;
-
-        try
-        {
-            await ServeUntilFailureAsync(attempt.Token);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            return;
-        }
-        catch (OperationCanceledException) when (attempt.WasForceKilled)
-        {
-            // An injected fault the connector recovers from by restarting, so it is not reported.
-        }
-        finally
-        {
-            // Cleared before the disposal, so a kill arriving from here on finds no attempt rather
-            // than a disposed one.
-            _currentAttempt = null;
-            attempt.Dispose();
-        }
-    }
-}
-```
-
-The stopping token is checked before the kill flag, so a stop that lands together with a kill exits instead of restarting. `ForceKillAsync` marks before it cancels, so the loop cannot reach its kill clause ahead of the mark, and leaves an already disposed attempt unmarked, because a kill that reached a torn-down iteration reached nothing. `CancelAsync` ends an iteration without marking it, which is what a loop uses to stop a sibling task once the first of them has completed. Where the restart backoff sits decides what a kill during it does: inside the iteration it is accepted and cancels work that has already ended, after the iteration it has nothing to cancel and is dropped.
+A connector that participates in chaos testing implements [`IFaultInjectable`](../src/Namotion.Interceptor.Connectors/IFaultInjectable.cs) and gives each restart-loop iteration its own [`ConnectorRunAttempt`](../src/Namotion.Interceptor.Connectors/ConnectorRunAttempt.cs), so injected-kill cancellation and the flag identifying it have the same lifetime. The built-in [MQTT](../src/Namotion.Interceptor.Mqtt/Client/MqttSubjectClientSource.cs), [OPC UA](../src/Namotion.Interceptor.OpcUa/Client/OpcUaSubjectClientSource.cs), and [WebSocket](../src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs) connectors are the reference implementations.
 
 The outbound queue is wired up by reporting drops into the lifetime-owned metrics and registering only the processor's depth provider. The registration is released when that processor goes away:
 
