@@ -1,7 +1,9 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Tests.Models;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -10,6 +12,87 @@ namespace HomeBlaze.Services.Tests;
 /// </summary>
 public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
 {
+    [Fact]
+    public void WhenEmptyInvalidationsAreRepeated_ThenTheResolverDoesNotAllocatePerInvalidation()
+    {
+        // Arrange
+        const int lifecycleChangeCount = 2_000;
+        var subject = new PathCacheContainer(Context);
+        var changes = new SubjectLifecycleChange[lifecycleChangeCount];
+        for (var index = 0; index < changes.Length; index++)
+        {
+            changes[index] = new SubjectLifecycleChange
+            {
+                Subject = subject,
+                ReferenceCount = index + 1,
+                IsPropertyReferenceAdded = true
+            };
+        }
+
+        var relationshipHandler = (IPropertyRelationshipHandler)Resolver;
+        var relationshipProperty = new PropertyReference(subject, nameof(PathCacheContainer.Children));
+
+        // Warm the JIT and interface dispatch before measuring the same-thread hot path.
+        Resolver.HandleLifecycleChange(changes[0]);
+        relationshipHandler.ReconcileChildRelationships(
+            relationshipProperty, ReadOnlySpan<SubjectPropertyRelationship>.Empty);
+
+        // Act
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        for (var index = 0; index < changes.Length; index++)
+        {
+            Resolver.HandleLifecycleChange(changes[index]);
+        }
+        relationshipHandler.ReconcileChildRelationships(
+            relationshipProperty, ReadOnlySpan<SubjectPropertyRelationship>.Empty);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+        // Assert
+        Assert.Equal(0, allocated);
+    }
+
+    [Fact]
+    public void WhenDistinctSubjectsAreEqualByValue_ThenCanonicalPathsAreCachedByReferenceIdentity()
+    {
+        // Arrange
+        var first = new EqualByValuePathContainer(Context);
+        var second = new EqualByValuePathContainer(Context);
+        var root = new EqualByValuePathRoot(Context)
+        {
+            First = first,
+            Second = second
+        };
+        RootManager.Root = root;
+        EqualByValuePathContainer.ResetEqualityCallCount();
+
+        // Act
+        var firstPath = Resolver.GetPath(first, PathStyle.Canonical);
+        var secondPath = Resolver.GetPath(second, PathStyle.Canonical);
+
+        // Assert
+        Assert.Equal("/First", firstPath);
+        Assert.Equal("/Second", secondPath);
+        Assert.Equal(0, EqualByValuePathContainer.EqualityCallCount);
+    }
+
+    [Fact]
+    public void WhenAnAncestorIsEqualByValueToItsDescendant_ThenPathTraversalUsesReferenceIdentity()
+    {
+        // Arrange
+        var descendant = new EqualByValuePathContainer(Context);
+        var ancestor = new EqualByValuePathContainer(Context) { Child = descendant };
+        var root = new EqualByValuePathRoot(Context) { Child = ancestor };
+        RootManager.Root = root;
+        EqualByValuePathContainer.ResetEqualityCallCount();
+
+        // Act
+        var path = Resolver.GetPath(descendant, PathStyle.Canonical);
+
+        // Assert
+        Assert.Equal("/Child/Child", path);
+        Assert.Equal(0, EqualByValuePathContainer.EqualityCallCount);
+    }
+
     [Fact]
     public void GetPath_CacheInvalidatedOnDetach_ReturnsNull()
     {
@@ -181,7 +264,7 @@ public class SubjectPathResolverCacheTests : SubjectPathResolverTestBase
     }
 
     [Fact]
-    public async Task WhenRelationshipChangesWhileAPathIsBeingCached_ThenStaleGenerationCannotBeRepublished()
+    public async Task WhenRelationshipChangesWhileAPathIsBeingCached_ThenStaleVersionCannotPoisonQuiescentLookup()
     {
         // Arrange
         using var pathConstructionEntered = new ManualResetEventSlim();
@@ -253,4 +336,41 @@ internal partial class PathCacheContainer
     {
         Children = [];
     }
+}
+
+[InterceptorSubject]
+internal partial class EqualByValuePathContainer
+{
+    private static int _equalityCallCount;
+
+    public static int EqualityCallCount => Volatile.Read(ref _equalityCallCount);
+
+    public partial EqualByValuePathContainer? Child { get; set; }
+
+    public static void ResetEqualityCallCount()
+    {
+        Volatile.Write(ref _equalityCallCount, 0);
+    }
+
+    public override bool Equals(object? obj)
+    {
+        Interlocked.Increment(ref _equalityCallCount);
+        return obj is EqualByValuePathContainer;
+    }
+
+    public override int GetHashCode()
+    {
+        Interlocked.Increment(ref _equalityCallCount);
+        return 0;
+    }
+}
+
+[InterceptorSubject]
+internal partial class EqualByValuePathRoot
+{
+    public partial EqualByValuePathContainer? First { get; set; }
+
+    public partial EqualByValuePathContainer? Second { get; set; }
+
+    public partial EqualByValuePathContainer? Child { get; set; }
 }

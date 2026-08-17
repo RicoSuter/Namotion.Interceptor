@@ -19,9 +19,11 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyRelationshipHandl
 {
     private readonly RootManager _rootManager;
 
-    // Replacing the complete generation prevents a reader that overlaps invalidation from republishing
-    // an old path into the caches used by later readers.
-    private PathCacheGeneration _cacheGeneration = new();
+    private readonly ConcurrentDictionary<IInterceptorSubject, CanonicalPathCacheEntry> _canonicalPaths =
+        new(ReferenceEqualityComparer.Instance);
+    private readonly ConcurrentDictionary<(string Path, PathStyle Style), ResolvedSubjectCacheEntry> _resolvedSubjects =
+        new();
+    private long _cacheVersion;
 
     /// <summary>
     /// Initializes a new subject path resolver.
@@ -67,10 +69,53 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyRelationshipHandl
                 return null;
 
             var remainingPath = path[1..];
-            var cacheGeneration = Volatile.Read(ref _cacheGeneration);
-            return cacheGeneration.ResolvedSubjects.GetOrAdd(
-                (path, style),
-                _ => ResolveInternal(root, remainingPath, style));
+            var cacheKey = (path, style);
+
+            while (true)
+            {
+                var version = Volatile.Read(ref _cacheVersion);
+                if (_resolvedSubjects.TryGetValue(cacheKey, out var cached) && cached.Version == version)
+                {
+                    if (Volatile.Read(ref _cacheVersion) == version)
+                        return cached.Subject;
+
+                    continue;
+                }
+
+                var resolved = ResolveInternal(root, remainingPath, style);
+                var entry = new ResolvedSubjectCacheEntry(version, resolved);
+
+                if (Volatile.Read(ref _cacheVersion) != version)
+                    return resolved;
+
+                while (true)
+                {
+                    if (_resolvedSubjects.TryGetValue(cacheKey, out cached))
+                    {
+                        if (cached.Version == version)
+                        {
+                            if (Volatile.Read(ref _cacheVersion) == version)
+                                return cached.Subject;
+
+                            return resolved;
+                        }
+
+                        if (_resolvedSubjects.TryUpdate(cacheKey, entry, cached))
+                            break;
+                    }
+                    else if (_resolvedSubjects.TryAdd(cacheKey, entry))
+                    {
+                        break;
+                    }
+                }
+
+                if (Volatile.Read(ref _cacheVersion) == version)
+                    return entry.Subject;
+
+                _resolvedSubjects.TryRemove(
+                    new KeyValuePair<(string Path, PathStyle Style), ResolvedSubjectCacheEntry>(cacheKey, entry));
+                return resolved;
+            }
         }
 
         // Explicit relative: ./...
@@ -131,8 +176,65 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyRelationshipHandl
         IInterceptorSubject subject,
         PathStyle style)
     {
-        var cacheGeneration = Volatile.Read(ref _cacheGeneration);
-        var canonicalPaths = cacheGeneration.CanonicalPaths.GetOrAdd(subject, ComputeCanonicalPaths);
+        IReadOnlyList<string> canonicalPaths;
+
+        while (true)
+        {
+            var version = Volatile.Read(ref _cacheVersion);
+            if (_canonicalPaths.TryGetValue(subject, out var cached) && cached.Version == version)
+            {
+                if (Volatile.Read(ref _cacheVersion) == version)
+                {
+                    canonicalPaths = cached.Paths;
+                    break;
+                }
+
+                continue;
+            }
+
+            var computed = ComputeCanonicalPaths(subject);
+            var entry = new CanonicalPathCacheEntry(version, computed);
+
+            if (Volatile.Read(ref _cacheVersion) != version)
+            {
+                canonicalPaths = computed;
+                break;
+            }
+
+            while (true)
+            {
+                if (_canonicalPaths.TryGetValue(subject, out cached))
+                {
+                    if (cached.Version == version)
+                    {
+                        canonicalPaths = Volatile.Read(ref _cacheVersion) == version
+                            ? cached.Paths
+                            : computed;
+                        break;
+                    }
+
+                    if (_canonicalPaths.TryUpdate(subject, entry, cached))
+                    {
+                        canonicalPaths = entry.Paths;
+                        break;
+                    }
+                }
+                else if (_canonicalPaths.TryAdd(subject, entry))
+                {
+                    canonicalPaths = entry.Paths;
+                    break;
+                }
+            }
+
+            if (Volatile.Read(ref _cacheVersion) != version)
+            {
+                _canonicalPaths.TryRemove(
+                    new KeyValuePair<IInterceptorSubject, CanonicalPathCacheEntry>(subject, entry));
+                canonicalPaths = computed;
+            }
+
+            break;
+        }
 
         if (style == PathStyle.Canonical)
             return canonicalPaths;
@@ -179,7 +281,13 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyRelationshipHandl
 
     private void ClearCaches()
     {
-        Volatile.Write(ref _cacheGeneration, new PathCacheGeneration());
+        Interlocked.Increment(ref _cacheVersion);
+
+        if (!_canonicalPaths.IsEmpty)
+            _canonicalPaths.Clear();
+
+        if (!_resolvedSubjects.IsEmpty)
+            _resolvedSubjects.Clear();
     }
 
     /// <summary>
@@ -330,7 +438,7 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyRelationshipHandl
             return Array.Empty<string>();
 
         var paths = new List<string>();
-        var visited = new HashSet<IInterceptorSubject>();
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
 
         foreach (var parent in parents)
         {
@@ -415,10 +523,17 @@ public class SubjectPathResolver : ILifecycleHandler, IPropertyRelationshipHandl
         }
     }
 
-    private sealed class PathCacheGeneration
+    private sealed class CanonicalPathCacheEntry(long version, IReadOnlyList<string> paths)
     {
-        public ConcurrentDictionary<IInterceptorSubject, IReadOnlyList<string>> CanonicalPaths { get; } = new();
+        public long Version { get; } = version;
 
-        public ConcurrentDictionary<(string Path, PathStyle Style), IInterceptorSubject?> ResolvedSubjects { get; } = new();
+        public IReadOnlyList<string> Paths { get; } = paths;
+    }
+
+    private sealed class ResolvedSubjectCacheEntry(long version, IInterceptorSubject? subject)
+    {
+        public long Version { get; } = version;
+
+        public IInterceptorSubject? Subject { get; } = subject;
     }
 }
