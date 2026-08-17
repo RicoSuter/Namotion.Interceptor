@@ -297,6 +297,12 @@ Targeted comparison uses:
 
 The new benchmark classes must have byte-identical definitions on the benchmark-only master base. Allocation and scaling shape are primary; timing movement inside the unchanged resolver noise row is inconclusive.
 
+The user runs the targeted three-launch comparison on another machine. Local benchmark
+status remains pending until those results are supplied. Before merge, the final
+implementation must be compared against pinned production base
+`868a4d109d53b24805c9ee180efbf5029ee12c1a` with byte-identical benchmark definitions
+on the benchmark-only base.
+
 ## Acceptance Criteria
 
 The implementation is ready for merge when:
@@ -312,7 +318,9 @@ The implementation is ready for merge when:
 - lifecycle-only graphs allocate no per-occurrence relationship objects;
 - master's multi-lifecycle dispatch and ownership limitation remain preserved;
 - the non-integration suite and public API verification pass;
-- benchmark definitions expose linear scaling without unexplained allocation regression;
+- the external targeted three-launch comparison against pinned production base
+  `868a4d109d53b24805c9ee180efbf5029ee12c1a` is complete and shows linear scaling with
+  no unexplained allocation regression;
 - static inspection confirms provisional Registry updates and full replacement are linear when unobserved;
 - the cumulative diff contains one reconciliation algorithm and no unrelated optimization; and
 - Registry documentation and final pull request metadata describe the semantics and intentional API break accurately.
