@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Tracking.Parent;
 
@@ -6,29 +7,26 @@ public static class ParentsHandlerExtensions
 {
     private const string ParentsKey = "Namotion.Interceptor.Tracking.Parents";
 
-    internal static void AddParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
+    internal static void AddParent(this IInterceptorSubject subject, SubjectPropertyRelationship relationship)
     {
         var parentsSet = (ParentsSet)subject.Data.GetOrAdd((null, ParentsKey), _ => new ParentsSet())!;
-        parentsSet.Add(new SubjectParent(parent, index));
+        parentsSet.Add(relationship);
     }
 
-    /// <summary>
-    /// Moves this subject's parent entry for the given property to a new index, so that the tracked parents
-    /// stay in step with the registry when a retained subject's position or key changes.
-    /// </summary>
-    internal static void UpdateParentIndex(this IInterceptorSubject subject, PropertyReference parent, object? newIndex)
+    internal static void ReplaceParentGroup(
+        this IInterceptorSubject subject,
+        PropertyReference parent,
+        ImmutableArray<SubjectPropertyRelationship> relationships)
+    {
+        var parentsSet = (ParentsSet)subject.Data.GetOrAdd((null, ParentsKey), _ => new ParentsSet())!;
+        parentsSet.Replace(parent, relationships);
+    }
+
+    internal static void RemoveParent(this IInterceptorSubject subject, PropertyReference parent)
     {
         if (subject.Data.TryGetValue((null, ParentsKey), out var existing))
         {
-            ((ParentsSet)existing!).UpdateIndex(parent, newIndex);
-        }
-    }
-
-    internal static void RemoveParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
-    {
-        if (subject.Data.TryGetValue((null, ParentsKey), out var existing))
-        {
-            ((ParentsSet)existing!).Remove(new SubjectParent(parent, index));
+            ((ParentsSet)existing!).Remove(parent);
         }
     }
 
@@ -39,7 +37,7 @@ public static class ParentsHandlerExtensions
     public static TRoot? TryGetFirstParent<TRoot>(this IInterceptorSubject subject)
         where TRoot : class
     {
-        var visited = new HashSet<IInterceptorSubject>();
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
         var queue = new Queue<IInterceptorSubject>();
         queue.Enqueue(subject);
 
@@ -59,10 +57,7 @@ public static class ParentsHandlerExtensions
 
             foreach (var parent in current.GetParents())
             {
-                if (!parent.Equals(default))
-                {
-                    queue.Enqueue(parent.Property.Subject);
-                }
+                queue.Enqueue(parent.Property.Subject);
             }
         }
 
@@ -83,89 +78,98 @@ public static class ParentsHandlerExtensions
     }
 
     /// <summary>
-    /// Thread-safe collection with O(1) writes and zero-allocation reads via cached ImmutableArray.
+    /// Thread-safe ordered relationship groups with zero-allocation cached reads.
     /// </summary>
     private sealed class ParentsSet
     {
         private readonly Lock _lock = new();
-        private readonly HashSet<SubjectParent> _set = [];
-        private volatile ImmutableArray<SubjectParent>[]? _cache; // Box in array for volatile
+        private RelationshipGroup? _firstGroup;
+        private List<RelationshipGroup>? _additionalGroups;
+        private ImmutableArray<SubjectParent>[]? _cache; // Box in array for volatile publication
 
-        public bool Add(SubjectParent parent)
+        public bool Add(SubjectPropertyRelationship relationship)
         {
             lock (_lock)
             {
-                if (_set.Add(parent))
-                {
-                    _cache = null; // Invalidate cache
-                    return true;
-                }
-                return false;
-            }
-        }
-
-        public bool Remove(SubjectParent parent)
-        {
-            lock (_lock)
-            {
-                if (_set.Remove(parent))
-                {
-                    _cache = null; // Invalidate cache
-                    return true;
-                }
-
-                // Fall back to the property alone: attach adds at most one entry per property, so this is
-                // unambiguous, and an index that somehow moved unnoticed would otherwise strand the entry.
-                SubjectParent? stale = null;
-                foreach (var entry in _set)
-                {
-                    if (entry.Property == parent.Property)
-                    {
-                        stale = entry;
-                        break;
-                    }
-                }
-
-                if (stale is null)
+                if (FindGroup(relationship.Parent) >= 0)
                 {
                     return false;
                 }
 
-                _set.Remove(stale.Value);
-                _cache = null; // Invalidate cache
+                AddGroup(new RelationshipGroup(relationship.Parent, [relationship]));
+                Volatile.Write(ref _cache, null);
                 return true;
             }
         }
 
-        public bool UpdateIndex(PropertyReference parent, object? newIndex)
+        public void Replace(
+            PropertyReference parent,
+            ImmutableArray<SubjectPropertyRelationship> relationships)
         {
             lock (_lock)
             {
-                SubjectParent? current = null;
-                foreach (var entry in _set)
+                var group = new RelationshipGroup(parent, relationships);
+                var groupIndex = FindGroup(parent);
+                if (groupIndex == 0)
                 {
-                    if (entry.Property == parent)
-                    {
-                        current = entry;
-                        break;
-                    }
+                    _firstGroup = group;
+                }
+                else if (groupIndex > 0)
+                {
+                    _additionalGroups![groupIndex - 1] = group;
+                }
+                else
+                {
+                    AddGroup(group);
                 }
 
-                if (current is null || Equals(current.Value.Index, newIndex))
+                Volatile.Write(ref _cache, null);
+            }
+        }
+
+        public bool Remove(PropertyReference parent)
+        {
+            lock (_lock)
+            {
+                var groupIndex = FindGroup(parent);
+                if (groupIndex < 0)
                 {
                     return false;
                 }
 
-                _set.Remove(current.Value);
-                _set.Add(new SubjectParent(parent, newIndex));
-                _cache = null; // Invalidate cache
+                if (groupIndex == 0)
+                {
+                    if (_additionalGroups is { Count: > 0 } additionalGroups)
+                    {
+                        _firstGroup = additionalGroups[0];
+                        additionalGroups.RemoveAt(0);
+                        if (additionalGroups.Count == 0)
+                        {
+                            _additionalGroups = null;
+                        }
+                    }
+                    else
+                    {
+                        _firstGroup = null;
+                    }
+                }
+                else
+                {
+                    _additionalGroups!.RemoveAt(groupIndex - 1);
+                    if (_additionalGroups.Count == 0)
+                    {
+                        _additionalGroups = null;
+                    }
+                }
+
+                Volatile.Write(ref _cache, null);
                 return true;
             }
         }
 
         public ImmutableArray<SubjectParent> ToImmutableArray()
         {
-            var cached = _cache;
+            var cached = Volatile.Read(ref _cache);
             if (cached is not null)
             {
                 return cached[0];
@@ -173,23 +177,102 @@ public static class ParentsHandlerExtensions
 
             lock (_lock)
             {
-                cached = _cache;
+                cached = Volatile.Read(ref _cache);
                 if (cached is not null)
                 {
                     return cached[0];
                 }
 
-                // Fast path: avoid allocation for empty set
-                if (_set.Count == 0)
+                ImmutableArray<SubjectParent> array;
+                if (_firstGroup is null)
                 {
-                    _cache = [ImmutableArray<SubjectParent>.Empty];
-                    return ImmutableArray<SubjectParent>.Empty;
+                    array = ImmutableArray<SubjectParent>.Empty;
+                }
+                else
+                {
+                    var count = _firstGroup.Relationships.Length;
+                    if (_additionalGroups is not null)
+                    {
+                        foreach (var group in _additionalGroups)
+                        {
+                            count += group.Relationships.Length;
+                        }
+                    }
+
+                    var builder = ImmutableArray.CreateBuilder<SubjectParent>(count);
+                    AddParents(builder, _firstGroup);
+                    if (_additionalGroups is not null)
+                    {
+                        foreach (var group in _additionalGroups)
+                        {
+                            AddParents(builder, group);
+                        }
+                    }
+
+                    array = builder.MoveToImmutable();
                 }
 
-                ImmutableArray<SubjectParent> array = [.. _set];
-                _cache = [array];
+                cached = [array];
+                Volatile.Write(ref _cache, cached);
                 return array;
             }
+        }
+
+        private int FindGroup(PropertyReference parent)
+        {
+            if (_firstGroup is null)
+            {
+                return -1;
+            }
+
+            if (PropertyReference.Comparer.Equals(_firstGroup.Parent, parent))
+            {
+                return 0;
+            }
+
+            if (_additionalGroups is not null)
+            {
+                for (var index = 0; index < _additionalGroups.Count; index++)
+                {
+                    if (PropertyReference.Comparer.Equals(_additionalGroups[index].Parent, parent))
+                    {
+                        return index + 1;
+                    }
+                }
+            }
+
+            return -1;
+        }
+
+        private void AddGroup(RelationshipGroup group)
+        {
+            if (_firstGroup is null)
+            {
+                _firstGroup = group;
+                return;
+            }
+
+            _additionalGroups ??= [];
+            _additionalGroups.Add(group);
+        }
+
+        private static void AddParents(
+            ImmutableArray<SubjectParent>.Builder builder,
+            RelationshipGroup group)
+        {
+            foreach (var relationship in group.Relationships)
+            {
+                builder.Add(new SubjectParent(relationship.Parent, relationship.Index));
+            }
+        }
+
+        private sealed class RelationshipGroup(
+            PropertyReference parent,
+            ImmutableArray<SubjectPropertyRelationship> relationships)
+        {
+            public PropertyReference Parent { get; } = parent;
+
+            public ImmutableArray<SubjectPropertyRelationship> Relationships { get; } = relationships;
         }
     }
 }

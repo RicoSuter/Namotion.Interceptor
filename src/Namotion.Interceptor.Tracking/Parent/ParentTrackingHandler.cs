@@ -5,8 +5,12 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace Namotion.Interceptor.Tracking.Parent;
 
 [RunsBefore(typeof(ContextInheritanceHandler))]
-public class ParentTrackingHandler : ILifecycleHandler, IPropertyLifecycleHandler
+public class ParentTrackingHandler : ILifecycleHandler, IPropertyRelationshipHandler
 {
+    private readonly Lock _relationshipReconciliationGate = new();
+    private readonly Dictionary<PropertyReference, IInterceptorSubject[]> _childrenByProperty =
+        new(PropertyReference.Comparer);
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
@@ -18,53 +22,86 @@ public class ParentTrackingHandler : ILifecycleHandler, IPropertyLifecycleHandle
         // Add parent on attach or reference added
         if (change.IsContextAttach || change.IsPropertyReferenceAdded)
         {
-            change.Subject.AddParent(change.Property.Value, change.Index);
+            var relationship = change.Relationship ?? new SubjectPropertyRelationship(
+                change.Property.Value,
+                change.Subject,
+                change.Index);
+
+            lock (_relationshipReconciliationGate)
+            {
+                change.Subject.AddParent(relationship);
+            }
+
             return;
         }
 
         // Remove parent on reference removed
         if (change.IsPropertyReferenceRemoved)
         {
-            change.Subject.RemoveParent(change.Property.Value, change.Index);
-        }
-    }
-
-    void IPropertyLifecycleHandler.AttachProperty(SubjectPropertyLifecycleChange change)
-    {
-    }
-
-    void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change)
-    {
-    }
-
-    /// <summary>
-    /// Moves the tracked parent index of the retained children, which the add/remove events cannot do
-    /// because a retained child raises neither.
-    /// </summary>
-    void IPropertyLifecycleHandler.RefreshCollectionProperty(PropertyReference property, object? value)
-    {
-        if (!property.Metadata.Type.IsSubjectCollectionType() || value is not System.Collections.IEnumerable enumerable)
-        {
-            return;
-        }
-
-        var children = new List<(IInterceptorSubject Subject, int Index)>();
-        var index = 0;
-        foreach (var item in enumerable)
-        {
-            if (item is IInterceptorSubject child)
+            lock (_relationshipReconciliationGate)
             {
-                children.Add((child, index));
+                change.Subject.RemoveParent(change.Property.Value);
+            }
+        }
+    }
+
+    public void ReconcileChildRelationships(
+        PropertyReference property,
+        ReadOnlySpan<SubjectPropertyRelationship> relationships)
+    {
+        lock (_relationshipReconciliationGate)
+        {
+            var groupIndexes = new Dictionary<IInterceptorSubject, int>(ReferenceEqualityComparer.Instance);
+            var groups = new List<RelationshipGroup>();
+            foreach (var relationship in relationships)
+            {
+                if (!groupIndexes.TryGetValue(relationship.Child, out var groupIndex))
+                {
+                    groupIndex = groups.Count;
+                    groupIndexes.Add(relationship.Child, groupIndex);
+                    groups.Add(new RelationshipGroup(relationship.Child));
+                }
+
+                groups[groupIndex].Relationships.Add(relationship);
             }
 
-            index++;
-        }
+            if (_childrenByProperty.TryGetValue(property, out var previousChildren))
+            {
+                foreach (var previousChild in previousChildren)
+                {
+                    if (!groupIndexes.ContainsKey(previousChild))
+                    {
+                        previousChild.RemoveParent(property);
+                    }
+                }
+            }
 
-        // Applied back to front so a subject held at several positions keeps the first one, which is the
-        // position attach recorded.
-        for (var childIndex = children.Count - 1; childIndex >= 0; childIndex--)
-        {
-            children[childIndex].Subject.UpdateParentIndex(property, children[childIndex].Index);
+            foreach (var group in groups)
+            {
+                group.Child.ReplaceParentGroup(property, [.. group.Relationships]);
+            }
+
+            if (groups.Count == 0)
+            {
+                _childrenByProperty.Remove(property);
+            }
+            else
+            {
+                var currentChildren = new IInterceptorSubject[groups.Count];
+                for (var groupIndex = 0; groupIndex < groups.Count; groupIndex++)
+                {
+                    currentChildren[groupIndex] = groups[groupIndex].Child;
+                }
+
+                _childrenByProperty[property] = currentChildren;
+            }
         }
+    }
+
+    private sealed class RelationshipGroup(IInterceptorSubject child)
+    {
+        public IInterceptorSubject Child { get; } = child;
+
+        public List<SubjectPropertyRelationship> Relationships { get; } = [];
     }
 }

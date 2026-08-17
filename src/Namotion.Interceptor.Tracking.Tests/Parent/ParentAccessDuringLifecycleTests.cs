@@ -57,6 +57,63 @@ public class ParentAccessDuringLifecycleTests
     }
 
     [Fact]
+    public void WhenComponentOccursTwice_ThenFirstOccurrenceIsVisibleDuringAttachAndBothAreVisibleAfterwards()
+    {
+        // Waiting for full reconciliation before publishing any parent would break attach-time traversal,
+        // while keeping only the provisional membership would lose the duplicate occurrence.
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithParents();
+
+        var simulation = new Simulation(context) { Name = "Root" };
+        var component = new Component { Name = "Child" };
+
+        // Act
+        simulation.Components = [component, component];
+
+        // Assert
+        var parentDuringAttach = Assert.Single(component.ParentsFoundDuringAttach!);
+        Assert.Equal(0, parentDuringAttach.Index);
+        Assert.Equal([0, 1], component.GetParents().Select(parent => parent.Index));
+    }
+
+    [Fact]
+    public void WhenDuplicatedComponentIsDetaching_ThenSubjectDetachingSeesTheOldRelationshipGroup()
+    {
+        // Clearing the group before SubjectDetaching would hide the old graph from observers.
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithParents();
+
+        var simulation = new Simulation(context) { Name = "Root" };
+        var component = new Component { Name = "Child" };
+        simulation.Components = [component, component];
+        var lifecycleInterceptor = context.TryGetLifecycleInterceptor();
+        Assert.NotNull(lifecycleInterceptor);
+
+        SubjectParent[]? parentsDuringDetach = null;
+        lifecycleInterceptor.SubjectDetaching += change =>
+        {
+            if (ReferenceEquals(change.Subject, component))
+            {
+                parentsDuringDetach = component.GetParents().ToArray();
+            }
+        };
+
+        // Act
+        simulation.Components = [];
+
+        // Assert
+        Assert.NotNull(parentsDuringDetach);
+        Assert.Equal([0, 1], parentsDuringDetach.Select(parent => parent.Index));
+        Assert.Empty(component.GetParents());
+    }
+
+    [Fact]
     public void WhenComponentWithoutContextAttachedViaContextInheritance_ThenParentsAreSetBeforeAttachSubject()
     {
         // This test specifically tests the scenario where:
