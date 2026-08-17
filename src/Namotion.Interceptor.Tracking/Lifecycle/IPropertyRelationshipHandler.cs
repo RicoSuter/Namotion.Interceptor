@@ -7,8 +7,9 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// Handlers are invoked synchronously in resolver order while the calling lifecycle interceptor holds
 /// its structural lock. Dispatch continues after a handler failure and rethrows the first exception after
 /// all handlers have run. Handlers must therefore be fast, non-blocking, and thread-safe across lifecycle
-/// authorities. A handler may write a different property. Writing the property currently being reconciled
-/// throws <see cref="InvalidOperationException"/> before nested reconciliation.
+/// authorities. During ordinary reconciliation, a handler may write a different property. Writing the
+/// property currently being reconciled, or any structural property on the same subject during its initial
+/// attach, throws <see cref="InvalidOperationException"/> before terminal backing mutation.
 /// </remarks>
 public interface IPropertyRelationshipHandler
 {

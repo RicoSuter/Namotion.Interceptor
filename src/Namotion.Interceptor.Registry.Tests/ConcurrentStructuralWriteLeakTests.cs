@@ -341,7 +341,7 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
 
     /// <summary>
     /// Concurrent writes to different structural properties (Mother and Father)
-    /// on the same subject. Each property has its own lastProcessed baseline,
+    /// on the same subject. Each property has its own canonical baseline,
     /// but they share the same _attachedSubjects lock. This tests whether
     /// interleaved lock acquisitions across different properties can cause
     /// reference count mismatches that prevent proper cleanup.

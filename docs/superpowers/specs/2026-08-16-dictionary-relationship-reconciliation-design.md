@@ -135,7 +135,7 @@ public interface IPropertyRelationshipHandler
 
 The interface is an ordered multi-service extension contract. It receives the full source-ordered sequence after initial attachment and successful structural writes, and an empty span on property detach. Context handlers run in resolver order, followed by a subject handler. Dispatch continues after failures and rethrows the first exception with its original stack after every handler has run.
 
-For ordinary writes, each lifecycle interceptor captures its relationship handlers before invoking the backing setter. Relationship handlers run synchronously under that lifecycle interceptor's structural lock and can run concurrently when several lifecycle authorities process different writes. They must be fast, non-blocking, and thread-safe across authorities. A handler may write a different property. A write to the property currently being reconciled throws before nested processing. A handler may also cause the parent to detach; the current reconciliation then follows the abort semantics below instead of publishing its staged generation.
+For ordinary writes, each lifecycle interceptor captures its relationship handlers before invoking the backing setter. Relationship handlers run synchronously under that lifecycle interceptor's structural lock and can run concurrently when several lifecycle authorities process different writes. They must be fast, non-blocking, and thread-safe across authorities. During ordinary reconciliation, a handler may write a different property. A write to the property currently being reconciled throws before nested processing. A structural write to the same subject during its initial attach also throws before terminal backing mutation. A handler may cause the parent to detach; the current reconciliation then follows the abort semantics below instead of publishing its staged generation.
 
 `SubjectLifecycleChange.Relationship` identifies the immutable occurrence that supplies membership-transition metadata when relationships were materialized. `Index` is always available:
 
@@ -190,7 +190,7 @@ If a callback re-entrantly detaches the parent, the abort path never publishes s
 
 ### Initial attach
 
-Initial attach creates a private token under the lifecycle lock and stages every structural property before the first callback. Enumeration failure clears the token without publishing child membership, processed state, or relationship groups. A structural write to the subject being staged is rejected before the terminal setter, whether it targets the property currently being enumerated or an earlier property, so the staged property set cannot overwrite a re-entrant generation.
+Initial attach creates a private token under the lifecycle lock and stages every structural property before the first callback. Enumeration failure clears the token without publishing child membership, processed state, or relationship groups. A thread-local, per-authority guard remains active from before staging through membership callbacks, root attachment, initial relationship dispatch, and final cleanup. A re-entrant structural write to that subject is rejected before the terminal setter, whether it originates in enumeration or a callback and whether it targets the current, earlier, or later property. Writes from another thread remain serialized by the lifecycle lock and reconcile after the attach operation releases it.
 
 Membership additions then run in property and source order. Successfully applied additions are recorded, processed states are provisionally installed, and master's existing explicit context attach follows. If the parent remains attached, full relationship groups publish in property order and the token is removed.
 
@@ -315,7 +315,7 @@ The implementation is ready for merge when:
 - same-instance reassignment reconciles current container contents;
 - hostile subject or key equality and hashing are never invoked;
 - re-entrant detach leaves no staged membership or relationship group;
-- initial attach rejects re-entrant structural writes before backing mutation;
+- initial attach rejects same-subject re-entrant structural writes before backing mutation throughout every callback-bearing phase;
 - setter-only writes cannot let an older terminal revision overwrite newer canonical metadata;
 - completed concurrency cases converge without leaks, stale edges, torn reads, or permanently stale caches;
 - HomeBlaze path caches use subject reference identity and allocate nothing when repeatedly invalidated while empty;
