@@ -22,7 +22,7 @@ Registry relationship work is spread across structural writes, Registry construc
 pwsh scripts/benchmark.ps1 -Filter "*ChildIndexRefreshBenchmark*","*RegistryBenchmark*","*ParentLookupBenchmark*","*ServiceOrderResolverBenchmark.LinearChain*" -LaunchCount 3
 ```
 
-Despite its historical class name, `ChildIndexRefreshBenchmark` measures complete ordered relationship reconciliation. A structural write enumerates the source once and publishes one relationship per subject-valued occurrence in exact collection or dictionary enumeration order. Its duplicate row repeats each distinct child twice and reverses the occurrence sequence without changing membership.
+Despite its historical class name, `ChildIndexRefreshBenchmark` measures complete ordered relationship reconciliation. A structural write enumerates the source once. When relationship consumers are enabled, it publishes one relationship per subject-valued occurrence in exact collection or dictionary enumeration order. Its duplicate row repeats each distinct child twice and reverses the occurrence sequence without changing membership.
 
 `Count` selects 4 or 1000 occurrences. `Consumers` selects lifecycle only, Registry, or Registry with parent tracking. Every operation runs with each configuration, so the lifecycle-only rows perform the same structural writes without materializing relationship objects. Compare their allocations with the Registry configurations to detect accidental per-occurrence allocation in compact processed state.
 

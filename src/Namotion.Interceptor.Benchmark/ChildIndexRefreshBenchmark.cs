@@ -43,11 +43,7 @@ public enum RelationshipConsumerConfiguration
 [MemoryDiagnoser]
 public class ChildIndexRefreshBenchmark
 {
-    private RefreshContainer _replacementContainer;
-    private RefreshContainer _reorderContainer;
-    private RefreshContainer _rekeyContainer;
-    private RefreshContainer _duplicateContainer;
-    private RefreshContainer _sameInstanceContainer;
+    private RefreshContainer _container;
 
     private RefreshItem[] _replacementA;
     private RefreshItem[] _replacementB;
@@ -74,29 +70,31 @@ public class ChildIndexRefreshBenchmark
         RelationshipConsumerConfiguration.RegistryAndParents)]
     public RelationshipConsumerConfiguration Consumers;
 
-    [GlobalSetup]
-    public void Setup()
+    [GlobalSetup(Target = nameof(ReplaceCollection))]
+    public void SetupReplaceCollection()
     {
-        var items = CreateItems(Count);
-
-        _sameOrder = [.. items];
-        _reordered = [.. items];
-        Array.Reverse(_reordered);
-
         _replacementA = CreateItems(Count);
         _replacementB = CreateItems(Count);
 
-        var duplicateItems = CreateItems(Count / 2);
-        _duplicatesA = new RefreshItem[Count];
-        _duplicatesB = new RefreshItem[Count];
-        for (var index = 0; index < Count; index++)
-        {
-            _duplicatesA[index] = duplicateItems[index / 2];
-            _duplicatesB[index] = duplicateItems[(Count - 1 - index) / 2];
-        }
+        _container = CreateContainer();
+        _container.Items = _replacementB;
+    }
 
-        _sameInstance = [.. items];
+    [GlobalSetup(Target = nameof(ReorderCollection))]
+    public void SetupReorderCollection()
+    {
+        _sameOrder = CreateItems(Count);
+        _reordered = [.. _sameOrder];
+        Array.Reverse(_reordered);
 
+        _container = CreateContainer();
+        _container.Items = _reordered;
+    }
+
+    [GlobalSetup(Target = nameof(RekeyDictionaryEntry))]
+    public void SetupRekeyDictionaryEntry()
+    {
+        var items = CreateItems(Count);
         var keys = new string[Count];
         var sameKeys = new Dictionary<string, RefreshItem>(Count);
         var rekeyed = new Dictionary<string, RefreshItem>(Count);
@@ -114,20 +112,33 @@ public class ChildIndexRefreshBenchmark
         _sameKeys = sameKeys;
         _rekeyed = rekeyed;
 
-        _replacementContainer = CreateContainer();
-        _replacementContainer.Items = _replacementB;
+        _container = CreateContainer();
+        _container.ItemsByKey = _rekeyed;
+    }
 
-        _reorderContainer = CreateContainer();
-        _reorderContainer.Items = _reordered;
+    [GlobalSetup(Target = nameof(ReorderDuplicateOccurrences))]
+    public void SetupReorderDuplicateOccurrences()
+    {
+        var duplicateItems = CreateItems(Count / 2);
+        _duplicatesA = new RefreshItem[Count];
+        _duplicatesB = new RefreshItem[Count];
+        for (var index = 0; index < Count; index++)
+        {
+            _duplicatesA[index] = duplicateItems[index / 2];
+            _duplicatesB[index] = duplicateItems[(Count - 1 - index) / 2];
+        }
 
-        _rekeyContainer = CreateContainer();
-        _rekeyContainer.ItemsByKey = _rekeyed;
+        _container = CreateContainer();
+        _container.Items = _duplicatesB;
+    }
 
-        _duplicateContainer = CreateContainer();
-        _duplicateContainer.Items = _duplicatesB;
+    [GlobalSetup(Target = nameof(RefreshSameInstanceCollection))]
+    public void SetupRefreshSameInstanceCollection()
+    {
+        _sameInstance = CreateItems(Count);
 
-        _sameInstanceContainer = CreateContainer();
-        _sameInstanceContainer.Items = _sameInstance;
+        _container = CreateContainer();
+        _container.Items = _sameInstance;
     }
 
     /// <summary>Replaces every collection membership with a new subject.</summary>
@@ -135,7 +146,7 @@ public class ChildIndexRefreshBenchmark
     public void ReplaceCollection()
     {
         _replacementFlip = !_replacementFlip;
-        _replacementContainer.Items = _replacementFlip ? _replacementA : _replacementB;
+        _container.Items = _replacementFlip ? _replacementA : _replacementB;
     }
 
     /// <summary>Reverses all retained collection occurrences.</summary>
@@ -143,7 +154,7 @@ public class ChildIndexRefreshBenchmark
     public void ReorderCollection()
     {
         _reorderFlip = !_reorderFlip;
-        _reorderContainer.Items = _reorderFlip ? _sameOrder : _reordered;
+        _container.Items = _reorderFlip ? _sameOrder : _reordered;
     }
 
     /// <summary>Moves one retained dictionary occurrence to another key.</summary>
@@ -151,7 +162,7 @@ public class ChildIndexRefreshBenchmark
     public void RekeyDictionaryEntry()
     {
         _rekeyFlip = !_rekeyFlip;
-        _rekeyContainer.ItemsByKey = _rekeyFlip ? _sameKeys : _rekeyed;
+        _container.ItemsByKey = _rekeyFlip ? _sameKeys : _rekeyed;
     }
 
     /// <summary>Reverses repeated occurrences while each distinct subject remains a member.</summary>
@@ -159,7 +170,7 @@ public class ChildIndexRefreshBenchmark
     public void ReorderDuplicateOccurrences()
     {
         _duplicateFlip = !_duplicateFlip;
-        _duplicateContainer.Items = _duplicateFlip ? _duplicatesA : _duplicatesB;
+        _container.Items = _duplicateFlip ? _duplicatesA : _duplicatesB;
     }
 
     /// <summary>Mutates and assigns the same collection instance to request an explicit structural refresh.</summary>
@@ -167,7 +178,7 @@ public class ChildIndexRefreshBenchmark
     public void RefreshSameInstanceCollection()
     {
         (_sameInstance[0], _sameInstance[^1]) = (_sameInstance[^1], _sameInstance[0]);
-        _sameInstanceContainer.Items = _sameInstance;
+        _container.Items = _sameInstance;
     }
 
     private RefreshContainer CreateContainer()

@@ -30,10 +30,13 @@ public class ParentLookupBenchmark
         var car = new Car(context);
         _tire = car.Tires[0];
         _registered = _tire.TryGetRegisteredSubject()!;
+
+        _ = _registered.Parents;
+        _ = _tire.GetParents();
     }
 
     /// <summary>The registry's copy, behind a lock-free snapshot.</summary>
-    [Benchmark(Baseline = true, OperationsPerInvoke = 256)]
+    [Benchmark(OperationsPerInvoke = 256)]
     public int ReadRegistryParents()
     {
         var sum = 0;
