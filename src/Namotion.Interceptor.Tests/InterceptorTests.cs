@@ -93,8 +93,7 @@ public class InterceptorTests
         
         var context = InterceptorSubjectContext
             .Create()
-            .WithService(() => new TestLifecycleInterceptor("a", logs), _ => false)
-            .WithService(() => new TestLifecycleInterceptor("b", logs), _ => false);
+            .WithService(() => new TestLifecycleInterceptor(logs, "a", "b"), _ => false);
         
         // Act
         var car = new Car(context);
@@ -106,23 +105,29 @@ public class InterceptorTests
 
     public class TestLifecycleInterceptor : ILifecycleInterceptor
     {
-        private readonly string _name;
+        private readonly string[] _names;
         private readonly List<string> _logs;
 
-        public TestLifecycleInterceptor(string name, List<string> logs)
+        public TestLifecycleInterceptor(List<string> logs, params string[] names)
         {
-            _name = name;
+            _names = names;
             _logs = logs;
         }
 
         public void AttachSubjectToContext(IInterceptorSubject subject)
         {
-            _logs.Add($"{_name}: Attached");
+            foreach (var name in _names)
+            {
+                _logs.Add($"{name}: Attached");
+            }
         }
 
         public void DetachSubjectFromContext(IInterceptorSubject subject)
         {
-            _logs.Add($"{_name}: Detached");
+            foreach (var name in _names)
+            {
+                _logs.Add($"{name}: Detached");
+            }
         }
     }
     
