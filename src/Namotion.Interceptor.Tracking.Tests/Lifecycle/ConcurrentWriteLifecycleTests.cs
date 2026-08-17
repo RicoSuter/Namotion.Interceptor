@@ -1,5 +1,10 @@
+using System.Collections;
+using System.Reflection;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -240,5 +245,125 @@ public class ConcurrentWriteLifecycleTests
         // Verify registry only contains root + current children (no orphaned subjects)
         var registry = context.GetService<ISubjectRegistry>();
         Assert.Equal(1 + currentChildren.Count, registry.KnownSubjects.Count);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public async Task WhenContextDetachRacesADescendantWrite_ThenDetachClearsAndReattachUsesTheBackingGeneration()
+    {
+        // Walking the descendant's newer backing value during detach would strand the old membership,
+        // while committing the parked writer after detach would leak the replacement into lifecycle state.
+        // Arrange
+        var initial = new Person { FirstName = "Initial" };
+        var replacement = new Person { FirstName = "Replacement" };
+        var replacementGeneration = new[] { replacement };
+        using var writeGate = new AfterCommitWriteGate(
+            nameof(Person.Children),
+            replacementGeneration);
+        var context = InterceptorSubjectContext.Create();
+        context.AddService<IWriteInterceptor>(writeGate);
+        context.WithContextInheritance();
+
+        var child = new Person
+        {
+            FirstName = "Child",
+            Children = [initial]
+        };
+        var root = new Person
+        {
+            FirstName = "Root",
+            Children = [child]
+        };
+        var rootContext = ((IInterceptorSubject)root).Context;
+        Assert.True(rootContext.AddFallbackContext(context));
+        var lifecycle = context.GetService<LifecycleInterceptor>();
+
+        // Act: park the descendant write after backing commit and let context detach serialize first.
+        var writer = Task.Factory.StartNew(
+            () => child.Children = replacementGeneration,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => writeGate.BackingCommitted.IsSet || writer.IsCompleted,
+            message: "The descendant write should commit before context detach.");
+        Assert.True(writeGate.BackingCommitted.IsSet);
+        Assert.False(writer.IsCompleted);
+
+        Assert.True(rootContext.RemoveFallbackContext(context));
+        writeGate.Release.Set();
+        await writer;
+
+        // Assert: no attached or processed state survives the detach, and the backing write remains authoritative.
+        Assert.Same(replacementGeneration, child.Children);
+        Assert.Equal(0, root.GetReferenceCount());
+        Assert.Equal(0, child.GetReferenceCount());
+        Assert.Equal(0, initial.GetReferenceCount());
+        Assert.Equal(0, replacement.GetReferenceCount());
+        AssertLifecycleStorageEmpty(lifecycle);
+
+        // Act: reattach must enumerate the backing graph and recreate exactly its memberships.
+        Assert.True(rootContext.AddFallbackContext(context));
+
+        // Assert
+        Assert.Same(child, Assert.Single(root.Children));
+        Assert.Same(replacement, Assert.Single(child.Children));
+        Assert.Equal(0, root.GetReferenceCount());
+        Assert.Equal(1, child.GetReferenceCount());
+        Assert.Equal(0, initial.GetReferenceCount());
+        Assert.Equal(1, replacement.GetReferenceCount());
+
+        Assert.True(rootContext.RemoveFallbackContext(context));
+        AssertLifecycleStorageEmpty(lifecycle);
+        Assert.Equal(0, child.GetReferenceCount());
+        Assert.Equal(0, replacement.GetReferenceCount());
+    }
+
+    private static void AssertLifecycleStorageEmpty(LifecycleInterceptor lifecycle)
+    {
+        // Callers reach this helper only after the worker and the synchronous detach have completed.
+        Assert.Empty(GetPrivateDictionary(lifecycle, "_attachedSubjects"));
+        Assert.Empty(GetPrivateDictionary(lifecycle, "_processedProperties"));
+    }
+
+    private static IDictionary GetPrivateDictionary(LifecycleInterceptor lifecycle, string fieldName)
+    {
+        var field = typeof(LifecycleInterceptor).GetField(
+            fieldName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        return Assert.IsAssignableFrom<IDictionary>(field?.GetValue(lifecycle));
+    }
+
+    [RunsAfter(typeof(LifecycleInterceptor))]
+    private sealed class AfterCommitWriteGate(string propertyName, object expectedValue)
+        : IWriteInterceptor, IDisposable
+    {
+        public ManualResetEventSlim BackingCommitted { get; } = new();
+
+        public ManualResetEventSlim Release { get; } = new();
+
+        public void WriteProperty<TProperty>(
+            ref PropertyWriteContext<TProperty> context,
+            WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            if (context.Property.Name != propertyName || !ReferenceEquals(context.NewValue, expectedValue))
+            {
+                return;
+            }
+
+            // ManualResetEventSlim owns publication between the writer and test thread.
+            BackingCommitted.Set();
+            if (!Release.Wait(TimeSpan.FromSeconds(10)))
+            {
+                throw new TimeoutException("The committed descendant write was not released.");
+            }
+        }
+
+        public void Dispose()
+        {
+            BackingCommitted.Dispose();
+            Release.Dispose();
+        }
     }
 }

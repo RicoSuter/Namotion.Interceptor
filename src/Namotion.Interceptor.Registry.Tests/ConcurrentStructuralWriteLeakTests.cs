@@ -1,5 +1,8 @@
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Tests.Models;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
@@ -227,99 +230,91 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             $"This indicates the concurrent structural write race condition in LifecycleInterceptor.WriteProperty.");
     }
 
-    /// <summary>
-    /// Reproduces the parent-detach-races-with-child-write scenario.
-    /// One thread repeatedly attaches and detaches a child subtree from the parent,
-    /// while another thread writes to a structural property on the child.
-    /// The child's property write calls next() (writing to backing store) before
-    /// acquiring the lock, creating a window where the parent detach cascade can
-    /// miss the newly written grandchild, leaving it orphaned in the registry.
-    ///
-    /// Because this is a timing-dependent race, we run multiple rounds to
-    /// increase the probability of hitting the interleaving that triggers the leak.
-    /// </summary>
     [Fact]
     [Trait("Category", "Concurrency")]
-    public void ParentDetachDuringChildPropertyWrite_OrphanedGrandchildrenLeakInRegistry()
+    public async Task ParentDetachDuringChildPropertyWrite_OrphanedGrandchildrenLeakInRegistry()
     {
-        const int rounds = 10;
-        const int iterationsPerThread = 2000;
-        var totalOrphaned = 0;
+        // A detach which walks the newer backing value instead of the committed relationship state can
+        // strand the old grandchild, while a late writer which skips the attached-parent check can leak the new one.
+        // Arrange
+        var oldGrandchild = new Person { FirstName = "Old grandchild" };
+        var newGrandchild = new Person { FirstName = "New grandchild" };
+        using var writeGate = new AfterCommitWriteGate(nameof(Person.Mother), newGrandchild);
+        var context = InterceptorSubjectContext.Create();
+        context.AddService<IWriteInterceptor>(writeGate);
+        context
+            .WithFullPropertyTracking()
+            .WithParents()
+            .WithRegistry();
 
-        for (var round = 0; round < rounds; round++)
+        var registry = context.GetService<ISubjectRegistry>();
+        var grandparent = new Person(context) { FirstName = "Grandparent" };
+        var child = new Person
         {
-            // Arrange
-            var context = InterceptorSubjectContext
-                .Create()
-                .WithFullPropertyTracking()
-                .WithRegistry();
+            FirstName = "Child",
+            Mother = oldGrandchild
+        };
+        grandparent.Mother = child;
 
-            var registry = context.GetService<ISubjectRegistry>();
-            var grandparent = new Person(context) { FirstName = "Grandparent" };
+        // Act: park the descendant writer after its backing commit but before lifecycle reconciliation,
+        // then let the parent detach win the lifecycle writer lock.
+        var writer = Task.Factory.StartNew(
+            () => child.Mother = newGrandchild,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => writeGate.BackingCommitted.IsSet || writer.IsCompleted,
+            message: "The descendant write should commit its backing value before parent detach.");
+        Assert.True(writeGate.BackingCommitted.IsSet);
+        Assert.False(writer.IsCompleted);
 
-            var barrier = new Barrier(2);
-            var child = new Person { FirstName = "Child" };
+        grandparent.Mother = null;
+        writeGate.Release.Set();
+        await writer;
 
-            // Act:
-            // Thread 1: rapidly attaches/detaches child from grandparent.Mother
-            // Thread 2: rapidly writes grandchild subjects to child.Mother
-            var detachThread = new Thread(() =>
-            {
-                barrier.SignalAndWait();
-                for (var iteration = 0; iteration < iterationsPerThread; iteration++)
-                {
-                    grandparent.Mother = child;
-                    grandparent.Mother = null;
-                }
-            });
-            detachThread.IsBackground = true;
+        // Assert: the detached subtree has no published relationships or lifecycle membership.
+        Assert.Same(newGrandchild, child.Mother);
+        Assert.Equal(0, child.GetReferenceCount());
+        Assert.Equal(0, oldGrandchild.GetReferenceCount());
+        Assert.Equal(0, newGrandchild.GetReferenceCount());
+        Assert.Empty(child.GetParents());
+        Assert.Empty(oldGrandchild.GetParents());
+        Assert.Empty(newGrandchild.GetParents());
+        Assert.Single(registry.KnownSubjects);
+        Assert.Same(grandparent, registry.KnownSubjects.Single().Key);
+        Assert.Null(registry.TryGetRegisteredSubject(child));
+        Assert.Null(registry.TryGetRegisteredSubject(oldGrandchild));
+        Assert.Null(registry.TryGetRegisteredSubject(newGrandchild));
+        Assert.Empty(registry.TryGetRegisteredSubject(grandparent)!
+            .TryGetProperty(nameof(Person.Mother))!.Children);
 
-            var childWriteThread = new Thread(() =>
-            {
-                barrier.SignalAndWait();
-                for (var iteration = 0; iteration < iterationsPerThread; iteration++)
-                {
-                    child.Mother = new Person { FirstName = $"Grandchild_{iteration}" };
-                    child.Mother = null;
-                }
-            });
-            childWriteThread.IsBackground = true;
+        // Act: a later reattach must enumerate the successful backing value, proving processed state was cleared.
+        grandparent.Mother = child;
 
-            detachThread.Start();
-            childWriteThread.Start();
-            detachThread.Join();
-            childWriteThread.Join();
+        // Assert
+        var grandparentMother = registry.TryGetRegisteredSubject(grandparent)!
+            .TryGetProperty(nameof(Person.Mother))!;
+        var childMother = registry.TryGetRegisteredSubject(child)!
+            .TryGetProperty(nameof(Person.Mother))!;
+        var childRelationship = Assert.Single(grandparentMother.Children);
+        var grandchildRelationship = Assert.Single(childMother.Children);
+        Assert.Same(child, childRelationship.Subject);
+        Assert.Null(childRelationship.Index);
+        Assert.Same(newGrandchild, grandchildRelationship.Subject);
+        Assert.Null(grandchildRelationship.Index);
+        Assert.Equal(1, child.GetReferenceCount());
+        Assert.Equal(1, newGrandchild.GetReferenceCount());
+        Assert.Equal(0, oldGrandchild.GetReferenceCount());
+        Assert.Equal(3, registry.KnownSubjects.Count);
 
-            // Final state: ensure clean detach
-            grandparent.Mother = null;
-            child.Mother = null;
-
-            // Check for leaked subjects
-            var knownSubjects = registry.KnownSubjects;
-            foreach (var kvp in knownSubjects)
-            {
-                if (!ReferenceEquals(kvp.Key, grandparent))
-                {
-                    var name = ((Person)kvp.Key).FirstName;
-                    var refCount = kvp.Value.ReferenceCount;
-                    var parents = kvp.Value.Parents;
-                    var parentDesc = parents.Length > 0
-                        ? string.Join(", ", parents.Select(p => $"{p.Property.Name}"))
-                        : "no-parents";
-                    output.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount} parents=[{parentDesc}]");
-                    totalOrphaned++;
-                }
-            }
-        }
-
-        // Assert: across all rounds, no orphaned subjects should accumulate
-        Assert.True(
-            totalOrphaned == 0,
-            $"Detected {totalOrphaned} total orphaned subject(s) across {rounds} rounds. " +
-            $"This indicates the parent-detach-during-child-write race condition in " +
-            $"LifecycleInterceptor.WriteProperty where grandchild subjects are attached " +
-            $"to a child that is concurrently being detached from its parent, and the " +
-            $"detach cascade misses the newly written grandchild.");
+        var registryParent = Assert.Single(registry.TryGetRegisteredSubject(newGrandchild)!.Parents);
+        var trackedParent = Assert.Single(newGrandchild.GetParents());
+        Assert.Same(childMother, registryParent.Property);
+        Assert.Null(registryParent.Index);
+        Assert.Same(child, trackedParent.Property.Subject);
+        Assert.Equal(nameof(Person.Mother), trackedParent.Property.Name);
+        Assert.Null(trackedParent.Index);
     }
 
     /// <summary>
@@ -978,6 +973,39 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 _hasReentered = true;
                 Callback?.Invoke();
             }
+        }
+    }
+
+    [RunsAfter(typeof(LifecycleInterceptor))]
+    private sealed class AfterCommitWriteGate(string propertyName, object expectedValue)
+        : IWriteInterceptor, IDisposable
+    {
+        public ManualResetEventSlim BackingCommitted { get; } = new();
+
+        public ManualResetEventSlim Release { get; } = new();
+
+        public void WriteProperty<TProperty>(
+            ref PropertyWriteContext<TProperty> context,
+            WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            if (context.Property.Name != propertyName || !ReferenceEquals(context.NewValue, expectedValue))
+            {
+                return;
+            }
+
+            // ManualResetEventSlim owns publication between the writer and test thread.
+            BackingCommitted.Set();
+            if (!Release.Wait(TimeSpan.FromSeconds(10)))
+            {
+                throw new TimeoutException("The committed structural write was not released.");
+            }
+        }
+
+        public void Dispose()
+        {
+            BackingCommitted.Dispose();
+            Release.Dispose();
         }
     }
 }
