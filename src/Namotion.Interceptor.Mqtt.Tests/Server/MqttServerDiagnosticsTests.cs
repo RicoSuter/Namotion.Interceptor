@@ -55,8 +55,8 @@ public class MqttServerDiagnosticsTests
     {
         // Arrange
         await using var server = CreateServer(new MqttServerConfiguration());
-        var shutdownCts = (CancellationTokenSource)typeof(MqttSubjectServer)
-            .GetField("_shutdownCts", BindingFlags.Instance | BindingFlags.NonPublic)!
+        var publishSemaphore = (SemaphoreSlim)typeof(MqttSubjectServer)
+            .GetField("_publishSemaphore", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(server)!;
 
         await using var executionGate = HostedExecutionGate.Install(server);
@@ -70,15 +70,14 @@ public class MqttServerDiagnosticsTests
 
             // Assert
             Assert.False(disposal.IsCompleted);
-            Assert.False(shutdownCts.IsCancellationRequested);
+            Assert.True(publishSemaphore.Wait(0));
+            publishSemaphore.Release();
         }
         finally
         {
             executionGate.AllowExit();
             await disposal;
         }
-
-        Assert.True(shutdownCts.IsCancellationRequested);
         Assert.Null(server.Diagnostics.LastError);
     }
 
