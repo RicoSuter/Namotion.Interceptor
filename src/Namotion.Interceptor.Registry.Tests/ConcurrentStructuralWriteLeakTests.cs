@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -263,15 +264,34 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             CancellationToken.None,
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => writeGate.BackingCommitted.IsSet || writer.IsCompleted,
-            message: "The descendant write should commit its backing value before parent detach.");
-        Assert.True(writeGate.BackingCommitted.IsSet);
-        Assert.False(writer.IsCompleted);
+        ExceptionDispatchInfo? workerFailure = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => writeGate.BackingCommitted.IsSet || writer.IsCompleted,
+                message: "The descendant write should commit its backing value before parent detach.");
+            if (!writeGate.BackingCommitted.IsSet)
+            {
+                await writer;
+            }
+            Assert.True(writeGate.BackingCommitted.IsSet);
+            Assert.False(writer.IsCompleted);
 
-        grandparent.Mother = null;
-        writeGate.Release.Set();
-        await writer;
+            grandparent.Mother = null;
+        }
+        catch (Exception exception)
+        {
+            workerFailure = ExceptionDispatchInfo.Capture(exception);
+        }
+        finally
+        {
+            writeGate.Release.Set();
+            workerFailure = await ObserveWorkerAsync(
+                writer,
+                workerFailure,
+                "The descendant writer should complete after its commit gate is released.");
+        }
+        workerFailure?.Throw();
 
         // Assert: the detached subtree has no published relationships or lifecycle membership.
         Assert.Same(newGrandchild, child.Mother);
@@ -974,6 +994,38 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 Callback?.Invoke();
             }
         }
+    }
+
+    private static async Task<ExceptionDispatchInfo?> ObserveWorkerAsync(
+        Task worker,
+        ExceptionDispatchInfo? primaryFailure,
+        string message)
+    {
+        ExceptionDispatchInfo? coordinationFailure = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => worker.IsCompleted,
+                message: message);
+        }
+        catch (Exception exception)
+        {
+            coordinationFailure = ExceptionDispatchInfo.Capture(exception);
+        }
+
+        if (worker.IsCompleted)
+        {
+            try
+            {
+                await worker;
+            }
+            catch (Exception exception)
+            {
+                primaryFailure ??= ExceptionDispatchInfo.Capture(exception);
+            }
+        }
+
+        return primaryFailure ?? coordinationFailure;
     }
 
     [RunsAfter(typeof(LifecycleInterceptor))]

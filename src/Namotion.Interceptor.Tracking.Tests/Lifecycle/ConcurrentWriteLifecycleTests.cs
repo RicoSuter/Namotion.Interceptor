@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
@@ -284,15 +285,34 @@ public class ConcurrentWriteLifecycleTests
             CancellationToken.None,
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => writeGate.BackingCommitted.IsSet || writer.IsCompleted,
-            message: "The descendant write should commit before context detach.");
-        Assert.True(writeGate.BackingCommitted.IsSet);
-        Assert.False(writer.IsCompleted);
+        ExceptionDispatchInfo? workerFailure = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => writeGate.BackingCommitted.IsSet || writer.IsCompleted,
+                message: "The descendant write should commit before context detach.");
+            if (!writeGate.BackingCommitted.IsSet)
+            {
+                await writer;
+            }
+            Assert.True(writeGate.BackingCommitted.IsSet);
+            Assert.False(writer.IsCompleted);
 
-        Assert.True(rootContext.RemoveFallbackContext(context));
-        writeGate.Release.Set();
-        await writer;
+            Assert.True(rootContext.RemoveFallbackContext(context));
+        }
+        catch (Exception exception)
+        {
+            workerFailure = ExceptionDispatchInfo.Capture(exception);
+        }
+        finally
+        {
+            writeGate.Release.Set();
+            workerFailure = await ObserveWorkerAsync(
+                writer,
+                workerFailure,
+                "The descendant writer should complete after its commit gate is released.");
+        }
+        workerFailure?.Throw();
 
         // Assert: no attached or processed state survives the detach, and the backing write remains authoritative.
         Assert.Same(replacementGeneration, child.Children);
@@ -332,6 +352,38 @@ public class ConcurrentWriteLifecycleTests
             fieldName,
             BindingFlags.Instance | BindingFlags.NonPublic);
         return Assert.IsAssignableFrom<IDictionary>(field?.GetValue(lifecycle));
+    }
+
+    private static async Task<ExceptionDispatchInfo?> ObserveWorkerAsync(
+        Task worker,
+        ExceptionDispatchInfo? primaryFailure,
+        string message)
+    {
+        ExceptionDispatchInfo? coordinationFailure = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => worker.IsCompleted,
+                message: message);
+        }
+        catch (Exception exception)
+        {
+            coordinationFailure = ExceptionDispatchInfo.Capture(exception);
+        }
+
+        if (worker.IsCompleted)
+        {
+            try
+            {
+                await worker;
+            }
+            catch (Exception exception)
+            {
+                primaryFailure ??= ExceptionDispatchInfo.Capture(exception);
+            }
+        }
+
+        return primaryFailure ?? coordinationFailure;
     }
 
     [RunsAfter(typeof(LifecycleInterceptor))]

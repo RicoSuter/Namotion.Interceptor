@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Immutable;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -248,58 +249,74 @@ public class RelationshipConcurrencyTests
         // while the second writer waits. Readers observe both phases without assuming cross-view atomicity.
         var arrayWrite = StartWorker(() => container.Array = newArray);
         var dictionaryWrite = StartWorker(() => container.Directory = newDictionary);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => container.ArrayGate.Entered.IsSet || container.DirectoryGate.Entered.IsSet ||
-                  arrayWrite.IsCompleted || dictionaryWrite.IsCompleted,
-            message: "One relationship writer should reach its publication gate.");
-
-        var firstGate = container.ArrayGate.Entered.IsSet
-            ? container.ArrayGate
-            : container.DirectoryGate;
-        var secondGate = ReferenceEquals(firstGate, container.ArrayGate)
-            ? container.DirectoryGate
-            : container.ArrayGate;
-        var secondWrite = ReferenceEquals(secondGate, container.ArrayGate)
-            ? arrayWrite
-            : dictionaryWrite;
-        Assert.True(firstGate.Entered.IsSet);
-        Assert.False(arrayWrite.IsCompleted && dictionaryWrite.IsCompleted);
-        AssertActiveSnapshots(
-            registry,
-            arrayProperty,
-            arrayChild,
-            [(arrayChild, 0), (arrayOther, 1), (arrayChild, 2)],
-            [(arrayOther, 0), (arrayChild, 1), (arrayChild, 2)]);
-        AssertActiveSnapshots(
-            registry,
-            dictionaryProperty,
-            dictionaryChild,
-            [(dictionaryChild, alpha), (dictionaryOther, beta), (dictionaryChild, gamma)],
-            [(dictionaryChild, delta), (dictionaryChild, epsilon), (dictionaryOther, zeta)]);
-
-        firstGate.Release.Set();
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => secondGate.Entered.IsSet || secondWrite.IsCompleted,
-            message: "The second relationship writer should reach its publication gate.");
-        if (!secondGate.Entered.IsSet)
+        ExceptionDispatchInfo? workerFailure = null;
+        try
         {
-            await secondWrite;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => container.ArrayGate.Entered.IsSet || container.DirectoryGate.Entered.IsSet ||
+                      arrayWrite.IsCompleted || dictionaryWrite.IsCompleted,
+                message: "One relationship writer should reach its publication gate.");
+
+            var firstGate = container.ArrayGate.Entered.IsSet
+                ? container.ArrayGate
+                : container.DirectoryGate;
+            var secondGate = ReferenceEquals(firstGate, container.ArrayGate)
+                ? container.DirectoryGate
+                : container.ArrayGate;
+            var secondWrite = ReferenceEquals(secondGate, container.ArrayGate)
+                ? arrayWrite
+                : dictionaryWrite;
+            Assert.True(firstGate.Entered.IsSet);
+            Assert.False(arrayWrite.IsCompleted && dictionaryWrite.IsCompleted);
+            AssertActiveSnapshots(
+                registry,
+                arrayProperty,
+                arrayChild,
+                [(arrayChild, 0), (arrayOther, 1), (arrayChild, 2)],
+                [(arrayOther, 0), (arrayChild, 1), (arrayChild, 2)]);
+            AssertActiveSnapshots(
+                registry,
+                dictionaryProperty,
+                dictionaryChild,
+                [(dictionaryChild, alpha), (dictionaryOther, beta), (dictionaryChild, gamma)],
+                [(dictionaryChild, delta), (dictionaryChild, epsilon), (dictionaryOther, zeta)]);
+
+            firstGate.Release.Set();
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => secondGate.Entered.IsSet || secondWrite.IsCompleted,
+                message: "The second relationship writer should reach its publication gate.");
+            if (!secondGate.Entered.IsSet)
+            {
+                await secondWrite;
+            }
+            Assert.True(secondGate.Entered.IsSet);
+            AssertActiveSnapshots(
+                registry,
+                arrayProperty,
+                arrayChild,
+                [(arrayChild, 0), (arrayOther, 1), (arrayChild, 2)],
+                [(arrayOther, 0), (arrayChild, 1), (arrayChild, 2)]);
+            AssertActiveSnapshots(
+                registry,
+                dictionaryProperty,
+                dictionaryChild,
+                [(dictionaryChild, alpha), (dictionaryOther, beta), (dictionaryChild, gamma)],
+                [(dictionaryChild, delta), (dictionaryChild, epsilon), (dictionaryOther, zeta)]);
         }
-        Assert.True(secondGate.Entered.IsSet);
-        AssertActiveSnapshots(
-            registry,
-            arrayProperty,
-            arrayChild,
-            [(arrayChild, 0), (arrayOther, 1), (arrayChild, 2)],
-            [(arrayOther, 0), (arrayChild, 1), (arrayChild, 2)]);
-        AssertActiveSnapshots(
-            registry,
-            dictionaryProperty,
-            dictionaryChild,
-            [(dictionaryChild, alpha), (dictionaryOther, beta), (dictionaryChild, gamma)],
-            [(dictionaryChild, delta), (dictionaryChild, epsilon), (dictionaryOther, zeta)]);
-        secondGate.Release.Set();
-        await Task.WhenAll(arrayWrite, dictionaryWrite);
+        catch (Exception exception)
+        {
+            workerFailure = ExceptionDispatchInfo.Capture(exception);
+        }
+        finally
+        {
+            container.ArrayGate.Release.Set();
+            container.DirectoryGate.Release.Set();
+            workerFailure = await ObserveWorkersAsync(
+                [arrayWrite, dictionaryWrite],
+                workerFailure,
+                "Both relationship writers should complete after their publication gates are released.");
+        }
+        workerFailure?.Throw();
 
         // Assert: captured arrays stay frozen and every quiescent view agrees with the backing values.
         AssertGeneration(oldArrayChildren, [(arrayChild, 0), (arrayOther, 1), (arrayChild, 2)]);
@@ -360,14 +377,58 @@ public class RelationshipConcurrencyTests
         };
     }
 
-    private static Task RunConcurrently(Action first, Action second) =>
-        Task.WhenAll(StartWorker(first), StartWorker(second));
+    private static async Task RunConcurrently(Action first, Action second)
+    {
+        var workers = new[] { StartWorker(first), StartWorker(second) };
+        var workerFailure = await ObserveWorkersAsync(
+            workers,
+            null,
+            "Both concurrent structural writers should complete.");
+        workerFailure?.Throw();
+    }
 
     private static Task StartWorker(Action action) => Task.Factory.StartNew(
         action,
         CancellationToken.None,
         TaskCreationOptions.LongRunning,
         TaskScheduler.Default);
+
+    private static async Task<ExceptionDispatchInfo?> ObserveWorkersAsync(
+        IReadOnlyList<Task> workers,
+        ExceptionDispatchInfo? primaryFailure,
+        string message)
+    {
+        ExceptionDispatchInfo? coordinationFailure = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => workers.All(worker => worker.IsCompleted),
+                message: message);
+        }
+        catch (Exception exception)
+        {
+            coordinationFailure = ExceptionDispatchInfo.Capture(exception);
+        }
+
+        foreach (var worker in workers)
+        {
+            if (!worker.IsCompleted)
+            {
+                continue;
+            }
+
+            try
+            {
+                await worker;
+            }
+            catch (Exception exception)
+            {
+                primaryFailure ??= ExceptionDispatchInfo.Capture(exception);
+            }
+        }
+
+        return primaryFailure ?? coordinationFailure;
+    }
 
     private static void AssertGraphState<TContainer>(
         RelationshipConfiguration configuration,
