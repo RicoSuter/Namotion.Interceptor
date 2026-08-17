@@ -84,7 +84,11 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     /// <summary>
     /// Gets the consecutive failure count.
     /// </summary>
-    internal int ConsecutiveFailures => _consecutiveFailures;
+    internal int ConsecutiveFailures => Volatile.Read(ref _consecutiveFailures);
+
+    internal int RecordConsecutiveFailure() => Interlocked.Increment(ref _consecutiveFailures);
+
+    private void ResetConsecutiveFailures() => Interlocked.Exchange(ref _consecutiveFailures, 0);
 
     public OpcUaSubjectServer(
         IInterceptorSubject subject,
@@ -222,7 +226,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     {
         // Reset failure counter on fresh start so that accumulated failures from
         // previous stop/start cycles don't cause excessive backoff delays.
-        _consecutiveFailures = 0;
+        ResetConsecutiveFailures();
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -271,7 +275,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                     await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
                     await application.StartAsync(server).ConfigureAwait(false);
 
-                    _consecutiveFailures = 0;
+                    ResetConsecutiveFailures();
 
                     // LastError is deliberately left in place: clearing it on recovery would erase
                     // the only evidence of a transient fault.
@@ -305,15 +309,15 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                     return;
                 }
 
-                _consecutiveFailures++;
+                var consecutiveFailures = RecordConsecutiveFailure();
 
                 // Nothing outside this loop reports its failures.
                 Metrics.ReportError(ex);
-                _logger.LogError(ex, "Failed to start OPC UA server (attempt {Attempt}).", _consecutiveFailures);
+                _logger.LogError(ex, "Failed to start OPC UA server (attempt {Attempt}).", consecutiveFailures);
 
                 // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s, 30s (capped) + 0-2s random jitter
                 // Jitter prevents thundering herd when multiple servers fail simultaneously
-                var baseDelay = Math.Min(Math.Pow(2, _consecutiveFailures - 1), 30);
+                var baseDelay = Math.Min(Math.Pow(2, consecutiveFailures - 1), 30);
                 var jitter = Random.Shared.NextDouble() * 2;
                 await Task.Delay(TimeSpan.FromSeconds(baseDelay + jitter), stoppingToken);
             }
