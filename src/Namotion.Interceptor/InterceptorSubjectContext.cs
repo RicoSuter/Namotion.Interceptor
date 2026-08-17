@@ -74,8 +74,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private readonly object _mutationLock = new();
 
     // Contexts that resolve through this context, lazily allocated because most contexts are
-    // never used as a fallback. The set instance is its own lock: it is created once via CAS and
-    // never replaced, so every thread locks the same canonical object without a second allocation.
+    // never used as a public fallback or internal ownership-route target. The set instance is its
+    // own lock: it is created once via CAS and never replaced, so every thread locks the same
+    // canonical object without a second allocation.
     private HashSet<InterceptorSubjectContext>? _usedByContexts;
 
     /// <summary>
@@ -495,8 +496,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// Reports whether every context on the candidate loop still holds the state the walk pinned.
     /// A state is never installed twice, so one still in place has been in place since it was
     /// pinned, and every edge of the loop therefore existed at the same moment. That is a cycle.
-    /// Comparing states rather than the fallback contexts they point at is what makes this exact: a
-    /// sequence of rewirings that is acyclic throughout can otherwise produce a repeat.
+    /// Comparing states rather than the public fallback and internal ownership-route relationships
+    /// they describe is what makes this exact: a sequence of rewirings that is acyclic throughout
+    /// can otherwise produce a repeat.
     ///
     /// <paramref name="loopStart"/> reports where the loop begins, because the run ahead of it is
     /// deliberately not re-read and proves nothing, see <see cref="CacheResolvedTerminal"/>.
@@ -804,9 +806,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Turns the buffer region a context and its fallbacks filled into that context's result:
-    /// duplicates dropped keeping the first occurrence, then reordered by the ordering attributes.
-    /// Per context rather than once at the end, which is what the result order depends on.
+    /// Turns the buffer region a context, its public fallbacks, and its internal ownership route
+    /// filled into that context's result: duplicates dropped keeping the first occurrence, then
+    /// reordered by the ordering attributes. Per context rather than once at the end, which is what
+    /// the result order depends on.
     /// </summary>
     private static void ReduceFrame(List<object> collected, int resultStart, HashSet<object> distinctServices)
     {
@@ -1006,10 +1009,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         HashSet<InterceptorSubjectContext> visited,
         List<InterceptorSubjectContext> pending)
     {
-        // Contexts never used as a fallback take no lock. The field is written once by a CAS
-        // ordered before the registrant's own publish, so a racing registration is either visible
-        // here or belongs to a context that has not published yet, whose own walk then covers
-        // everything above it. This depends on the publish being a full fence, see PublishState.
+        // Contexts never used as a public fallback or internal ownership-route target take no lock.
+        // The field is written once by a CAS ordered before the registrant's own publish, so a
+        // racing registration is either visible here or belongs to a context that has not published
+        // yet, whose own walk then covers everything above it. This depends on the publish being a
+        // full fence, see PublishState.
         //
         // Emptiness is deliberately NOT checked outside the lock: HashSet.Count is a composite of
         // two independently mutated fields, so an unlocked read can compute a count that was never
