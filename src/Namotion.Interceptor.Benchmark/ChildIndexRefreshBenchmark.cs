@@ -30,10 +30,10 @@ public partial class RefreshContainer
 }
 
 /// <summary>
-/// Container writes which retain their children, the only writes that reach the child-index refresh.
+/// Structural container writes measured through full relationship reconciliation.
 /// Each case alternates between two prebuilt values, so the reference-equality shortcut never skips a
-/// write and the reordering cases reorder on every call. <see cref="ReplaceCollection"/> retains
-/// nothing and is the reference row for writes the refresh cannot reach.
+/// write and the reordering cases reorder on every call. <see cref="ReplaceCollection"/> is the
+/// reference row for replacing every membership rather than retaining occurrences.
 /// </summary>
 [MemoryDiagnoser]
 public class ChildIndexRefreshBenchmark
@@ -58,7 +58,7 @@ public class ChildIndexRefreshBenchmark
     public int Count;
 
     /// <summary>
-    /// Parent tracking keeps a second copy of each child index, refreshed per retained child.
+    /// Parent tracking projects the same immutable relationships into its tracked-parent view.
     /// </summary>
     [Params(false, true)]
     public bool TrackParents;
@@ -125,7 +125,7 @@ public class ChildIndexRefreshBenchmark
         _container = new RefreshContainer(context) { Items = _sameOrderB };
     }
 
-    /// <summary>Same children in the same order: the refresh finds nothing to move.</summary>
+    /// <summary>Same children in the same order: reconciliation publishes an equivalent ordered group.</summary>
     [Benchmark]
     public void RewriteCollectionSameOrder()
     {
@@ -149,7 +149,7 @@ public class ChildIndexRefreshBenchmark
         _container.Items = _flip ? _sameOrderA : _reversed;
     }
 
-    /// <summary>Retains nothing, so the refresh is never dispatched. Reference row for unreached writes.</summary>
+    /// <summary>Replaces every membership and relationship, with no retained occurrences.</summary>
     [Benchmark]
     public void ReplaceCollection()
     {
@@ -157,7 +157,7 @@ public class ChildIndexRefreshBenchmark
         _container.Items = _flip ? _replacementA : _replacementB;
     }
 
-    /// <summary>Same children under the same keys: the refresh finds nothing to move.</summary>
+    /// <summary>Same children under the same logical keys and in the same enumeration order.</summary>
     [Benchmark]
     public void RewriteDictionarySameKeys()
     {
@@ -165,7 +165,7 @@ public class ChildIndexRefreshBenchmark
         _container.ItemsByKey = _flip ? _sameKeysA : _sameKeysB;
     }
 
-    /// <summary>One child moves to another key, which is the case master never refreshed.</summary>
+    /// <summary>One child moves to another key while the child enumeration order remains unchanged.</summary>
     [Benchmark]
     public void RekeyOneDictionaryEntry()
     {
@@ -174,9 +174,7 @@ public class ChildIndexRefreshBenchmark
     }
 
     /// <summary>
-    /// Same keys and same children, enumerated in the opposite order: no index changes at all, yet every child
-    /// has to move. The children of a dictionary were left in place before this refresh became shape-agnostic,
-    /// so this is the row where that regression, if any, shows up.
+    /// Same logical keys and children enumerated in the opposite order, requiring complete group reordering.
     /// </summary>
     [Benchmark]
     public void ReorderDictionary()
