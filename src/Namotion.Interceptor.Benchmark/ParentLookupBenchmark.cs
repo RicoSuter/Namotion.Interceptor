@@ -9,10 +9,8 @@ namespace Namotion.Interceptor.Benchmark;
 #pragma warning disable CS8618
 
 /// <summary>
-/// The two copies of a subject's parent index, read side by side: <see cref="RegisteredSubject.Parents"/>
-/// maintained by the registry, and the tracked copy behind <see cref="ParentsHandlerExtensions.GetParents"/>
-/// maintained by the parent tracking handler. Both are read on hot paths, and any change that derives one
-/// from the other has to be judged on these two rows rather than on write cost alone.
+/// Reads the Registry and parent-tracking projections of a subject's incoming relationships side by side.
+/// Both calls exercise their cached hot paths after setup has materialized the snapshots.
 /// </summary>
 [MemoryDiagnoser]
 public class ParentLookupBenchmark

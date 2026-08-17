@@ -29,157 +29,182 @@ public partial class RefreshContainer
     public partial IReadOnlyDictionary<string, RefreshItem> ItemsByKey { get; set; }
 }
 
+public enum RelationshipConsumerConfiguration
+{
+    LifecycleOnly,
+    Registry,
+    RegistryAndParents
+}
+
 /// <summary>
-/// Structural container writes measured through full relationship reconciliation.
-/// Each case alternates between two prebuilt values, so the reference-equality shortcut never skips a
-/// write and the reordering cases reorder on every call. <see cref="ReplaceCollection"/> is the
-/// reference row for replacing every membership rather than retaining occurrences.
+/// Structural writes that exercise ordered relationship reconciliation. The lifecycle-only configuration
+/// performs the same writes without a relationship consumer, which isolates compact membership-state cost.
 /// </summary>
 [MemoryDiagnoser]
 public class ChildIndexRefreshBenchmark
 {
-    private RefreshContainer _container;
+    private RefreshContainer _replacementContainer;
+    private RefreshContainer _reorderContainer;
+    private RefreshContainer _rekeyContainer;
+    private RefreshContainer _duplicateContainer;
+    private RefreshContainer _sameInstanceContainer;
 
-    private RefreshItem[] _sameOrderA;
-    private RefreshItem[] _sameOrderB;
-    private RefreshItem[] _reversed;
-    private RefreshItem[] _shifted;
     private RefreshItem[] _replacementA;
     private RefreshItem[] _replacementB;
+    private RefreshItem[] _sameOrder;
+    private RefreshItem[] _reordered;
+    private RefreshItem[] _duplicatesA;
+    private RefreshItem[] _duplicatesB;
+    private RefreshItem[] _sameInstance;
 
-    private IReadOnlyDictionary<string, RefreshItem> _sameKeysA;
-    private IReadOnlyDictionary<string, RefreshItem> _sameKeysB;
+    private IReadOnlyDictionary<string, RefreshItem> _sameKeys;
     private IReadOnlyDictionary<string, RefreshItem> _rekeyed;
-    private IReadOnlyDictionary<string, RefreshItem> _reversedKeys;
 
-    private bool _flip;
+    private bool _replacementFlip;
+    private bool _reorderFlip;
+    private bool _rekeyFlip;
+    private bool _duplicateFlip;
 
     [Params(4, 1000)]
     public int Count;
 
-    /// <summary>
-    /// Parent tracking projects the same immutable relationships into its tracked-parent view.
-    /// </summary>
-    [Params(false, true)]
-    public bool TrackParents;
+    [Params(
+        RelationshipConsumerConfiguration.LifecycleOnly,
+        RelationshipConsumerConfiguration.Registry,
+        RelationshipConsumerConfiguration.RegistryAndParents)]
+    public RelationshipConsumerConfiguration Consumers;
 
     [GlobalSetup]
     public void Setup()
+    {
+        var items = CreateItems(Count);
+
+        _sameOrder = [.. items];
+        _reordered = [.. items];
+        Array.Reverse(_reordered);
+
+        _replacementA = CreateItems(Count);
+        _replacementB = CreateItems(Count);
+
+        var duplicateItems = CreateItems(Count / 2);
+        _duplicatesA = new RefreshItem[Count];
+        _duplicatesB = new RefreshItem[Count];
+        for (var index = 0; index < Count; index++)
+        {
+            _duplicatesA[index] = duplicateItems[index / 2];
+            _duplicatesB[index] = duplicateItems[(Count - 1 - index) / 2];
+        }
+
+        _sameInstance = [.. items];
+
+        var keys = new string[Count];
+        var sameKeys = new Dictionary<string, RefreshItem>(Count);
+        var rekeyed = new Dictionary<string, RefreshItem>(Count);
+        for (var index = 0; index < Count; index++)
+        {
+            keys[index] = "key" + index;
+            sameKeys[keys[index]] = items[index];
+        }
+
+        for (var index = 0; index < Count; index++)
+        {
+            rekeyed[index == 0 ? "moved" : keys[index]] = items[index];
+        }
+
+        _sameKeys = sameKeys;
+        _rekeyed = rekeyed;
+
+        _replacementContainer = CreateContainer();
+        _replacementContainer.Items = _replacementB;
+
+        _reorderContainer = CreateContainer();
+        _reorderContainer.Items = _reordered;
+
+        _rekeyContainer = CreateContainer();
+        _rekeyContainer.ItemsByKey = _rekeyed;
+
+        _duplicateContainer = CreateContainer();
+        _duplicateContainer.Items = _duplicatesB;
+
+        _sameInstanceContainer = CreateContainer();
+        _sameInstanceContainer.Items = _sameInstance;
+    }
+
+    /// <summary>Replaces every collection membership with a new subject.</summary>
+    [Benchmark]
+    public void ReplaceCollection()
+    {
+        _replacementFlip = !_replacementFlip;
+        _replacementContainer.Items = _replacementFlip ? _replacementA : _replacementB;
+    }
+
+    /// <summary>Reverses all retained collection occurrences.</summary>
+    [Benchmark]
+    public void ReorderCollection()
+    {
+        _reorderFlip = !_reorderFlip;
+        _reorderContainer.Items = _reorderFlip ? _sameOrder : _reordered;
+    }
+
+    /// <summary>Moves one retained dictionary occurrence to another key.</summary>
+    [Benchmark]
+    public void RekeyDictionaryEntry()
+    {
+        _rekeyFlip = !_rekeyFlip;
+        _rekeyContainer.ItemsByKey = _rekeyFlip ? _sameKeys : _rekeyed;
+    }
+
+    /// <summary>Reverses repeated occurrences while each distinct subject remains a member.</summary>
+    [Benchmark]
+    public void ReorderDuplicateOccurrences()
+    {
+        _duplicateFlip = !_duplicateFlip;
+        _duplicateContainer.Items = _duplicateFlip ? _duplicatesA : _duplicatesB;
+    }
+
+    /// <summary>Mutates and assigns the same collection instance to request an explicit structural refresh.</summary>
+    [Benchmark]
+    public void RefreshSameInstanceCollection()
+    {
+        (_sameInstance[0], _sameInstance[^1]) = (_sameInstance[^1], _sameInstance[0]);
+        _sameInstanceContainer.Items = _sameInstance;
+    }
+
+    private RefreshContainer CreateContainer()
     {
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking();
 
-        if (TrackParents)
+        switch (Consumers)
         {
-            context.WithParents();
+            case RelationshipConsumerConfiguration.LifecycleOnly:
+                break;
+
+            case RelationshipConsumerConfiguration.Registry:
+                context.WithRegistry();
+                break;
+
+            case RelationshipConsumerConfiguration.RegistryAndParents:
+                context.WithParents();
+                context.WithRegistry();
+                break;
+
+            default:
+                throw new ArgumentOutOfRangeException();
         }
 
-        context.WithRegistry();
+        return new RefreshContainer(context);
+    }
 
-        var items = new RefreshItem[Count];
-        for (var i = 0; i < Count; i++)
+    private static RefreshItem[] CreateItems(int count)
+    {
+        var items = new RefreshItem[count];
+        for (var index = 0; index < count; index++)
         {
-            items[i] = new RefreshItem();
+            items[index] = new RefreshItem();
         }
 
-        _sameOrderA = [.. items];
-        _sameOrderB = [.. items];
-
-        _reversed = [.. items];
-        Array.Reverse(_reversed);
-
-        _shifted = new RefreshItem[Count];
-        for (var i = 0; i < Count; i++)
-        {
-            _shifted[i] = items[(i + Count - 1) % Count];
-        }
-
-        _replacementA = new RefreshItem[Count];
-        _replacementB = new RefreshItem[Count];
-        for (var i = 0; i < Count; i++)
-        {
-            _replacementA[i] = new RefreshItem();
-            _replacementB[i] = new RefreshItem();
-        }
-
-        var sameKeysA = new Dictionary<string, RefreshItem>(Count);
-        var sameKeysB = new Dictionary<string, RefreshItem>(Count);
-        var rekeyed = new Dictionary<string, RefreshItem>(Count);
-        var reversedKeys = new Dictionary<string, RefreshItem>(Count);
-        for (var i = 0; i < Count; i++)
-        {
-            sameKeysA["k" + i] = items[i];
-            sameKeysB["k" + i] = items[i];
-            rekeyed[i == 0 ? "moved" : "k" + i] = items[i];
-            reversedKeys["k" + (Count - 1 - i)] = items[Count - 1 - i];
-        }
-
-        _sameKeysA = sameKeysA;
-        _sameKeysB = sameKeysB;
-        _rekeyed = rekeyed;
-        _reversedKeys = reversedKeys;
-
-        // Deliberately the B value: the first write of each case then differs by reference from what the
-        // property already holds, so no invocation is skipped by the reference-equality shortcut.
-        _container = new RefreshContainer(context) { Items = _sameOrderB };
-    }
-
-    /// <summary>Same children in the same order: reconciliation publishes an equivalent ordered group.</summary>
-    [Benchmark]
-    public void RewriteCollectionSameOrder()
-    {
-        _flip = !_flip;
-        _container.Items = _flip ? _sameOrderA : _sameOrderB;
-    }
-
-    /// <summary>Every child moves by one position, the shape a prepend or a remove-from-front produces.</summary>
-    [Benchmark]
-    public void ShiftCollectionByOne()
-    {
-        _flip = !_flip;
-        _container.Items = _flip ? _sameOrderA : _shifted;
-    }
-
-    /// <summary>Worst case for placement: every child moves, and the incoming order is the reverse of the stored one.</summary>
-    [Benchmark]
-    public void ReverseCollection()
-    {
-        _flip = !_flip;
-        _container.Items = _flip ? _sameOrderA : _reversed;
-    }
-
-    /// <summary>Replaces every membership and relationship, with no retained occurrences.</summary>
-    [Benchmark]
-    public void ReplaceCollection()
-    {
-        _flip = !_flip;
-        _container.Items = _flip ? _replacementA : _replacementB;
-    }
-
-    /// <summary>Same children under the same logical keys and in the same enumeration order.</summary>
-    [Benchmark]
-    public void RewriteDictionarySameKeys()
-    {
-        _flip = !_flip;
-        _container.ItemsByKey = _flip ? _sameKeysA : _sameKeysB;
-    }
-
-    /// <summary>One child moves to another key while the child enumeration order remains unchanged.</summary>
-    [Benchmark]
-    public void RekeyOneDictionaryEntry()
-    {
-        _flip = !_flip;
-        _container.ItemsByKey = _flip ? _sameKeysA : _rekeyed;
-    }
-
-    /// <summary>
-    /// Same logical keys and children enumerated in the opposite order, requiring complete group reordering.
-    /// </summary>
-    [Benchmark]
-    public void ReorderDictionary()
-    {
-        _flip = !_flip;
-        _container.ItemsByKey = _flip ? _sameKeysA : _reversedKeys;
+        return items;
     }
 }

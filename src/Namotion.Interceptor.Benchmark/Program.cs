@@ -19,8 +19,7 @@ public static class Program
 
     private static void Run()
     {
-        var benchmark = new RegistryBenchmark();
-        benchmark.Type = "interceptor";
+        var benchmark = new RegistryBenchmark { Count = 1000 };
         Console.WriteLine($"Setup...");
         benchmark.Setup();//.GetAwaiter().GetResult();
         Console.WriteLine($"Benchmark...");
