@@ -22,6 +22,7 @@ namespace Namotion.Interceptor.Mqtt.Tests.Client;
 /// without a real broker.
 /// </summary>
 [Trait("Category", "Integration")]
+[Collection(MqttNetworkIntegrationCollection.Name)]
 public partial class MqttClientLivenessTests
 {
     [InterceptorSubject]

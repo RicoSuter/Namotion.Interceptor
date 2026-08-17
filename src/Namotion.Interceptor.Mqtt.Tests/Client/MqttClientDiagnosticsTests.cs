@@ -14,6 +14,7 @@ namespace Namotion.Interceptor.Mqtt.Tests.Client;
 /// client which has never connected says so. The liveness transitions need a broker and are covered
 /// by <see cref="MqttClientLivenessTests"/>.
 /// </summary>
+[Collection(MqttNetworkIntegrationCollection.Name)]
 public class MqttClientDiagnosticsTests
 {
     /// <summary>

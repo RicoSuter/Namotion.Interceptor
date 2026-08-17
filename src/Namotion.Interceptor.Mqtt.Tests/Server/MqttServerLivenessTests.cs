@@ -23,6 +23,7 @@ namespace Namotion.Interceptor.Mqtt.Tests.Server;
 /// change queue: the metrics permit one live registration at a time.
 /// </summary>
 [Trait("Category", "Integration")]
+[Collection(MqttNetworkIntegrationCollection.Name)]
 public partial class MqttServerLivenessTests
 {
     [InterceptorSubject]

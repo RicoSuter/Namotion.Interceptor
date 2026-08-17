@@ -31,6 +31,7 @@ namespace Namotion.Interceptor.Mqtt.Tests;
 /// for IFaultInjectable and ISubjectSource.StateChanged.
 /// </remarks>
 [Trait("Category", "Integration")]
+[Collection(MqttNetworkIntegrationCollection.Name)]
 public partial class OutageStateTests
 {
     [InterceptorSubject]
