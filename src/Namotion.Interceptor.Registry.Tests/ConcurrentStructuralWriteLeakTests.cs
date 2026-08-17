@@ -18,14 +18,14 @@ namespace Namotion.Interceptor.Registry.Tests;
 /// The concurrency model:
 /// 1. next(ref context) writes the value to the backing store (no lock held)
 /// 2. Lock on _attachedSubjects is acquired
-/// 3. _lastProcessedValues is read as the baseline, backing store is re-read as new value
+/// 3. Canonical processed property state is read as the baseline, backing store is re-read as new value
 /// 4. Diffs baseline vs new value to determine attach/detach operations
-/// 5. Attaches/detaches subjects, updates _lastProcessedValues
+/// 5. Attaches/detaches subjects, publishes the new canonical state
 ///
 /// The key race window is between step 1 (next) and step 2 (lock acquisition):
 /// another thread's WriteProperty or DetachFromProperty can complete in this window,
-/// modifying _attachedSubjects and _lastProcessedValues. The parent-dead check
-/// (which undoes attachments to concurrently detached parents) and _lastProcessedValues
+/// modifying _attachedSubjects and canonical processed state. The parent-dead check
+/// (which undoes attachments to concurrently detached parents) and canonical-state
 /// seeding ensure no orphaned subjects remain after all concurrent writes settle.
 /// </summary>
 public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
@@ -868,7 +868,7 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             $"Detected {totalUnregistered} total inconsistencies across {rounds} rounds. " +
             $"This indicates either subjects reachable from the graph are not registered " +
             $"(parentStillAttached guard preventing registration) or subjects are leaked " +
-            $"in the registry (dangling _lastProcessedValues entries).");
+            $"in the registry (dangling canonical processed-state entries).");
     }
 
     /// <summary>
@@ -876,7 +876,7 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
     /// being concurrently detached. The registry's HandleLifecycleChange re-registers
     /// the parent (via RegisterSubject for the parent side-effect) after the parent was
     /// already removed from _knownSubjects. The parent ends up in _knownSubjects with
-    /// refCount=0 and no parent references — a permanent leak.
+    /// refCount=0 and no parent references, which is a permanent leak.
     ///
     /// Thread A: rapidly attaches/detaches a child from grandparent (which detaches
     ///           the child and triggers _knownSubjects.Remove for the child)

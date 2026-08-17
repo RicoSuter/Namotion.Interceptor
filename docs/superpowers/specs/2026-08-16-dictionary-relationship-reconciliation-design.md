@@ -135,7 +135,7 @@ public interface IPropertyRelationshipHandler
 
 The interface is an ordered multi-service extension contract. It receives the full source-ordered sequence after initial attachment and successful structural writes, and an empty span on property detach. Context handlers run in resolver order, followed by a subject handler. Dispatch continues after failures and rethrows the first exception with its original stack after every handler has run.
 
-For ordinary writes, each lifecycle interceptor captures its relationship handlers before invoking the backing setter. Relationship handlers run synchronously under the lifecycle structural lock. They must be fast, non-blocking, and must not re-enter lifecycle operations.
+For ordinary writes, each lifecycle interceptor captures its relationship handlers before invoking the backing setter. Relationship handlers run synchronously under that lifecycle interceptor's structural lock and can run concurrently when several lifecycle authorities process different writes. They must be fast, non-blocking, and thread-safe across authorities. A handler may write a different property. A write to the property currently being reconciled throws before nested processing. A handler may also cause the parent to detach; the current reconciliation then follows the abort semantics below instead of publishing its staged generation.
 
 `SubjectLifecycleChange.Relationship` identifies the immutable occurrence that supplies membership-transition metadata when relationships were materialized. `Index` is always available:
 
@@ -184,13 +184,13 @@ Matching is linear. It never invokes subject equality, dictionary-key equality, 
 5. Recheck attachment, then publish the processed state.
 6. Dispatch the complete relationship sequence when consumers are enabled.
 
-The same-property reconciliation guard throws `InvalidOperationException` before nested processing can corrupt the baseline. Writes to different properties remain supported.
+The same-property reconciliation guard throws `InvalidOperationException` before nested processing can corrupt the baseline. Writes to different properties remain supported. If the same-property marker unwinds through several lifecycle authorities that already committed the outer terminal write, every upstream authority finishes that outer generation and preserves the marker for its caller.
 
 If a callback re-entrantly detaches the parent, the abort path never publishes staged state. It reverses successfully applied additions, sends an empty sequence to captured relationship handlers, and clears processed state. Already applied removals need no restoration because the parent is detached.
 
 ### Initial attach
 
-Initial attach creates a private token under the lifecycle lock and stages every structural property before the first callback. Enumeration failure clears the token without publishing child membership, processed state, or relationship groups.
+Initial attach creates a private token under the lifecycle lock and stages every structural property before the first callback. Enumeration failure clears the token without publishing child membership, processed state, or relationship groups. A structural write to the subject being staged is rejected before the terminal setter, whether it targets the property currently being enumerated or an earlier property, so the staged property set cannot overwrite a re-entrant generation.
 
 Membership additions then run in property and source order. Successfully applied additions are recorded, processed states are provisionally installed, and master's existing explicit context attach follows. If the parent remains attached, full relationship groups publish in property order and the token is removed.
 
@@ -204,7 +204,7 @@ Detach reads canonical processed state rather than re-enumerating the backing co
 
 Each lifecycle interceptor's existing lock is its sole processed-state writer lock. Attach, detach, and structural reconciliation within that interceptor are serialized. The backing setter remains outside the lock.
 
-Several lifecycle interceptors never hold each other's locks. Each re-reads the backing value under its own lock and publishes a full group. Consumer gates serialize complete replacements, so completed invocations converge on the final backing value.
+Several lifecycle interceptors never hold each other's locks. Each getter-backed reconciliation re-reads the backing value under its own lock and publishes a full group. For a setter-only property, the immutable write context carries the terminal revision and reconciliation ignores it when the property's durable terminal watermark is newer. The watermark includes source commits and survives lifecycle detach and reattach. Equal revisions remain eligible so every lifecycle authority can process the same terminal write. Consumer gates serialize complete replacements, so completed invocations converge on the final backing value.
 
 When writes race, each locked reconciliation uses the backing value current at its lock acquisition. When a write races with detach, the first lifecycle-lock holder wins that transition. A writer that finds a detached parent publishes nothing; detach uses canonical state and cannot leak an unprocessed child.
 
@@ -284,7 +284,9 @@ Registry provisional publication uses one immutable committed group plus a tempo
 
 The reconciler does not allocate removed-relationship scratch or a duplicate new-subject set. Reverse-old-occurrence membership removal order remains intact.
 
-Further optimization of global consumer gates, high fan-in parent storage, multi-authority execution, HomeBlaze cache generations, or generalized pooling is outside this design.
+HomeBlaze path caching uses persistent concurrent dictionaries with versioned entries. Invalidation increments one version and opportunistically clears existing entries, which allocates nothing when the caches are empty. A lookup may return the coherent result it computed while overlapping an invalidation, but it cannot publish that result into the current version. Later quiescent lookups ignore or replace entries from older versions. Subject cache keys and recursive cycle detection use reference identity.
+
+Further optimization of global consumer gates, high fan-in parent storage, multi-authority execution, or generalized pooling is outside this design.
 
 Targeted comparison uses:
 
@@ -313,7 +315,10 @@ The implementation is ready for merge when:
 - same-instance reassignment reconciles current container contents;
 - hostile subject or key equality and hashing are never invoked;
 - re-entrant detach leaves no staged membership or relationship group;
+- initial attach rejects re-entrant structural writes before backing mutation;
+- setter-only writes cannot let an older terminal revision overwrite newer canonical metadata;
 - completed concurrency cases converge without leaks, stale edges, torn reads, or permanently stale caches;
+- HomeBlaze path caches use subject reference identity and allocate nothing when repeatedly invalidated while empty;
 - previously returned arrays and retained relationships remain frozen;
 - lifecycle-only graphs allocate no per-occurrence relationship objects;
 - master's multi-lifecycle dispatch and ownership limitation remain preserved;
