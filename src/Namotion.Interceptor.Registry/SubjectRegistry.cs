@@ -205,8 +205,12 @@ public class SubjectRegistry :
         // Known-subject state is deliberately released before taking either relationship-view lock.
         if (change.IsPropertyReferenceAdded && registeredSubject is not null && registeredProperty is not null)
         {
-            var relationship = change.Relationship ??
-                throw new InvalidOperationException("A registry relationship addition requires occurrence metadata.");
+            // Lifecycle handlers can observe a Registry added after the relationship-handler snapshot was
+            // captured. Seed that provisional occurrence from the lifecycle metadata in this topology window.
+            var relationship = change.Relationship ?? new SubjectPropertyRelationship(
+                change.Property!.Value,
+                change.Subject,
+                change.Index);
             registeredProperty.AddChildRelationship(relationship);
             registeredSubject.AddParentRelationship(registeredProperty, relationship);
         }

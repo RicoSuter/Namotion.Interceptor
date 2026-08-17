@@ -1,6 +1,8 @@
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Tests.Models;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Parent;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.Registry.Tests;
@@ -24,6 +26,73 @@ namespace Namotion.Interceptor.Registry.Tests;
 /// </summary>
 public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
 {
+    [Fact]
+    public void WhenARelationshipCallbackReentersTheSameProperty_ThenTheCommittedGenerationRemainsCanonical()
+    {
+        // Removing the per-authority guard would let the nested setter and downstream lifecycle authority
+        // overwrite the outer generation, stranding memberships or publishing a mixed registry view.
+        // Arrange
+        var firstLifecycle = new LifecycleInterceptor();
+        var secondLifecycle = new LifecycleInterceptor();
+        var reentrantHandler = new SamePropertyReentrantRelationshipHandler();
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(firstLifecycle);
+        context.AddService(secondLifecycle);
+        context.AddService<IPropertyRelationshipHandler>(reentrantHandler);
+        context
+            .WithFullPropertyTracking()
+            .WithParents()
+            .WithRegistry();
+
+        var registry = context.GetService<ISubjectRegistry>();
+        var parent = new Person(context) { FirstName = "Parent" };
+        var first = new Person { FirstName = "First" };
+        var writtenValue = new[] { first };
+        reentrantHandler.Callback = () => parent.Children = [];
+
+        // Act
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            parent.Children = writtenValue);
+
+        // Assert
+        Assert.Contains("already being reconciled", exception.Message);
+        Assert.Same(writtenValue, parent.Children);
+        AssertSingleRelationshipGeneration(parent, first, registry);
+        Assert.Equal(2, first.GetReferenceCount());
+
+        // Act: a later write must diff from the retained canonical generation.
+        var replacement = new Person { FirstName = "Replacement" };
+        parent.Children = [replacement];
+
+        // Assert
+        AssertSingleRelationshipGeneration(parent, replacement, registry);
+        Assert.Null(registry.TryGetRegisteredSubject(first));
+        Assert.Empty(first.GetParents());
+        Assert.Equal(0, first.GetReferenceCount());
+        Assert.Equal(2, replacement.GetReferenceCount());
+    }
+
+    private static void AssertSingleRelationshipGeneration(
+        Person parent,
+        Person child,
+        ISubjectRegistry registry)
+    {
+        var registeredParent = registry.TryGetRegisteredSubject(parent)!;
+        var childRelationship = Assert.Single(
+            registeredParent.TryGetProperty(nameof(Person.Children))!.Children);
+        var parentRelationship = Assert.Single(registry.TryGetRegisteredSubject(child)!.Parents);
+        var trackedParent = Assert.Single(child.GetParents());
+
+        Assert.Same(child, childRelationship.Subject);
+        Assert.Equal(0, childRelationship.Index);
+        Assert.Same(parent, parentRelationship.Property.Subject);
+        Assert.Equal(nameof(Person.Children), parentRelationship.Property.Name);
+        Assert.Equal(0, parentRelationship.Index);
+        Assert.Same(parent, trackedParent.Property.Subject);
+        Assert.Equal(nameof(Person.Children), trackedParent.Property.Name);
+        Assert.Equal(0, trackedParent.Index);
+    }
+
     /// <summary>
     /// Multiple threads rapidly replace the same ObjectRef property.
     /// After all threads finish and the property is set to a known final value,
@@ -890,5 +959,25 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             $"This indicates the registry re-registers a parent subject via RegisterSubject " +
             $"after it was concurrently detached, leaving it in _knownSubjects with " +
             $"refCount=0 and no parent references.");
+    }
+
+    private sealed class SamePropertyReentrantRelationshipHandler : IPropertyRelationshipHandler
+    {
+        private bool _hasReentered;
+
+        public Action? Callback { get; set; }
+
+        public void ReconcileChildRelationships(
+            PropertyReference property,
+            ReadOnlySpan<SubjectPropertyRelationship> relationships)
+        {
+            if (!_hasReentered &&
+                property.Name == nameof(Person.Children) &&
+                !relationships.IsEmpty)
+            {
+                _hasReentered = true;
+                Callback?.Invoke();
+            }
+        }
     }
 }

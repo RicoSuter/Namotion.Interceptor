@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -105,7 +106,14 @@ public class PropertyRelationshipHandlerTests
 
         // Assert
         Assert.Same(expectedException, actualException);
+        Assert.Contains(nameof(ThrowWithOriginalStack), actualException.StackTrace);
         Assert.Equal(["first", "second", "subject"], calls);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowWithOriginalStack(Exception exception)
+    {
+        throw exception;
     }
 
     private sealed class RecordingRelationshipHandler(string name, List<string> calls) : IPropertyRelationshipHandler
@@ -137,7 +145,7 @@ public class PropertyRelationshipHandlerTests
         public void ReconcileChildRelationships(PropertyReference property, ReadOnlySpan<SubjectPropertyRelationship> relationships)
         {
             calls.Add(name);
-            throw exception;
+            ThrowWithOriginalStack(exception);
         }
     }
 }

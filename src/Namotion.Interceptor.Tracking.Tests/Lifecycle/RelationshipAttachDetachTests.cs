@@ -331,6 +331,46 @@ public class RelationshipAttachDetachTests
         Assert.Same(child, Assert.Single(published.Relationships).Child);
     }
 
+    [Fact]
+    public void WhenALifecycleCallbackWritesAnotherProperty_ThenBothCanonicalGenerationsConverge()
+    {
+        // A subject-wide re-entry guard would reject the supported callback write even though the second
+        // property has an independent canonical baseline.
+        // Arrange
+        var relationshipHandler = new RecordingRelationshipHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle();
+        var parent = new ThrowingStructuralContainer();
+        var first = new Person { FirstName = "first" };
+        var second = new Person { FirstName = "second" };
+        var lifecycleHandler = new CallbackLifecycleHandler(change =>
+        {
+            if (ReferenceEquals(change.Subject, first) &&
+                change.IsPropertyReferenceAdded &&
+                change.Property is { } property &&
+                property.Name == nameof(ThrowingStructuralContainer.FirstItems))
+            {
+                parent.SecondItems = [second];
+            }
+        });
+        context.AddService<IPropertyRelationshipHandler>(relationshipHandler);
+        context.AddService<ILifecycleHandler>(lifecycleHandler);
+        ((IInterceptorSubject)parent).Context.AddFallbackContext(context);
+        relationshipHandler.Generations.Clear();
+
+        // Act
+        parent.FirstItems = [first];
+
+        // Assert
+        Assert.Same(first, Assert.Single(relationshipHandler.GetLastRelationships(
+            new PropertyReference(parent, nameof(ThrowingStructuralContainer.FirstItems)))).Child);
+        Assert.Same(second, Assert.Single(relationshipHandler.GetLastRelationships(
+            new PropertyReference(parent, nameof(ThrowingStructuralContainer.SecondItems)))).Child);
+        Assert.Equal(1, first.GetReferenceCount());
+        Assert.Equal(1, second.GetReferenceCount());
+    }
+
     private sealed class RecordingRelationshipHandler : IPropertyRelationshipHandler
     {
         public List<RelationshipGeneration> Generations { get; } = [];
