@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -301,39 +302,56 @@ public class ParentTrackingHandlerTests
         var secondOther = new Car { Name = "second other" };
         var garage = new Garage(context) { CarArray = [child, firstOther, child] };
         var viewLock = GetParentViewLock(child);
-        using var readerStarted = new ManualResetEventSlim();
-        using var writerStarted = new ManualResetEventSlim();
+        using var viewLockAcquired = new ManualResetEventSlim();
+        using var releaseViewLock = new ManualResetEventSlim();
         Thread? readerThread = null;
         Thread? writerThread = null;
-        Task<IReadOnlyList<object?>> readerTask;
-        Task writerTask;
+        Task<IReadOnlyList<object?>>? readerTask = null;
+        Task? writerTask = null;
+
+        var viewLockOwnerTask = Task.Run(() =>
+        {
+            using (viewLock.EnterScope())
+            {
+                viewLockAcquired.Set();
+                releaseViewLock.Wait();
+            }
+        });
 
         // Act
-        using (viewLock.EnterScope())
+        try
         {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => viewLockAcquired.IsSet || viewLockOwnerTask.IsCompleted,
+                message: "View-lock owner should acquire the reflected lock.");
+            Assert.False(viewLockOwnerTask.IsCompleted, "View-lock owner exited before release.");
+            Assert.True(viewLockAcquired.IsSet);
+
             readerTask = Task.Run(() =>
             {
                 readerThread = Thread.CurrentThread;
-                readerStarted.Set();
                 return (IReadOnlyList<object?>)child.GetParents().Select(parent => parent.Index).ToArray();
             });
-            readerStarted.Wait();
-            SpinWait.SpinUntil(
-                () => readerThread is not null && readerThread.ThreadState.HasFlag(ThreadState.WaitSleepJoin));
+            await AssertWorkerBlockedAsync(readerTask, () => readerThread, "Reader");
 
             writerTask = Task.Run(() =>
             {
                 writerThread = Thread.CurrentThread;
-                writerStarted.Set();
                 garage.CarArray = [firstOther, child, secondOther, child];
             });
-            writerStarted.Wait();
-            SpinWait.SpinUntil(
-                () => writerThread is not null && writerThread.ThreadState.HasFlag(ThreadState.WaitSleepJoin));
+            await AssertWorkerBlockedAsync(writerTask, () => writerThread, "Writer");
+        }
+        finally
+        {
+            releaseViewLock.Set();
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => viewLockOwnerTask.IsCompleted,
+                message: "View-lock owner should release the reflected lock.");
+            await viewLockOwnerTask;
         }
 
-        var racedGeneration = await readerTask;
-        await writerTask;
+        var racedGeneration = await readerTask!;
+        await writerTask!;
         var currentGeneration = child.GetParents().Select(parent => parent.Index).ToArray();
 
         // Assert
@@ -342,6 +360,27 @@ public class ParentTrackingHandlerTests
             racedGeneration.SequenceEqual(new object?[] { 1, 3 }));
         Assert.Equal([1, 3], currentGeneration);
     }
+
+    private static async Task AssertWorkerBlockedAsync(
+        Task worker,
+        Func<Thread?> getThread,
+        string workerName)
+    {
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => worker.IsCompleted || IsBlocked(getThread()),
+            message: $"{workerName} should reach the reflected view lock.");
+
+        if (worker.IsFaulted || worker.IsCanceled)
+        {
+            await worker;
+        }
+
+        Assert.False(worker.IsCompleted, $"{workerName} completed without waiting for the reflected view lock.");
+        Assert.True(IsBlocked(getThread()), $"{workerName} did not reach the expected blocked state.");
+    }
+
+    private static bool IsBlocked(Thread? thread) =>
+        thread is not null && thread.ThreadState.HasFlag(ThreadState.WaitSleepJoin);
 
     private static Lock GetParentViewLock(IInterceptorSubject subject)
     {
