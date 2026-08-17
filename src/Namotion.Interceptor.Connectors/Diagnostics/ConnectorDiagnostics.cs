@@ -33,8 +33,8 @@ public class ConnectorDiagnostics
     public bool IsOperational => _metrics.IsOperational;
 
     /// <summary>
-    /// Gets when <see cref="IsOperational"/> last changed, or <c>null</c> if the connector has never
-    /// started. Moves whenever the flag moves, so the pair reads as "up since T" or "down since T".
+    /// Gets when <see cref="IsOperational"/> last changed, or <c>null</c> until the first liveness
+    /// change. Moves whenever the flag moves, so the pair reads as "up since T" or "down since T".
     /// </summary>
     public DateTimeOffset? OperationalChangeTime => _metrics.OperationalChangeTime;
 

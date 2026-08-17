@@ -134,7 +134,7 @@ builder.Services.AddWebSocketSubjectServer<Device>(configuration =>
     // Network settings
     configuration.Port = 8080;              // Default: 8080
     configuration.Path = "/ws";             // Default: "/ws"
-    configuration.BindAddress = "127.0.0.1"; // Default: null (all interfaces)
+    configuration.BindAddress = "127.0.0.1"; // Default: null (localhost)
 
     // Performance tuning
     configuration.BufferTime = TimeSpan.FromMilliseconds(8);  // Batch updates
