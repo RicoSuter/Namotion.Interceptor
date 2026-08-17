@@ -173,3 +173,107 @@ The full project runs included their public API verification tests. The new fiel
 - Result commit hash: reported in the parent handoff because a commit cannot contain its own final hash.
 - Architecture conflicts: none found.
 - Remaining concerns: none within the requested scope. The approved overlapping-authority removal limitation remains unchanged.
+
+## Lifecycle fix review round 1: durable getterless ordering
+
+### Reviewer finding and hypothesis
+
+The first getterless ordering fix retained the committed revision in `ProcessedPropertyState`. That state belongs to one lifecycle authority and is removed on detach. Reattaching a setter-only subject stages an empty generation with revision zero because there is no getter. An older invocation parked after its terminal commit can therefore resume after detach and reattach, see no newer processed revision, and publish its stale captured value even though a later terminal commit still owns the backing store.
+
+The durable per-property terminal watermark in `PropertyWriteState` survives lifecycle cleanup. Lifecycle reconciliation models the subject's own backing store, so both local and source-originated commits have already reached its destination and must participate in ordering.
+
+### Deterministic RED
+
+The existing event-gated getterless race was extended as follows:
+
+1. T1 commits local generation A and parks downstream before lifecycle reconciliation.
+2. T2 commits generation B from a source and fully reconciles.
+3. The test proves the non-source watermark equals T1's revision while the all-terminal watermark is newer.
+4. The subject detaches and reattaches, clearing lifecycle membership and rebuilding getterless processed state without a value.
+5. T1 is released.
+
+Command:
+
+```text
+dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --filter "FullyQualifiedName~ConcurrentWriteLifecycleTests.WhenAnOlderSetterOnlyWriteResumesAfterLifecycleReattach_ThenTheLatestTerminalRevisionRemainsAuthoritative" --no-restore
+```
+
+Observed failure:
+
+```text
+Assert.Equal() Failure: Values differ
+Expected: 0
+Actual:   1
+ConcurrentWriteLifecycleTests.cs:line 332
+Failed: 1, Passed: 0, Total: 1
+```
+
+The stale A generation was attached after lifecycle cleanup even though B remained the latest terminal commit.
+
+### Root cause and implementation
+
+`ProcessedPropertyState.Revision` was not a terminal watermark. It was cleared with lifecycle canonical state, so it could not order an invocation across detach and reattach.
+
+Getterless reconciliation now calls:
+
+```text
+PropertyReference.TryGetWriteState(
+    includeSourceCommitsInRevision: true,
+    out latestTerminalRevision,
+    out _)
+```
+
+It skips only when `context.Revision < latestTerminalRevision`. Strict inequality is intentional. An invocation whose revision equals the terminal watermark remains eligible to retry reconciliation after a pre-commit enumeration or handler failure. The three-authority same-property unwind also relies on each authority being able to reconcile the same committed revision.
+
+`ProcessedPropertyState.Revision`, the reconciler revision argument, and all associated state plumbing were removed, restoring the compact processed state. Getter-backed properties do not consult the watermark and retain their existing backing-value re-read under the lifecycle lock.
+
+### Source commit semantics
+
+The RED makes T2 source-originated. Before cleanup it asserts:
+
+- `TryGetWriteState(false, ...)` returns T1's older local revision.
+- `TryGetWriteState(true, ...)` returns T2's newer terminal revision.
+
+This pins `includeSourceCommitsInRevision: true` as required. Using the non-source watermark would compare T1 against its own equal revision and incorrectly allow the stale reconciliation.
+
+### GREEN and regression results
+
+The exact focused regression passed 1 of 1 tests.
+
+Focused Tracking attach and reconciler matrix:
+
+```text
+Passed: 25, Failed: 0, Skipped: 0
+```
+
+This includes both initial-attach staging regressions and the focused reconciler suite.
+
+Focused Registry lifecycle matrix:
+
+```text
+Passed: 5, Failed: 0, Skipped: 0
+```
+
+This includes the three-authority same-property regression, which proves equal-revision upstream reconciliation remains eligible, and all four getter-backed same-property concurrency configurations.
+
+Full projects:
+
+```text
+dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --no-restore
+Passed: 557, Failed: 0, Skipped: 0
+
+dotnet test src/Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj --no-restore
+Passed: 205, Failed: 0, Skipped: 0
+```
+
+Round 1 diff verification:
+
+```text
+git diff --check
+exit 0, no output
+```
+
+- Required round 1 commit message: `fix(tracking): retain getterless write ordering`
+- Result commit hash: reported in the parent handoff because a commit cannot contain its own final hash.
+- Architecture conflicts: none found.
+- Remaining concerns: none within the requested scope.

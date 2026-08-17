@@ -584,25 +584,28 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
 
             // The terminal write runs outside this lock. Re-read the actual backing value after acquiring
             // the writer lock so racing writes converge to the latest value visible to this authority.
-            // Setter-only generated properties have no getter, so their committed write value is authoritative.
+            // Setter-only generated properties have no getter. The terminal watermark outlives lifecycle
+            // cleanup, and every terminal reached this backing store even when its origin was a source.
             var hasGetter = metadata.GetValue is { };
-            var value = metadata.GetValue is { } getValue
-                ? getValue(property.Subject)
-                : useWrittenValueWhenGetterMissing ? writtenValue : null;
-            _processedProperties.TryGetValue(property, out var previousState);
             if (!hasGetter &&
-                previousState is not null &&
-                writtenRevision < previousState.Revision)
+                property.TryGetWriteState(
+                    includeSourceCommitsInRevision: true,
+                    out var latestTerminalRevision,
+                    out _) &&
+                writtenRevision < latestTerminalRevision)
             {
                 return;
             }
 
+            var value = metadata.GetValue is { } getValue
+                ? getValue(property.Subject)
+                : useWrittenValueWhenGetterMissing ? writtenValue : null;
+            _processedProperties.TryGetValue(property, out var previousState);
             var reconciliation = SubjectPropertyRelationshipReconciler.Stage(
                 property,
                 value,
                 previousState,
-                materializeRelationships,
-                Math.Max(writtenRevision, previousState?.Revision ?? 0));
+                materializeRelationships);
             List<AppliedMembership>? appliedAdditions = null;
 
             // Enumeration can run user code which re-enters lifecycle operations because Monitor is

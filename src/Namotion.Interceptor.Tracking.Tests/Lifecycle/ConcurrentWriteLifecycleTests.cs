@@ -6,6 +6,7 @@ using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -250,10 +251,10 @@ public class ConcurrentWriteLifecycleTests
 
     [Fact]
     [Trait("Category", "Concurrency")]
-    public async Task WhenAnOlderSetterOnlyWriteResumesAfterANewerReconciliation_ThenTheNewerCommittedGenerationRemainsCanonical()
+    public async Task WhenAnOlderSetterOnlyWriteResumesAfterLifecycleReattach_ThenTheLatestTerminalRevisionRemainsAuthoritative()
     {
-        // Reconciling a getterless property from an older invocation after a newer commit would overwrite
-        // canonical membership because the lifecycle authority cannot re-read the actual backing value.
+        // Lifecycle cleanup must not make an older getterless invocation eligible again after a newer source
+        // commit, because the authority cannot re-read which value the setter-only backing store retained.
         // Arrange
         var first = new Car { Name = "First" };
         var second = new Car { Name = "Second" };
@@ -268,6 +269,8 @@ public class ConcurrentWriteLifecycleTests
         context.WithLifecycle();
         context.AddService<IPropertyRelationshipHandler>(relationshipHandler);
         var garage = new Garage(context);
+        var garageContext = ((IInterceptorSubject)garage).Context;
+        var property = new PropertyReference(garage, nameof(Garage.SetterOnlyCars));
         relationshipHandler.Generations.Clear();
 
         // Act: park the first write after its terminal commit, then let the newer write reconcile completely.
@@ -289,11 +292,27 @@ public class ConcurrentWriteLifecycleTests
             Assert.True(writeGate.BackingCommitted.IsSet);
             Assert.False(firstWriter.IsCompleted);
 
-            garage.SetterOnlyCars = secondGeneration;
+            property.SetValueFromSource(new object(), null, null, secondGeneration);
 
             Assert.Equal(0, first.GetReferenceCount());
             Assert.Equal(1, second.GetReferenceCount());
             Assert.Same(second, Assert.Single(Assert.Single(relationshipHandler.Generations)).Child);
+            Assert.True(property.TryGetWriteState(
+                includeSourceCommitsInRevision: false,
+                out var latestNonSourceRevision,
+                out _));
+            Assert.Equal(writeGate.CommittedRevision, latestNonSourceRevision);
+            Assert.True(property.TryGetWriteState(
+                includeSourceCommitsInRevision: true,
+                out var latestTerminalRevision,
+                out _));
+            Assert.True(latestTerminalRevision > writeGate.CommittedRevision);
+
+            Assert.True(garageContext.RemoveFallbackContext(context));
+            Assert.Equal(0, second.GetReferenceCount());
+            Assert.True(garageContext.AddFallbackContext(context));
+            Assert.Equal(0, first.GetReferenceCount());
+            Assert.Equal(0, second.GetReferenceCount());
         }
         catch (Exception exception)
         {
@@ -311,8 +330,8 @@ public class ConcurrentWriteLifecycleTests
 
         // Assert
         Assert.Equal(0, first.GetReferenceCount());
-        Assert.Equal(1, second.GetReferenceCount());
-        Assert.Same(second, Assert.Single(relationshipHandler.Generations[^1]).Child);
+        Assert.Equal(0, second.GetReferenceCount());
+        Assert.Empty(relationshipHandler.Generations[^1]);
     }
 
     [Fact]
@@ -457,9 +476,13 @@ public class ConcurrentWriteLifecycleTests
     private sealed class AfterCommitWriteGate(string propertyName, object expectedValue)
         : IWriteInterceptor, IDisposable
     {
+        private long _committedRevision;
+
         public ManualResetEventSlim BackingCommitted { get; } = new();
 
         public ManualResetEventSlim Release { get; } = new();
+
+        public long CommittedRevision => Interlocked.Read(ref _committedRevision);
 
         public void WriteProperty<TProperty>(
             ref PropertyWriteContext<TProperty> context,
@@ -472,6 +495,11 @@ public class ConcurrentWriteLifecycleTests
             }
 
             // ManualResetEventSlim owns publication between the writer and test thread.
+            Assert.True(context.Property.TryGetWriteState(
+                includeSourceCommitsInRevision: true,
+                out var committedRevision,
+                out _));
+            Interlocked.Exchange(ref _committedRevision, committedRevision);
             BackingCommitted.Set();
             if (!Release.Wait(TimeSpan.FromSeconds(10)))
             {
