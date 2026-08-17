@@ -59,17 +59,22 @@ public class SubjectPropertyRelationshipReconcilerTests
         // Act
         var reconciliation = SubjectPropertyRelationshipReconciler.Stage(
             property,
-            new[] { fourth, fifth },
+            new[] { fourth, second, fifth, second },
             previous,
             materializeRelationships: false);
 
         // Assert
         Assert.Equal(
-            new IInterceptorSubject[] { third, first, second },
+            new IInterceptorSubject[] { third, first },
             reconciliation.MembershipRemovals.Select(membership => membership.Subject));
         Assert.Equal(
             new IInterceptorSubject[] { fourth, fifth },
             reconciliation.MembershipAdditions.Select(membership => membership.Subject));
+        var retainedMembership = Assert.Single(
+            reconciliation.State.Memberships,
+            membership => ReferenceEquals(membership.Subject, second));
+        Assert.Equal(1, retainedMembership.FirstOccurrenceOrdinal);
+        Assert.Equal(3, retainedMembership.LastOccurrenceOrdinal);
     }
 
     [Fact]

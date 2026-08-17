@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Immutable;
 using System.Collections.ObjectModel;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -452,6 +453,168 @@ public class RelationshipReconciliationTests
         Assert.Null(child.TryGetRegisteredSubject());
     }
 
+    [Fact]
+    public void WhenProvisionalRelationshipsChange_ThenExactSnapshotsRemainFrozenUntilFullReplacement()
+    {
+        // Collapsing committed duplicates, appending retry tombstones, or mutating a cached projection would
+        // change at least one exact subject/key sequence captured across these provisional transitions.
+        // Arrange
+        var relationshipHandler = new RecordingRelationshipHandler();
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        context.AddService<IPropertyRelationshipHandler>(relationshipHandler);
+        var parent = new OpaqueKeyDirectory(context);
+        var duplicate = new Person { FirstName = "Duplicate" };
+        var retained = new Person { FirstName = "Retained" };
+        var removed = new Person { FirstName = "Removed" };
+        var firstAddition = new Person { FirstName = "First addition" };
+        var secondAddition = new Person { FirstName = "Second addition" };
+        var firstDuplicateKey = new OpaqueKey("duplicate-first");
+        var retainedKey = new OpaqueKey("retained");
+        var secondDuplicateKey = new OpaqueKey("duplicate-second");
+        var removedKey = new OpaqueKey("removed");
+        var firstAdditionKey = new OpaqueKey("first-addition");
+        var secondAdditionKey = new OpaqueKey("second-addition");
+
+        var committedRelationships = AssignAndGetGeneration(
+            relationshipHandler,
+            () => parent.Items = new OpaqueReadOnlyDictionary(
+                (firstDuplicateKey, duplicate),
+                (retainedKey, retained),
+                (secondDuplicateKey, duplicate),
+                (removedKey, removed)));
+        var additionRelationships = AssignAndGetGeneration(
+            relationshipHandler,
+            () => parent.Items = new OpaqueReadOnlyDictionary(
+                (firstAdditionKey, firstAddition),
+                (secondAdditionKey, secondAddition)));
+        var finalRelationships = AssignAndGetGeneration(
+            relationshipHandler,
+            () => parent.Items = new OpaqueReadOnlyDictionary(
+                (firstAdditionKey, firstAddition),
+                (firstDuplicateKey, duplicate),
+                (retainedKey, retained),
+                (secondDuplicateKey, duplicate),
+                (secondAdditionKey, secondAddition)));
+        var property = new RegisteredSubject(parent)
+            .TryGetProperty(nameof(OpaqueKeyDirectory.Items))!;
+        property.ReplaceChildRelationships(committedRelationships.ToImmutableArray());
+        var committedSnapshot = property.Children;
+
+        // Act & Assert: remove one committed membership while duplicates and a retained membership stay visible.
+        property.RemoveChildRelationships(removed);
+        var removalSnapshot = property.Children;
+        AssertChildren(removalSnapshot,
+            (duplicate, firstDuplicateKey),
+            (retained, retainedKey),
+            (duplicate, secondDuplicateKey));
+
+        // Act & Assert: provisional additions append in lifecycle order.
+        property.AddChildRelationship(additionRelationships[0]);
+        property.AddChildRelationship(additionRelationships[1]);
+        var provisionalSnapshot = property.Children;
+        AssertChildren(provisionalSnapshot,
+            (duplicate, firstDuplicateKey),
+            (retained, retainedKey),
+            (duplicate, secondDuplicateKey),
+            (firstAddition, firstAdditionKey),
+            (secondAddition, secondAdditionKey));
+
+        // Act & Assert: replacing an active addition moves one node to the end without duplicating it.
+        property.AddChildRelationship(additionRelationships[0]);
+        var replacedAdditionSnapshot = property.Children;
+        AssertChildren(replacedAdditionSnapshot,
+            (duplicate, firstDuplicateKey),
+            (retained, retainedKey),
+            (duplicate, secondDuplicateKey),
+            (secondAddition, secondAdditionKey),
+            (firstAddition, firstAdditionKey));
+
+        // Act & Assert: removing and re-adding an addition unlinks it and appends one active node.
+        property.RemoveChildRelationships(firstAddition);
+        var provisionalRemovalSnapshot = property.Children;
+        AssertChildren(provisionalRemovalSnapshot,
+            (duplicate, firstDuplicateKey),
+            (retained, retainedKey),
+            (duplicate, secondDuplicateKey),
+            (secondAddition, secondAdditionKey));
+        property.AddChildRelationship(additionRelationships[0]);
+        var readdedSnapshot = property.Children;
+        AssertChildren(readdedSnapshot,
+            (duplicate, firstDuplicateKey),
+            (retained, retainedKey),
+            (duplicate, secondDuplicateKey),
+            (secondAddition, secondAdditionKey),
+            (firstAddition, firstAdditionKey));
+
+        // Act & Assert: re-adding a removed committed duplicate suppresses both old occurrences.
+        property.RemoveChildRelationships(duplicate);
+        var duplicateRemovalSnapshot = property.Children;
+        AssertChildren(duplicateRemovalSnapshot,
+            (retained, retainedKey),
+            (secondAddition, secondAdditionKey),
+            (firstAddition, firstAdditionKey));
+        property.AddChildRelationship(committedRelationships[0]);
+        var duplicateReaddedSnapshot = property.Children;
+        AssertChildren(duplicateReaddedSnapshot,
+            (retained, retainedKey),
+            (secondAddition, secondAdditionKey),
+            (firstAddition, firstAdditionKey),
+            (duplicate, firstDuplicateKey));
+
+        // Act: full publication replaces the complete group and clears the provisional overlay.
+        property.ReplaceChildRelationships(finalRelationships.ToImmutableArray());
+        var finalSnapshot = property.Children;
+
+        // Assert
+        AssertChildren(finalSnapshot,
+            (firstAddition, firstAdditionKey),
+            (duplicate, firstDuplicateKey),
+            (retained, retainedKey),
+            (duplicate, secondDuplicateKey),
+            (secondAddition, secondAdditionKey));
+        AssertChildren(committedSnapshot,
+            (duplicate, firstDuplicateKey),
+            (retained, retainedKey),
+            (duplicate, secondDuplicateKey),
+            (removed, removedKey));
+        AssertChildren(removalSnapshot,
+            (duplicate, firstDuplicateKey),
+            (retained, retainedKey),
+            (duplicate, secondDuplicateKey));
+        AssertChildren(provisionalSnapshot,
+            (duplicate, firstDuplicateKey),
+            (retained, retainedKey),
+            (duplicate, secondDuplicateKey),
+            (firstAddition, firstAdditionKey),
+            (secondAddition, secondAdditionKey));
+        AssertChildren(replacedAdditionSnapshot,
+            (duplicate, firstDuplicateKey),
+            (retained, retainedKey),
+            (duplicate, secondDuplicateKey),
+            (secondAddition, secondAdditionKey),
+            (firstAddition, firstAdditionKey));
+        AssertChildren(provisionalRemovalSnapshot,
+            (duplicate, firstDuplicateKey),
+            (retained, retainedKey),
+            (duplicate, secondDuplicateKey),
+            (secondAddition, secondAdditionKey));
+        AssertChildren(readdedSnapshot,
+            (duplicate, firstDuplicateKey),
+            (retained, retainedKey),
+            (duplicate, secondDuplicateKey),
+            (secondAddition, secondAdditionKey),
+            (firstAddition, firstAdditionKey));
+        AssertChildren(duplicateRemovalSnapshot,
+            (retained, retainedKey),
+            (secondAddition, secondAdditionKey),
+            (firstAddition, firstAdditionKey));
+        AssertChildren(duplicateReaddedSnapshot,
+            (retained, retainedKey),
+            (secondAddition, secondAdditionKey),
+            (firstAddition, firstAdditionKey),
+            (duplicate, firstDuplicateKey));
+    }
+
     private static IInterceptorSubjectContext CreateContext() => InterceptorSubjectContext
         .Create()
         .WithParents()
@@ -616,6 +779,27 @@ public class RelationshipReconciliationTests
         Assert.DoesNotContain(registry.KnownSubjects.Keys, known => ReferenceEquals(known, subject));
     }
 
+    private static SubjectPropertyRelationship[] AssignAndGetGeneration(
+        RecordingRelationshipHandler relationshipHandler,
+        Action assignment)
+    {
+        relationshipHandler.Generations.Clear();
+        assignment();
+        return Assert.Single(relationshipHandler.Generations);
+    }
+
+    private static void AssertChildren(
+        ImmutableArray<SubjectPropertyChild> actual,
+        params (IInterceptorSubject Subject, object Index)[] expected)
+    {
+        Assert.Equal(expected.Length, actual.Length);
+        for (var index = 0; index < expected.Length; index++)
+        {
+            Assert.Same(expected[index].Subject, actual[index].Subject);
+            Assert.Same(expected[index].Index, actual[index].Index);
+        }
+    }
+
     private static void AssertIndex(object? expected, object? actual)
     {
         if (expected is OpaqueKey)
@@ -662,6 +846,22 @@ public class RelationshipReconciliationTests
                 {
                     throw new InvalidOperationException("Enumeration failed after yielding one item.");
                 }
+            }
+        }
+    }
+
+    private sealed class RecordingRelationshipHandler : IPropertyRelationshipHandler
+    {
+        public List<SubjectPropertyRelationship[]> Generations { get; } = [];
+
+        public void ReconcileChildRelationships(
+            PropertyReference property,
+            ReadOnlySpan<SubjectPropertyRelationship> relationships)
+        {
+            if (property.Subject is OpaqueKeyDirectory &&
+                property.Name == nameof(OpaqueKeyDirectory.Items))
+            {
+                Generations.Add(relationships.ToArray());
             }
         }
     }

@@ -12,6 +12,8 @@ public class RegisteredSubjectProperty
 {
     private readonly Lock _childrenLock = new();
     private ImmutableArray<SubjectPropertyRelationship> _relationships = [];
+    private Dictionary<IInterceptorSubject, ProvisionalChildState>? _provisionalChildren;
+    private LinkedList<SubjectPropertyRelationship>? _provisionalAdditions;
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
 
     private readonly PropertyAttributeAttribute? _attributeMetadata;
@@ -180,14 +182,42 @@ public class RegisteredSubjectProperty
             {
                 if (_childrenCache.IsDefault)
                 {
-                    var builder = ImmutableArray.CreateBuilder<SubjectPropertyChild>(_relationships.Length);
+                    var count = _provisionalAdditions?.Count ?? 0;
                     foreach (var relationship in _relationships)
                     {
-                        builder.Add(new SubjectPropertyChild
+                        if (_provisionalChildren is null ||
+                            !_provisionalChildren.TryGetValue(relationship.Child, out var state) ||
+                            state.IncludeCommittedRelationships)
                         {
-                            Subject = relationship.Child,
-                            Index = relationship.Index
-                        });
+                            count++;
+                        }
+                    }
+
+                    var builder = ImmutableArray.CreateBuilder<SubjectPropertyChild>(count);
+                    foreach (var relationship in _relationships)
+                    {
+                        if (_provisionalChildren is null ||
+                            !_provisionalChildren.TryGetValue(relationship.Child, out var state) ||
+                            state.IncludeCommittedRelationships)
+                        {
+                            builder.Add(new SubjectPropertyChild
+                            {
+                                Subject = relationship.Child,
+                                Index = relationship.Index
+                            });
+                        }
+                    }
+
+                    if (_provisionalAdditions is not null)
+                    {
+                        foreach (var relationship in _provisionalAdditions)
+                        {
+                            builder.Add(new SubjectPropertyChild
+                            {
+                                Subject = relationship.Child,
+                                Index = relationship.Index
+                            });
+                        }
                     }
 
                     _childrenCache = builder.MoveToImmutable();
@@ -332,15 +362,21 @@ public class RegisteredSubjectProperty
     {
         lock (_childrenLock)
         {
-            foreach (var current in _relationships)
+            EnsureProvisionalChildren();
+            if (!_provisionalChildren!.TryGetValue(relationship.Child, out var state))
             {
-                if (ReferenceEquals(current.Child, relationship.Child))
-                {
-                    return;
-                }
+                state = new ProvisionalChildState();
+                _provisionalChildren.Add(relationship.Child, state);
             }
 
-            _relationships = _relationships.Add(relationship);
+            state.IncludeCommittedRelationships = false;
+            if (state.AdditionNode is not null)
+            {
+                _provisionalAdditions!.Remove(state.AdditionNode);
+            }
+
+            _provisionalAdditions ??= [];
+            state.AdditionNode = _provisionalAdditions.AddLast(relationship);
             _childrenCache = default;
         }
     }
@@ -349,19 +385,26 @@ public class RegisteredSubjectProperty
     {
         lock (_childrenLock)
         {
-            var builder = ImmutableArray.CreateBuilder<SubjectPropertyRelationship>(_relationships.Length);
-            foreach (var relationship in _relationships)
+            EnsureProvisionalChildren();
+            if (_provisionalChildren!.TryGetValue(child, out var state))
             {
-                if (!ReferenceEquals(relationship.Child, child))
+                var changed = state.IncludeCommittedRelationships || state.AdditionNode is not null;
+                state.IncludeCommittedRelationships = false;
+                if (state.AdditionNode is not null)
                 {
-                    builder.Add(relationship);
+                    _provisionalAdditions!.Remove(state.AdditionNode);
+                    state.AdditionNode = null;
                 }
-            }
 
-            if (builder.Count != _relationships.Length)
-            {
-                _relationships = builder.ToImmutable();
-                _childrenCache = default;
+                if (!state.HasCommittedRelationships)
+                {
+                    _provisionalChildren.Remove(child);
+                }
+
+                if (changed)
+                {
+                    _childrenCache = default;
+                }
             }
         }
     }
@@ -371,7 +414,40 @@ public class RegisteredSubjectProperty
         lock (_childrenLock)
         {
             _relationships = relationships;
+            _provisionalChildren = null;
+            _provisionalAdditions = null;
             _childrenCache = default;
         }
+    }
+
+    private void EnsureProvisionalChildren()
+    {
+        if (_provisionalChildren is not null)
+        {
+            return;
+        }
+
+        _provisionalChildren = new Dictionary<IInterceptorSubject, ProvisionalChildState>(
+            ReferenceEqualityComparer.Instance);
+        foreach (var relationship in _relationships)
+        {
+            if (!_provisionalChildren.ContainsKey(relationship.Child))
+            {
+                _provisionalChildren.Add(relationship.Child, new ProvisionalChildState
+                {
+                    HasCommittedRelationships = true,
+                    IncludeCommittedRelationships = true
+                });
+            }
+        }
+    }
+
+    private sealed class ProvisionalChildState
+    {
+        public bool HasCommittedRelationships { get; init; }
+
+        public bool IncludeCommittedRelationships { get; set; }
+
+        public LinkedListNode<SubjectPropertyRelationship>? AdditionNode { get; set; }
     }
 }

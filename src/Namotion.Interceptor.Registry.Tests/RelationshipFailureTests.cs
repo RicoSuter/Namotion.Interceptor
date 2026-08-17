@@ -151,6 +151,52 @@ public class RelationshipFailureTests
         Assert.Equal(1, child.GetReferenceCount());
     }
 
+    [Fact]
+    public void WhenLifecycleAdditionFailsAfterRegistryPublication_ThenRetryReplacesTheProvisionalSnapshot()
+    {
+        // Leaving provisional tombstones after a partial lifecycle attempt would duplicate or reorder the
+        // successful retry, while mutating the failed snapshot would hide the topology seen at the failure.
+        // Arrange
+        var throwingHandler = new ThrowOnceAfterRegistryLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        context.AddService<ILifecycleHandler>(throwingHandler);
+        var parent = new RelationshipFailureContainer(context);
+        var first = new Person { FirstName = "First" };
+        var second = new Person { FirstName = "Second" };
+        var writtenValue = new[] { first, second };
+        var property = parent.TryGetRegisteredSubject()!
+            .TryGetProperty(nameof(RelationshipFailureContainer.Children))!;
+        throwingHandler.Arm(parent);
+
+        // Act & Assert: Registry has applied the first provisional addition when the later handler fails.
+        var exception = Assert.Throws<InvalidOperationException>(() => parent.Children = writtenValue);
+        Assert.Same(throwingHandler.ExpectedException, exception);
+        Assert.Same(writtenValue, parent.Children);
+        var failedSnapshot = property.Children;
+        var provisionalChild = Assert.Single(failedSnapshot);
+        Assert.Same(first, provisionalChild.Subject);
+        Assert.Equal(0, provisionalChild.Index);
+
+        // Act: retry the already-written generation after the one-shot failure.
+        parent.Children = writtenValue;
+
+        // Assert
+        var finalSnapshot = property.Children;
+        Assert.Equal(2, finalSnapshot.Length);
+        Assert.Same(first, finalSnapshot[0].Subject);
+        Assert.Equal(0, finalSnapshot[0].Index);
+        Assert.Same(second, finalSnapshot[1].Subject);
+        Assert.Equal(1, finalSnapshot[1].Index);
+        provisionalChild = Assert.Single(failedSnapshot);
+        Assert.Same(first, provisionalChild.Subject);
+        Assert.Equal(0, provisionalChild.Index);
+        Assert.Equal(1, first.GetReferenceCount());
+        Assert.Equal(1, second.GetReferenceCount());
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowExpectedException(Exception exception)
     {
@@ -202,6 +248,30 @@ public class RelationshipFailureTests
         public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
             Changes.Add(change);
+        }
+    }
+
+    [RunsAfter(typeof(SubjectRegistry))]
+    private sealed class ThrowOnceAfterRegistryLifecycleHandler : ILifecycleHandler
+    {
+        private IInterceptorSubject? _parent;
+
+        public InvalidOperationException ExpectedException { get; } = new("Lifecycle addition failed.");
+
+        public void Arm(IInterceptorSubject parent)
+        {
+            _parent = parent;
+        }
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (_parent is not null &&
+                change.IsPropertyReferenceAdded &&
+                ReferenceEquals(change.Property?.Subject, _parent))
+            {
+                _parent = null;
+                throw ExpectedException;
+            }
         }
     }
 

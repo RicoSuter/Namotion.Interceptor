@@ -17,21 +17,18 @@ internal static class SubjectPropertyRelationshipReconciler
         previousState ??= ProcessedPropertyState.Empty;
         ImmutableArray<SubjectPropertyRelationship> relationships;
         ImmutableArray<RelationshipIndexKind> relationshipKinds;
-        ImmutableArray<SubjectPropertyRelationship> removedRelationships;
         if (materializeRelationships)
         {
             relationships = ReconcileRelationships(
                 property,
                 descriptors,
                 previousState,
-                out relationshipKinds,
-                out removedRelationships);
+                out relationshipKinds);
         }
         else
         {
             relationships = ImmutableArray<SubjectPropertyRelationship>.Empty;
             relationshipKinds = ImmutableArray<RelationshipIndexKind>.Empty;
-            removedRelationships = previousState.Relationships;
         }
 
         var membershipBuilders = new List<ProcessedSubjectMembershipBuilder>();
@@ -84,12 +81,6 @@ internal static class SubjectPropertyRelationshipReconciler
             descriptors.Count);
 
         var additions = ImmutableArray.CreateBuilder<ProcessedSubjectMembership>();
-        var newSubjects = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
-        foreach (var membership in state.Memberships)
-        {
-            newSubjects.Add(membership.Subject);
-        }
-
         var oldSubjects = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
         foreach (var membership in previousState.Memberships)
         {
@@ -107,7 +98,7 @@ internal static class SubjectPropertyRelationshipReconciler
         var removalsByLastOccurrence = new ProcessedSubjectMembership?[previousState.OccurrenceCount];
         foreach (var membership in previousState.Memberships)
         {
-            if (!newSubjects.Contains(membership.Subject))
+            if (!membershipIndexes.ContainsKey(membership.Subject))
             {
                 removalsByLastOccurrence[membership.LastOccurrenceOrdinal] = membership;
             }
@@ -125,16 +116,14 @@ internal static class SubjectPropertyRelationshipReconciler
         return new StagedPropertyReconciliation(
             state,
             removals.ToImmutable(),
-            additions.ToImmutable(),
-            removedRelationships);
+            additions.ToImmutable());
     }
 
     private static ImmutableArray<SubjectPropertyRelationship> ReconcileRelationships(
         PropertyReference property,
         List<SubjectOccurrenceDescriptor> descriptors,
         ProcessedPropertyState previousState,
-        out ImmutableArray<RelationshipIndexKind> relationshipKinds,
-        out ImmutableArray<SubjectPropertyRelationship> removedRelationships)
+        out ImmutableArray<RelationshipIndexKind> relationshipKinds)
     {
         var oldOccurrenceIndexes = new Dictionary<IInterceptorSubject, List<int>>(ReferenceEqualityComparer.Instance);
         for (var index = 0; index < previousState.Relationships.Length; index++)
@@ -150,7 +139,6 @@ internal static class SubjectPropertyRelationshipReconciler
         }
 
         var matchedOccurrenceCounts = new Dictionary<IInterceptorSubject, int>(ReferenceEqualityComparer.Instance);
-        var reusedOldRelationships = new bool[previousState.Relationships.Length];
         var relationships = ImmutableArray.CreateBuilder<SubjectPropertyRelationship>(descriptors.Count);
         var kinds = ImmutableArray.CreateBuilder<RelationshipIndexKind>(descriptors.Count);
 
@@ -170,7 +158,6 @@ internal static class SubjectPropertyRelationshipReconciler
                     if (CanReuse(oldRelationship, oldKind, descriptor))
                     {
                         relationship = oldRelationship;
-                        reusedOldRelationships[oldIndex] = true;
                     }
                 }
             }
@@ -179,17 +166,7 @@ internal static class SubjectPropertyRelationshipReconciler
             kinds.Add(descriptor.Kind);
         }
 
-        var removed = ImmutableArray.CreateBuilder<SubjectPropertyRelationship>();
-        for (var index = 0; index < previousState.Relationships.Length; index++)
-        {
-            if (!reusedOldRelationships[index])
-            {
-                removed.Add(previousState.Relationships[index]);
-            }
-        }
-
         relationshipKinds = kinds.MoveToImmutable();
-        removedRelationships = removed.ToImmutable();
         return relationships.MoveToImmutable();
     }
 
@@ -363,13 +340,11 @@ internal sealed class StagedPropertyReconciliation
     public StagedPropertyReconciliation(
         ProcessedPropertyState state,
         ImmutableArray<ProcessedSubjectMembership> membershipRemovals,
-        ImmutableArray<ProcessedSubjectMembership> membershipAdditions,
-        ImmutableArray<SubjectPropertyRelationship> removedRelationships)
+        ImmutableArray<ProcessedSubjectMembership> membershipAdditions)
     {
         State = state;
         MembershipRemovals = membershipRemovals;
         MembershipAdditions = membershipAdditions;
-        RemovedRelationships = removedRelationships;
     }
 
     public ProcessedPropertyState State { get; }
@@ -377,8 +352,6 @@ internal sealed class StagedPropertyReconciliation
     public ImmutableArray<ProcessedSubjectMembership> MembershipRemovals { get; }
 
     public ImmutableArray<ProcessedSubjectMembership> MembershipAdditions { get; }
-
-    public ImmutableArray<SubjectPropertyRelationship> RemovedRelationships { get; }
 
     public bool HasRelationshipGeneration =>
         State.OccurrenceCount > 0 ||
