@@ -171,6 +171,8 @@ public class UniqueContextServiceTests
         var descendant = InterceptorSubjectContext.Create();
         descendant.AddService(new UniqueAlpha("first"));
         var root = InterceptorSubjectContext.Create();
+        // Keep validation on the root's own state so this detects removal of upstream-state invalidation.
+        root.AddService("root");
         root.AddFallbackContext(descendant);
         _ = root.GetServices<object>();
 
