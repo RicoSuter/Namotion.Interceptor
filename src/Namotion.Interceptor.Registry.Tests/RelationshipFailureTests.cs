@@ -12,39 +12,79 @@ namespace Namotion.Interceptor.Registry.Tests;
 public class RelationshipFailureTests
 {
     [Fact]
-    public void WhenRegistryAppearsAfterRelationshipHandlerCapture_ThenLifecycleMetadataSeedsItsProvisionalRelationship()
+    public void WhenRegistryAppearsAfterRelationshipHandlerCapture_ThenProvisionalRelationshipIsLaterReplacedByFullGeneration()
     {
         // Capturing no relationship handlers before next() must remain compatible with Registry appearing
-        // before the later lifecycle-handler resolution. Otherwise the membership commits with a null
-        // Relationship and Registry throws instead of using the always-present property, subject, and index.
+        // before the later lifecycle-handler resolution. The first operation may seed only its lifecycle
+        // occurrence; a later operation captures Registry and must replace that provisional group exactly.
         // Arrange
         var lifecycle = new LifecycleInterceptor();
         var registry = new SubjectRegistry();
         var addRegistryInterceptor = new AddRegistryDuringWriteInterceptor(registry);
+        var lifecycleHandler = new RecordingLifecycleHandler();
         var context = InterceptorSubjectContext.Create();
         context.AddService(lifecycle);
         context.AddService(addRegistryInterceptor);
-        var parent = new Person(context) { FirstName = "Parent" };
+        context.AddService<ILifecycleHandler>(lifecycleHandler);
+        var parent = new TopologyRelationshipContainer(context);
         var child = new Person { FirstName = "Child" };
-        var writtenValue = new[] { child };
+        var firstKey = new EqualityTripwireKey("first");
+        var secondKey = new EqualityTripwireKey("second");
+        var writtenValue = new Dictionary<EqualityTripwireKey, Person>
+        {
+            [firstKey] = child,
+            [secondKey] = child
+        };
+        firstKey.Arm();
+        secondKey.Arm();
+        lifecycleHandler.Changes.Clear();
         addRegistryInterceptor.IsArmed = true;
 
         // Act
-        var exception = Record.Exception(() => parent.Children = writtenValue);
+        var exception = Record.Exception(() => parent.Items = writtenValue);
 
         // Assert
         Assert.Null(exception);
-        Assert.Same(writtenValue, parent.Children);
-        var relationship = Assert.Single(registry
+        Assert.Same(writtenValue, parent.Items);
+        var addition = Assert.Single(
+            lifecycleHandler.Changes,
+            change => ReferenceEquals(change.Subject, child) && change.IsPropertyReferenceAdded);
+        Assert.Null(addition.Relationship);
+        Assert.Same(firstKey, addition.Index);
+        Assert.Equal(nameof(TopologyRelationshipContainer.Items), addition.Property?.Name);
+
+        var registeredProperty = registry
             .TryGetRegisteredSubject(parent)!
-            .TryGetProperty(nameof(Person.Children))!
-            .Children);
-        var parentRelationship = Assert.Single(registry.TryGetRegisteredSubject(child)!.Parents);
-        Assert.Same(child, relationship.Subject);
-        Assert.Equal(0, relationship.Index);
-        Assert.Same(parent, parentRelationship.Property.Subject);
-        Assert.Equal(0, parentRelationship.Index);
+            .TryGetProperty(nameof(TopologyRelationshipContainer.Items))!;
+        var provisionalChild = Assert.Single(registeredProperty.Children);
+        var provisionalParent = Assert.Single(registry.TryGetRegisteredSubject(child)!.Parents);
+        Assert.Same(child, provisionalChild.Subject);
+        Assert.Same(firstKey, provisionalChild.Index);
+        Assert.Same(parent, provisionalParent.Property.Subject);
+        Assert.Same(firstKey, provisionalParent.Index);
         Assert.Equal(1, child.GetReferenceCount());
+        Assert.False(firstKey.WasInvoked);
+        Assert.False(secondKey.WasInvoked);
+        lifecycleHandler.Changes.Clear();
+
+        // Act: Registry is now present in the captured relationship-handler snapshot.
+        parent.Items = writtenValue;
+
+        // Assert
+        Assert.Empty(lifecycleHandler.Changes);
+        var children = registeredProperty.Children;
+        var parents = registry.TryGetRegisteredSubject(child)!.Parents;
+        Assert.Equal(2, children.Length);
+        Assert.Equal(2, parents.Length);
+        Assert.All(children, relationship => Assert.Same(child, relationship.Subject));
+        Assert.All(parents, relationship => Assert.Same(parent, relationship.Property.Subject));
+        Assert.Same(firstKey, children[0].Index);
+        Assert.Same(secondKey, children[1].Index);
+        Assert.Same(firstKey, parents[0].Index);
+        Assert.Same(secondKey, parents[1].Index);
+        Assert.Equal(1, child.GetReferenceCount());
+        Assert.False(firstKey.WasInvoked);
+        Assert.False(secondKey.WasInvoked);
     }
 
     [Fact]
@@ -71,7 +111,7 @@ public class RelationshipFailureTests
             ThrowAfterRecording = true
         };
         var child = new Person { FirstName = "Child" };
-        var writtenValue = new[] { child };
+        var writtenValue = new[] { child, child };
         throwingHandler.IsArmed = true;
         recordingHandler.Generations.Clear();
 
@@ -85,24 +125,29 @@ public class RelationshipFailureTests
         Assert.Equal(["throwing", "recording", "subject"], calls);
         Assert.Same(writtenValue, parent.Children);
 
-        var recordedRelationship = Assert.Single(Assert.Single(recordingHandler.Generations));
-        var subjectRelationship = Assert.Single(Assert.Single(parent.RelationshipReconciliations));
-        Assert.Same(recordedRelationship, subjectRelationship);
-        Assert.Same(child, recordedRelationship.Child);
-        Assert.Equal(0, recordedRelationship.Index);
+        var recordedRelationships = Assert.Single(recordingHandler.Generations);
+        var subjectRelationships = Assert.Single(parent.RelationshipReconciliations);
+        Assert.Equal(2, recordedRelationships.Length);
+        Assert.Equal(2, subjectRelationships.Length);
+        for (var index = 0; index < recordedRelationships.Length; index++)
+        {
+            Assert.Same(recordedRelationships[index], subjectRelationships[index]);
+            Assert.Same(child, recordedRelationships[index].Child);
+            Assert.Equal(index, recordedRelationships[index].Index);
+        }
 
         var registeredProperty = registry
             .TryGetRegisteredSubject(parent)!
             .TryGetProperty(nameof(RelationshipFailureContainer.Children))!;
-        var registryChild = Assert.Single(registeredProperty.Children);
-        var registryParent = Assert.Single(registry.TryGetRegisteredSubject(child)!.Parents);
-        var trackedParent = Assert.Single(child.GetParents());
-        Assert.Same(child, registryChild.Subject);
-        Assert.Equal(0, registryChild.Index);
-        Assert.Same(parent, registryParent.Property.Subject);
-        Assert.Equal(0, registryParent.Index);
-        Assert.Same(parent, trackedParent.Property.Subject);
-        Assert.Equal(0, trackedParent.Index);
+        var registryChildren = registeredProperty.Children;
+        var registryParents = registry.TryGetRegisteredSubject(child)!.Parents;
+        var trackedParents = child.GetParents();
+        Assert.Equal([0, 1], registryChildren.Select(relationship => relationship.Index));
+        Assert.Equal([0, 1], registryParents.Select(relationship => relationship.Index));
+        Assert.Equal([0, 1], trackedParents.Select(relationship => relationship.Index));
+        Assert.All(registryChildren, relationship => Assert.Same(child, relationship.Subject));
+        Assert.All(registryParents, relationship => Assert.Same(parent, relationship.Property.Subject));
+        Assert.All(trackedParents, relationship => Assert.Same(parent, relationship.Property.Subject));
         Assert.Equal(1, child.GetReferenceCount());
     }
 
@@ -148,6 +193,53 @@ public class RelationshipFailureTests
             calls.Add("recording");
             Generations.Add(relationships.ToArray());
         }
+    }
+
+    private sealed class RecordingLifecycleHandler : ILifecycleHandler
+    {
+        public List<SubjectLifecycleChange> Changes { get; } = [];
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            Changes.Add(change);
+        }
+    }
+
+    public sealed class EqualityTripwireKey(string value)
+    {
+        private bool _isArmed;
+
+        public bool WasInvoked { get; private set; }
+
+        public void Arm()
+        {
+            WasInvoked = false;
+            _isArmed = true;
+        }
+
+        public override bool Equals(object? obj)
+        {
+            WasInvoked = true;
+            if (_isArmed)
+            {
+                throw new InvalidOperationException("Dictionary-key equality must not run during reconciliation.");
+            }
+
+            return ReferenceEquals(this, obj);
+        }
+
+        public override int GetHashCode()
+        {
+            WasInvoked = true;
+            if (_isArmed)
+            {
+                throw new InvalidOperationException("Dictionary-key hashing must not run during reconciliation.");
+            }
+
+            return RuntimeHelpers.GetHashCode(this);
+        }
+
+        public override string ToString() => value;
     }
 
     [RunsAfter(typeof(LifecycleInterceptor))]
@@ -202,4 +294,15 @@ public partial class RelationshipFailureContainer : IPropertyRelationshipHandler
             throw new ApplicationException("Subject relationship consumer failed.");
         }
     }
+}
+
+[InterceptorSubject]
+public partial class TopologyRelationshipContainer
+{
+    public TopologyRelationshipContainer()
+    {
+        Items = new Dictionary<RelationshipFailureTests.EqualityTripwireKey, Person>();
+    }
+
+    public partial Dictionary<RelationshipFailureTests.EqualityTripwireKey, Person> Items { get; set; }
 }
