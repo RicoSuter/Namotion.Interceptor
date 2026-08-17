@@ -112,6 +112,7 @@ namespace Namotion.Interceptor.Connectors
         public override void Dispose() { }
         protected override sealed System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         protected abstract System.Threading.Tasks.Task RunAsync(System.Threading.CancellationToken stoppingToken);
+        public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
     }
     public static class SubjectFactoryExtensions
     {

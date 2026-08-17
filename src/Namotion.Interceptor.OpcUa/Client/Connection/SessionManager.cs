@@ -83,6 +83,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
         catch (Exception ex)
         {
+            _source.ReportBackgroundError(ex, cancellationToken);
             _logger.LogError(ex, "Full state sync failed after SDK reconnection. Clearing session for manual reconnection.");
             await ClearSessionAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -202,8 +203,13 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         if (_configuration.EnablePollingFallback)
         {
             PollingManager = new PollingManager(
-                source, sessionManager: this,
-                propertyWriter, _configuration, pollingMetrics, _logger);
+                source,
+                sessionProvider: () => CurrentSession,
+                propertyWriter,
+                _configuration,
+                pollingMetrics,
+                source.ReportBackgroundError,
+                _logger);
 
             PollingDiagnostics = new PollingDiagnostics(PollingManager, pollingMetrics);
 
@@ -217,12 +223,20 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 source,
                 configuration,
                 readAfterWriteMetrics,
+                source.ReportBackgroundError,
                 logger);
 
             ReadAfterWriteDiagnostics = new ReadAfterWriteDiagnostics(ReadAfterWriteManager, readAfterWriteMetrics);
         }
 
-        SubscriptionManager = new SubscriptionManager(source, propertyWriter, PollingManager, ReadAfterWriteManager, configuration, logger);
+        SubscriptionManager = new SubscriptionManager(
+            source,
+            propertyWriter,
+            PollingManager,
+            ReadAfterWriteManager,
+            configuration,
+            source.ReportBackgroundError,
+            logger);
     }
 
     /// <summary>
@@ -400,6 +414,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             {
                 // BeginReconnect threw - reset flag for immediate recovery instead of waiting 30s for stall detection
                 Interlocked.Exchange(ref _isReconnecting, 0);
+                if (Volatile.Read(ref _disposed) == 0)
+                {
+                    _source.ReportBackgroundError(ex);
+                }
                 _logger.LogError(ex, "BeginReconnect threw unexpected exception.");
             }
         }
@@ -791,6 +809,14 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
         lock (_reconnectingLock)
         {
+            // Disposing the SDK timer does not wait for an async reconnect already in progress, whose
+            // completion callback can still arrive later. Consume its outcome before disposing the
+            // handler; the disposed latch makes that callback return without classifying it again.
+            if (Interlocked.Exchange(ref _pendingSdkReconnection, 0) == 1)
+            {
+                _source.ReconnectionMetrics.RecordAbandoned();
+            }
+
             try { _reconnectHandler.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing reconnect handler."); }
         }
         if (ReadAfterWriteManager is not null)

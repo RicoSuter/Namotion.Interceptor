@@ -275,7 +275,7 @@ public interface ISubjectSource : ISubjectConnector
 }
 ```
 
-Direct interface implementation without the base class is supported for advanced scenarios, but the implementer is then responsible for its own listening loop, buffering, and outbound dispatch, as well as the four synchronization-state members. See the XML docs on `ISubjectSource` for their exact contract, including the lock-free requirement on `State`/`StateChangeTime`/`RootSubject` and the obligation to register with every reachable `SourceMonitor`.
+Direct interface implementation without the base class is supported for advanced scenarios, but the implementer is then responsible for its own listening loop, buffering, and outbound dispatch, as well as the four synchronization-state members. See the XML docs on `ISubjectSource` for their exact contract, including the lock-free requirement on `RootSubject`/`State`/`StateChangeTime`/`LastSynchronizedAt` and the obligation to register with every reachable `SourceMonitor`.
 
 A direct implementer needs **two** diagnostics members, not one, because C# has no covariant implicit interface implementation: the property that satisfies `ISubjectSource.Diagnostics` cannot also satisfy `ISubjectConnector.Diagnostics`, so the base interface's member is implemented explicitly and forwards to it.
 
@@ -290,6 +290,8 @@ public MySource() => Diagnostics = new SourceDiagnostics(_metrics);
 ```
 
 The `SourceMetrics` instance is the writable side and stays private to the source: it is what the source calls `MarkStarted()`, `MarkOperational()`, `ReportError()` and the queue registrations on, and nothing outside the source can reach it through the returned view. See [Connector Diagnostics](#connector-diagnostics).
+
+A direct source must register `ClaimedPropertyCount` and all queue gauges: `OutboundChanges`, `OutboundRetries`, and `InboundBuffer`. Give a disabled queue a capacity of `0`; use a `null` capacity only when the queue is actually unbounded. If the source owns custom `IResettableMetrics` instances, register each one once before `MarkStarted()` so its totals join the run's first epoch.
 
 Deriving from `SubjectSourceBase` instead gets both members, the start epoch, the recording of a failed connect attempt, and the drop of liveness on the way out. **Raising liveness is the derived class's job**: the base never calls `MarkOperational()`, because each protocol becomes usable at a different point and that point is what `IsOperational` means for that connector. A source that never calls it reports not operational for its entire life while its `State` reaches `Synchronized`. The three in-tree clients show where to put the call: the MQTT client raises it once `ConnectAsync` returns, the WebSocket client once the server's Welcome has been accepted, and the OPC UA client only once a session it has already created is confirmed usable, which is several steps later and which step depends on how that session came about (see [OPC UA Client](connectors-opcua-client.md#diagnostics)). Each drops it again from the path that detects the loss.
 
@@ -629,108 +631,6 @@ Every built-in connector implements it, sources through `ISubjectSource : ISubje
 
 > **Note**: Path providers are implementation details. A source/server may use a path provider internally to decide which properties to include and how to map them, or it may not use one at all.
 
-### SubjectConnectorBase
-
-`SubjectConnectorBase` is the base every connector shares, client or server. It is a `BackgroundService` that implements `ISubjectConnector` and owns the diagnostics lifecycle, so a connector cannot forget to report that it stopped serving. `SubjectSourceBase` derives from it and adds the source pump on top; a server derives from it directly.
-
-`ExecuteAsync` is `protected sealed override`. The member to override is `RunAsync`, which the base wraps:
-
-```csharp
-public sealed class MySubjectServer : SubjectConnectorBase
-{
-    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
-
-    public MySubjectServer(IInterceptorSubject subject)
-        : base(new ConnectorMetrics())
-    {
-        RootSubject = subject;
-
-        // The same instance the base holds, so the read side and the write side agree.
-        Diagnostics = new MyServerDiagnostics(this, Metrics);
-    }
-
-    public override IInterceptorSubject RootSubject { get; }
-
-    /// <inheritdoc cref="SubjectConnectorBase.Diagnostics" />
-    public override MyServerDiagnostics Diagnostics { get; }
-
-    protected override async Task RunAsync(CancellationToken stoppingToken)
-    {
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await ListenAsync(stoppingToken);
-                Metrics.MarkOperational();
-                try
-                {
-                    await ServeUntilFailureAsync(stoppingToken);
-                }
-                finally
-                {
-                    Metrics.MarkNotOperational();
-                }
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception exception)
-            {
-                // Swallowed failures never reach the base class, so report them here. A failure the
-                // stop itself caused is left unrecorded: the clause above only covers the
-                // cancellation, not the arbitrary exception a transport torn down mid-stop raises,
-                // and recording that would overwrite the genuine fault for good, because LastError is
-                // sticky and a stopped connector does not start again.
-                if (!stoppingToken.IsCancellationRequested)
-                {
-                    Metrics.ReportError(exception);
-                }
-
-                await Task.Delay(RetryDelay, stoppingToken);
-            }
-        }
-    }
-}
-```
-
-What the base provides around that call:
-
-| Behaviour | Where |
-|---|---|
-| Stamps the start epoch that every `Total` counter and `StartTime` are measured from, clears `LastError`, and resets the registered metrics | `MarkStarted()`, once per `ExecuteAsync` entry |
-| Records a fault that escapes `RunAsync` into `LastError` | the catch around the `RunAsync` call |
-| Leaves an expected shutdown unrecorded, so a graceful stop does not overwrite the genuine error that made the connector fail | the `OperationCanceledException` filter on the stopping token |
-| Forces liveness false when `RunAsync` exits, on every path | `MarkStopped()` in the `finally` |
-| Forces liveness false on disposal, because `BackgroundService.Dispose` cancels the token without awaiting `ExecuteAsync` | the `Dispose` override |
-
-What a server author must implement:
-
-- `RootSubject`, the subject tree this connector is bound to.
-- `Diagnostics`, narrowed to the connector's own sealed type via a covariant override, so callers reach the protocol-specific numbers without a cast.
-- `RunAsync`, the protocol work. It runs until cancellation, and a cancellation caused by the stopping token must not be turned into a fault: either return, as the sample does, or let the exception leave, which the base recognises and does not record.
-- Handing the diagnostics view the same metrics object the base holds, by constructing it from the inherited `Metrics` property rather than from a second instance. A view built over its own `ConnectorMetrics` compiles and then reports nothing.
-- Every failure the connector's own loop swallows: the base only sees what escapes `RunAsync`, so a retry loop that catches its own failures has to call `ReportError` itself, and move liveness with `MarkOperational` and `MarkNotOperational` around the serving window. Guard that report on the stopping token, as the sample does: a cancellation filter alone does not cover the arbitrary exception a transport torn down mid-stop raises, and recording that replaces the genuine fault for good, because `LastError` is sticky and a stopped connector does not start again. One class of failure stays out of reach: `ChangeQueueProcessor` logs and swallows everything the write handler raises, on the buffered path, on the immediate path and inside the flush task, so a write that fails on the way out of the connector never reaches `LastError` however the loop is written.
-- Wiring the outbound change queue into diagnostics, so `Diagnostics.OutboundChanges` reports the processor the server actually publishes through.
-
-A connector whose transport work runs in a task the loop does not await, such as a client's reconnect monitor, is outside `RunAsync` too, and has to report its own failures for the same reason.
-
-A connector that participates in chaos testing implements [`IFaultInjectable`](../src/Namotion.Interceptor.Connectors/IFaultInjectable.cs) and gives each restart-loop iteration its own [`ConnectorRunAttempt`](../src/Namotion.Interceptor.Connectors/ConnectorRunAttempt.cs), so injected-kill cancellation and the flag identifying it have the same lifetime. The built-in [MQTT](../src/Namotion.Interceptor.Mqtt/Client/MqttSubjectClientSource.cs), [OPC UA](../src/Namotion.Interceptor.OpcUa/Client/OpcUaSubjectClientSource.cs), and [WebSocket](../src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs) connectors are the reference implementations.
-
-The outbound queue is wired up by reporting drops into the lifetime-owned metrics and registering only the processor's depth provider. The registration is released when that processor goes away:
-
-```csharp
-using var processor = CreateChangeQueueProcessor(); // Factory wires AddDropped as its drop handler.
-
-// Declared after the processor, so reverse-order disposal releases the registration first.
-using var registration = Metrics.OutboundChanges.Register(
-    () => processor.QueueDepth, capacity: null);
-
-await processor.ProcessAsync(stoppingToken);
-```
-
-`Register` allows one live registration at a time and throws while one is still held, so a restart that does not dispose the previous handle fails on every attempt. Dispose a scoped registration when its processor goes away; lifetime-long providers intentionally leave their returned handle undisposed. A bounded buffer reports each drop through `AddDropped`; `ChangeQueueProcessor` invokes its optional `dropHandler` only on that drop path. Keeping drop counts in the metrics makes registration handover monotonic and exact without adding diagnostics work to successful queue operations. Skipping the registration altogether is silent for depth, while skipping drop reports leaves `TotalDropped` at 0. The `maxQueueDepth` argument of `ChangeQueueProcessor` is a bound on the buffered queue and must be either `null` for unbounded, which is what all three built-in servers pass, or positive; zero is rejected, because a bound has to leave room for at least one change. A server that wants no buffering at all passes a `bufferTime` of zero, which takes the immediate path, never fills that queue and therefore neither reads the bound nor validates it.
-
 ### Connector Diagnostics
 
 Every connector reports what its transport is doing through `ISubjectConnector.Diagnostics`. The declared type is `ConnectorDiagnostics`, narrowed to `SourceDiagnostics` on `ISubjectSource` and to a sealed per-connector type on each concrete connector, so `IOpcUaSubjectClientSource.Diagnostics` hands back an `OpcUaClientDiagnostics` with no cast. The shared members:
@@ -773,7 +673,7 @@ The three buffers answer three different questions, and reading which one is gro
 
 Everything on these types is read-only. The writable side is a `ConnectorMetrics` (or `SourceMetrics`) that each connector constructs and never exposes, so a consumer cannot flip another connector's liveness or inject an error it did not have. Reads take no lock owned by this library and no getter throws, which makes them safe from any thread, including from inside a `StateChanged` handler. `Depth` is the one that is not free: on the change queue it is a segment walk that briefly takes that queue's own internal lock, so sample it rather than polling it tightly.
 
-Each individual read is internally consistent and the timestamps are monotonic, but two property reads are two separate snapshots. Reading `IsOperational` and then `OperationalChangeTime` can pair a stale flag with a fresh timestamp, and the same applies to `State` and `StateChangeTime`. That is fine for a dashboard sampling every few seconds; do not build a decision that depends on the pair being from the same instant.
+Each individual read is internally consistent, but two property reads are two separate snapshots. Reading `IsOperational` and then `OperationalChangeTime` can pair a stale flag with a fresh timestamp, and the same applies to `State` and `StateChangeTime`. The timestamps come from the wall clock, so a system clock adjustment can move a later timestamp backward. That is fine for a dashboard sampling every few seconds; do not build a decision that depends on the pair being from the same instant.
 
 `Total` marks a counter that only rises within a run, measured from `StartTime`. A count member without it is a gauge that can go both ways, such as `Depth`, `ClaimedPropertyCount` or the OPC UA server's `ConsecutiveFailures`. Members that count nothing are neither: `Reconnects.LastConnectionTime` records when a past event happened, and the WebSocket server's `CurrentSequence` is a position in the message stream that only moves forward. A restart resets the `Total` counters along with `StartTime` and `LastError`; a transport-level reconnect does not.
 
@@ -941,6 +841,108 @@ Properties can receive concurrent writes from multiple origins:
 Individual property updates are atomic and thread-safe without requiring additional synchronization.
 
 When overriding `StartListeningAsync`, use the provided `SubjectPropertyWriter` to write inbound updates. This handles buffering during initialization and ensures correct ordering.
+
+### SubjectConnectorBase
+
+`SubjectConnectorBase` is the base every connector shares, client or server. It is a `BackgroundService` that implements `ISubjectConnector` and owns the diagnostics lifecycle, so a connector cannot forget to report that it stopped serving. `SubjectSourceBase` derives from it and adds the source pump on top; a server derives from it directly.
+
+`ExecuteAsync` is `protected sealed override`. The member to override is `RunAsync`, which the base wraps:
+
+```csharp
+public sealed class MySubjectServer : SubjectConnectorBase
+{
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
+
+    public MySubjectServer(IInterceptorSubject subject)
+        : base(new ConnectorMetrics())
+    {
+        RootSubject = subject;
+
+        // The same instance the base holds, so the read side and the write side agree.
+        Diagnostics = new MyServerDiagnostics(this, Metrics);
+    }
+
+    public override IInterceptorSubject RootSubject { get; }
+
+    /// <inheritdoc cref="SubjectConnectorBase.Diagnostics" />
+    public override MyServerDiagnostics Diagnostics { get; }
+
+    protected override async Task RunAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await ListenAsync(stoppingToken);
+                Metrics.MarkOperational();
+                try
+                {
+                    await ServeUntilFailureAsync(stoppingToken);
+                }
+                finally
+                {
+                    Metrics.MarkNotOperational();
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                // Swallowed failures never reach the base class, so report them here. A failure the
+                // stop itself caused is left unrecorded: the clause above only covers the
+                // cancellation, not the arbitrary exception a transport torn down mid-stop raises,
+                // and recording that would overwrite the genuine fault for good, because LastError is
+                // sticky and a stopped connector does not start again.
+                if (!stoppingToken.IsCancellationRequested)
+                {
+                    Metrics.ReportError(exception);
+                }
+
+                await Task.Delay(RetryDelay, stoppingToken);
+            }
+        }
+    }
+}
+```
+
+What the base provides around that call:
+
+| Behaviour | Where |
+|---|---|
+| Stamps the start epoch that every `Total` counter and `StartTime` are measured from, clears `LastError`, and resets the registered metrics | `MarkStarted()`, once per `ExecuteAsync` entry |
+| Records a fault that escapes `RunAsync` into `LastError` | the catch around the `RunAsync` call |
+| Leaves an expected shutdown unrecorded, so a graceful stop does not overwrite the genuine error that made the connector fail | the `OperationCanceledException` filter on the stopping token |
+| Forces liveness false when `RunAsync` exits, on every path | `MarkStopped()` in the `finally` |
+| Forces liveness false on disposal, because `BackgroundService.Dispose` cancels the token without awaiting `ExecuteAsync` | the `Dispose` override |
+
+What a server author must implement:
+
+- `RootSubject`, the subject tree this connector is bound to.
+- `Diagnostics`, narrowed to the connector's own sealed type via a covariant override, so callers reach the protocol-specific numbers without a cast.
+- `RunAsync`, the protocol work. It runs until cancellation, and a cancellation caused by the stopping token must not be turned into a fault: either return, as the sample does, or let the exception leave, which the base recognises and does not record.
+- Handing the diagnostics view the same metrics object the base holds, by constructing it from the inherited `Metrics` property rather than from a second instance. A view built over its own `ConnectorMetrics` compiles and then reports nothing.
+- Every failure the connector's own loop swallows: the base only sees what escapes `RunAsync`, so a retry loop that catches its own failures has to call `ReportError` itself, and move liveness with `MarkOperational` and `MarkNotOperational` around the serving window. Guard that report on the stopping token, as the sample does: a cancellation filter alone does not cover the arbitrary exception a transport torn down mid-stop raises, and recording that replaces the genuine fault for good, because `LastError` is sticky and a stopped connector does not start again. One class of failure stays out of reach: `ChangeQueueProcessor` logs and swallows everything the write handler raises, on the buffered path, on the immediate path and inside the flush task, so a write that fails on the way out of the connector never reaches `LastError` however the loop is written.
+- Wiring the outbound change queue into diagnostics, so `Diagnostics.OutboundChanges` reports the processor the server actually publishes through.
+
+A connector whose transport work runs in a task the loop does not await, such as a client's reconnect monitor, is outside `RunAsync` too, and has to report its own failures for the same reason.
+
+A connector that participates in chaos testing implements [`IFaultInjectable`](../src/Namotion.Interceptor.Connectors/IFaultInjectable.cs) and gives each restart-loop iteration its own [`ConnectorRunAttempt`](../src/Namotion.Interceptor.Connectors/ConnectorRunAttempt.cs), so injected-kill cancellation and the flag identifying it have the same lifetime. The [MQTT client](../src/Namotion.Interceptor.Mqtt/Client/MqttSubjectClientSource.cs), [WebSocket client](../src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs), and [OPC UA server](../src/Namotion.Interceptor.OpcUa/Server/OpcUaSubjectServer.cs) are the reference implementations. The OPC UA client instead cancels the SDK session by clearing it, or cancels the currently owned manual-reconnection token, because the SDK owns its reconnect loop.
+
+The outbound queue is wired up by reporting drops into the lifetime-owned metrics and registering only the processor's depth provider. The registration is released when that processor goes away:
+
+```csharp
+using var processor = CreateChangeQueueProcessor(); // Factory wires AddDropped as its drop handler.
+
+// Declared after the processor, so reverse-order disposal releases the registration first.
+using var registration = Metrics.OutboundChanges.Register(
+    () => processor.QueueDepth, capacity: null);
+
+await processor.ProcessAsync(stoppingToken);
+```
+
+`Register` allows one live registration at a time and throws while one is still held, so a restart that does not dispose the previous handle fails on every attempt. Dispose a scoped registration when its processor goes away; lifetime-long providers intentionally leave their returned handle undisposed. A bounded buffer reports each drop through `AddDropped`; `ChangeQueueProcessor` invokes its optional `dropHandler` only on that drop path. Keeping drop counts in the metrics makes registration handover monotonic and exact without adding diagnostics work to successful queue operations. Skipping the registration altogether is silent for depth, while skipping drop reports leaves `TotalDropped` at 0. The `maxQueueDepth` argument of `ChangeQueueProcessor` is a bound on the buffered queue and must be either `null` for unbounded, which is what all three built-in servers pass, or positive; zero is rejected, because a bound has to leave room for at least one change. A server that wants no buffering at all passes a `bufferTime` of zero, which takes the immediate path, never fills that queue and therefore neither reads the bound nor validates it.
 
 ## Known Limitations
 

@@ -52,12 +52,13 @@ public class ConnectorMetrics
     /// <remarks>
     /// Deliberately not idempotent. Called once per <c>ExecuteAsync</c> entry, so a host stop and
     /// start moves the epoch while a transport reconnect inside the connector's own loop does not.
-    /// Use a new instance per run: restarting the same one by hand can let the previous run's
-    /// <see cref="MarkStopped"/> land after the new <see cref="MarkStarted"/> and latch the fresh epoch.
+    /// <see cref="SubjectConnectorBase"/> permits a sequential restart only after its previous
+    /// execution completes. A connector driving these methods without that base must enforce the
+    /// same non-overlap so an old <see cref="MarkStopped"/> cannot latch a new epoch.
     /// </remarks>
     public void MarkStarted()
     {
-        Interlocked.Exchange(ref _startTicks, DateTimeOffset.UtcNow.UtcTicks);
+        var startTicks = DateTimeOffset.UtcNow.UtcTicks;
         Volatile.Write(ref _lastError, null);
         ResetLiveness();
         ResetTotals();
@@ -66,6 +67,8 @@ public class ConnectorMetrics
         {
             resettable.Reset();
         }
+
+        Interlocked.Exchange(ref _startTicks, startTicks);
     }
 
     /// <summary>

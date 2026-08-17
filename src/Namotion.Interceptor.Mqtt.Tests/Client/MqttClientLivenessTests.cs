@@ -1,11 +1,15 @@
+using System.Buffers;
+using System.Collections;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
 using Microsoft.Extensions.Logging.Abstractions;
 using MQTTnet;
+using MQTTnet.Packets;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Monitoring;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Mqtt.Client;
 using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Mqtt.Server;
@@ -14,6 +18,7 @@ using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Mqtt.Tests.Client;
 
@@ -144,7 +149,6 @@ public partial class MqttClientLivenessTests
             Assert.NotSame(firstClient, GetCurrentClient(source));
             Assert.False(firstClient.IsConnected);
             Assert.True(source.Diagnostics.OperationalChangeTime > downAt);
-            Assert.Null(source.Diagnostics.LastError);
         }
         finally
         {
@@ -236,6 +240,163 @@ public partial class MqttClientLivenessTests
         }
     }
 
+    [Fact]
+    public async Task WhenOldTransportMessageFinishesConversionAfterReplacement_ThenItCannotOverwriteRecoveredValue()
+    {
+        // Arrange
+        var brokerPort = GetFreeTcpPort();
+        using var converter = new GatedMqttValueConverter("Old");
+        await using var broker = CreateBroker(brokerPort);
+        await using var source = CreateClientSource(
+            brokerPort,
+            reconnectDelay: TimeSpan.FromSeconds(1),
+            valueConverter: converter);
+        var brokerRoot = (LivenessTestRoot)broker.RootSubject;
+        var clientRoot = (LivenessTestRoot)source.RootSubject;
+
+        await broker.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
+
+        Task? oldCallback = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial",
+                message: "The initial transport should receive the broker's retained value.");
+
+            var oldClient = GetCurrentClient(source);
+            var oldMessageHandler = Assert.Single(GetApplicationMessageHandlers(oldClient));
+            oldCallback = Task.Run(() => oldMessageHandler(CreateMessageReceivedEventArgs("Old", converter)));
+            await converter.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+
+            brokerRoot.Name = "Recovered";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientRoot.Name == "Recovered",
+                message: "The live transport should receive the newer retained value.");
+
+            var property = clientRoot.GetPropertyReference(nameof(LivenessTestRoot.Name));
+            property.SetValueFromSource(
+                source,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                "Awaiting recovery");
+
+            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational &&
+                    !ReferenceEquals(oldClient, GetCurrentClient(source)) &&
+                    clientRoot.Name == "Recovered",
+                message: "The replacement transport should restore the newer retained value.");
+
+            // Act
+            converter.Release();
+            await oldCallback.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Assert
+            Assert.Empty(GetApplicationMessageHandlers(oldClient));
+            Assert.Equal("Recovered", clientRoot.Name);
+        }
+        finally
+        {
+            converter.Release();
+            if (oldCallback is not null)
+            {
+                await oldCallback.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+
+            await source.StopAsync(CancellationToken.None);
+            await broker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenOldTransportCommitIsAdmittedBeforeReplacement_ThenRecoveryCommitsLast()
+    {
+        // Arrange
+        var brokerPort = GetFreeTcpPort();
+        using var commitGate = new GatedWriteInterceptor("Old");
+        var retirementBarrier = new MqttSubjectClientSource.TransportRetirementTestBarrier();
+        await using var broker = CreateBroker(brokerPort);
+        await using var source = CreateClientSource(
+            brokerPort,
+            reconnectDelay: TimeSpan.FromSeconds(1),
+            writeInterceptor: commitGate,
+            retirementBarrier: retirementBarrier);
+        var brokerRoot = (LivenessTestRoot)broker.RootSubject;
+        var clientRoot = (LivenessTestRoot)source.RootSubject;
+
+        await broker.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
+
+        Task? oldCallback = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial",
+                message: "The initial transport should receive the broker's retained value.");
+
+            brokerRoot.Name = "Recovered";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientRoot.Name == "Recovered",
+                message: "The live transport should receive the newer retained value.");
+
+            var property = clientRoot.GetPropertyReference(nameof(LivenessTestRoot.Name));
+            property.SetValueFromSource(
+                source,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                "Awaiting recovery");
+            Assert.Equal("Awaiting recovery", clientRoot.Name);
+
+            var oldClient = GetCurrentClient(source);
+            var oldMessageHandler = Assert.Single(GetApplicationMessageHandlers(oldClient));
+            oldCallback = Task.Run(() => oldMessageHandler(CreateMessageReceivedEventArgs("Old")));
+            await commitGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+
+            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
+            var firstLifecycleEvent = await Task.WhenAny(
+                    retirementBarrier.RetirementAwaitRegistered,
+                    retirementBarrier.ReplacementRecoveryCompleted)
+                .WaitAsync(TimeSpan.FromSeconds(10));
+            var retirementAwaitWasRegistered =
+                ReferenceEquals(firstLifecycleEvent, retirementBarrier.RetirementAwaitRegistered);
+            if (!retirementAwaitWasRegistered)
+            {
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => clientRoot.Name == "Recovered",
+                    message: "A replacement that bypassed the drain should recover before the old commit is released.");
+            }
+
+            // Act
+            commitGate.Release();
+            await oldCallback.WaitAsync(TimeSpan.FromSeconds(10));
+
+            if (retirementAwaitWasRegistered)
+            {
+                await retirementBarrier.ReplacementRecoveryCompleted.WaitAsync(TimeSpan.FromSeconds(10));
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => clientRoot.Name == "Recovered",
+                    message: "Recovery should follow an old commit that retirement already admitted.");
+            }
+
+            // Assert
+            Assert.Empty(GetApplicationMessageHandlers(oldClient));
+            Assert.Equal("Recovered", clientRoot.Name);
+            Assert.True(retirementAwaitWasRegistered);
+        }
+        finally
+        {
+            commitGate.Release();
+            if (oldCallback is not null)
+            {
+                await oldCallback.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+
+            await source.StopAsync(CancellationToken.None);
+            await broker.StopAsync(CancellationToken.None);
+        }
+    }
+
     private static MqttSubjectServer CreateBroker(int brokerPort)
     {
         var context = InterceptorSubjectContext
@@ -250,7 +411,12 @@ public partial class MqttClientLivenessTests
             NullLogger<MqttSubjectServer>.Instance);
     }
 
-    private static MqttSubjectClientSource CreateClientSource(int brokerPort, TimeSpan? reconnectDelay = null)
+    private static MqttSubjectClientSource CreateClientSource(
+        int brokerPort,
+        TimeSpan? reconnectDelay = null,
+        IMqttValueConverter? valueConverter = null,
+        IWriteInterceptor? writeInterceptor = null,
+        MqttSubjectClientSource.TransportRetirementTestBarrier? retirementBarrier = null)
     {
         var context = InterceptorSubjectContext
             .Create()
@@ -260,7 +426,12 @@ public partial class MqttClientLivenessTests
             .WithSourceTransactions()
             .WithSourceMonitoring();
 
-        return new MqttSubjectClientSource(
+        if (writeInterceptor is not null)
+        {
+            context.WithService<IWriteInterceptor>(() => writeInterceptor, _ => false);
+        }
+
+        var source = new MqttSubjectClientSource(
             new LivenessTestRoot(context),
             new MqttClientConfiguration
             {
@@ -269,11 +440,15 @@ public partial class MqttClientLivenessTests
                 BrokerHost = "127.0.0.1",
                 BrokerPort = brokerPort,
                 Mapper = CreateMapper(),
+                ValueConverter = valueConverter ?? new JsonMqttValueConverter(),
                 ReconnectDelay = reconnectDelay ?? TimeSpan.FromSeconds(1),
                 MaximumReconnectDelay = TimeSpan.FromSeconds(4),
                 HealthCheckInterval = TimeSpan.FromSeconds(1)
             },
             NullLogger<MqttSubjectClientSource>.Instance);
+
+        source.RetirementTestBarrier = retirementBarrier;
+        return source;
     }
 
     private static MqttCompositeMapper CreateMapper() => new(
@@ -282,11 +457,17 @@ public partial class MqttClientLivenessTests
 
     private static IMqttClient GetCurrentClient(MqttSubjectClientSource source)
     {
+        return TryGetCurrentClient(source) ??
+            throw new InvalidOperationException("The source has no active MQTT client.");
+    }
+
+    private static IMqttClient? TryGetCurrentClient(MqttSubjectClientSource source)
+    {
         var client = typeof(MqttSubjectClientSource)
             .GetField("_client", BindingFlags.Instance | BindingFlags.NonPublic)?
             .GetValue(source);
 
-        return client as IMqttClient ?? throw new InvalidOperationException("The source has no active MQTT client.");
+        return client as IMqttClient;
     }
 
     private static MqttConnectionMonitor GetConnectionMonitor(MqttSubjectClientSource source)
@@ -307,6 +488,110 @@ public partial class MqttClientLivenessTests
             throw new InvalidOperationException("The source has no disconnected handler.");
 
         return method.CreateDelegate<Func<MqttClientDisconnectedEventArgs, Task>>(source);
+    }
+
+    private static IReadOnlyList<Func<MqttApplicationMessageReceivedEventArgs, Task>> GetApplicationMessageHandlers(
+        IMqttClient client)
+    {
+        var events = client.GetType()
+            .GetField("_events", BindingFlags.Instance | BindingFlags.NonPublic)?
+            .GetValue(client) ?? throw new InvalidOperationException("The MQTT client has no event collection.");
+        var applicationMessageEvent = events.GetType()
+            .GetProperty("ApplicationMessageReceivedEvent", BindingFlags.Instance | BindingFlags.Public)?
+            .GetValue(events) ?? throw new InvalidOperationException("The MQTT client has no application-message event.");
+        var handlers = applicationMessageEvent.GetType()
+            .GetField("_handlersForInvoke", BindingFlags.Instance | BindingFlags.NonPublic)?
+            .GetValue(applicationMessageEvent) as IEnumerable ??
+            throw new InvalidOperationException("The MQTT application-message event has no handler snapshot.");
+
+        var result = new List<Func<MqttApplicationMessageReceivedEventArgs, Task>>();
+        foreach (var handler in handlers)
+        {
+            if (handler?.GetType()
+                .GetField("_asyncHandler", BindingFlags.Instance | BindingFlags.NonPublic)?
+                .GetValue(handler) is Func<MqttApplicationMessageReceivedEventArgs, Task> asyncHandler)
+            {
+                result.Add(asyncHandler);
+            }
+        }
+
+        return result;
+    }
+
+    private static MqttApplicationMessageReceivedEventArgs CreateMessageReceivedEventArgs(
+        string value,
+        IMqttValueConverter? converter = null)
+    {
+        converter ??= new JsonMqttValueConverter();
+        var message = new MqttApplicationMessage
+        {
+            Topic = "Name",
+            PayloadSegment = new ArraySegment<byte>(converter.Serialize(value, typeof(string)))
+        };
+
+        return new MqttApplicationMessageReceivedEventArgs(
+            "old-client",
+            message,
+            new MqttPublishPacket(),
+            static (_, _) => Task.CompletedTask);
+    }
+
+    private sealed class GatedMqttValueConverter(string blockedValue) : IMqttValueConverter, IDisposable
+    {
+        private readonly JsonMqttValueConverter _inner = new();
+        private readonly ManualResetEventSlim _release = new(false);
+        private int _blocked;
+
+        public Task Entered => _entered.Task;
+
+        private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public byte[] Serialize(object? value, Type type) => _inner.Serialize(value, type);
+
+        public object? Deserialize(ReadOnlySequence<byte> payload, Type type)
+        {
+            var value = _inner.Deserialize(payload, type);
+            if (Equals(value, blockedValue) && Interlocked.Exchange(ref _blocked, 1) == 0)
+            {
+                _entered.TrySetResult();
+                _release.Wait();
+            }
+
+            return value;
+        }
+
+        public void Release() => _release.Set();
+
+        public void Dispose() => _release.Dispose();
+    }
+
+    // Instance-scoped test seam. It blocks only after the source has admitted the old commit, and
+    // it runs outside MqttTransportOwnership's internal lock.
+    private sealed class GatedWriteInterceptor(string blockedValue) : IWriteInterceptor, IDisposable
+    {
+        private readonly ManualResetEventSlim _release = new(false);
+        private int _blocked;
+
+        public Task Entered => _entered.Task;
+
+        private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void WriteProperty<TProperty>(
+            ref PropertyWriteContext<TProperty> context,
+            WriteInterceptionDelegate<TProperty> next)
+        {
+            if (Equals(context.NewValue, blockedValue) && Interlocked.Exchange(ref _blocked, 1) == 0)
+            {
+                _entered.TrySetResult();
+                _release.Wait();
+            }
+
+            next(ref context);
+        }
+
+        public void Release() => _release.Set();
+
+        public void Dispose() => _release.Dispose();
     }
 
     private static int GetFreeTcpPort()

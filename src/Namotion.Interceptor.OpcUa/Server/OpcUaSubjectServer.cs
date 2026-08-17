@@ -78,8 +78,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     /// <summary>
     /// Gets the number of active sessions.
     /// </summary>
-    internal uint ActiveSessionCount =>
-        _server?.CurrentInstance?.ServerDiagnostics.CurrentSessionCount ?? 0;
+    internal uint ActiveSessionCount => _server?.ActiveSessionCount ?? 0;
 
     /// <summary>
     /// Gets the consecutive failure count.

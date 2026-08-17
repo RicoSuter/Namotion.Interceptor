@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry;
@@ -35,6 +36,26 @@ public class OpcUaServerDiagnosticsTests
         Assert.Null(diagnostics.LastError);
         Assert.Equal(0, diagnostics.ConsecutiveFailures);
         Assert.Equal(0u, activeSessionCount);
+    }
+
+    [Fact]
+    public void WhenTheSdkServerInstanceIsUnavailable_ThenActiveSessionCountIsZero()
+    {
+        // Arrange
+        var configuration = new OpcUaServerConfiguration();
+        using var server = CreateServer(configuration);
+        using var sdkServer = new OpcUaStandardServer(
+            server.RootSubject, server, configuration, NullLogger.Instance);
+
+        typeof(OpcUaSubjectServer)
+            .GetField("_server", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(server, sdkServer);
+
+        // Act
+        var count = server.Diagnostics.ActiveSessionCount;
+
+        // Assert
+        Assert.Equal(0u, count);
     }
 
     [Fact]

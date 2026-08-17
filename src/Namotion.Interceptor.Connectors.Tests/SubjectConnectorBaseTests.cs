@@ -136,6 +136,39 @@ public class SubjectConnectorBaseTests
     }
 
     [Fact]
+    public async Task WhenStartedWhilePreviousExecutionIsStillActive_ThenSecondStartIsRejected()
+    {
+        // Arrange
+        using var connector = new TestConnector { IgnoreCancellation = true };
+        var hostedService = (IHostedService)connector;
+        await hostedService.StartAsync(CancellationToken.None);
+        var firstExecution = connector.ExecuteTask!;
+
+        using var cancelledStop = new CancellationTokenSource();
+        await cancelledStop.CancelAsync();
+        await hostedService.StopAsync(cancelledStop.Token);
+        Assert.False(firstExecution.IsCompleted);
+
+        try
+        {
+            // Act & Assert
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => hostedService.StartAsync(CancellationToken.None));
+            Assert.Equal(1, connector.ExecutionCount);
+        }
+        finally
+        {
+            var latestExecution = connector.ExecuteTask;
+            connector.Release();
+            await firstExecution;
+            if (!ReferenceEquals(firstExecution, latestExecution))
+            {
+                await latestExecution!;
+            }
+        }
+    }
+
+    [Fact]
     public async Task WhenARegisteredResettableThrowsOnStart_ThenTheErrorIsRecordedAndTheConnectorIsNotOperational()
     {
         // Arrange: RegisterResettable and IResettableMetrics are public, so a third-party Reset that
@@ -180,6 +213,7 @@ public class SubjectConnectorBaseTests
     {
         private readonly ConnectorMetrics _metrics;
         private TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _executionCount;
 
         public TestConnector()
             : this(new ConnectorMetrics())
@@ -197,6 +231,10 @@ public class SubjectConnectorBaseTests
 
         public Exception? FaultBeforeBackoff { get; init; }
 
+        public bool IgnoreCancellation { get; init; }
+
+        public int ExecutionCount => Volatile.Read(ref _executionCount);
+
         public override IInterceptorSubject RootSubject => throw new NotSupportedException();
 
         public override ConnectorDiagnostics Diagnostics { get; }
@@ -213,6 +251,8 @@ public class SubjectConnectorBaseTests
 
         protected override async Task RunAsync(CancellationToken stoppingToken)
         {
+            Interlocked.Increment(ref _executionCount);
+
             if (FaultBeforeBackoff is not null)
             {
                 // Mirrors a connector that records its connect failure and then backs off inside its
@@ -221,7 +261,13 @@ public class SubjectConnectorBaseTests
                 await Task.Delay(Timeout.Infinite, stoppingToken);
             }
 
-            await using (stoppingToken.Register(() => _gate.TrySetResult()))
+            await using (stoppingToken.Register(() =>
+            {
+                if (!IgnoreCancellation)
+                {
+                    _gate.TrySetResult();
+                }
+            }))
             {
                 await _gate.Task;
             }

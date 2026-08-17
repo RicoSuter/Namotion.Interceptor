@@ -83,6 +83,21 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     /// </remarks>
     internal void NotifySessionNotHealthy() => Metrics.MarkNotOperational();
 
+    /// <summary>
+    /// Records a failure swallowed by source-owned background work, unless that work is only failing
+    /// because its lifetime is ending. Helper types use this instead of exposing the metrics writer.
+    /// </summary>
+    internal void ReportBackgroundError(Exception error) =>
+        ReportBackgroundError(error, default);
+
+    internal void ReportBackgroundError(Exception error, CancellationToken cancellationToken)
+    {
+        if (!cancellationToken.IsCancellationRequested && Volatile.Read(ref _disposed) == 0)
+        {
+            Metrics.ReportError(error);
+        }
+    }
+
     /// <inheritdoc />
     public override int WriteBatchSize => _writer?.WriteBatchSize ?? 0;
 
@@ -130,7 +145,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             onSubjectDetaching: OnSubjectDetaching);
 
         _subjectLoader = new OpcUaSubjectLoader(subject, configuration, _ownership, this, logger);
-        _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
+        _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger, ReportBackgroundError);
 
         Metrics.RegisterClaimedProperties(() => _ownership.Count);
         Metrics.RegisterResettable(ReconnectionMetrics);
@@ -396,6 +411,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             }
             catch (Exception ex)
             {
+                ReportBackgroundError(ex, stoppingToken);
                 _logger.LogError(ex, "Error during health check or session restart. Retrying after delay.");
                 try { await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken).ConfigureAwait(false); }
                 catch (OperationCanceledException) { return; }
@@ -422,7 +438,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             _logger.LogWarning(
                 "OPC UA subscription has stopped publishing. Starting manual reconnection to recover notification flow...");
             await ReconnectSessionAsync(cancellationToken).ConfigureAwait(false);
-            return true;
+            return sessionManager.IsConnected;
         }
 
         await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
@@ -565,7 +581,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             // Clear the session so health check can trigger a fresh reconnection attempt
             await sessionManager.ClearSessionAsync(cancellationToken).ConfigureAwait(false);
 
-            throw; // Re-throw to trigger retry in ExecuteAsync
+            return; // The health loop retries on its next tick.
         }
         catch (Exception ex)
         {
@@ -582,14 +598,14 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             else
             {
                 ReconnectionMetrics.RecordFailure();
-                Metrics.ReportError(ex);
+                ReportBackgroundError(ex, cancellationToken);
                 _logger.LogError(ex, "Failed to restart session. Will retry on next health check.");
             }
 
             // Clear the session so health check can trigger a new reconnection attempt
             await sessionManager.ClearSessionAsync(cancellationToken).ConfigureAwait(false);
 
-            throw; // Re-throw to trigger retry in ExecuteAsync
+            return; // The health loop retries on its next tick.
         }
         finally
         {

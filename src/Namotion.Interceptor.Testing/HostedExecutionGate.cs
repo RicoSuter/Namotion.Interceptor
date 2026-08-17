@@ -46,6 +46,7 @@ public sealed class HostedExecutionGate : IAsyncDisposable
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        await _stoppingCts.CancelAsync().ConfigureAwait(false);
         AllowExit();
         await _executionTask.ConfigureAwait(false);
         _stoppingCts.Dispose();

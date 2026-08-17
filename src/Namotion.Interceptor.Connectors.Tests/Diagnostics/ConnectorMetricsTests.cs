@@ -207,6 +207,39 @@ public class ConnectorMetricsTests
     }
 
     [Fact]
+    public async Task WhenRestartResetIsStillRunning_ThenTheNewEpochIsNotYetVisible()
+    {
+        // Arrange
+        var metrics = new SourceMetrics();
+        var diagnostics = new SourceDiagnostics(metrics);
+        metrics.MarkStarted();
+        var firstStart = diagnostics.StartTime;
+        metrics.OutboundRetries.AddDropped(3);
+
+        using var resettable = new BlockingResettable();
+        metrics.RegisterResettable(resettable);
+        ClockTestHelpers.WaitForClockTick();
+
+        // Act
+        var restart = Task.Run(metrics.MarkStarted);
+        await resettable.Entered.WaitAsync(TimeSpan.FromSeconds(5));
+
+        try
+        {
+            // Assert
+            Assert.Equal(firstStart, diagnostics.StartTime);
+        }
+        finally
+        {
+            resettable.AllowReset();
+            await restart;
+        }
+
+        Assert.NotEqual(firstStart, diagnostics.StartTime);
+        Assert.Equal(0, diagnostics.OutboundRetries.TotalDropped);
+    }
+
+    [Fact]
     public void WhenNoThroughputCountersArePassed_ThenBothRatesAreNull()
     {
         // Arrange
@@ -353,5 +386,23 @@ public class ConnectorMetricsTests
         public int ResetCount { get; private set; }
 
         public void Reset() => ResetCount++;
+    }
+
+    private sealed class BlockingResettable : IResettableMetrics, IDisposable
+    {
+        private readonly ManualResetEventSlim _allowReset = new();
+        private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal Task Entered => _entered.Task;
+
+        internal void AllowReset() => _allowReset.Set();
+
+        public void Reset()
+        {
+            _entered.TrySetResult();
+            _allowReset.Wait();
+        }
+
+        public void Dispose() => _allowReset.Dispose();
     }
 }

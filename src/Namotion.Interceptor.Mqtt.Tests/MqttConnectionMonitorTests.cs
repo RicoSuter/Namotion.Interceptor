@@ -186,6 +186,49 @@ public class MqttConnectionMonitorTests
     }
 
     [Fact]
+    public async Task WhenTransportTerminationFailsDuringShutdown_ThenTheFailureIsNotReported()
+    {
+        // Arrange
+        var client = new Mock<IMqttClient>();
+        using var cancellation = new CancellationTokenSource();
+        var errorCount = 0;
+
+        client.Setup(c => c.IsConnected).Returns(true);
+        SetupPingUnhealthy(client);
+        client
+            .Setup(c => c.DisconnectAsync(
+                It.IsAny<MqttClientDisconnectOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                cancellation.Cancel();
+                return Task.FromException(new InvalidOperationException("transport stopped"));
+            });
+
+        var monitor = new MqttConnectionMonitor(
+            client.Object,
+            CreateConfiguration(healthCheckInterval: TimeSpan.FromSeconds(30)),
+            CreateOptions,
+            onReconnected: _ => Task.CompletedTask,
+            onDisconnected: () => Task.CompletedTask,
+            onError: _ => Interlocked.Increment(ref errorCount),
+            NullLogger.Instance);
+        monitor.SignalReconnectNeeded();
+
+        // Act
+        try
+        {
+            await monitor.MonitorConnectionAsync(cancellation.Token);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+        }
+
+        // Assert
+        Assert.Equal(0, errorCount);
+    }
+
+    [Fact]
     public async Task DisconnectSignal_TriggersReconnection()
     {
         // Arrange

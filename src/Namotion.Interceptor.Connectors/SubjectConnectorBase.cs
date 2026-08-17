@@ -12,6 +12,8 @@ namespace Namotion.Interceptor.Connectors;
 /// </remarks>
 public abstract class SubjectConnectorBase : BackgroundService, ISubjectConnector
 {
+    private int _executionActive;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="SubjectConnectorBase"/> class.
     /// </summary>
@@ -45,6 +47,31 @@ public abstract class SubjectConnectorBase : BackgroundService, ISubjectConnecto
     protected abstract Task RunAsync(CancellationToken stoppingToken);
 
     /// <inheritdoc />
+    /// <exception cref="InvalidOperationException">
+    /// The previous execution is still running.
+    /// </exception>
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        // BackgroundService permits StartAsync after a timed-out StopAsync even while its previous
+        // ExecuteTask is still live. Starting then would overwrite the task and cancellation source,
+        // and the old execution could stop the new diagnostics epoch when it eventually exits.
+        if (Interlocked.CompareExchange(ref _executionActive, 1, 0) != 0)
+        {
+            throw new InvalidOperationException("Cannot start a connector while its previous execution is still running.");
+        }
+
+        try
+        {
+            return base.StartAsync(cancellationToken);
+        }
+        catch
+        {
+            Volatile.Write(ref _executionActive, 0);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
@@ -69,7 +96,14 @@ public abstract class SubjectConnectorBase : BackgroundService, ISubjectConnecto
         }
         finally
         {
-            Metrics.MarkStopped();
+            try
+            {
+                Metrics.MarkStopped();
+            }
+            finally
+            {
+                Volatile.Write(ref _executionActive, 0);
+            }
         }
     }
 

@@ -23,6 +23,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     private readonly Timer _timer;
     private readonly CancellationTokenSource _cts = new();
     private readonly ReadAfterWriteMetrics _metrics;
+    private readonly Action<Exception> _reportError;
 
     // NodeId -> (RevisedInterval, Property) for properties that need read-after-writes
     private readonly Dictionary<NodeId, (TimeSpan RevisedInterval, RegisteredSubjectProperty Property)> _trackedProperties = new();
@@ -35,19 +36,11 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
     private DateTime _earliestReadTime = DateTime.MaxValue;
     private ISession? _lastKnownSession;
+    private int _pendingReadCount;
     private int _disposed;
     private int _isProcessing; // 0 = not processing, 1 = processing (for timer callback serialization)
 
-    internal int PendingReadCount
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _pendingReads.Count;
-            }
-        }
-    }
+    internal int PendingReadCount => Volatile.Read(ref _pendingReadCount);
 
     /// <summary>
     /// Creates a new read-after-write manager.
@@ -56,21 +49,25 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     /// <param name="source">The subject source for applying read values.</param>
     /// <param name="configuration">OPC UA client configuration.</param>
     /// <param name="metrics">The counters to report into.</param>
+    /// <param name="reportError">Reports genuine background failures to the owning source.</param>
     /// <param name="logger">Logger instance.</param>
     public ReadAfterWriteManager(
         Func<ISession?> sessionProvider,
         ISubjectSource source,
         OpcUaClientConfiguration configuration,
         ReadAfterWriteMetrics metrics,
+        Action<Exception> reportError,
         ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(metrics);
+        ArgumentNullException.ThrowIfNull(reportError);
 
         _sessionProvider = sessionProvider;
         _source = source;
         _configuration = configuration;
         _logger = logger;
         _metrics = metrics;
+        _reportError = reportError;
         _circuitBreaker = new CircuitBreaker(
             configuration.PollingCircuitBreakerThreshold,
             configuration.PollingCircuitBreakerCooldown);
@@ -126,6 +123,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
             if (_pendingReads.Remove(nodeId))
             {
+                UpdatePendingReadCountLocked();
                 RecalculateEarliestLocked();
             }
         }
@@ -179,6 +177,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             }
 
             _pendingReads[nodeId] = (readAt, tracked.Property);
+            UpdatePendingReadCountLocked();
 
             // Only reschedule timer if this is earlier than current earliest
             if (readAt < _earliestReadTime)
@@ -220,6 +219,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     private void ClearPendingReadsLocked()
     {
         _pendingReads.Clear();
+        UpdatePendingReadCountLocked();
         _earliestReadTime = DateTime.MaxValue;
         _timer.Change(Timeout.Infinite, Timeout.Infinite);
     }
@@ -244,6 +244,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         }
         catch (Exception ex)
         {
+            ReportErrorIfRunning(ex);
             _logger.LogError(ex, "Unexpected error in read-after-write timer callback.");
         }
         finally
@@ -252,7 +253,9 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         }
     }
 
-    private async Task ProcessDueReadsAsync()
+    private Task ProcessDueReadsAsync() => ProcessDueReadsAsync(DateTime.UtcNow);
+
+    internal async Task ProcessDueReadsAsync(DateTime utcNow)
     {
         if (!_circuitBreaker.ShouldAttempt())
         {
@@ -264,12 +267,11 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         int dueCount;
         lock (_lock)
         {
-            var now = DateTime.UtcNow;
             _dueReadsList.Clear();
 
             foreach (var kvp in _pendingReads)
             {
-                if (kvp.Value.ReadAt <= now)
+                if (kvp.Value.ReadAt <= utcNow)
                 {
                     _dueReadsList.Add((kvp.Key, kvp.Value.Property));
                 }
@@ -278,6 +280,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             foreach (var (nodeId, _) in _dueReadsList)
             {
                 _pendingReads.Remove(nodeId);
+                UpdatePendingReadCountLocked();
             }
 
             RecalculateEarliestLocked();
@@ -298,75 +301,110 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             return;
         }
 
+        var successCount = 0;
+        var failedCount = 0;
+        var skippedCount = 0;
+        var completedCount = 0;
+
         try
         {
-            var readValues = new ReadValueIdCollection(dueCount);
-            for (var i = 0; i < dueCount; i++)
+            try
             {
-                readValues.Add(new ReadValueId
+                var readValues = new ReadValueIdCollection(dueCount);
+                for (var i = 0; i < dueCount; i++)
                 {
-                    NodeId = _dueReadsList[i].NodeId,
-                    AttributeId = Opc.Ua.Attributes.Value
-                });
-            }
-
-            var response = await session.ReadAsync(
-                requestHeader: null,
-                maxAge: 0,
-                timestampsToReturn: TimestampsToReturn.Source,
-                readValues,
-                _cts.Token).ConfigureAwait(false);
-
-            var successCount = 0;
-            var skippedCount = 0;
-            var receivedTimestamp = DateTimeOffset.UtcNow;
-
-            for (var i = 0; i < response.Results.Count && i < dueCount; i++)
-            {
-                var result = response.Results[i];
-                if (!StatusCode.IsGood(result.StatusCode))
-                {
-                    continue;
+                    readValues.Add(new ReadValueId
+                    {
+                        NodeId = _dueReadsList[i].NodeId,
+                        AttributeId = Opc.Ua.Attributes.Value
+                    });
                 }
 
-                var (_, property) = _dueReadsList[i];
-                var sourceTimestamp = (DateTimeOffset)result.SourceTimestamp;
-
-                // Skip if property already has a newer value from subscription notification
-                var currentWriteTimestamp = property.Reference.TryGetWriteTimestamp();
-                if (currentWriteTimestamp.HasValue && currentWriteTimestamp.Value >= sourceTimestamp)
+                ReadResponse response;
+                try
                 {
-                    skippedCount++;
-                    continue;
+                    response = await session.ReadAsync(
+                        requestHeader: null,
+                        maxAge: 0,
+                        timestampsToReturn: TimestampsToReturn.Source,
+                        readValues,
+                        _cts.Token).ConfigureAwait(false);
+                }
+                catch (Exception) when (_cts.IsCancellationRequested)
+                {
+                    return;
                 }
 
-                var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
-                property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
-                successCount++;
+                var receivedTimestamp = DateTimeOffset.UtcNow;
+
+                for (var i = 0; i < response.Results.Count && i < dueCount; i++)
+                {
+                    var result = response.Results[i];
+                    if (!StatusCode.IsGood(result.StatusCode))
+                    {
+                        failedCount++;
+                        completedCount++;
+                        continue;
+                    }
+
+                    var (_, property) = _dueReadsList[i];
+                    var sourceTimestamp = (DateTimeOffset)result.SourceTimestamp;
+
+                    // Skip if property already has a newer value from subscription notification
+                    var currentWriteTimestamp = property.Reference.TryGetWriteTimestamp();
+                    if (currentWriteTimestamp.HasValue && currentWriteTimestamp.Value >= sourceTimestamp)
+                    {
+                        skippedCount++;
+                        completedCount++;
+                        continue;
+                    }
+
+                    var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
+                    property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
+                    successCount++;
+                    completedCount++;
+                }
+            }
+            catch (Exception ex)
+            {
+                failedCount += dueCount - completedCount;
+                _metrics.RecordExecuted(successCount);
+                _metrics.RecordFailed(failedCount);
+                ReportErrorIfRunning(ex);
+                if (_circuitBreaker.RecordFailure())
+                {
+                    _logger.LogError(ex, "Read-after-write circuit breaker opened after failures.");
+                }
+                else
+                {
+                    _logger.LogWarning(ex, "Failed to execute read-after-writes.");
+                }
+
+                return;
             }
 
+            failedCount += dueCount - completedCount;
             _metrics.RecordExecuted(successCount);
+            _metrics.RecordFailed(failedCount);
             _circuitBreaker.RecordSuccess();
 
+            // Logging provider failures are not read failures. Let them propagate to the timer callback's
+            // unexpected-error guard without replaying metrics or changing the circuit state.
             _logger.LogDebug(
                 "Completed {SuccessCount}/{TotalCount} read-after-writes ({SkippedCount} skipped as stale).",
                 successCount, dueCount, skippedCount);
         }
-        catch (Exception ex)
-        {
-            _metrics.RecordFailed();
-            if (_circuitBreaker.RecordFailure())
-            {
-                _logger.LogError(ex, "Read-after-write circuit breaker opened after failures.");
-            }
-            else
-            {
-                _logger.LogWarning(ex, "Failed to execute read-after-writes.");
-            }
-        }
         finally
         {
             RescheduleTimer();
+        }
+    }
+
+    private void ReportErrorIfRunning(Exception error)
+    {
+        if (Volatile.Read(ref _disposed) == 0 && !_cts.IsCancellationRequested)
+        {
+            _reportError(error);
         }
     }
 
@@ -419,6 +457,11 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         _earliestReadTime = earliest;
     }
 
+    private void UpdatePendingReadCountLocked()
+    {
+        Volatile.Write(ref _pendingReadCount, _pendingReads.Count);
+    }
+
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
@@ -443,6 +486,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         {
             _trackedProperties.Clear();
             _pendingReads.Clear();
+            UpdatePendingReadCountLocked();
             _earliestReadTime = DateTime.MaxValue;
         }
     }

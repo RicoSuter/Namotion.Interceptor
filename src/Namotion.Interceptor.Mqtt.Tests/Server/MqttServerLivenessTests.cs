@@ -1,14 +1,24 @@
+using System.Buffers;
+using System.Collections;
+using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
 using Microsoft.Extensions.Logging.Abstractions;
 using MQTTnet;
+using MQTTnet.Formatter;
+using MQTTnet.Packets;
+using MQTTnet.Protocol;
 using MQTTnet.Server;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Mapping;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Mqtt.Server;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Testing;
@@ -215,16 +225,445 @@ public partial class MqttServerLivenessTests
         }
     }
 
+    [Fact]
+    public async Task WhenConnectedCallbackOutlivesRun_ThenItObservesTheCapturedCancellation()
+    {
+        // Arrange
+        await using var server = CreateServer();
+        await server.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+        var staleHandler = GetInstalledHandler<ClientConnectedEventArgs>(
+            GetCurrentBroker(server), "ClientConnectedEvent");
+        await server.StopAsync(CancellationToken.None);
+
+        var args =
+            new ClientConnectedEventArgs(
+                new MqttConnectPacket { ClientId = "stale-client" },
+                MqttProtocolVersion.V500,
+                new IPEndPoint(IPAddress.Loopback, 1),
+                new Hashtable());
+
+        // Act
+        await staleHandler(args);
+
+        // Assert
+        Assert.Equal(0, server.Diagnostics.ConnectedClientCount);
+    }
+
+    [Fact]
+    public async Task WhenDisconnectedCallbackOutlivesRun_ThenItCannotChangeTheNextRunCount()
+    {
+        // Arrange
+        var brokerPort = GetFreeTcpPort();
+        await using var server = CreateServer(port: brokerPort);
+        using var client = new MqttClientFactory().CreateMqttClient();
+
+        await server.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+            var staleHandler = GetInstalledHandler<ClientDisconnectedEventArgs>(
+                GetCurrentBroker(server), "ClientDisconnectedEvent");
+
+            await server.StopAsync(CancellationToken.None);
+            await server.StartAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+
+            var options = new MqttClientOptionsBuilder()
+                .WithTcpServer("127.0.0.1", brokerPort)
+                .Build();
+            await client.ConnectAsync(options, CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Diagnostics.ConnectedClientCount == 1);
+
+            var args = new ClientDisconnectedEventArgs(
+                new MqttConnectPacket { ClientId = "stale-client" },
+                new MqttDisconnectPacket(),
+                MqttClientDisconnectType.Clean,
+                new IPEndPoint(IPAddress.Loopback, 1),
+                new Hashtable());
+
+            // Act
+            await staleHandler(args);
+
+            // Assert
+            Assert.Equal(1, server.Diagnostics.ConnectedClientCount);
+        }
+        finally
+        {
+            if (client.IsConnected)
+            {
+                await client.DisconnectAsync();
+            }
+
+            await server.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenPublishMappingOutlivesRun_ThenOnlyTheReplacementRunCanMutateAndRelay()
+    {
+        // Arrange
+        var brokerPort = GetFreeTcpPort();
+        using var mapper = new GatedMqttMapper();
+        await using var server = CreateServer(
+            port: brokerPort,
+            initialStateDelay: TimeSpan.Zero,
+            mapper: mapper);
+        var root = (LivenessTestRoot)server.RootSubject;
+        using var publishCancellation = new CancellationTokenSource();
+        using var subscriber = new MqttClientFactory().CreateMqttClient();
+        var relayedValues = new ConcurrentQueue<string>();
+        var newValueRelayed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sentinelRelayed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        subscriber.ApplicationMessageReceivedAsync += args =>
+        {
+            var value = (string)new JsonMqttValueConverter().Deserialize(
+                args.ApplicationMessage.Payload,
+                typeof(string))!;
+            relayedValues.Enqueue(value);
+            if (value == "New")
+            {
+                newValueRelayed.TrySetResult();
+            }
+            else if (value == "Sentinel")
+            {
+                sentinelRelayed.TrySetResult();
+            }
+
+            return Task.CompletedTask;
+        };
+
+        await server.StartAsync(CancellationToken.None);
+        Task? staleCallback = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+            var staleHandler = GetInstalledHandler<InterceptingPublishEventArgs>(
+                GetCurrentBroker(server), "InterceptingPublishEvent");
+            var staleArgs = CreatePublishEventArgs("Old", publishCancellation.Token);
+            staleCallback = Task.Run(() => staleHandler(staleArgs));
+            await mapper.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+
+            await server.StopAsync(CancellationToken.None);
+            await server.StartAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+
+            var subscriberOptions = new MqttClientOptionsBuilder()
+                .WithTcpServer("127.0.0.1", brokerPort)
+                .Build();
+            await subscriber.ConnectAsync(subscriberOptions, CancellationToken.None);
+            var subscribeOptions = new MqttClientSubscribeOptionsBuilder()
+                .WithTopicFilter(filter => filter.WithTopic("Name"))
+                .Build();
+            await subscriber.SubscribeAsync(subscribeOptions, CancellationToken.None);
+
+            var currentHandler = GetInstalledHandler<InterceptingPublishEventArgs>(
+                GetCurrentBroker(server), "InterceptingPublishEvent");
+            var currentArgs = CreatePublishEventArgs("New");
+            await currentHandler(currentArgs);
+            await newValueRelayed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Act
+            mapper.Release();
+            await staleCallback.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal("New", root.Name);
+            root.Name = "Sentinel";
+            await sentinelRelayed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Assert
+            Assert.Equal(publishCancellation.Token, mapper.ObservedCancellationToken);
+            Assert.False(currentArgs.ProcessPublish);
+            Assert.Equal("Sentinel", root.Name);
+            Assert.DoesNotContain("Old", relayedValues);
+        }
+        finally
+        {
+            mapper.Release();
+            if (staleCallback is not null)
+            {
+                await staleCallback.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+
+            if (subscriber.IsConnected)
+            {
+                await subscriber.DisconnectAsync();
+            }
+
+            await server.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenMapperPausedPublishResumesDuringShutdown_ThenRetiringBrokerDoesNotRelayIt()
+    {
+        // Arrange
+        using var mapper = new GatedMqttMapper();
+
+        // Act & Assert
+        await AssertRetiringBrokerDoesNotRelayMapperPausedPublishAsync(mapper);
+    }
+
+    [Fact]
+    public async Task WhenUnmappedPublishMappingOutlivesShutdown_ThenRetiringBrokerDoesNotRelayIt()
+    {
+        // Arrange
+        using var mapper = new GatedMqttMapper(returnNullAfterRelease: true);
+
+        // Act & Assert
+        await AssertRetiringBrokerDoesNotRelayMapperPausedPublishAsync(mapper);
+    }
+
+    [Fact]
+    public async Task WhenPublishMappingThrowsAfterShutdown_ThenRetiringBrokerDoesNotRelayIt()
+    {
+        // Arrange
+        using var mapper = new GatedMqttMapper(throwAfterRelease: true);
+
+        // Act & Assert
+        await AssertRetiringBrokerDoesNotRelayMapperPausedPublishAsync(mapper);
+    }
+
+    private static async Task AssertRetiringBrokerDoesNotRelayMapperPausedPublishAsync(GatedMqttMapper mapper)
+    {
+        var brokerPort = GetFreeTcpPort();
+        using var commitGate = new GatedWriteInterceptor("Drain");
+        await using var server = CreateServer(
+            port: brokerPort,
+            initialStateDelay: TimeSpan.Zero,
+            mapper: mapper,
+            writeInterceptor: commitGate);
+        using var subscriber = new MqttClientFactory().CreateMqttClient();
+        using var publisher = new MqttClientFactory().CreateMqttClient();
+        var converter = new JsonMqttValueConverter();
+        var relayedValues = new ConcurrentQueue<string>();
+        var sentinelRelayed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        subscriber.ApplicationMessageReceivedAsync += args =>
+        {
+            var value = (string)converter.Deserialize(args.ApplicationMessage.Payload, typeof(string))!;
+            relayedValues.Enqueue(value);
+            if (value == "Sentinel")
+            {
+                sentinelRelayed.TrySetResult();
+            }
+
+            return Task.CompletedTask;
+        };
+
+        await server.StartAsync(CancellationToken.None);
+        Task? stalePublishTask = null;
+        Task? admittedCallback = null;
+        Task? stopTask = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+            var broker = GetCurrentBroker(server);
+            var subscriberOptions = new MqttClientOptionsBuilder()
+                .WithTcpServer("127.0.0.1", brokerPort)
+                .WithClientId("relay-subscriber")
+                .Build();
+            await subscriber.ConnectAsync(subscriberOptions, CancellationToken.None);
+            await subscriber.SubscribeAsync(
+                new MqttClientSubscribeOptionsBuilder()
+                    .WithTopicFilter(filter => filter
+                        .WithTopic("Name")
+                        .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce))
+                    .Build(),
+                CancellationToken.None);
+            var publisherOptions = new MqttClientOptionsBuilder()
+                .WithTcpServer("127.0.0.1", brokerPort)
+                .WithClientId("relay-publisher")
+                .Build();
+            await publisher.ConnectAsync(publisherOptions, CancellationToken.None);
+
+            stalePublishTask = publisher.PublishAsync(
+                CreateApplicationMessage("Old", converter),
+                CancellationToken.None);
+            await mapper.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+
+            var publishHandler = GetInstalledHandler<InterceptingPublishEventArgs>(
+                broker, "InterceptingPublishEvent");
+            admittedCallback = Task.Run(() => publishHandler(CreatePublishEventArgs("Drain", converter: converter)));
+            await commitGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+
+            stopTask = server.StopAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => GetInstalledHandlers<InterceptingPublishEventArgs>(broker, "InterceptingPublishEvent").Count == 0,
+                message: "Shutdown should unregister the publish callback before draining admitted commits.");
+            Assert.True(broker.IsStarted);
+            var lateArgs = CreatePublishEventArgs("Late", converter: converter);
+            await publishHandler(lateArgs);
+
+            // Act
+            mapper.Release();
+            await stalePublishTask.WaitAsync(TimeSpan.FromSeconds(10));
+            await broker.InjectApplicationMessage(
+                new InjectedMqttApplicationMessage(CreateApplicationMessage("Sentinel", converter))
+                {
+                    SenderClientId = "sentinel-client"
+                },
+                CancellationToken.None);
+            await sentinelRelayed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Assert
+            Assert.DoesNotContain("Old", relayedValues);
+            Assert.False(lateArgs.ProcessPublish);
+        }
+        finally
+        {
+            mapper.Release();
+            commitGate.Release();
+
+            if (stalePublishTask is not null)
+            {
+                await stalePublishTask.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+
+            if (admittedCallback is not null)
+            {
+                await admittedCallback.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+
+            if (stopTask is not null)
+            {
+                await stopTask.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+
+            if (publisher.IsConnected)
+            {
+                await publisher.DisconnectAsync();
+            }
+
+            if (subscriber.IsConnected)
+            {
+                await subscriber.DisconnectAsync();
+            }
+
+            await server.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenShutdownRetiresPublishPausedInConversion_ThenLateCommitIsRejected()
+    {
+        // Arrange
+        using var converter = new GatedMqttValueConverter("Old");
+        await using var server = CreateServer(valueConverter: converter);
+        var root = (LivenessTestRoot)server.RootSubject;
+        root.Name = "Initial";
+
+        await server.StartAsync(CancellationToken.None);
+        Task? staleCallback = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+            var broker = GetCurrentBroker(server);
+            var staleHandler = GetInstalledHandler<InterceptingPublishEventArgs>(
+                broker, "InterceptingPublishEvent");
+            staleCallback = Task.Run(() => staleHandler(CreatePublishEventArgs("Old", converter: converter)));
+            await converter.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Act
+            var stopTask = server.StopAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => GetInstalledHandlers<InterceptingPublishEventArgs>(broker, "InterceptingPublishEvent").Count == 0,
+                message: "Shutdown should unregister the old publish callback before retiring its commits.");
+            await stopTask.WaitAsync(TimeSpan.FromSeconds(10));
+            converter.Release();
+            await staleCallback.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Assert
+            Assert.Equal("Initial", root.Name);
+        }
+        finally
+        {
+            converter.Release();
+            if (staleCallback is not null)
+            {
+                await staleCallback.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+
+            await server.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenShutdownRetiresAnAdmittedPublishCommit_ThenStopDrainsItBeforeReplacementRun()
+    {
+        // Arrange
+        var brokerPort = GetFreeTcpPort();
+        using var commitGate = new GatedWriteInterceptor("Old");
+        await using var server = CreateServer(port: brokerPort, writeInterceptor: commitGate);
+        var root = (LivenessTestRoot)server.RootSubject;
+
+        await server.StartAsync(CancellationToken.None);
+        Task? admittedCallback = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+            var broker = GetCurrentBroker(server);
+            var handler = GetInstalledHandler<InterceptingPublishEventArgs>(
+                broker, "InterceptingPublishEvent");
+            admittedCallback = Task.Run(() => handler(CreatePublishEventArgs("Old")));
+            await commitGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Act
+            var stopTask = server.StopAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => GetInstalledHandlers<InterceptingPublishEventArgs>(broker, "InterceptingPublishEvent").Count == 0,
+                message: "Shutdown should unregister the old publish callback before retiring its commits.");
+
+            // Assert
+            Assert.False(stopTask.IsCompleted);
+            Assert.True(broker.IsStarted);
+
+            // Act
+            commitGate.Release();
+            await admittedCallback.WaitAsync(TimeSpan.FromSeconds(10));
+            await stopTask.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal("Old", root.Name);
+
+            await server.StartAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+            var replacementHandler = GetInstalledHandler<InterceptingPublishEventArgs>(
+                GetCurrentBroker(server), "InterceptingPublishEvent");
+            await replacementHandler(CreatePublishEventArgs("New"));
+
+            // Assert
+            Assert.Equal("New", root.Name);
+        }
+        finally
+        {
+            commitGate.Release();
+            if (admittedCallback is not null)
+            {
+                await admittedCallback.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+
+            await server.StopAsync(CancellationToken.None);
+        }
+    }
+
     private static MqttSubjectServer CreateServer(
         TimeSpan? bufferTime = null,
         int? port = null,
         TimeSpan? initialStateDelay = null,
-        bool withLifecycle = false)
+        bool withLifecycle = false,
+        IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>? mapper = null,
+        IMqttValueConverter? valueConverter = null,
+        IWriteInterceptor? writeInterceptor = null)
     {
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry();
+
+        if (writeInterceptor is not null)
+        {
+            context.WithService<IWriteInterceptor>(() => writeInterceptor, _ => false);
+        }
 
         if (withLifecycle)
         {
@@ -235,9 +674,10 @@ public partial class MqttServerLivenessTests
         {
             BrokerHost = "127.0.0.1",
             BrokerPort = port ?? GetFreeTcpPort(),
-            Mapper = new MqttCompositeMapper(
+            Mapper = mapper ?? new MqttCompositeMapper(
                 new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
                 new MqttAttributeMapper("mqtt")),
+            ValueConverter = valueConverter ?? new JsonMqttValueConverter(),
             BufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8),
             InitialStateDelay = initialStateDelay ?? TimeSpan.FromMilliseconds(500)
         };
@@ -251,6 +691,68 @@ public partial class MqttServerLivenessTests
             .GetField("_mqttServer", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(server)
             ?? throw new InvalidOperationException("The server has no active MQTT broker."));
+
+    private static Func<TEventArgs, Task> GetInstalledHandler<TEventArgs>(
+        MqttServer broker,
+        string eventPropertyName)
+        where TEventArgs : EventArgs
+    {
+        return Assert.Single(GetInstalledHandlers<TEventArgs>(broker, eventPropertyName));
+    }
+
+    private static IReadOnlyList<Func<TEventArgs, Task>> GetInstalledHandlers<TEventArgs>(
+        MqttServer broker,
+        string eventPropertyName)
+        where TEventArgs : EventArgs
+    {
+        var eventContainer = typeof(MqttServer)
+            .GetField("_eventContainer", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(broker)!;
+        var asyncEvent = eventContainer.GetType()
+            .GetProperty(eventPropertyName, BindingFlags.Instance | BindingFlags.Public)!
+            .GetValue(eventContainer)!;
+        var handlers = (IEnumerable)asyncEvent.GetType()
+            .GetField("_handlersForInvoke", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(asyncEvent)!;
+
+        var result = new List<Func<TEventArgs, Task>>();
+        foreach (var invocator in handlers)
+        {
+            var handler = (Func<TEventArgs, Task>?)invocator.GetType()
+                .GetField("_asyncHandler", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(invocator);
+            if (handler is not null)
+            {
+                result.Add(handler);
+            }
+        }
+
+        return result;
+    }
+
+    private static InterceptingPublishEventArgs CreatePublishEventArgs(
+        string value,
+        CancellationToken cancellationToken = default,
+        IMqttValueConverter? converter = null)
+    {
+        converter ??= new JsonMqttValueConverter();
+        return new InterceptingPublishEventArgs(
+            CreateApplicationMessage(value, converter),
+            "test-client",
+            "test-user",
+            new Hashtable(),
+            cancellationToken);
+    }
+
+    private static MqttApplicationMessage CreateApplicationMessage(
+        string value,
+        IMqttValueConverter converter) =>
+        new()
+        {
+            Topic = "Name",
+            PayloadSegment = new ArraySegment<byte>(converter.Serialize(value, typeof(string))),
+            QualityOfServiceLevel = MqttQualityOfServiceLevel.AtLeastOnce
+        };
 
     private static Task[] GetInitialStateTasks(MqttSubjectServer server) =>
         server.GetRunningInitialStateTasksSnapshot();
@@ -285,5 +787,110 @@ public partial class MqttServerLivenessTests
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return port;
+    }
+
+    private sealed class GatedMqttMapper(
+        bool returnNullAfterRelease = false,
+        bool throwAfterRelease = false)
+        : IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey>, IDisposable
+    {
+        private readonly MqttCompositeMapper _inner = new(
+            new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
+            new MqttAttributeMapper("mqtt"));
+        private readonly ManualResetEventSlim _release = new(false);
+        private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _blocked;
+
+        public Task Entered => _entered.Task;
+
+        public CancellationToken ObservedCancellationToken { get; private set; }
+
+        public bool TryGetMapping(
+            RegisteredSubjectProperty property,
+            IInterceptorSubject rootSubject,
+            [NotNullWhen(true)]
+            out MqttPropertyMapping? mapping) =>
+            _inner.TryGetMapping(property, rootSubject, out mapping);
+
+        public async ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
+            MqttLookupKey key,
+            RegisteredSubject subject,
+            CancellationToken cancellationToken)
+        {
+            var isBlockedInvocation = Interlocked.Exchange(ref _blocked, 1) == 0;
+            if (isBlockedInvocation)
+            {
+                ObservedCancellationToken = cancellationToken;
+                _entered.TrySetResult();
+                _release.Wait();
+            }
+
+            if (throwAfterRelease && isBlockedInvocation)
+            {
+                throw new InvalidOperationException("Mapping failed after release.");
+            }
+
+            return returnNullAfterRelease && isBlockedInvocation
+                ? null
+                : await _inner.TryGetPropertyAsync(key, subject, cancellationToken).ConfigureAwait(false);
+        }
+
+        public void Release() => _release.Set();
+
+        public void Dispose() => _release.Dispose();
+    }
+
+    private sealed class GatedMqttValueConverter(string blockedValue) : IMqttValueConverter, IDisposable
+    {
+        private readonly JsonMqttValueConverter _inner = new();
+        private readonly ManualResetEventSlim _release = new(false);
+        private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _blocked;
+
+        public Task Entered => _entered.Task;
+
+        public byte[] Serialize(object? value, Type type) => _inner.Serialize(value, type);
+
+        public object? Deserialize(ReadOnlySequence<byte> payload, Type type)
+        {
+            var value = _inner.Deserialize(payload, type);
+            if (Equals(value, blockedValue) && Interlocked.Exchange(ref _blocked, 1) == 0)
+            {
+                _entered.TrySetResult();
+                _release.Wait();
+            }
+
+            return value;
+        }
+
+        public void Release() => _release.Set();
+
+        public void Dispose() => _release.Dispose();
+    }
+
+    private sealed class GatedWriteInterceptor(string blockedValue) : IWriteInterceptor, IDisposable
+    {
+        private readonly ManualResetEventSlim _release = new(false);
+        private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _blocked;
+
+        public Task Entered => _entered.Task;
+
+        public void WriteProperty<TProperty>(
+            ref PropertyWriteContext<TProperty> context,
+            WriteInterceptionDelegate<TProperty> next)
+        {
+            if (Equals(context.NewValue, blockedValue) && Interlocked.Exchange(ref _blocked, 1) == 0)
+            {
+                _entered.TrySetResult();
+                _release.Wait();
+            }
+
+            next(ref context);
+        }
+
+        public void Release() => _release.Set();
+
+        public void Dispose() => _release.Dispose();
     }
 }

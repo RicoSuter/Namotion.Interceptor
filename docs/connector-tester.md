@@ -91,7 +91,7 @@ Each connector implements `IFaultInjectable` (separate from the production `ISub
   - *OPC UA Server*: Cancels the current attempt's loop token and closes transport listeners (TCP RST to all clients) before shutting the server down and restarting. The backoff after a failed start runs inside the attempt, so a kill arriving during it is accepted and cancels a token whose work has already ended: it does nothing for as long as the backoff lasts, which after repeated failures is up to 32 seconds. Only a kill landing between one attempt being released and the next being created has nothing to cancel and is dropped, and that call returns successfully having done nothing.
   - *OPC UA Client*: Attempts graceful session close, then kills the transport channel. Health check detects missing session and triggers full reconnection.
   - *MQTT Server*: Cancels the current attempt's loop token, so the processing loop exits and the broker restarts. Its backoff after a failed start behaves like the OPC UA server's, over a fixed five seconds.
-  - *MQTT Client*: Cancels the current iteration's token, so the connection monitor exits and the loop re-enters it. A kill landing between iterations has none to cancel and is dropped, which for a client is the few instructions between one iteration ending and the next starting.
+  - *MQTT Client*: Cancels the current iteration's token, so the connection monitor exits and the transport is replaced. The replacement loop publishes no current attempt, so a second Kill during teardown, reconnect backoff, or replacement connection attempts has none to cancel and is dropped.
   - *WebSocket Server*: Cancels the current attempt's loop token, triggering full teardown and rebuild of the Kestrel HTTP listener. The attempt is released before the five second backoff a failed attempt takes rather than after it, so a kill arriving anywhere in that window has no attempt to cancel and is dropped: the call returns successfully having done nothing.
   - *WebSocket Client*: Cancels the current iteration's token; the monitor loop's kill clause aborts the WebSocket and reconnects. A kill landing between iterations is dropped the same way the MQTT client drops one, and the reconnect backoff runs inside the iteration, so a kill during it is honoured.
 
@@ -260,7 +260,7 @@ Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfigur
 | Session stall / hung reconnect | N/A | N/A | Stall detection after 30s forces SDK handler reset, triggers manual reconnection |
 | Subscription creation failure | N/A | N/A | `SubscriptionHealthMonitor` retries failed items every 5s, falls back to polling |
 | Port already in use on restart | N/A | N/A | Retried with exponential backoff |
-| Resource exhaustion (polling) | N/A | N/A | Circuit breaker (5 failures, 60s cooldown) |
+| Resource exhaustion (polling) | N/A | N/A | Circuit breaker (5 failures, 30s cooldown) |
 | Concurrent server + client chaos | Both engines run independently, overlapping disruptions possible | Same | Each connector recovers independently |
 | Bidirectional mutations during chaos | Server and clients mutate concurrently during disruptions | Same | WriteRetryQueue buffers outbound writes, full state sync on reconnect |
 

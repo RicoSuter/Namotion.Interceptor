@@ -147,8 +147,11 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
                     }
                     catch (Exception exception)
                     {
-                        _onError(exception);
-                        _logger.LogWarning(exception, "Failed to terminate the unhealthy MQTT transport.");
+                        if (!cancellationToken.IsCancellationRequested)
+                        {
+                            _onError(exception);
+                            _logger.LogWarning(exception, "Failed to terminate the unhealthy MQTT transport.");
+                        }
                     }
                 }
 

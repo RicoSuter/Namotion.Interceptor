@@ -35,6 +35,9 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     private Connection.SessionManager? ActiveSessionManager =>
         _source.SessionManager is { IsDisposed: false } sessionManager ? sessionManager : null;
 
+    private Connection.SessionManager? ActiveSessionManagerWithCurrentSession =>
+        ActiveSessionManager is { CurrentSession: not null } sessionManager ? sessionManager : null;
+
     /// <summary>
     /// Gets a value indicating whether the client is currently attempting to reconnect.
     /// </summary>
@@ -53,7 +56,7 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     /// <summary>
     /// Gets the number of monitored items across all subscriptions.
     /// </summary>
-    public int MonitoredItemCount => ActiveSessionManager?.SubscriptionManager.MonitoredItems.Count ?? 0;
+    public int MonitoredItemCount => ActiveSessionManager?.SubscriptionManager.MonitoredItemCount ?? 0;
 
     /// <summary>
     /// Gets the reconnection history.
@@ -68,7 +71,7 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     /// The underlying totals are owned by the source rather than by the session, so they reappear at
     /// their previous values once a session exists again.
     /// </remarks>
-    public PollingDiagnostics? Polling => ActiveSessionManager?.PollingDiagnostics;
+    public PollingDiagnostics? Polling => ActiveSessionManagerWithCurrentSession?.PollingDiagnostics;
 
     /// <summary>
     /// Gets read-after-write diagnostics, or <c>null</c> when read-after-write is off, no session has
@@ -77,7 +80,7 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     /// <remarks>
     /// Its totals survive between attempts in the same way as <see cref="Polling"/>.
     /// </remarks>
-    public ReadAfterWriteDiagnostics? ReadAfterWrite => ActiveSessionManager?.ReadAfterWriteDiagnostics;
+    public ReadAfterWriteDiagnostics? ReadAfterWrite => ActiveSessionManagerWithCurrentSession?.ReadAfterWriteDiagnostics;
 }
 
 /// <summary>

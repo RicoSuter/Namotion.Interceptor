@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -22,6 +23,64 @@ namespace Namotion.Interceptor.Mqtt.Client;
 /// </summary>
 internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjectable, IAsyncDisposable
 {
+    /// <summary>
+    /// Per-transport commit lease. Admission and release each take one short, allocation-free lock;
+    /// the property write and its interceptor/user code run outside that lock. Retirement closes
+    /// admission and waits only when a commit was already admitted.
+    /// </summary>
+    private sealed class MqttTransportOwnership
+    {
+        private readonly Lock _lock = new();
+
+        private TaskCompletionSource? _drained;
+        private int _activeCommits;
+        private bool _retired;
+
+        public bool TryAcquireCommit()
+        {
+            lock (_lock)
+            {
+                if (_retired)
+                {
+                    return false;
+                }
+
+                _activeCommits++;
+                return true;
+            }
+        }
+
+        public void ReleaseCommit()
+        {
+            TaskCompletionSource? drained = null;
+            lock (_lock)
+            {
+                _activeCommits--;
+                if (_retired && _activeCommits == 0)
+                {
+                    drained = _drained;
+                }
+            }
+
+            drained?.TrySetResult();
+        }
+
+        public Task RetireAsync()
+        {
+            lock (_lock)
+            {
+                _retired = true;
+                if (_activeCommits == 0)
+                {
+                    return Task.CompletedTask;
+                }
+
+                _drained ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                return _drained.Task;
+            }
+        }
+    }
+
     // Pool for UserProperties lists to avoid allocations on hot path
     private static readonly ObjectPool<List<MqttUserProperty>> UserPropertiesPool
         = new(() => new List<MqttUserProperty>(1));
@@ -37,7 +96,13 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
     private readonly SourceOwnershipManager _ownership;
 
+    // Publishes and retires the client/ownership pair atomically. Never held across an await or a
+    // property commit, so user interceptors cannot participate in this lock order.
+    private readonly Lock _transportPublicationLock = new();
+
     private volatile IMqttClient? _client;
+    private volatile MqttTransportOwnership? _transportOwnership;
+    private volatile Func<MqttApplicationMessageReceivedEventArgs, Task>? _applicationMessageHandler;
     private volatile SubjectPropertyWriter? _propertyWriter;
     private volatile MqttConnectionMonitor? _connectionMonitor;
 
@@ -105,28 +170,52 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
         IMqttClient? client = null;
         MqttConnectionMonitor? connectionMonitor = null;
+        Func<MqttApplicationMessageReceivedEventArgs, Task>? applicationMessageHandler = null;
+        MqttTransportOwnership? transportOwnership = null;
         try
         {
-            (client, connectionMonitor) = await CreateMqttConnectionAsync(cancellationToken).ConfigureAwait(false);
+            (client, connectionMonitor, applicationMessageHandler, transportOwnership) =
+                await CreateMqttConnectionAsync(cancellationToken).ConfigureAwait(false);
             Metrics.MarkOperational();
             await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
 
             var clientForLifetime = client;
             var monitorForLifetime = connectionMonitor;
+            var applicationMessageHandlerForLifetime = applicationMessageHandler;
+            var transportOwnershipForLifetime = transportOwnership;
             return BackgroundTaskLifetime.Start(
                 cancellationToken,
                 _logger,
-                ct => RunMonitorWithKillRestartAsync(clientForLifetime, monitorForLifetime, ct),
-                () => DisposeMqttConnectionAsync(_client, _connectionMonitor, clearPropertyWriter: true));
+                ct => RunMonitorWithKillRestartAsync(
+                    clientForLifetime,
+                    monitorForLifetime,
+                    applicationMessageHandlerForLifetime,
+                    transportOwnershipForLifetime,
+                    ct),
+                () => DisposeMqttConnectionAsync(
+                    _client,
+                    _connectionMonitor,
+                    _applicationMessageHandler,
+                    _transportOwnership,
+                    clearPropertyWriter: true));
         }
         catch
         {
-            await DisposeMqttConnectionAsync(client, connectionMonitor, clearPropertyWriter: true).ConfigureAwait(false);
+            await DisposeMqttConnectionAsync(
+                client,
+                connectionMonitor,
+                applicationMessageHandler,
+                transportOwnership,
+                clearPropertyWriter: true).ConfigureAwait(false);
             throw;
         }
     }
 
-    private async Task<(IMqttClient Client, MqttConnectionMonitor Monitor)> CreateMqttConnectionAsync(
+    private async Task<(
+        IMqttClient Client,
+        MqttConnectionMonitor Monitor,
+        Func<MqttApplicationMessageReceivedEventArgs, Task> ApplicationMessageHandler,
+        MqttTransportOwnership TransportOwnership)> CreateMqttConnectionAsync(
         CancellationToken cancellationToken)
     {
         _logger.LogInformation(
@@ -135,12 +224,22 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             _configuration.BrokerPort);
 
         IMqttClient? client = null;
+        Func<MqttApplicationMessageReceivedEventArgs, Task>? applicationMessageHandler = null;
+        MqttTransportOwnership? transportOwnership = null;
         try
         {
             client = _factory.CreateMqttClient();
-            _client = client;
-            client.ApplicationMessageReceivedAsync += OnMessageReceivedAsync;
+            transportOwnership = new MqttTransportOwnership();
+            applicationMessageHandler = e => OnMessageReceivedAsync(client, transportOwnership, e);
+            client.ApplicationMessageReceivedAsync += applicationMessageHandler;
             client.DisconnectedAsync += OnDisconnectedAsync;
+
+            lock (_transportPublicationLock)
+            {
+                _client = client;
+                _transportOwnership = transportOwnership;
+                _applicationMessageHandler = applicationMessageHandler;
+            }
 
             await client.ConnectAsync(GetClientOptions(), cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Connected to MQTT broker successfully.");
@@ -159,11 +258,16 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 Metrics.ReportError,
                 _logger);
             _connectionMonitor = connectionMonitor;
-            return (client, connectionMonitor);
+            return (client, connectionMonitor, applicationMessageHandler, transportOwnership);
         }
         catch
         {
-            await DisposeMqttConnectionAsync(client, connectionMonitor: null, clearPropertyWriter: false)
+            await DisposeMqttConnectionAsync(
+                client,
+                connectionMonitor: null,
+                applicationMessageHandler,
+                transportOwnership,
+                clearPropertyWriter: false)
                 .ConfigureAwait(false);
             throw;
         }
@@ -172,12 +276,16 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
     private async Task RunMonitorWithKillRestartAsync(
         IMqttClient initialClient,
         MqttConnectionMonitor initialConnectionMonitor,
+        Func<MqttApplicationMessageReceivedEventArgs, Task> initialApplicationMessageHandler,
+        MqttTransportOwnership initialTransportOwnership,
         CancellationToken stoppingToken)
     {
         // stoppingToken (from the lifetime) breaks out for good on host shutdown
         // or when the listen lifetime is disposed by the base retry path.
         var client = initialClient;
         var connectionMonitor = initialConnectionMonitor;
+        var applicationMessageHandler = initialApplicationMessageHandler;
+        var transportOwnership = initialTransportOwnership;
         while (!stoppingToken.IsCancellationRequested)
         {
             var attempt = new ConnectorRunAttempt(stoppingToken);
@@ -219,7 +327,12 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             _logger.LogWarning("MQTT client force-killed. Replacing the transport connection...");
             Metrics.MarkNotOperational();
             _propertyWriter?.StartBuffering();
-            await DisposeMqttConnectionAsync(client, connectionMonitor, clearPropertyWriter: false)
+            await DisposeMqttConnectionAsync(
+                client,
+                connectionMonitor,
+                applicationMessageHandler,
+                transportOwnership,
+                clearPropertyWriter: false)
                 .ConfigureAwait(false);
 
             while (!stoppingToken.IsCancellationRequested)
@@ -227,7 +340,8 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 try
                 {
                     await Task.Delay(_configuration.ReconnectDelay, stoppingToken).ConfigureAwait(false);
-                    (client, connectionMonitor) = await CreateMqttConnectionAsync(stoppingToken).ConfigureAwait(false);
+                    (client, connectionMonitor, applicationMessageHandler, transportOwnership) =
+                        await CreateMqttConnectionAsync(stoppingToken).ConfigureAwait(false);
                     await SubscribeToPropertiesAsync(stoppingToken).ConfigureAwait(false);
 
                     if (_propertyWriter is not null)
@@ -236,6 +350,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                     }
 
                     Metrics.MarkOperational();
+                    RetirementTestBarrier?.SignalReplacementRecoveryCompleted();
                     break;
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -246,7 +361,12 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 {
                     Metrics.ReportError(exception);
                     _logger.LogError(exception, "Failed to replace the force-killed MQTT client connection.");
-                    await DisposeMqttConnectionAsync(_client, _connectionMonitor, clearPropertyWriter: false)
+                    await DisposeMqttConnectionAsync(
+                        _client,
+                        _connectionMonitor,
+                        _applicationMessageHandler,
+                        _transportOwnership,
+                        clearPropertyWriter: false)
                         .ConfigureAwait(false);
                 }
             }
@@ -256,11 +376,41 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
     private async ValueTask DisposeMqttConnectionAsync(
         IMqttClient? client,
         MqttConnectionMonitor? connectionMonitor,
+        Func<MqttApplicationMessageReceivedEventArgs, Task>? applicationMessageHandler,
+        MqttTransportOwnership? transportOwnership,
         bool clearPropertyWriter)
     {
         // The disconnect below cannot report this: the event handler is detached first, so
         // OnDisconnectedAsync never runs for a teardown.
         Metrics.MarkNotOperational();
+
+        Task retirementTask;
+        lock (_transportPublicationLock)
+        {
+            // Mark retirement before clearing the published identity. A final writer action either
+            // acquired the lease first (and this teardown waits for it) or is rejected from now on.
+            retirementTask = transportOwnership?.RetireAsync() ?? Task.CompletedTask;
+            if (ReferenceEquals(_client, client) &&
+                ReferenceEquals(_transportOwnership, transportOwnership))
+            {
+                _client = null;
+                _transportOwnership = null;
+
+                if (ReferenceEquals(_applicationMessageHandler, applicationMessageHandler))
+                {
+                    _applicationMessageHandler = null;
+                }
+            }
+        }
+
+        if (client is not null)
+        {
+            if (applicationMessageHandler is not null)
+            {
+                client.ApplicationMessageReceivedAsync -= applicationMessageHandler;
+            }
+            client.DisconnectedAsync -= OnDisconnectedAsync;
+        }
 
         if (connectionMonitor is not null)
         {
@@ -268,11 +418,10 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             catch (Exception ex) { _logger.LogWarning(ex, "MQTT connection monitor threw during disposal."); }
         }
 
+        await new TransportRetirementAwaitable(retirementTask, RetirementTestBarrier);
+
         if (client is not null)
         {
-            client.ApplicationMessageReceivedAsync -= OnMessageReceivedAsync;
-            client.DisconnectedAsync -= OnDisconnectedAsync;
-
             try
             {
                 if (client.IsConnected)
@@ -283,11 +432,6 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             catch (Exception ex) { _logger.LogWarning(ex, "Error disconnecting MQTT client during disposal."); }
 
             try { client.Dispose(); } catch { /* ignore */ }
-        }
-
-        if (ReferenceEquals(_client, client))
-        {
-            _client = null;
         }
 
         if (ReferenceEquals(_connectionMonitor, connectionMonitor))
@@ -567,7 +711,10 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         return propertyReference;
     }
 
-    private async Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
+    private async Task OnMessageReceivedAsync(
+        IMqttClient client,
+        MqttTransportOwnership transportOwnership,
+        MqttApplicationMessageReceivedEventArgs e)
     {
         var topic = e.ApplicationMessage.Topic;
 
@@ -611,10 +758,33 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 _configuration.SourceTimestampPropertyName,
                 _configuration.SourceTimestampDeserializer) ?? receivedTimestamp;
 
-            // Use static delegate to avoid allocations on hot path
+            // Static delegate and value-tuple state keep the message hot path allocation-free. The
+            // lease lock is not held while SetValueFromSource invokes interceptors or user code.
             propertyWriter.Write(
-                (propertyReference, value, this, sourceTimestamp, receivedTimestamp),
-                static state => state.propertyReference.SetValueFromSource(state.Item3, state.sourceTimestamp, state.receivedTimestamp, state.value));
+                (propertyReference, value, source: this, client, transportOwnership, sourceTimestamp, receivedTimestamp),
+                static state =>
+                {
+                    if (!state.transportOwnership.TryAcquireCommit())
+                    {
+                        return;
+                    }
+
+                    try
+                    {
+                        if (ReferenceEquals(state.source._client, state.client))
+                        {
+                            state.propertyReference.SetValueFromSource(
+                                state.source,
+                                state.sourceTimestamp,
+                                state.receivedTimestamp,
+                                state.value);
+                        }
+                    }
+                    finally
+                    {
+                        state.transportOwnership.ReleaseCommit();
+                    }
+                });
         }
         catch (Exception ex)
         {
@@ -714,37 +884,65 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
         await StopAsync(CancellationToken.None).ConfigureAwait(false);
 
-        if (_connectionMonitor is not null)
-        {
-            await _connectionMonitor.DisposeAsync().ConfigureAwait(false);
-        }
-
-        var client = _client;
-        if (client is not null)
-        {
-            client.ApplicationMessageReceivedAsync -= OnMessageReceivedAsync;
-            client.DisconnectedAsync -= OnDisconnectedAsync;
-
-            if (client.IsConnected)
-            {
-                try
-                {
-                    await client.DisconnectAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Error disconnecting MQTT client.");
-                }
-            }
-
-            client.Dispose();
-            _client = null;
-        }
+        await DisposeMqttConnectionAsync(
+            _client,
+            _connectionMonitor,
+            _applicationMessageHandler,
+            _transportOwnership,
+            clearPropertyWriter: true).ConfigureAwait(false);
 
         _ownership.Dispose();
         _topicToProperty.Clear();
         _propertyToTopic.Clear();
 
         Dispose();
+    }
+
+    // Instance-scoped test seam. The fixed signals cannot run arbitrary observer code, and the
+    // retirement signal is raised only after the await continuation has been registered.
+    internal TransportRetirementTestBarrier? RetirementTestBarrier { get; set; }
+
+    internal sealed class TransportRetirementTestBarrier
+    {
+        private readonly TaskCompletionSource _retirementAwaitRegistered =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _replacementRecoveryCompleted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal Task RetirementAwaitRegistered => _retirementAwaitRegistered.Task;
+
+        internal Task ReplacementRecoveryCompleted => _replacementRecoveryCompleted.Task;
+
+        internal void SignalRetirementAwaitRegistered() => _retirementAwaitRegistered.TrySetResult();
+
+        internal void SignalReplacementRecoveryCompleted() => _replacementRecoveryCompleted.TrySetResult();
+    }
+
+    private readonly struct TransportRetirementAwaitable(
+        Task retirementTask,
+        TransportRetirementTestBarrier? testBarrier)
+    {
+        public Awaiter GetAwaiter() => new(retirementTask.ConfigureAwait(false).GetAwaiter(), testBarrier);
+
+        internal readonly struct Awaiter(
+            ConfiguredTaskAwaitable.ConfiguredTaskAwaiter awaiter,
+            TransportRetirementTestBarrier? testBarrier) : ICriticalNotifyCompletion
+        {
+            public bool IsCompleted => awaiter.IsCompleted;
+
+            public void GetResult() => awaiter.GetResult();
+
+            public void OnCompleted(Action continuation)
+            {
+                awaiter.OnCompleted(continuation);
+                testBarrier?.SignalRetirementAwaitRegistered();
+            }
+
+            public void UnsafeOnCompleted(Action continuation)
+            {
+                awaiter.UnsafeOnCompleted(continuation);
+                testBarrier?.SignalRetirementAwaitRegistered();
+            }
+        }
     }
 }

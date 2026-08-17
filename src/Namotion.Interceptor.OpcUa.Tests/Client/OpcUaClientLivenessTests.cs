@@ -54,7 +54,7 @@ public class OpcUaClientLivenessTests
 
         // Parks the load in the converter until the arming below, so the failure it causes lands on a
         // client that is already reporting itself as serving.
-        using var converter = new PoisonedLoadConverter(waitForArming: TimeSpan.FromSeconds(15));
+        using var converter = new PoisonedLoadConverter(waitForArming: true);
 
         var configuration = CreateClientConfiguration(
             port,
@@ -94,6 +94,7 @@ public class OpcUaClientLivenessTests
         }
         finally
         {
+            converter.Arm();
             await source.StopAsync(CancellationToken.None);
         }
     }
@@ -101,10 +102,11 @@ public class OpcUaClientLivenessTests
     /// <summary>
     /// The SDK's own reconnect raises liveness the moment the subscription transfer completes, and
     /// the full state sync that transfer schedules runs on the next health check tick. A sync that
-    /// fails clears the session, so the tick running it owes the drop.
+    /// fails clears the session, so the tick running it owes the drop. The swallowed failure must
+    /// remain visible after the next health tick reconnects successfully.
     /// </summary>
     [Fact]
-    public async Task WhenTheStateSyncAfterAnSdkReconnectFails_ThenLivenessDropsWithTheClearedSession()
+    public async Task WhenTheStateSyncAfterAnSdkReconnectFails_ThenFailureRemainsVisibleAfterRecovery()
     {
         // Arrange
         var logger = new TestLogger(_output);
@@ -126,7 +128,7 @@ public class OpcUaClientLivenessTests
 
         // Poisons whatever load runs after the arming below, which is the full state sync, and
         // converts normally until then so the initial load succeeds.
-        using var converter = new PoisonedLoadConverter(waitForArming: TimeSpan.Zero);
+        using var converter = new PoisonedLoadConverter(waitForArming: false);
 
         var configuration = CreateClientConfiguration(
             port,
@@ -183,6 +185,19 @@ public class OpcUaClientLivenessTests
 
             Assert.True(converter.PoisonWasHandedOut);
             Assert.Null(source.Diagnostics.SessionId);
+
+            var error = source.Diagnostics.LastError;
+            Assert.NotNull(error);
+
+            // Act
+            converter.Disarm();
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational,
+                timeout: TimeSpan.FromSeconds(75),
+                message: "The health loop should reconnect after the failed full state sync");
+
+            // Assert
+            Assert.Same(error, source.Diagnostics.LastError);
         }
         finally
         {
@@ -310,15 +325,14 @@ public class OpcUaClientLivenessTests
     private sealed class PoisonedLoadConverter : OpcUaValueConverter, IDisposable
     {
         private readonly ManualResetEventSlim _armed = new(false);
-        private readonly TimeSpan _waitForArming;
+        private readonly bool _waitForArming;
         private int _poisonWasHandedOut; // written from the load and the callback threads
 
         /// <param name="waitForArming">
-        /// How long a conversion of the poisoned property parks waiting to be armed. Zero converts
-        /// normally until <see cref="Arm"/> lands; a positive value holds the load there, which is
-        /// what makes it fail on a client that already reports itself as serving.
+        /// Whether a conversion of the poisoned property parks waiting to be armed. Otherwise it
+        /// converts normally until <see cref="Arm"/> lands.
         /// </param>
-        internal PoisonedLoadConverter(TimeSpan waitForArming)
+        internal PoisonedLoadConverter(bool waitForArming)
         {
             _waitForArming = waitForArming;
         }
@@ -330,9 +344,20 @@ public class OpcUaClientLivenessTests
 
         internal void Arm() => _armed.Set();
 
+        internal void Disarm() => _armed.Reset();
+
         public override object? ConvertToPropertyValue(object? nodeValue, RegisteredSubjectProperty property)
         {
-            if (property.Name != nameof(TestRoot.Name) || !_armed.Wait(_waitForArming))
+            if (property.Name != nameof(TestRoot.Name))
+            {
+                return base.ConvertToPropertyValue(nodeValue, property);
+            }
+
+            if (_waitForArming)
+            {
+                _armed.Wait();
+            }
+            else if (!_armed.IsSet)
             {
                 return base.ConvertToPropertyValue(nodeValue, property);
             }

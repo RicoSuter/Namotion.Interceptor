@@ -197,7 +197,7 @@ Two timestamps sit next to `State`, and they answer different questions.
 
 Neither can be derived from the other, which is why both exist: `StateChangeTime` cannot say whether the source was ever synchronized, and `LastSynchronizedAt` cannot say when synchronization was lost.
 
-Reading `State` and `StateChangeTime` in sequence is two separate snapshots. Each read is internally consistent and the timestamps are monotonic, but the pair is not guaranteed to be from the same instant, so do not build a decision that depends on it being so.
+Reading `State` and `StateChangeTime` in sequence is two separate snapshots. Each read is internally consistent. These wall-clock timestamps come from `UtcNow`, so a system clock adjustment can move a later timestamp backward. The pair is not guaranteed to be from the same instant, so do not build a decision that depends on it being so.
 
 ### Diagnostics and State answer different questions
 

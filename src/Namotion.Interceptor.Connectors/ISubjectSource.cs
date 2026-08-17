@@ -10,10 +10,11 @@ namespace Namotion.Interceptor.Connectors;
 /// Sources must claim ownership of properties by calling <c>SetSource(this)</c> during initialization.
 /// </summary>
 /// <remarks>
-/// <see cref="ISubjectConnector.RootSubject"/>, <see cref="State"/> and <see cref="StateChangeTime"/>
-/// must be lock-free. <c>SourceMonitor</c> reads them while holding its own lock, and
-/// <see cref="StateChanged"/> is raised from inside the source's transition lock, so a getter that
-/// took that lock would close an ABBA cycle. <see cref="SubjectSourceBase"/> satisfies this.
+/// <see cref="ISubjectConnector.RootSubject"/>, <see cref="State"/>, <see cref="StateChangeTime"/> and
+/// <see cref="LastSynchronizedAt"/> must be lock-free. <c>SourceMonitor</c> reads them while holding
+/// its own lock, and <see cref="StateChanged"/> is raised from inside the source's transition lock,
+/// so a getter that took that lock would close an ABBA cycle. <see cref="SubjectSourceBase"/>
+/// satisfies this.
 /// <para>
 /// Implementing this directly instead of deriving from <see cref="SubjectSourceBase"/> means
 /// registering with every monitor from <c>subject.Context.GetServices&lt;SourceMonitor&gt;()</c> on

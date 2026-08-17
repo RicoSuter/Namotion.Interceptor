@@ -47,6 +47,18 @@ internal sealed class ReadAfterWriteMetrics : IResettableMetrics
     /// </summary>
     public void RecordFailed() => Interlocked.Increment(ref _failed);
 
+    /// <summary>
+    /// Records failed read-after-write operations.
+    /// </summary>
+    /// <param name="count">Number of reads that failed (must be non-negative).</param>
+    internal void RecordFailed(int count)
+    {
+        if (count > 0)
+        {
+            Interlocked.Add(ref _failed, count);
+        }
+    }
+
     /// <inheritdoc/>
     public override string ToString() =>
         $"Scheduled={Scheduled}, Executed={Executed}, Coalesced={Coalesced}, Failed={Failed}";
