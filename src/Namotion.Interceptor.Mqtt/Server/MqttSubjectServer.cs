@@ -625,6 +625,8 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
             return;
         }
 
+        await StopAsync(CancellationToken.None).ConfigureAwait(false);
+
         if (_lifecycleInterceptor is not null)
         {
             _lifecycleInterceptor.SubjectDetaching -= OnSubjectDetaching;

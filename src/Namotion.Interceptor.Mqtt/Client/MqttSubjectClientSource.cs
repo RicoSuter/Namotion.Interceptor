@@ -713,6 +713,8 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             return;
         }
 
+        await StopAsync(CancellationToken.None).ConfigureAwait(false);
+
         if (_connectionMonitor is not null)
         {
             await _connectionMonitor.DisposeAsync().ConfigureAwait(false);

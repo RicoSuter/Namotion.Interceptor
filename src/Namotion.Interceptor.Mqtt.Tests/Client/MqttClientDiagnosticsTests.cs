@@ -62,6 +62,38 @@ public class MqttClientDiagnosticsTests
         Assert.Equal(0, afterRelease);
     }
 
+    [Fact]
+    public async Task WhenDisposedWhileHostedExecutionIsActive_ThenCleanupWaitsForExecutionToExit()
+    {
+        // Arrange
+        await using var source = CreateClientSource();
+        var property = ((DeliveryRuleTestRoot)source.RootSubject)
+            .GetPropertyReference(nameof(DeliveryRuleTestRoot.Name));
+        Assert.True(source.Ownership.ClaimSource(property));
+
+        await using var executionGate = HostedExecutionGate.Install(source);
+        await executionGate.Started.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Act
+        var disposal = source.DisposeAsync().AsTask();
+        try
+        {
+            await executionGate.CancellationObserved.WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Assert
+            Assert.False(disposal.IsCompleted);
+            Assert.Equal(1, source.Ownership.Count);
+        }
+        finally
+        {
+            executionGate.AllowExit();
+            await disposal;
+        }
+
+        Assert.Equal(0, source.Ownership.Count);
+        Assert.Null(source.Diagnostics.LastError);
+    }
+
     /// <summary>
     /// The connection monitor runs inside the listen lifetime, outside the try in
     /// <c>SubjectSourceBase.RunAsync</c> that records per-attempt failures, so the monitor has to

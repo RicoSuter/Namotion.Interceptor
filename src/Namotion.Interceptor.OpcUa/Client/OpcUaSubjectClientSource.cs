@@ -791,6 +791,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             return; // Already disposed
         }
 
+        await StopAsync(CancellationToken.None).ConfigureAwait(false);
+
         var sessionManager = _sessionManager;
         if (sessionManager is not null)
         {

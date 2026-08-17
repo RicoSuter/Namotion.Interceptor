@@ -1,6 +1,8 @@
+using System.Reflection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Mqtt.Server;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Mqtt.Tests.Server;
@@ -46,6 +48,38 @@ public class MqttServerDiagnosticsTests
         Assert.IsType<FormatException>(server.Diagnostics.LastError);
         Assert.NotNull(server.Diagnostics.StartTime);
         Assert.False(server.Diagnostics.IsOperational);
+    }
+
+    [Fact]
+    public async Task WhenDisposedWhileHostedExecutionIsActive_ThenCleanupWaitsForExecutionToExit()
+    {
+        // Arrange
+        await using var server = CreateServer(new MqttServerConfiguration());
+        var shutdownCts = (CancellationTokenSource)typeof(MqttSubjectServer)
+            .GetField("_shutdownCts", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(server)!;
+
+        await using var executionGate = HostedExecutionGate.Install(server);
+        await executionGate.Started.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Act
+        var disposal = server.DisposeAsync().AsTask();
+        try
+        {
+            await executionGate.CancellationObserved.WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Assert
+            Assert.False(disposal.IsCompleted);
+            Assert.False(shutdownCts.IsCancellationRequested);
+        }
+        finally
+        {
+            executionGate.AllowExit();
+            await disposal;
+        }
+
+        Assert.True(shutdownCts.IsCancellationRequested);
+        Assert.Null(server.Diagnostics.LastError);
     }
 
     private static MqttSubjectServer CreateServer(MqttServerConfiguration configuration)

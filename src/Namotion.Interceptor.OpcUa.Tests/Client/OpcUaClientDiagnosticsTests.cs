@@ -166,6 +166,37 @@ public class OpcUaClientDiagnosticsTests
     }
 
     [Fact]
+    public async Task WhenDisposedWhileHostedExecutionIsActive_ThenCleanupWaitsForExecutionToExit()
+    {
+        // Arrange
+        await using var source = CreateClientSource();
+        var property = ((TestRoot)source.RootSubject).GetPropertyReference(nameof(TestRoot.Name));
+        Assert.True(source.Ownership.ClaimSource(property));
+
+        await using var executionGate = HostedExecutionGate.Install(source);
+        await executionGate.Started.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Act
+        var disposal = source.DisposeAsync().AsTask();
+        try
+        {
+            await executionGate.CancellationObserved.WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Assert
+            Assert.False(disposal.IsCompleted);
+            Assert.Equal(1, source.Ownership.Count);
+        }
+        finally
+        {
+            executionGate.AllowExit();
+            await disposal;
+        }
+
+        Assert.Equal(0, source.Ownership.Count);
+        Assert.Null(source.Diagnostics.LastError);
+    }
+
+    [Fact]
     public async Task WhenReconnectionsAreRecorded_ThenTheReconnectBlockReportsThem()
     {
         // Arrange
