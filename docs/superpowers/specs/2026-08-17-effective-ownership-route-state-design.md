@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-17
 
-**Status:** Draft for written-spec review
+**Status:** Approved
 
 **Stack position:** PR 1 on `master`
 
@@ -158,9 +158,10 @@ change.
 
 ### Empty-state behavior
 
-`ContextState.IsEmpty` remains a direct check over existing fields plus the derived delegation
-result. A routed state is never treated as empty. Route-only contexts delegate before service-cache
-lookup and therefore do not allocate a service cache on the source state.
+`ContextState.IsEmpty` keeps its existing direct check over services and public fallbacks, with no
+new route-free branch. A route-only state has a delegation target and is resolved before
+`GetServicesFromState` reaches the empty-state check. It therefore does not allocate a service cache
+on the source state. This caller invariant is documented next to that check.
 
 ## Reverse Dependency and Invalidation
 
@@ -195,8 +196,9 @@ stale and is therefore forbidden.
 - Reverse using-set locks remain leaf locks. No path takes a second context mutation lock.
 - Route construction and state construction happen before publication. An allocation failure leaves
   the old state and relationships unchanged.
-- No user code, service factory, lifecycle callback, or virtual context method executes while the
-  mutation lock is held.
+- The ownership-route transition executes no user code, service factory, lifecycle callback, or
+  virtual context method while the mutation lock is held. Existing service registration semantics
+  are outside this statement.
 - Internal route graphs use the existing visited sets and iterative worklists. Cycles terminate and
   deep graphs do not recurse.
 

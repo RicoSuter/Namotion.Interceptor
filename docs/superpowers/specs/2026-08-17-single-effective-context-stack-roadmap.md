@@ -314,6 +314,11 @@ Each pull request:
 9. records the exact head and base commits for external performance verification;
 10. asks the maintainer before handing benchmark work to the stable external machine.
 
+PR 1 is expected to be a small internal net addition. The combined PR 1 plus PR 2 review also
+includes a production simplification audit. Every new production block must enforce a named
+invariant, legacy fallback and lifecycle coupling must be deleted, and no compatibility bridge or
+temporary multi-domain recovery path may survive into the pair.
+
 Local benchmark timing is diagnostic only on the development machine. It can catch an obvious
 regression but does not accept or reject a performance change.
 
