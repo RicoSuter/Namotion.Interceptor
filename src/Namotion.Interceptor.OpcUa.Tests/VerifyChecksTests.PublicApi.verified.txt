@@ -97,6 +97,8 @@ namespace Namotion.Interceptor.OpcUa.Client
         public bool EnableReadAfterWrite { get; set; }
         public System.TimeSpan KeepAliveInterval { get; set; }
         public Namotion.Interceptor.Connectors.Mapping.IReversePropertyMapper<Namotion.Interceptor.OpcUa.Mapping.OpcUaPropertyMapping, Namotion.Interceptor.OpcUa.Mapping.OpcUaLookupKey> Mapper { get; set; }
+        public int MaxAttributeTraversals { get; set; }
+        public int MaxBrowseContinuations { get; set; }
         public int MaxItemsPerSubscription { get; set; }
         public System.TimeSpan MaxReconnectDuration { get; set; }
         public uint MaxReferencesPerNode { get; set; }
@@ -161,11 +163,20 @@ namespace Namotion.Interceptor.OpcUa.Client
         public Opc.Ua.Client.ISession? CurrentSession { get; }
         public Opc.Ua.Client.ISession? PreviousSession { get; }
     }
+    public sealed class OpcUaTransientServiceException : System.Exception
+    {
+        public OpcUaTransientServiceException(string operation, Opc.Ua.NodeId? nodeId, Opc.Ua.StatusCode statusCode) { }
+        public Opc.Ua.NodeId? NodeId { get; }
+        public string Operation { get; }
+        public Opc.Ua.StatusCode StatusCode { get; }
+    }
     public class OpcUaTypeResolver
     {
         public OpcUaTypeResolver(Microsoft.Extensions.Logging.ILogger logger) { }
         public virtual System.Attribute[] GetDynamicPropertyAttributes(Opc.Ua.ReferenceDescription reference, Opc.Ua.Client.ISession session) { }
-        public virtual System.Threading.Tasks.Task<System.Type?> TryGetTypeForNodeAsync(Opc.Ua.Client.ISession session, Opc.Ua.ReferenceDescription reference, System.Threading.CancellationToken cancellationToken) { }
+        public virtual System.Type ResolveObjectNodeType(System.Collections.Generic.IReadOnlyList<Opc.Ua.ReferenceDescription> children) { }
+        public virtual System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<Opc.Ua.NodeId, System.Type?>> ResolveVariableTypesAsync(Opc.Ua.Client.ISession session, System.Collections.Generic.IReadOnlyCollection<Opc.Ua.ReferenceDescription> variables, System.Threading.CancellationToken cancellationToken) { }
+        protected virtual System.Type? TryMapBuiltInType(Opc.Ua.BuiltInType builtInType) { }
     }
     public sealed class OpcUaWriteException : System.InvalidOperationException
     {

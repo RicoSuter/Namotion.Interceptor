@@ -208,6 +208,17 @@ public class OpcUaClientConfiguration
     public uint MaxReferencesPerNode { get; set; } = 0;
 
     /// <summary>
+    /// Gets or sets the maximum number of BrowseNext continuation rounds per browse. Bounds pagination depth
+    /// so a server that returns a fresh continuation point forever cannot loop the loader. Default is 100.
+    /// </summary>
+    public int MaxBrowseContinuations { get; set; } = 100;
+
+    /// <summary>
+    /// Gets or sets the maximum attribute-traversal depth (attributes of attributes) during loading. Default is 100.
+    /// </summary>
+    public int MaxAttributeTraversals { get; set; } = 100;
+
+    /// <summary>
     /// Gets or sets whether to enable automatic polling fallback when subscriptions are not supported.
     /// When enabled, items that fail subscription creation automatically fall back to periodic polling.
     /// Default is true.
@@ -456,6 +467,20 @@ public class OpcUaClientConfiguration
             throw new ArgumentException(
                 $"MaxItemsPerSubscription must be positive, got: {MaxItemsPerSubscription}",
                 nameof(MaxItemsPerSubscription));
+        }
+
+        if (MaxBrowseContinuations <= 0)
+        {
+            throw new ArgumentException(
+                $"MaxBrowseContinuations must be positive, got: {MaxBrowseContinuations}",
+                nameof(MaxBrowseContinuations));
+        }
+
+        if (MaxAttributeTraversals <= 0)
+        {
+            throw new ArgumentException(
+                $"MaxAttributeTraversals must be positive, got: {MaxAttributeTraversals}",
+                nameof(MaxAttributeTraversals));
         }
 
         if (EnablePollingFallback)

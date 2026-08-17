@@ -782,3 +782,25 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 **Back-reference pattern.** Several classes (`SessionManager`, `SubscriptionManager`, `PollingManager`) receive a reference to `OpcUaSubjectClientSource` to access shared state (metrics, throughput counters, error tracking). `OutboundWriter` demonstrates the preferred alternative: receiving only the specific dependencies it needs via constructor parameters.
 
 **Diagnostics as a facade.** `OpcUaClientDiagnostics` navigates through `OpcUaSubjectClientSource` and `SessionManager` to expose a flat public API. It allocates `PollingDiagnostics` and `ReadAfterWriteDiagnostics` wrappers on demand to avoid exposing internal types.
+
+### Known Limitations
+
+**Rollback of a failed load is not fully transactional.** When a load fails partway, the subjects it
+staged are detached so the registry sheds them and the next load starts clean. Property assignments
+made during the load are not reverted, because prior values were not captured.
+
+Rollback only un-stages a subject that nothing references yet. A staged subject that was bound to a
+parent property during the load is left attached, because the model now references it and it is not
+an orphan to shed. This mirrors the rule the core already follows: `ContextInheritanceHandler` is the
+only other place that removes a fallback context, and it does so only once the last property
+reference is gone.
+
+Removing it in any other state would break a graph invariant rather than restore one. The subject
+would be evicted from the registry while its parent property still pointed at it, and nothing
+reconciles those two. The next load would reuse it from `property.Children` without re-staging it, so
+it would never re-attach, and the loader would then skip it as unregistered. The subtree would be
+silently unmonitored for good, with no retry recovering it.
+
+The visible consequence is that a failed load can leave a partially populated subtree attached to the
+model. Those subjects are registered and monitored, and the next successful load completes them in
+place, which is the same behaviour as before the loader batched its browse calls.
