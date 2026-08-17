@@ -486,6 +486,27 @@ Before finalizing the pull request, run comparative benchmarks against a base re
 
 Per the repository benchmarking guide, these targeted comparisons take approximately 75 minutes combined. A whole-suite benchmark is not required. Small timing changes inside the noise reference are inconclusive; allocations and scaling shape are the primary acceptance signals.
 
+### Bounded static-performance correction
+
+Static review found that Registry's provisional outgoing view rebuilt an immutable array once for every unique child removal and addition. Replacing `n` old children with `n` new children therefore copied O(n squared) relationship references before the final full-group replacement. This is not acceptable for the 1,000-child case even before runtime benchmarking.
+
+`RegisteredSubjectProperty` will retain one immutable committed relationship group and add a temporary reference-identity membership overlay. The first provisional membership change initializes one state entry per distinct committed subject in O(n). Each entry records whether its committed occurrences remain visible and optionally points to an active provisional-addition node. Active additions use a linked list so replacement or removal unlinks the previous node in O(1) and no retry tombstones accumulate. Later lifecycle removals and additions therefore update the overlay in O(1) average time without comparing or hashing relationship indices. Provisional additions retain lifecycle callback order.
+
+The `Children` getter lazily projects one snapshot under its existing view lock. It scans the committed group in order, skips subjects whose committed occurrences are suppressed, then appends active provisional additions in lifecycle order. A full relationship publication atomically replaces the committed group, clears the overlay, and invalidates the cache. A failed callback can leave the overlay as the best available provisional state, matching the existing failure contract; later retry, detach, or successful full publication can update or clear it without an unbounded history.
+
+This preserves callback visibility:
+
+- `SubjectAttached` can observe the first provisional occurrence for a newly attached membership.
+- `SubjectDetaching` continues to observe the complete old relationship group before Registry handles the removal.
+- Later lifecycle handlers can observe the membership transition already applied by Registry.
+- Published `Children` snapshots remain frozen and contain one coherent provisional or committed generation.
+
+Ordinary writes remain O(n) even when lifecycle callbacks do not read `Children`. If an external callback requests a complete frozen `Children` snapshot after every one of n membership events, the requested projections can still total O(n squared). That cost is driven by the observer requesting n full snapshots and is not paid by an unobserved write.
+
+The reconciler will also stop computing its unused removed-relationship array and will use the existing new-membership reference map when selecting removals instead of allocating a duplicate subject set. These changes do not alter public API or reconciliation semantics.
+
+Further speculative optimization is deferred. In particular, this PR will not redesign global consumer gates, parent-property fan-in storage, multi-authority execution, or HomeBlaze cache-generation allocation. Those paths remain candidates for measurement on the benchmark machine, but changing them without evidence would enlarge the correctness surface.
+
 ## Verification Strategy
 
 ### Semantic tests
@@ -576,6 +597,8 @@ The final PR remains #458 and is rewritten around this design. The cumulative di
 - the unrelated container-kind cache optimization,
 - parent-lookup benchmark cases unrelated to the changed storage and read paths.
 
+After the bounded performance correction, a separate no-behavior-change shrink pass will reassess every changed file against master. The tracked implementation plan will be removed from the final PR, repeated test setup may be consolidated, and superseded transitional tests or helpers will be deleted. Unique correctness, failure, lifecycle-visibility, opaque-key, and deterministic concurrency coverage will remain. The performance correction itself must stay contained to Registry's provisional child view and the reconciler's dead scratch state.
+
 The branch will be organized into reviewable commits:
 
 1. Add tests that define occurrence, ordering, duplicate, failure, and concurrency semantics.
@@ -598,6 +621,7 @@ The implementation is ready for merge when:
 - all concurrency tests converge after quiescence without leaks, stale edges, torn reads, or permanently stale caches,
 - the complete non-integration test suite and public API verification pass,
 - targeted benchmarks show linear scaling and no unexplained allocation regression,
+- static inspection confirms that ordinary Registry construction and full replacement no longer rebuild outgoing immutable groups once per membership event,
 - the final diff contains one reconciliation algorithm and no unrelated optimization,
 - lifecycle and registry design documentation describe the new relationship and concurrency model,
 - the PR description accurately reports verification and the intentional public API break.
