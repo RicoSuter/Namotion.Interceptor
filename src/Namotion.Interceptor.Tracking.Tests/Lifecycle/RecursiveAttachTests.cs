@@ -194,6 +194,33 @@ public class RecursiveAttachTests
         Assert.Contains(grandchild, detached);
     }
 
+    [Fact]
+    public void WhenContextInheritanceReentersDetachAfterMembershipRemoval_ThenDescendantHandlersRunFirst()
+    {
+        // Removing the detached-subject traversal makes the outer removal handler run before its descendants.
+        // Arrange
+        var detached = new List<IInterceptorSubject>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+        context.AddService<ILifecycleHandler>(new RecordingRemovalLifecycleHandler(detached));
+
+        var root = new Person(context) { FirstName = "Root" };
+        var grandchild = new Person { FirstName = "Grandchild" };
+        var child = new Person { FirstName = "Child", Mother = grandchild };
+        var parent = new Person { FirstName = "Parent", Mother = child };
+        root.Mother = parent;
+
+        // Act
+        root.Mother = null;
+
+        // Assert
+        Assert.Equal(new IInterceptorSubject[] { grandchild, child, parent }, detached);
+        Assert.Equal(0, parent.GetReferenceCount());
+        Assert.Equal(0, child.GetReferenceCount());
+        Assert.Equal(0, grandchild.GetReferenceCount());
+    }
+
     // ──────────────────────────────────────────────
     // Subsequent writes diff correctly against seeded baseline
     // ──────────────────────────────────────────────
@@ -345,5 +372,16 @@ public class RecursiveAttachTests
 
         // Assert
         Assert.Contains(grandmother, attached);
+    }
+
+    private sealed class RecordingRemovalLifecycleHandler(List<IInterceptorSubject> detached) : ILifecycleHandler
+    {
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (change is { IsPropertyReferenceRemoved: true, ReferenceCount: 0 })
+            {
+                detached.Add(change.Subject);
+            }
+        }
     }
 }

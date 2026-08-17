@@ -163,11 +163,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
                     }
                 }
 
-                if (!_attachedSubjects.ContainsKey(subject))
-                {
-                    return;
-                }
-
                 var detachedProperties = CaptureDetachedProperties(subject, collectedSubjects);
 
                 foreach (var child in collectedSubjects)
@@ -374,7 +369,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
         };
 
         SubjectDetaching?.Invoke(change);
-        var firstException = ClearRelationshipsAndProcessedStates(detachedProperties);
+        var firstException = ClearRelationships(detachedProperties);
+        RemoveProcessedStates(detachedProperties);
         InvokeRemovedLifecycleHandlers(subject, context, change);
 
         firstException?.Throw();
@@ -428,9 +424,19 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
         }
 
         var firstException = detachedProperties is not null
-            ? ClearRelationshipsAndProcessedStates(detachedProperties)
+            ? ClearRelationships(detachedProperties)
             : null;
-        InvokeRemovedLifecycleHandlers(subject, context, change);
+        try
+        {
+            InvokeRemovedLifecycleHandlers(subject, context, change);
+        }
+        finally
+        {
+            if (detachedProperties is not null)
+            {
+                RemoveProcessedStates(detachedProperties);
+            }
+        }
 
         if (children is not null)
         {
@@ -962,7 +968,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
         }
     }
 
-    private ExceptionDispatchInfo? ClearRelationshipsAndProcessedStates(
+    private static ExceptionDispatchInfo? ClearRelationships(
         List<DetachedProperty> detachedProperties)
     {
         ExceptionDispatchInfo? firstException = null;
@@ -982,13 +988,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor, IS
             {
                 firstException ??= ExceptionDispatchInfo.Capture(exception);
             }
-            finally
-            {
-                _processedProperties.Remove(detachedProperty.Property);
-            }
         }
 
         return firstException;
+    }
+
+    private void RemoveProcessedStates(List<DetachedProperty> detachedProperties)
+    {
+        foreach (var detachedProperty in detachedProperties)
+        {
+            _processedProperties.Remove(detachedProperty.Property);
+        }
     }
 
     private static void AddMemberships(
