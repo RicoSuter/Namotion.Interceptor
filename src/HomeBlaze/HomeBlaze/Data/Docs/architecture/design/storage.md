@@ -8,7 +8,7 @@ status: Implemented
 
 ## Overview
 
-HomeBlaze persists several categories of data through a pluggable storage layer. Live state is NOT persisted — it recovers from the source of truth (devices, peers) on restart. Everything else flows through `IStorageContainer`.
+HomeBlaze persists several categories of data through a pluggable storage layer. This layer holds *originated* state that HomeBlaze owns: configuration, knowledge files, documents, and metadata. *Reflected* live state (property values mirrored from a device or a database) is NOT persisted here; it recovers from its source of truth on restart. Records held by database-backed subjects (orders, batches, audit, alarm journal) are originated state too, but they live in their own database rather than in `IStorageContainer`. See [Records and Persistence](records-and-persistence.md). Everything in the categories below flows through `IStorageContainer`.
 
 ## What Is Stored
 
@@ -19,8 +19,9 @@ HomeBlaze persists several categories of data through a pluggable storage layer.
 | Documents | PDFs, images, data files linked to subjects | Binary blobs | Yes |
 | Dynamic metadata | Annotations, tags, links between subjects | JSON (separate from subject config) | Yes |
 | Plugin configuration | NuGet feed URLs, package list | JSON | Yes |
-| Property values (live state) | Sensor readings, device status | — | No — recovers from field devices (satellites), peers via WebSocket Welcome snapshot (central/standby) |
-| Time-series history | Property change history | Via history sink (see [History](history.md)) | Yes (separate concern) |
+| Property values (reflected live state) | Sensor readings, device status | — | No: recovers from field devices (satellites) or peers via WebSocket Welcome snapshot (central/standby) |
+| Time-series history | Property change history | Via history sink (see [History](history.md)); satellites keep a durable store-and-forward buffer | Yes (separate concern) |
+| Originated records | Orders, batches, genealogy, audit, alarm journal | Database, via a database-backed subject (see [Records and Persistence](records-and-persistence.md)) | Yes (in its own database, not `IStorageContainer`) |
 
 ### Recovery on Restart
 
@@ -29,8 +30,9 @@ Each layer recovers from its source of truth:
 | Instance | Recovers from | Mechanism |
 |----------|--------------|-----------|
 | Satellite | Field devices | Connectors reconnect, read current values |
-| Central UNS | Satellites | Satellites reconnect, send Welcome snapshot with full state. Disconnected satellites are not visible — central only shows live-connected data |
+| Central UNS | Satellites | Satellites reconnect, send Welcome snapshot with full state. Disconnected satellites are not visible, so central only shows live-connected data |
 | Standby | Primary | Reconnects, receives Welcome snapshot |
+| Database-backed subject | Its database | Re-reads records on startup; the database is its source of truth, exactly as a device is for a device-backed subject |
 
 ## Storage Abstraction [Implemented]
 
@@ -149,6 +151,7 @@ The "recover from source of truth" model means most data does NOT need backup fo
 | Time-series history | **No — this is the critical one** | Historical data is generated locally and cannot be recovered from devices. Once lost, it is gone |
 | Live state (property values) | **Yes** — recovers from devices/peers | No backup needed |
 | Audit trail (when implemented) | No | Compliance and debugging history lost |
+| Originated records (database-backed subjects) | No, but backed up by the database itself | Orders, batches, genealogy lost. Backup is the database's own responsibility, not `IStorageContainer` |
 
 ### What Does NOT Need Backup
 
@@ -198,7 +201,7 @@ Live state has zero data loss — it recovers to the current device state, not t
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| No live state persistence | Recover from source of truth | External world (devices, peers) is authoritative. Avoids stale state. Individual subjects may cache last known state locally as an implementation detail (e.g., restore from history or file in `ExecuteAsync` before device reconnects), but the platform does not prescribe or automate this |
+| No *reflected* live state persistence | Recover from source of truth | For reflected state, the external world (devices, peers) is authoritative, which avoids stale state. Originated records are different: they are their own source of truth and persist in a database-backed subject's database (see [Records and Persistence](records-and-persistence.md)). Individual subjects may cache last known state locally as an implementation detail (for example restore from history or file in `ExecuteAsync` before device reconnects), but the platform does not prescribe or automate this |
 | Storage abstraction | `IStorageContainer` with FluentStorage backends | Pluggable without code changes; local filesystem for dev, cloud storage for production |
 | File format | JSON for configuration, Markdown for knowledge | Human-readable, diffable, version-controllable |
 | Configuration vs state | `[Configuration]` (persisted) vs `[State]` (runtime-only) | Clear developer intent, explicit persistence boundary |

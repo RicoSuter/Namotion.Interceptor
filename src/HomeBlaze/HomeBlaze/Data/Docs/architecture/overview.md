@@ -125,6 +125,15 @@ It does not currently own:
 
 ## 4. Building Block View
 
+### Consistency Model: Reflection and Control Planes
+
+HomeBlaze operates in two planes, and most correctness decisions come down to which plane a flow belongs to.
+
+- **Reflection plane.** The subject graph mirrors an external source of truth (a device, or a database). State converges by last-writer-wins on arrival order, is eventually consistent, and is recovered from the source on restart. Property sync, the Unified Namespace, and the historian live here. Last-writer-wins is safe here because it only reflects a truth that lives elsewhere.
+- **Control plane.** Commands and actuation: writing a setpoint, invoking an operation, promoting a standby. These need a single authoritative writer, exclusive control, confirmation, at-least-once delivery with idempotency, and authorization re-validated at each node boundary. Operations and cross-instance RPC live here. Last-writer-wins is not sufficient here, because two conflicting commands drive real physical action.
+
+The design docs are organized around this split. Reflection-plane concerns: [Storage](design/storage.md), [History](design/history.md), [Records and Persistence](design/records-and-persistence.md), [Scalability](design/scalability.md). Control-plane concerns: [Methods](design/methods.md), [Resilience](design/resilience.md), [Security](design/security.md).
+
 ### Level 1 — Top-Level Building Blocks
 
 ```
@@ -251,7 +260,7 @@ Horizontal scaling and resilience use two complementary channels. **State sync**
 | Satellite to Central | WebSocket client on satellite, server on central | State flows up, writes and operations flow down |
 | Primary to Standby | WebSocket server on primary, client on standby | Full state replication |
 
-On failover, the standby detects the primary is unreachable and performs a **fencing check** — it verifies it can still reach the field devices. This prevents false promotion during network partitions (if both primary and devices are unreachable, the standby assumes a network partition and does not promote). If fencing passes, the standby activates device connections, reads current device state to close any sync gap, and becomes the new primary. State converges because external devices are the authoritative source of truth — no distributed consensus is needed.
+On failover, the standby detects the primary is unreachable and performs a **fencing check**: it verifies it can still reach the field devices. This reduces false promotion during network partitions (if both primary and devices are unreachable, the standby assumes a network partition and does not promote). If fencing passes, the standby activates device connections, reads current device state to close any sync gap, and becomes the new primary. Reflected state converges because external devices are the authoritative source of truth. Fencing does not by itself guarantee that only one node writes to a device, however: single-writer mutual exclusion for actuation is an open control-plane problem, so automatic failover stays disabled until it is solved. See [Resilience](design/resilience.md).
 
 ---
 
@@ -467,7 +476,7 @@ These are potential bottlenecks identified from code analysis. Actual limits dep
 
 For containerized environments, each HA pair maps to a StatefulSet with 2 replicas. Pod ordinal determines role (0 = primary, 1 = standby). Services route traffic to the primary pod via role labels. Headless services provide stable DNS for standby-to-primary connections.
 
-**Persistence model.** HomeBlaze does not persist live state — each instance recovers from its source of truth on restart. Satellites reconnect to field devices and re-read current values. Central instances receive Welcome snapshots from reconnecting satellites. Standbys receive Welcome snapshots from their primary. Only subject configuration (settings, topology) and time-series history are locally persisted. See [Storage](design/storage.md) for details.
+**Persistence model.** HomeBlaze does not persist *reflected* live state. Each instance recovers it from its source of truth on restart: satellites reconnect to field devices and re-read current values, central instances receive Welcome snapshots from reconnecting satellites, and standbys receive Welcome snapshots from their primary. *Originated* state is different. Subject configuration (settings, topology), time-series history, and records held by database-backed subjects (orders, batches, audit, alarm journal) are their own source of truth and are durably persisted. A database-backed subject recovers by re-reading its database, exactly as a device-backed subject recovers by re-reading its device. See [Storage](design/storage.md) and [Records and Persistence](design/records-and-persistence.md) for details.
 
 ---
 
@@ -479,18 +488,19 @@ For containerized environments, each HA pair maps to a StatefulSet with 2 replic
 | 2 | Inter-node protocol | WebSocket (SubjectUpdate) | Atomic snapshots, structural graph sync, sequence-based consistency. Already built into Namotion.Interceptor |
 | 3 | Device connection ownership | Satellites, not central | Failure isolation, independent deployment per domain |
 | 4 | HA pattern | Active-standby (2 nodes per pair) | External devices are the source of truth. No need for distributed consensus |
-| 5 | Failover mechanism | Standby promotes by activating device connections | Self-contained, fencing check prevents false promotion |
+| 5 | Failover mechanism | Standby promotes by activating device connections | Self-contained. A fencing check reduces false promotion but does not by itself guarantee single-writer mutual exclusion. Ensuring exactly one device-writer per pair is an open control-plane problem. See [Resilience](design/resilience.md) |
 | 6 | Knowledge graph foundation | Namotion.Interceptor subject graph with registry | Typed properties, metadata, change tracking, and queryability with no impedance mismatch |
 | 7 | Operations | First-class on subjects, migrating to Namotion.Interceptor registry | Natural extension: subjects have properties (nouns) and operations (verbs). Enables OPC UA method mapping |
 | 8 | AI integration | Built-in agents (subjects) + external agents (MCP) | Two-mode model: in-process for automation, MCP for ad-hoc copilots |
 | 9 | MCP tool layering | `Namotion.Interceptor.Mcp` (base) + `HomeBlaze.Mcp` (rich) | Interceptor library stays usable independently; HomeBlaze adds domain-specific tools |
-| 10 | History | Plugin-based: abstractions (sink interface) + implementation (collector) | Any instance can optionally record history. Central UNS accumulates full history naturally via topology |
+| 10 | History | Plugin-based: abstractions (sink interface) + implementation (collector) | Any instance can optionally record history. Central accumulates history for periods when satellites are connected; it is best-effort, not guaranteed complete (disconnected windows and sink backpressure cause gaps). Lossless capture needs edge store-and-forward. See [History](design/history.md) |
 | 11 | Documents | Subjects with Read/Write operations, linked via dynamic attributes | No special infrastructure — standard subject model |
 | 12 | Plugin contract | Subject types only (NuGet packages) | Everything is a subject. No separate plugin interfaces |
 | 13 | Persistence | None for live state — recover from source of truth | External world is the persistence layer. Only configuration and history are locally persisted |
 | 14 | Observability | OpenTelemetry + health subjects | Ops teams get standard tooling, AI agents can monitor the system itself |
 | 15 | Versioning | Plugins depend on stable abstractions packages, not host versions | Independent upgradeability |
-| 16 | No external database for live state | In-memory subject graph only; no graph DB or SQL DB | The in-memory graph is already the knowledge graph — reactive, typed, queryable. An external DB would duplicate state, add sync complexity, and introduce latency on the hot path. Recovery from source of truth eliminates the need for persistent live state. SQL/time-series databases are used only for history sinks |
+| 16 | No external database for *reflected* live state | In-memory subject graph only for state mirrored from a source of truth; no graph DB or SQL DB duplicating the live device graph | The in-memory graph is already the knowledge graph: reactive, typed, queryable. Duplicating reflected state in an external DB would add sync complexity and hot-path latency, and recovery from source of truth removes the need for it. This does not restrict *originated* records (orders, batches, audit, alarm journal), which are their own source of truth and belong in a database via a database-backed subject. See [Records and Persistence](design/records-and-persistence.md) |
+| 17 | Records and system of record | Database-backed subjects; historical and bulk records exposed as DTOs from `[Query]` methods, not as graph nodes | A database is just another source of truth. Live, addressable, actionable data is a subject; historical or bulk data is a DTO from a query method, proxied across instances via RPC rather than replicated. Keeps records out of the live graph and the Welcome snapshot. See [Records and Persistence](design/records-and-persistence.md) |
 
 ---
 
@@ -508,6 +518,11 @@ For containerized environments, each HA pair maps to a StatefulSet with 2 replic
 | Central Instance | A HomeBlaze instance that aggregates state from multiple satellites into a unified namespace |
 | Primary | The active node in an HA pair. Owns device connections (satellites) or receives satellite sync (central) |
 | Standby | The passive node in an HA pair. Maintains a full replica via WebSocket. Promotes to primary on failover |
-| Fencing | Safety check before promotion: standby verifies it can reach devices. Prevents false promotion during network partitions |
+| Fencing | Safety check before promotion: standby verifies it can reach devices. Reduces false promotion during network partitions, but does not by itself guarantee that only one node writes to a device. See [Resilience](design/resilience.md) |
 | MCP | Model Context Protocol. The standard protocol through which external AI agents access the knowledge graph |
 | Connector | A protocol integration bridging external systems into the knowledge graph. Core connectors live in Namotion.Interceptor; HomeBlaze wraps them as manageable subjects |
+| Reflection plane | State flows where the graph mirrors an external source of truth (device or database): eventually consistent, last-writer-wins, recovered from source |
+| Control plane | Commands and actuation flows (setpoints, operation invocation, failover): require a single authoritative writer, confirmation, and idempotent at-least-once delivery |
+| System of record | The durable, authoritative store for originated data (orders, batches, audit, alarm journal), held by a database-backed subject rather than the in-memory graph |
+| Reflected state | State mirrored from an external source of truth; ephemeral, recovered on restart |
+| Originated state | State created inside the platform that is its own source of truth; durably persisted |
