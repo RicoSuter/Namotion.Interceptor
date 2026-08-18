@@ -75,7 +75,7 @@ Gates: transactional structural end-to-end tests, review agent pass, the full Co
 
 ## Verification schedule
 
-Long-running verification, agreed now per AGENTS.md: PR A `websocket-load` (with payload-size recording) plus the server-side structural-churn profile; PR C `websocket-chaos`, `websocket-load`, `websocket-transactions`; PR D the full matrix enumerated in its section, which is the acceptance bar. Benchmarks: PR A compares `*SubjectUpdateBenchmark*` against master.
+Long-running verification, agreed now per AGENTS.md: PR A `websocket-load` (with payload-size recording) plus the server-side structural-churn profile; PR C `websocket-chaos`, `websocket-load`, `websocket-transactions`; PR D the full matrix enumerated in its section, which is the acceptance bar. Benchmarks: PR A compares `*SubjectUpdateBenchmark*` against master. The user runs the benchmark and all Connector Tester runs on a separate machine; the implementation side prepares exact commands and profiles, and each PR stays draft until its runs are reported back and green.
 
 ## Deferred to per-PR design
 
@@ -84,4 +84,4 @@ Long-running verification, agreed now per AGENTS.md: PR A `websocket-load` (with
 
 ## Disposition of #197
 
-Closed as superseded when PR A opens, with a comment linking this spec and the stack. The branch is kept (not deleted) as reference until PR D lands. Everything in the #197 PR body is dispositioned by this spec: ported (protocol, pipeline, metadata serialization, batch scope, sequence and resync machinery, final flush), re-implemented (transport wiring), or named as dropped with the reason (digest, buffer, minting, apply lock, lifecycle rework).
+Closed as superseded once all three stack PRs are implemented and reviewed (before the long-running verification runs), with a comment linking this spec and the stack. The branch is kept (not deleted) as reference until PR D lands. Everything in the #197 PR body is dispositioned by this spec: ported (protocol, pipeline, metadata serialization, batch scope, sequence and resync machinery, final flush), re-implemented (transport wiring), or named as dropped with the reason (digest, buffer, minting, apply lock, lifecycle rework).

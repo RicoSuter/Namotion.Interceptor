@@ -950,37 +950,38 @@ git commit -m "Document the stable-ID subject update protocol"
 
 ---
 
-### Task 8: Benchmark gate
+### Task 8: Benchmark gate (run by the user on a separate machine)
 
-- [ ] **Step 1: Read the benchmarking guide**
+The user runs the benchmark on another machine; this task prepares the exact handoff and consumes the reported results. The PR stays draft until the numbers are back.
 
-Read `docs/benchmarking.md` fully before running anything; it defines how to run and how to interpret a comparison.
+- [ ] **Step 1: Prepare the handoff**
 
-- [ ] **Step 2: Run the comparison against master**
+Provide the user, in one message: the branch name to check out, the command `pwsh scripts/benchmark.ps1 -Filter "*SubjectUpdateBenchmark*" -LaunchCount 3` (they should read `docs/benchmarking.md` interpretation notes; regressions in allocations matter more than CPU per AGENTS.md priorities), and the request to also record serialized payload sizes: serialize one representative `CreateCompleteUpdate` of the benchmark model with `System.Text.Json` on master and on this branch and report both byte counts. 22-character base62 IDs replace small integers, so a size increase is expected and must be quantified, not hidden.
 
-Run: `pwsh scripts/benchmark.ps1 -Filter "*SubjectUpdateBenchmark*" -LaunchCount 3`
-This is long-running. Record the result table verbatim in the task summary. Interpretation per the guide; regressions in allocations matter more than CPU (AGENTS.md priorities). Also record serialized payload sizes: add a temporary local measurement (serialize one representative `CreateCompleteUpdate` of the benchmark model with `System.Text.Json` on master and on this branch, compare byte counts) and report both numbers; 22-character base62 IDs replace small integers, so a size increase is expected and must be quantified, not hidden.
+- [ ] **Step 2: Consume the results**
 
-- [ ] **Step 3: Report**
-
-No commit from this task unless the guide's process produces artifacts that belong in the PR. Surface the numbers to the user before finalizing the PR; a material regression is a user decision, not an implementer fix.
+Record the reported result table verbatim in the PR description. A material regression is a user decision, not an implementer fix; do not tune code in response without a new task.
 
 ---
 
-### Task 9: Chaos gates and PR
+### Task 9: Final sweep, PR, and chaos handoff
 
-- [ ] **Step 1: Connector Tester runs (agreed long-running verification)**
-
-Two runs, both from `src/Namotion.Interceptor.ConnectorTester` (coordinate with the user before starting; these take significant wall-clock time and do not run in CI, and OPC UA port 4840 conflicts do not apply to the websocket profiles):
-1. `websocket-load` profile: the new-protocol baseline. Record convergence per cycle and the payload-size observation from Task 7.
-2. `websocket-structural` profile (new): server-side structural churn, transactions off. Record convergence and the four `SubjectUpdateDiagnostics` counters at the end; a rising `DroppedOutboundChanges`/`DroppedInboundSubjectUpdates` count with convergence still green is acceptable (drops that self-heal); convergence failures are blockers.
-
-- [ ] **Step 2: Final sweep and PR**
+- [ ] **Step 1: Final sweep**
 
 Run: `dotnet build src/Namotion.Interceptor.slnx && dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"` then `dotnet test src/Namotion.Interceptor.WebSocket.Tests/Namotion.Interceptor.WebSocket.Tests.csproj`
 Expected: all green, warnings-clean.
 
-Push and open a draft PR titled "Stable-ID subject update protocol and ID-resolving pipeline". The description must include: the approved break list PLUS the two additions discovered in planning (`Count` removed, `CompleteSubjectIds` added); the release-notes paragraph for the AspNetCore JSON shape change (structural items serialize as `id`/`key` instead of `index`; `root` may be absent on partial updates); what was deliberately not ported and why (one line each: pending buffer, lazy minting, apply lock, digest, batch scope deferred to PR B); the benchmark table and payload sizes; the chaos run results; a note that #197 closes as superseded when this PR opens (post that comment only with user approval). No AI attribution. Spec reference: `docs/superpowers/specs/2026-08-18-websocket-structural-stack-design.md`.
+- [ ] **Step 2: Push and open the draft PR**
+
+Push and open a draft PR titled "Stable-ID subject update protocol and ID-resolving pipeline". The description must include: the approved break list PLUS the two additions discovered in planning (`Count` removed, `CompleteSubjectIds` added); the release-notes paragraph for the AspNetCore JSON shape change (structural items serialize as `id`/`key` instead of `index`; `root` may be absent on partial updates); what was deliberately not ported and why (one line each: pending buffer, lazy minting, apply lock, digest); a "pending long-running verification" section listing the benchmark and the two Connector Tester runs as open gates the user runs on a separate machine. Do NOT mention closing #197 here; per the spec it closes only once all three stack PRs are implemented and reviewed. No AI attribution. Spec reference: `docs/superpowers/specs/2026-08-18-websocket-structural-stack-design.md`.
+
+- [ ] **Step 3: Chaos handoff (run by the user on a separate machine)**
+
+Hand the user, in one message alongside the Task 8 benchmark handoff: the branch name, and the two Connector Tester runs from `src/Namotion.Interceptor.ConnectorTester`:
+1. `websocket-load` profile: the new-protocol baseline. Record convergence per cycle.
+2. `websocket-structural` profile (new): server-side structural churn, transactions off. Record convergence and the four `SubjectUpdateDiagnostics` counters at the end; a rising `DroppedOutboundChanges`/`DroppedInboundSubjectUpdates` count with convergence still green is acceptable (drops that self-heal); convergence failures are blockers.
+
+When the results come back, paste them into the PR description. The PR leaves draft only after both runs and the benchmark are reported green.
 
 ---
 
