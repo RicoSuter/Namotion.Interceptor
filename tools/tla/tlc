@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Run the TLC model checker from the bootstrapped toolchain.
+# Prefers a system Java (JAVA_HOME or PATH, for example CI setup-java); falls
+# back to the pinned portable JRE downloaded by bootstrap.sh. Usage:
+#   tools/tla/tlc path/to/Module.tla [tlc options]
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cache="$here/.cache"
+jar="$cache/tla2tools.jar"
+
+[ -f "$jar" ] || { echo "tla2tools.jar not found. Run: $here/bootstrap.sh" >&2; exit 1; }
+
+if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+  java_bin="$JAVA_HOME/bin/java"
+elif command -v java >/dev/null 2>&1; then
+  java_bin="$(command -v java)"
+elif [ -x "$cache/jre/bin/java" ]; then
+  java_bin="$cache/jre/bin/java"
+else
+  echo "No Java found. Run: $here/bootstrap.sh" >&2
+  exit 1
+fi
+
+cm="$cache/CommunityModules-deps.jar"
+exec "$java_bin" -XX:+UseParallelGC -cp "$jar:$cm" tlc2.TLC "$@"
