@@ -159,10 +159,10 @@ ledger and reservation protocol.
 
 ### Included
 
-- Add explicit `AttachToContext`, `DetachFromContext`, and `TryGetAttachContext` subject APIs.
+- Add strict `AttachToContext`, `DetachFromContext`, and `TryGetAttachContext` subject APIs.
 - Make `AddFallbackContext` and `RemoveFallbackContext` pure service composition operations.
-- Capture the successful lifecycle authority sequence for explicit attachment and use it for
-  detach.
+- Resolve zero or one lifecycle coordinator, capture its identity for the active ownership domain,
+  and reject mutations that would change it while the domain owns subjects.
 - Replace Tracking's empty-property-set root sentinel with separate explicit-root and property-edge
   membership.
 - Add the complete ordered parent-reference ledger, generation-aware transition state, and
@@ -176,6 +176,10 @@ ledger and reservation protocol.
   incompatible property value commits.
 - Preserve subject-local services and interceptors as branch overlays for the subject and its
   descendants.
+- Make `WithLifecycle()` include recursive inheritance and remove `WithContextInheritance()` and
+  the functional `ContextInheritanceHandler` capability.
+- Use a deliberate public Core provider contract for Tracking ownership coordination. Add no new
+  friend-assembly access between the published packages.
 - Update generated and dynamic constructors, first-party root call sites, connectors, OPC UA, and
   HomeBlaze in the same coordinated change.
 - Publish connector-created children through the parent edge before recursive population and
@@ -188,6 +192,8 @@ ledger and reservation protocol.
 
 - Adding or removing a fallback no longer attaches or detaches a subject.
 - A subject can no longer use several fallback calls as several lifecycle roots.
+- A subject can no longer have several explicit root attachments, including repeated attachment to
+  the same context without an intervening detach.
 - Public fallback composition no longer establishes property inheritance.
 - A subject can no longer aggregate unrelated parent ownership domains or all parent branch
   overlays.
@@ -195,6 +201,7 @@ ledger and reservation protocol.
 - A property-child factory can no longer return a child already owned by an incompatible route.
 - Explicit attachment to another subject executor is rejected. Explicit roots attach to a plain
   configured context; property children inherit through their parent.
+- Shallow lifecycle without recursive property inheritance is no longer configurable.
 
 Fallback composition, cycles, repeated service paths, nonunique services, late nonunique service
 registration, and branch-local services remain supported.
@@ -333,6 +340,10 @@ The final performance acceptance criterion for every pull request is:
 The maintainer supplies the external benchmark result before a pull request is finalized. PR 1's
 route-free state shape and hot paths also receive static inspection because the new route has no
 production caller yet.
+
+PR 2 is additionally compared with exact `master`, because the semantic rewrite is expected to
+remove enough legacy fallback and reference-count machinery to keep the normal one-global-context
+case at least as fast as the released baseline. A repeatable regression reopens the design.
 
 ## Whole-Stack Success Criteria
 
