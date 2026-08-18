@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -171,21 +172,36 @@ public class BatchScopeTests
     }
 
     [Fact]
-    public void WhenBatchScopeClosesWithoutDeferredDetaches_ThenNoThreadStaticStateRemains()
+    public void WhenBatchScopeClosesWithoutDeferredDetaches_ThenTheRootContextIsNotRetained()
     {
-        // Arrange
+        // Arrange & Act: a scope that only attaches, so nothing is ever deferred
+        var weakContext = CreateContextAndCloseEmptyBatchScope();
+
+        for (var i = 0; i < 10 && weakContext.IsAlive; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+
+        // Assert: the closed scope pins neither the root context nor the graph and interceptor it reaches
+        Assert.False(weakContext.IsAlive);
+        Assert.Equal(0, GetBatchScopeCountOnCurrentThread());
+    }
+
+    // NoInlining so the context local cannot be kept alive by the caller's frame.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference CreateContextAndCloseEmptyBatchScope()
+    {
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new Person(context) { FirstName = "Par" };
         var lifecycle = context.TryGetLifecycleInterceptor()!;
 
-        // Act: a scope that only attaches, so nothing is ever deferred
         using (lifecycle.CreateBatchScope(context))
         {
             parent.Mother = new Person { FirstName = "Chi" };
         }
 
-        // Assert: the scope pins neither the root context nor the owning interceptor
-        AssertNoBatchScopeStateOnCurrentThread();
+        return new WeakReference(context);
     }
 
     [Fact]
@@ -235,6 +251,52 @@ public class BatchScopeTests
         // Assert: and it is processed normally on dispose
         Assert.False(idRegistry.TryGetSubjectById("secondChildId", out _));
         AssertNoBatchScopeStateOnCurrentThread();
+    }
+
+    [Fact]
+    public void WhenOneDeferredDetachThrows_ThenTheRemainingDetachesStillComplete()
+    {
+        // Arrange
+        var throwingHandler = new ThrowingOnDetachLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithService<ILifecycleHandler>(
+                () => throwingHandler,
+                handler => handler is ThrowingOnDetachLifecycleHandler);
+
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var idRegistry = context.GetService<ISubjectIdRegistry>();
+
+        var failingChild = new Person { FirstName = "Ch1" };
+        var survivingChild = new Person { FirstName = "Ch2" };
+        var parent = new Person(context) { FirstName = "Par", Mother = failingChild, Father = survivingChild };
+
+        failingChild.SetSubjectId("failingChildId");
+        survivingChild.SetSubjectId("survivingChildId");
+
+        throwingHandler.FailingSubject = failingChild;
+
+        var scope = lifecycle.CreateBatchScope(context);
+        parent.Mother = null;
+        parent.Father = null;
+
+        // Act & Assert: the handler failure surfaces unwrapped out of the scope close
+        var exception = Assert.Throws<InvalidOperationException>(() => scope.Dispose());
+        Assert.Equal("Handler failure during detach.", exception.Message);
+
+        // Assert: the other deferred subject was still detached and deregistered
+        Assert.False(idRegistry.TryGetSubjectById("survivingChildId", out _));
+        AssertNoBatchScopeStateOnCurrentThread();
+
+        // Act: re-attach the subject whose deferred detach ran after the failing one
+        parent.Father = survivingChild;
+
+        // Assert: it attaches as a new context attach, so it is not stuck in a
+        // present-but-empty state where it can never be registered again
+        Assert.True(idRegistry.TryGetSubjectById("survivingChildId", out var found));
+        Assert.Same(survivingChild, found);
     }
 
     [Fact]
@@ -356,9 +418,15 @@ public class BatchScopeTests
     {
         public bool IsEnabled { get; set; } = true;
 
+        /// <summary>
+        /// The only subject to fail for, or null to fail for every context detach.
+        /// </summary>
+        public IInterceptorSubject? FailingSubject { get; set; }
+
         public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
-            if (IsEnabled && change.IsContextDetach)
+            if (IsEnabled && change.IsContextDetach &&
+                (FailingSubject is null || ReferenceEquals(FailingSubject, change.Subject)))
             {
                 throw new InvalidOperationException("Handler failure during detach.");
             }

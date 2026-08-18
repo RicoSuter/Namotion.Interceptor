@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using Namotion.Interceptor.Interceptors;
 
@@ -77,8 +78,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// <remarks>
     /// The scope state is thread local: the returned scope must be disposed on the thread that created it
     /// and must not be held across an await. Disposing it on another thread throws an
-    /// <see cref="InvalidOperationException"/>. Nested scopes must be disposed in reverse creation order,
-    /// and only the outermost scope processes the deferred detaches.
+    /// <see cref="InvalidOperationException"/>. Only the outermost scope processes the deferred detaches,
+    /// whichever nested scope happens to close last.
+    /// Only the interceptor that opened the outermost scope defers: a scope opened by a different interceptor
+    /// while one is already open defers nothing, so that interceptor's graph keeps reporting a last detach
+    /// immediately and the transient detach of a subject moved between properties stays observable there.
     /// Under a scope a last-detach edge is reported twice: once immediately with
     /// <see cref="SubjectLifecycleChange.IsPropertyReferenceRemoved"/> alone, and once at scope close with
     /// <see cref="SubjectLifecycleChange.IsPropertyReferenceRemoved"/> and
@@ -88,6 +92,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// <returns>The scope which processes the deferred detaches when it is disposed.</returns>
     public IDisposable CreateBatchScope(IInterceptorSubjectContext rootContext)
     {
+        ArgumentNullException.ThrowIfNull(rootContext);
+
         s_batchScopeCount++;
         if (s_batchScopeCount == 1)
         {
@@ -99,91 +105,144 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
     private void EndBatchScope()
     {
+        // No lock here: the scope state is thread static, so the decrement and the handover
+        // of the deferred map need no synchronization.
+        if (--s_batchScopeCount > 0)
+        {
+            return;
+        }
+
+        // Reset before invoking handlers: a handler that throws, or that opens a nested
+        // scope, must not see or strand this scope's state.
+        var deferred = s_deferredLastDetaches;
+        var resolveContext = s_batchScopeRootContext;
+        var owner = s_batchScopeOwner;
+
+        s_deferredLastDetaches = null;
+        s_batchScopeRootContext = null;
+        s_batchScopeOwner = null;
+
+        if (deferred is null || deferred.Count == 0 || resolveContext is null || owner is null)
+        {
+            return;
+        }
+
+        // Only the owner deferred anything, and the deferred entries live in its _attachedSubjects,
+        // so the owner processes them even when a different instance closes the outermost scope.
+        owner.ProcessDeferredDetaches(deferred, resolveContext);
+    }
+
+    private void ProcessDeferredDetaches(
+        Dictionary<IInterceptorSubject, (PropertyReference Property, object? Index)> deferred,
+        IInterceptorSubjectContext resolveContext)
+    {
+        List<Exception>? failures = null;
+
         lock (_attachedSubjects)
         {
-            if (--s_batchScopeCount > 0)
-            {
-                return;
-            }
-
-            // Reset before invoking handlers: a handler that throws, or that opens a nested
-            // scope, must not see or strand this scope's state.
-            var deferred = s_deferredLastDetaches;
-            var resolveContext = s_batchScopeRootContext;
-            s_deferredLastDetaches = null;
-            s_batchScopeRootContext = null;
-            s_batchScopeOwner = null;
-
-            if (deferred is null || deferred.Count == 0 || resolveContext is null)
-            {
-                return;
-            }
-
             foreach (var (subject, deferredDetach) in deferred)
             {
-                if (_attachedSubjects.TryGetValue(subject, out var set) && set.IsEmpty)
+                try
                 {
-                    // Genuinely orphaned, execute full detach.
-                    _attachedSubjects.Remove(subject);
-
-                    List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
-                    foreach (var entry in subject.Properties)
-                    {
-                        var subjectProperty = new PropertyReference(subject, entry.Key);
-                        var metadata = entry.Value;
-                        if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
-                        {
-                            if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
-                            {
-                                children ??= GetList();
-                                FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
-                            }
-
-                            _lastProcessedValues.Remove(subjectProperty);
-                        }
-
-                        subject.DetachSubjectProperty(subjectProperty);
-                    }
-
-                    var count = subject.GetReferenceCount();
-                    var change = new SubjectLifecycleChange
-                    {
-                        Subject = subject,
-                        Property = deferredDetach.Property,
-                        Index = deferredDetach.Index,
-                        ReferenceCount = count,
-                        IsPropertyReferenceRemoved = true,
-                        IsContextDetach = true
-                    };
-
-                    SubjectDetaching?.Invoke(change);
-
-                    if (subject is ILifecycleHandler subjectHandler)
-                    {
-                        subjectHandler.HandleLifecycleChange(change);
-                    }
-
-                    // Use the root context for service resolution. The subject's own
-                    // context and intermediate parent contexts may have their fallbacks
-                    // removed by ContextInheritanceHandler during processing. The root
-                    // context never loses its fallback and can always resolve services.
-                    var array = resolveContext.GetServices<ILifecycleHandler>();
-                    for (var i = 0; i < array.Length; i++)
-                    {
-                        array[i].HandleLifecycleChange(change);
-                    }
-
-                    if (children is not null)
-                    {
-                        foreach (var child in children)
-                        {
-                            DetachFromProperty(child.subject, resolveContext, child.property, child.index);
-                        }
-
-                        ReturnList(children);
-                    }
+                    ProcessDeferredDetach(subject, deferredDetach, resolveContext);
                 }
-                // else: re-attached during batch (entry not empty), skip
+                catch (Exception exception)
+                {
+                    // A throwing handler must not abandon the remaining entries: they would stay in
+                    // _attachedSubjects as present-but-empty entries which can never be detached
+                    // (the property is already removed) nor re-registered (the entry still exists).
+                    (failures ??= []).Add(exception);
+                }
+            }
+        }
+
+        if (failures is { Count: 1 })
+        {
+            ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        }
+
+        if (failures is not null)
+        {
+            throw new AggregateException(failures);
+        }
+    }
+
+    private void ProcessDeferredDetach(
+        IInterceptorSubject subject,
+        (PropertyReference Property, object? Index) deferredDetach,
+        IInterceptorSubjectContext resolveContext)
+    {
+        if (!_attachedSubjects.TryGetValue(subject, out var set) || !set.IsEmpty)
+        {
+            // Re-attached during the batch (entry not empty), skip.
+            return;
+        }
+
+        // Genuinely orphaned, execute full detach.
+        _attachedSubjects.Remove(subject);
+
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
+        foreach (var entry in subject.Properties)
+        {
+            var subjectProperty = new PropertyReference(subject, entry.Key);
+            var metadata = entry.Value;
+            if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
+            {
+                if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
+                {
+                    children ??= GetList();
+                    FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
+                }
+
+                _lastProcessedValues.Remove(subjectProperty);
+            }
+
+            subject.DetachSubjectProperty(subjectProperty);
+        }
+
+        var count = subject.GetReferenceCount();
+        var change = new SubjectLifecycleChange
+        {
+            Subject = subject,
+            Property = deferredDetach.Property,
+            Index = deferredDetach.Index,
+            ReferenceCount = count,
+            IsPropertyReferenceRemoved = true,
+            IsContextDetach = true
+        };
+
+        try
+        {
+            SubjectDetaching?.Invoke(change);
+
+            if (subject is ILifecycleHandler subjectHandler)
+            {
+                subjectHandler.HandleLifecycleChange(change);
+            }
+
+            // Use the root context for service resolution. The subject's own
+            // context and intermediate parent contexts may have their fallbacks
+            // removed by ContextInheritanceHandler during processing. The root
+            // context never loses its fallback and can always resolve services.
+            var array = resolveContext.GetServices<ILifecycleHandler>();
+            for (var i = 0; i < array.Length; i++)
+            {
+                array[i].HandleLifecycleChange(change);
+            }
+
+            if (children is not null)
+            {
+                foreach (var child in children)
+                {
+                    DetachFromProperty(child.subject, resolveContext, child.property, child.index);
+                }
+            }
+        }
+        finally
+        {
+            if (children is not null)
+            {
+                ReturnList(children);
             }
         }
     }
