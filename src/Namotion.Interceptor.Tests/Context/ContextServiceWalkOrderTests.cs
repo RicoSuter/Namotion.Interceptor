@@ -11,11 +11,11 @@ namespace Namotion.Interceptor.Tests.Context;
 /// exact shape of the walk and not only on the set it reaches.
 ///
 /// The reference below is a direct transcription of the recursive walk that the iterative one
-/// replaced: depth first, left to right, own services before the fallback contexts, distinct and
-/// reordered once per context, and a visited set that both cuts cycles and collapses a shared
-/// subgraph onto the path that reached it first. Randomized graphs are resolved with both and the
-/// two sequences are compared element by element, so a walk that reaches the same services in a
-/// different order fails here.
+/// replaced: depth first, left to right, own services before fallback contexts and the ownership
+/// route after them, distinct and reordered once per context, and a visited set that both cuts
+/// cycles and collapses a shared subgraph onto the path that reached it first. Randomized graphs
+/// are resolved with both and the two sequences are compared element by element, so a walk that
+/// reaches the same services in a different order fails here.
 /// </summary>
 public class ContextServiceWalkOrderTests
 {
@@ -376,9 +376,6 @@ public class ContextServiceWalkOrderTests
         internal List<Node> Fallbacks { get; } = [];
 
         internal Node? OwnershipRoute { get; set; }
-
-        internal IEnumerable<Node> Relationships =>
-            OwnershipRoute is null ? Fallbacks : Fallbacks.Append(OwnershipRoute!);
 
         /// <summary>Mirrors <c>ContextState.DelegationTarget</c>.</summary>
         internal Node? DelegationTarget
