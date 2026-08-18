@@ -167,8 +167,16 @@ ledger and reservation protocol.
   membership.
 - Add the complete ordered parent-reference ledger, generation-aware transition state, and
   prospective reservation before any property value commits.
-- Synchronize only potentially structural null-context setters with executor and reservation
-  publication; leave the unowned scalar fast path unchanged.
+- Serialize potentially structural operations through one reentrant gate per ownership domain;
+  different domains remain independent and the final committed property value wins.
+- Bind one lifecycle coordinator instance to at most one active ownership domain so its mutable
+  reconciliation state is protected by exactly one domain gate.
+- Add one compact, allocation-free route-free admission handshake so a materialized unowned
+  executor drains its old cached write before adoption; leave the unowned scalar fast path
+  unchanged.
+- Move the canonical conservative subject-property classifier into Core, keep the existing Tracking
+  extensions as forwarders, and feed generated, Dynamic, Core admission, and Tracking from that one
+  contract.
 - Support several parent references only when they share one ownership-domain identity.
 - Keep the earliest surviving compatible parent active and transfer deterministically when its
   final reference disappears.
@@ -183,6 +191,8 @@ ledger and reservation protocol.
 - Make `ILifecycleInterceptor` formally inherit `IWriteInterceptor` and use complete public,
   stack-only Core operation facades for Tracking ownership coordination. Add no new friend-assembly
   access between the published packages.
+- Keep a coordinator reached by route-free fallback composition transparent when no committed Core
+  ownership operation exists; lifecycle state is touched only under its bound domain gate.
 - Reuse one short Core authority-publication gate for domain activation, reservations, routes, and
   authority-relevant context publication. Keep resolution, scalar writes, callbacks, getters, and
   service factories outside that gate; PR 3 extends the same activation record.
@@ -206,7 +216,17 @@ ledger and reservation protocol.
 - A subject can no longer aggregate unrelated parent ownership domains or all parent branch
   overlays.
 - Reparenting into an incompatible ownership domain no longer succeeds temporarily.
-- A property-child factory can no longer return a child already owned by an incompatible route.
+- A property-child factory must return a route-free, unowned child. It cannot return an explicitly
+  attached or inherited subject for the caller to steal or silently retain as an independent root.
+- Concurrent structural operations inside one ownership domain no longer commit and reconcile in
+  parallel. They serialize through one reentrant domain gate and the final committed value wins.
+- Explicit ownership transitions and coordinator-changing context mutations cannot reenter from an
+  unfinished route-free structural interceptor chain.
+- One lifecycle coordinator instance cannot serve several active ownership domains.
+- A nested domain operation cannot wait for a different contended domain while holding another
+  domain gate, a service predicate/factory callback scope, or its initiating subject's `SyncRoot`.
+- Consumers and custom interceptors cannot start domain-gated work while manually holding another
+  subject's `SyncRoot`; first-party code never uses that lock order.
 - Explicit attachment to another subject executor is rejected. Explicit roots attach to a plain
   configured context; property children inherit through their parent.
 - Shallow lifecycle without recursive property inheritance is no longer configurable.
@@ -341,9 +361,10 @@ The final performance acceptance criterion for every pull request is:
 
 > For the normal one-global-context use case, the pull request introduces no repeatable performance
 > regression relative to its exact base commit. Steady-state intercepted reads, scalar writes,
-> method invocations, and cached service resolution add no allocations. Targeted comparisons on
-> the stable benchmark machine show no repeatable timing regression outside contemporaneous
-> control-row noise. A regression above noise requires explicit maintainer approval.
+> method invocations, cached service resolution, and warmed-up ordinary structural writes add no
+> ownership allocations. Targeted comparisons on the stable benchmark machine show no repeatable
+> timing regression outside contemporaneous control-row noise. A regression above noise requires
+> redesign or explicit maintainer approval.
 
 The maintainer supplies the external benchmark result before a pull request is finalized. PR 1's
 route-free state shape and hot paths also receive static inspection because the new route has no
@@ -352,9 +373,12 @@ production caller yet.
 PR 2 is additionally compared with exact `master`, because the semantic rewrite is expected to
 remove enough legacy fallback and reference-count machinery to keep the normal one-global-context
 case at least as fast as the released baseline. Its stable-machine handoff compares both the exact
-stacked PR 1 base and exact master, and includes unowned structural initialization so the narrow
-null-context handshake cannot hide a construction regression. A repeatable regression reopens the
-design.
+stacked PR 1 base and exact master. Focused unowned structural-initialization and contended
+structural-write rows use one temporary benchmark-only harness patch applied identically to all
+three checkouts on the stable machine. The patch touches only the benchmark project and is recorded
+with the result; it is not committed to PR 1. The handoff also covers ordinary and concurrent
+structural mutation so per-domain serialization cannot hide a meaningful regression. A repeatable
+regression reopens the design.
 
 ## Whole-Stack Success Criteria
 

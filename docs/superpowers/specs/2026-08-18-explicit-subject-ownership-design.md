@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-18
 
-**Status:** Revised after independent written-spec review; awaiting maintainer review
+**Status:** Revised through three independent written-spec review rounds; awaiting final approval
 
 **Stack position:** PR 2 on `feature/effective-ownership-route`
 
@@ -46,7 +46,8 @@ before an incompatible property value commits, and less fallback-specific lifecy
   identity names the domain. Descendants retain that identity even when their effective route
   targets a parent executor.
 - **Ownership coordinator:** the zero-or-one `ILifecycleInterceptor` resolved for an ownership
-  domain. Tracking's `LifecycleInterceptor` is the built-in implementation.
+  domain. Tracking's `LifecycleInterceptor` is the built-in implementation. One coordinator
+  instance serves at most one active domain.
 - **Effective ownership route:** the single internal PR 1 route used for service resolution. An
   explicit attachment wins. Otherwise the earliest surviving compatible parent membership that
   can form an acyclic route wins.
@@ -68,6 +69,7 @@ before an incompatible property value commits, and less fallback-specific lifecy
 - Keep graph traversal and lifecycle policy in Tracking while Core owns atomic state mechanics.
 - Remove functional context inheritance as an optional handler capability.
 - Keep the ordinary scalar interception path allocation-free and at least as fast as `master`.
+- Keep warmed-up ordinary structural writes allocation-free and serialize them per ownership domain.
 - Release every subject, context, property reference, reservation, and reconciliation entry when
   the final external ownership anchor disappears.
 
@@ -311,15 +313,26 @@ int OwnershipReferenceCount { get; }
 Reading the count for a never-used subject may create its normal lazy executor, but never creates
 an ownership record.
 
-For a structural property write, Core stores the committed operation token and provider-owned
-reconciliation state in the by-reference `PropertyWriteContext<TProperty>`. The exact coordinator's
-existing `WriteProperty` call receives control after `next`, obtains a fresh stack-only facade
-through `context.TryGetSubjectOwnershipOperation(out var operation)`, reads `ProviderState`, updates
-its baseline, and invokes callbacks. The method returns `false` when no structural operation
-committed. Core recognizes the exact coordinator node in the compiled chain and wraps it in
-`finally` so pending Core reservations and deferred route work are released even when a provider
-violates the no-throw contract. This wrapper does not add another interceptor or change the
-coordinator's ordering identity.
+For a structural property write in a lifecycle-coordinated domain, Core enters the ownership
+domain's reentrant structural-write gate before it selects the cached action. It then re-reads the
+ownership generation and context state, so an action compiled while a subject was route-free cannot
+run after that subject has joined a domain. The ordinary resolved chain contains the exact
+coordinator once in its characterized ordering position. A subject that is reserved before its
+ownership route becomes visible uses a transition-generation action built from its still-visible
+local interceptors plus that exact coordinator. This changes write coordination only; it does not
+expose the pending ownership route or parent services to service lookup. A valid explicitly
+attached domain with no lifecycle coordinator has no recursive property ownership and keeps the
+ordinary cached structural-write path.
+
+Core stores the committed operation token and provider-owned reconciliation state in the
+by-reference `PropertyWriteContext<TProperty>`. The exact coordinator's existing `WriteProperty`
+call receives control after `next`, obtains a fresh stack-only facade through
+`context.TryGetSubjectOwnershipOperation(out var operation)`, reads `ProviderState`, updates its
+baseline, and invokes callbacks. The method returns `false` when no structural operation committed.
+Core wraps that exact coordinator node in `finally` so pending Core reservations and deferred route
+work are released even when a provider violates the no-throw contract. The transition-generation
+action uses the coordinator's concrete ordering identity, does not add a second provider node, and
+is discarded when that transition generation ends.
 
 The write context exposes the operation only during that exact committed unwind:
 
@@ -328,11 +341,23 @@ public bool TryGetSubjectOwnershipOperation(
     out SubjectOwnershipOperation operation);
 ```
 
+Because fallback composition can contribute interceptors before a subject belongs to any ownership
+domain, the same coordinator may also appear in an ordinary route-free write chain. That call has no
+activation record and no domain gate. `WriteProperty` must call `next` normally, then treat
+`TryGetSubjectOwnershipOperation == false` as a transparent non-ownership write: it touches no
+lifecycle membership, reconciliation baseline, provider state, or callback projection. Core
+guarantees the matching gate only for attach, detach, prepare, and unwind of a committed ownership
+operation. A route-free transparent call may run concurrently with the coordinator's bound active
+domain because it does not access the coordinator's lifecycle state.
+
 The contract is an advanced provider API:
 
 - at most one distinct coordinator may resolve in one active effective context;
+- one coordinator instance is bound to at most one active configured-context domain;
 - that exact coordinator instance occurs exactly once in the ordered write chain;
 - calls are synchronous;
+- Core holds the matching domain structural-write gate for attach, detach, prepare, and committed
+  ownership unwind; an ordinary route-free `WriteProperty` call has no operation and is transparent;
 - `WriteProperty` calls `next` at most once and performs postcommit reconciliation during unwind;
 - implementations must not throw from lifecycle callbacks;
 - implementations must not retain an operation context, view, enumerator, or reservation beyond
@@ -346,7 +371,8 @@ surface further.
 
 ## Core Ownership State
 
-Every `InterceptorExecutor` has one nullable ownership field:
+Every `InterceptorExecutor` has one nullable ownership field and one compact route-free structural
+admission word:
 
 ```text
 SubjectOwnershipState?
@@ -359,11 +385,17 @@ SubjectOwnershipState?
   ReferenceCount
   Generation
   PendingTransition
+
+RouteFreeStructuralAdmission
+  ActiveWriterCount
+  Generation
 ```
 
-The field remains `null` until the subject first participates in explicit or inherited ownership.
-When the final attachment, parent membership, and transition disappear, Core clears the field back
-to `null`.
+The ownership field remains `null` until the subject first participates in explicit or inherited
+ownership. When the final attachment, parent membership, and transition disappear, Core clears the
+field back to `null`. The admission word is inline executor storage, not a heap object. It is touched
+only by potentially structural writes while the executor is still route-free and by the cold
+operation that adopts such a subject.
 
 The common first parent membership is stored inline. An ordered overflow collection is allocated
 only for a second distinct parent property. The collection preserves insertion order so transfer is
@@ -384,6 +416,17 @@ The first explicit root activates its plain configured ownership domain and capt
 zero-or-one lifecycle coordinator, including the valid no-coordinator case. Several disconnected
 roots may share the same activated domain.
 
+Prospective coordinator discovery uses a Core authority walk over the exact immutable context
+states and does not call ordinary `GetServices<ILifecycleInterceptor>()`. It deduplicates only by
+`ReferenceEquals`, allowing the same instance through repeated paths and rejecting two distinct
+instances even when a custom `Equals` implementation considers them equal. The walk uses the same
+cycle-aware pooled traversal shape as service resolution but does not apply default-equality service
+deduplication before cardinality validation. Activation performs this raw walk, binding check, and
+activation-record publication under one authority-publication-gate interval, so a context or
+fallback mutation cannot publish between discovery and capture. The walk invokes no user code.
+The implementation is a permanent contract-type-plus-reference-identity collector; PR 3 reuses it
+for every declared unique authority instead of replacing a lifecycle-specific algorithm.
+
 An activated plain context uses a derived immutable context state that references one lazy
 `ContextAuthorityActivation` record. Route-free, inactive contexts retain the PR 1 state shape.
 The record contains:
@@ -395,12 +438,39 @@ ContextAuthorityActivation
   ExplicitRootLeaseCount
   Generation
   TransitionToken
+  ReentrantStructuralWriteGate
 ```
 
-`ExplicitRootLeaseCount` counts explicit anchors in this exact domain, not subjects. The record is
+`ExplicitRootLeaseCount` counts explicit anchors in this exact domain, not subjects. The activation
+record itself is the monitor target, so the gate adds no second managed allocation. The record is
 removed after the last explicit anchor and every ownership transition from that anchor has
-quiesced. PR 3 extends the authority value stored in this same permanent record rather than
-replacing the record or its synchronization.
+quiesced. PR 3 extends the authority value stored in this same record shape and mechanism rather
+than replacing them; an individual activation-record instance is not permanent after final release.
+
+One gate per lifecycle domain is deliberate. A structural transition can reserve and reconcile
+several subjects, so independent per-subject serializers would still require ordered multi-lock
+coordination and a separate graph-wide callback order. The domain gate provides that order with the
+same lifecycle synchronization domain the library already has and without allocating a queue or
+gate per subject. The per-subject route-free admission word is only a temporary adoption handshake,
+not another serializer.
+
+One lifecycle coordinator instance may be bound to at most one active ownership domain. The first
+activation records that binding under the authority publication gate; activation of another exact
+plain context with the same coordinator rejects before ownership publication or callbacks. Several
+explicit roots in the same exact domain still share the coordinator and gate. Final quiescent
+release removes the binding. This keeps the coordinator's mutable reconciliation state protected by
+one gate without retaining Tracking's second lock or manufacturing per-domain copies of provider
+state.
+
+Core stores active non-null bindings in one lazily created reference-identity map protected by the
+authority publication gate. An entry points to the exact activation record, is consulted only by
+cold activation and release, and is removed before that record becomes unreachable. It adds no
+steady-state lookup or per-subject allocation.
+
+If first activation later fails before an explicit lease or ownership batch commits, Core removes
+the zero-lease activation record and its coordinator binding under the authority publication gate.
+The same coordinator can then bind immediately to another domain. No failed precommit activation
+leaves an `Activating` record or identity-map entry behind.
 
 Every context-state replacement, including cache invalidation through `WithoutCaches()`, preserves
 the exact activation record just as PR 1 preserves an exact ownership-route descriptor. An inactive
@@ -409,28 +479,32 @@ plain context uses the base state and pays no activation-record allocation.
 Every owned subject pins the captured coordinator identity, including `null`, across its complete
 effective context. A service, fallback, or ownership-route mutation that would change that identity
 for any active downstream subject is rejected before publication. Adding another path to the same
-coordinator instance remains valid. Capturing `null` prevents adding the first coordinator anywhere
-in that active effective cone. The cold mutation path may walk active reverse dependencies;
-steady-state resolution does not. Non-lifecycle service mutation remains legal.
+coordinator instance inside its already bound domain remains valid. Capturing `null` prevents adding
+the first coordinator anywhere in that active effective cone. The cold mutation path may walk
+active reverse dependencies; steady-state resolution does not. Non-lifecycle service mutation
+remains legal.
 
-The activation record is lazy and permanent infrastructure that PR 3 can extend for the complete
-unique-authority map. PR 2 must not add a lifecycle-only compatibility bridge that PR 3 removes.
+The lazy activation-record mechanism is permanent infrastructure that PR 3 can extend for the
+complete unique-authority map. PR 2 must not add a lifecycle-only compatibility bridge that PR 3
+removes.
 
 ### Authority publication gate
 
 One permanent Core gate linearizes only authority-relevant publication:
 
 - domain activation and final release;
+- exact coordinator-to-domain binding and unbinding;
 - ownership reservation publication and cancellation;
 - ownership-route publication, transfer, and clear;
 - service and fallback state publication whose prospective state must be checked against active
   domains.
 
-The gate is never entered by cached service resolution, intercepted reads, scalar writes, method
-invocations, lifecycle callbacks, reconciliation, property getters, or target code. Context-local
-`TryAddService` predicates and factories retain their current behavior under that context's
-mutation lock and run before the publication gate is entered. The publisher re-reads the state,
-validates the complete prospective authority result, and publishes while holding both locks.
+The authority publication gate is never entered by cached service resolution, intercepted reads,
+scalar writes, method invocations, lifecycle callbacks, reconciliation, property getters, or target
+code. It is distinct from the per-domain structural-write gate. Context-local `TryAddService`
+predicates and factories retain their current behavior under that context's mutation lock and run
+before the publication gate is entered. The publisher re-reads the state, validates the complete
+prospective authority result, and publishes while holding both locks.
 
 The order for context mutation is the existing context mutation lock followed by the authority
 publication gate. A holder of the publication gate never waits for another context's mutation lock.
@@ -459,22 +533,53 @@ Domain activation follows this state table:
 |---|---|---|
 | Inactive | First valid explicit attach | Publish `Activating` with one lease and captured coordinator |
 | Activating | Same transition token | Continue reservation or commit |
-| Activating | Competing attach or authority mutation | Observe the generation and retry after it changes |
+| Activating | Structural write in the same synchronous domain operation | Enter the reentrant gate and join the live operation |
+| Activating | Competing structural write on another thread | Wait at the domain gate without holding a Core publication or subject lock, then re-read state and execute once |
+| Activating | Context mutation preserving the captured coordinator | Publish without waiting for the domain gate; advance the activation generation so discovery retries |
+| Activating | Context mutation changing the captured coordinator | Reject before publication without waiting for the domain gate |
+| Activating | Reentrant explicit ownership transition | Reject before publication rather than waiting on itself |
+| Activating | Competing explicit ownership transition on another thread | Wait at the domain gate without holding a context or publication lock, then re-evaluate |
 | Active | Compatible explicit attach | Increment lease count |
-| Active | Mutation preserving captured coordinator identity | Publish normally |
-| Active | Mutation changing captured coordinator identity | Reject before publication |
+| Active | Context mutation preserving captured coordinator identity | Publish normally without waiting for the domain gate |
+| Active | Context mutation changing captured coordinator identity | Reject before publication without waiting for the domain gate |
 | Active | Final explicit-anchor release | Publish `Releasing` until ownership cleanup quiesces |
 | Releasing | Same transition token | Complete cleanup and remove the activation record |
-| Releasing | Competing activation or mutation | Observe the generation and retry after it changes |
+| Releasing | Reentrant structural write in the same operation | Enter the reentrant gate and reconcile against the live generation |
+| Releasing | Context mutation preserving the captured coordinator | Publish without waiting for the domain gate; advance the release generation so cleanup revalidates |
+| Releasing | Context mutation changing the captured coordinator | Reject before publication without waiting for the domain gate |
+| Releasing | Reentrant explicit ownership transition | Reject before publication rather than waiting on itself |
+| Releasing | Competing explicit ownership transition on another thread | Wait at the domain gate without holding a context or publication lock, then re-evaluate |
 
-Retry is library controlled around a short publication phase. It never blocks while a user
-callback, service factory, or property getter is running.
+The domain gate is intentionally held across the synchronous structural chain and lifecycle
+reconciliation, except while a cold adoption waits for a route-free writer to leave. This matches
+today's rule that lifecycle callbacks execute inside lifecycle synchronization. A different thread
+can therefore wait while a fast no-throw callback completes, but it holds no context,
+authority-publication, or subject lock while waiting. Monitor reentrancy allows structural writes
+from the current lifecycle operation. A reentrant operation that cannot be joined safely fails
+immediately instead of waiting on itself. Context publication never waits for the domain gate:
+compatible publication advances the transition generation, and coordinator-changing publication
+is rejected under the authority publication gate. Generation retry remains library controlled and
+never reruns an already-executed write-interceptor prefix.
+
+Core applies one domain-entry rule to structural writes, explicit attach, and explicit detach. It
+tracks the current domain-entry stack and `TryAddService` predicate/factory callback depth in
+reusable thread-local state. Same-domain entry is reentrant. An ordinary caller holding neither a
+different domain gate, a context-mutation callback scope, nor the initiating subject's `SyncRoot`
+may wait for the gate. Otherwise entry is try-only: an available gate proceeds, but contention
+throws before a write-interceptor prefix or ownership mutation. No operation waits for one domain
+while holding another domain, a context mutation callback scope, or its subject synchronization.
+This prevents A-to-B/B-to-A, context-lock-to-domain-gate, and same-subject
+`SyncRoot`-to-domain-gate inversions without adding global lock ordering or redesigning atomic
+service registration. Core can detect only the initiating subject's public `SyncRoot`. Consumers
+and custom interceptors must not invoke a domain-gated operation while manually holding another
+subject's `SyncRoot`; the runtime cannot discover arbitrary externally held monitors. Library-owned
+paths never enter a domain gate while holding any subject's `SyncRoot`.
 
 ## Tracking Responsibilities
 
 Tracking owns policy and graph knowledge:
 
-- classify structural properties;
+- interpret structural object, collection, and dictionary shapes after Core admission;
 - enumerate subject references in objects, collections, dictionaries, and read-only enumerable
   shapes;
 - maintain the committed property-value reconciliation baseline;
@@ -490,6 +595,40 @@ Tracking owns policy and graph knowledge:
 Core is the source of truth for ownership membership. Tracking dictionaries are reconciliation and
 callback projections, not independent ownership ledgers.
 
+### Structural classification contract
+
+Core owns the conservative property-type classification because admission happens before a Core
+write action is selected. The public package boundary is:
+
+```csharp
+public static class SubjectPropertyTypeClassifier
+{
+    public static bool CanContainSubjects(Type type);
+    public static bool IsSubjectReferenceType(Type type);
+    public static bool IsSubjectCollectionType(Type type);
+    public static bool IsSubjectDictionaryType(Type type);
+}
+
+public readonly record struct SubjectPropertyMetadata
+{
+    public bool CanContainSubjects { get; }
+}
+```
+
+The cached classifier moves from Tracking to Core. Existing Tracking
+`SubjectPropertyTypeExtensions` methods remain as forwarding compatibility APIs, so there is one
+runtime classification implementation. Every public `SubjectPropertyMetadata` constructor computes
+and stores the flag from its `Type`; no caller-supplied boolean can bypass admission. Generated
+setters receive a compile-time mirror directly, so the null-context and stable generated paths do
+not perform a metadata lookup. Generated metadata still computes the stored flag through the Core
+runtime classifier during cold type initialization. Dynamic construction and non-generic paths read
+the stored metadata flag. Tracking consumes the same flag before interpreting the value shape.
+Generator snapshot and cross-package tests require the compile-time mirror and runtime
+classification to agree for scalar, subject, object, interface, collection, dictionary, and
+ambiguous enumerable shapes. Conservatively classified `object` and interface writes enter
+admission even when a particular runtime value is scalar; those rows are included in performance
+verification.
+
 ## Structural Property Write Protocol
 
 A structural assignment must validate the final proposed value before the generated backing field
@@ -497,13 +636,46 @@ changes. A post-commit handler cannot provide that guarantee.
 
 ### Compiled write seam
 
-Core resolves the zero-or-one ownership coordinator while compiling the cached write chain. It does
-not perform a service lookup on each write.
+Known scalar property types use the ordinary cached Core path. They do not inspect ownership state,
+enter a lifecycle gate, or perform a service lookup.
 
-The ordinary scalar Core terminal remains unchanged when no coordinator is present. Known scalar
-property types do not enter the ownership-aware terminal. Potentially structural shapes use a
-specialized terminal that calls the public coordinator contract immediately before the backing
-write.
+Potentially structural shapes that can participate in lifecycle ownership enter Core ownership
+admission before selecting their cached action. An owned subject with a coordinator captures its
+activation record, enters that record's reentrant structural-write gate, re-reads its ownership
+generation and context state, and only then selects and executes the action. Except for the cold
+route-free-writer drain described below, the gate remains held through the existing interceptor
+chain, backing-field commit, provider unwind, and lifecycle reconciliation. This serializes
+structural operations within one lifecycle-coordinated ownership domain. Different ownership
+domains remain independent. An explicitly attached no-coordinator domain keeps the ordinary cached
+structural path because it has no inherited membership or lifecycle reconciliation.
+
+A reserved subject whose ownership route is not visible yet uses a transition-generation action.
+Core orders the exact captured coordinator with the interceptors visible from the subject's current
+local and fallback composition, using the coordinator's normal concrete ordering identity. The
+action is cached only for that transition generation and is discarded when the route is published,
+transferred, cancelled, or cleared. Parent services and the pending route do not become visible
+early. The exact coordinator is therefore present for postcommit unwind even when an older
+route-free action had previously been compiled.
+
+A structurally capable executor that is still route-free uses its inline route-free admission word.
+Core increments the active-writer count under `SyncRoot` before action selection and decrements it in
+`finally`. Adoption can publish a pending domain only after that count reaches zero. If it observes
+active writers, it first cancels and clears the operation's complete tentative reservation batch.
+It then releases the domain gate and every Core publication lock, waits on the subject's generation,
+re-enters the domain gate, and restarts terminal discovery from the still-uncommitted transformed
+value. No partial reservation remains visible while the gate is released, and the write-interceptor
+prefix does not run again. It never waits while holding the domain gate, authority publication gate,
+context mutation lock, or another subject lock. Once the pending domain is published, a new write
+joins that domain gate before choosing an action.
+Core tracks current route-free admissions in a reusable thread-static stack so a synchronous
+self-upgrade is rejected instead of waiting on its own active-writer count. The stack is cleared in
+`finally` and has no allocation after thread warm-up.
+
+The existing `LifecycleInterceptor` remains in its characterized `IWriteInterceptor` position.
+Stable chains contain the normally resolved instance. Transition-generation actions inject that
+same exact instance only as write coordination, at the same position, without exposing services or
+creating a second instance. The terminal hook performs prospective ownership reservation and
+commit. Lifecycle reconciliation occurs when the coordinator unwinds.
 
 The generated `_context is null` fast path needs one narrow handshake because an unowned subtree
 can be reserved for attachment while one of its descendants is being changed. The generator emits
@@ -513,53 +685,74 @@ a conservative compile-time `canContainSubjects` flag for each property setter:
   beyond today's `_context` check;
 - a potentially structural unowned setter locks the subject's already-existing `SyncRoot`,
   re-reads `_context`, and writes directly only when it is still null;
-- attachment publishes the subject's executor and pending reservation through that same
-  `SyncRoot` before it reads the subject's structural properties;
-- once the executor exists, the setter leaves the null-context path and the ownership-aware
-  terminal observes the pending reservation.
+- ordinary `Context` access may continue to publish the executor by compare-and-swap; a structural
+  setter or adopting operation takes `SyncRoot`, re-reads that publication, creates and publishes an
+  executor only when still absent, and uses the compare-and-swap winner;
+- after the executor exists, its route-free admission word covers the longer intercepted-write
+  interval, regardless of which path first published it;
+- attachment waits for pre-existing route-free writers to leave before it publishes the pending
+  domain and reads the subject's structural properties;
+- once a pending domain exists, the setter enters that domain's gate and selects either the
+  transition-generation or stable routed action.
 
-A setter that acquired `SyncRoot` first commits before discovery reads it. An attachment that
-acquired it first publishes the executor and reservation before the setter can proceed. No
-structural mutation can therefore land between final subtree validation and the parent commit.
-This changes only unowned potentially structural writes. Attached writes already synchronize on
-`SyncRoot`, and unowned scalar initialization remains unchanged. Dynamic and non-generic property
-entry points already create or receive an executor and use the same terminal protocol.
+A setter that acquired `SyncRoot` first either finishes the direct null-context write or publishes
+its route-free active-writer admission before discovery can reserve it. An adopting operation that
+acquired it first ensures the executor and pending domain are published before the setter can choose
+an action. A concurrent nonstructural `Context` access may win executor publication, but it does not
+bypass the `SyncRoot` handshake used by the structural setter and adopter. No
+structural mutation can therefore land between final subtree validation and the parent commit, and
+no interceptor prefix is replayed. Dynamic and non-generic property entry points already create or
+receive an executor and use the same admission protocol.
 
-The existing `LifecycleInterceptor` remains in its characterized `IWriteInterceptor` position so
-custom and built-in write interceptor ordering does not change. The terminal hook performs only
-prospective ownership reservation and commit. Lifecycle reconciliation occurs when the existing
-interceptor unwinds.
+Calling explicit attach, explicit detach, or a coordinator-changing context mutation synchronously
+from inside an active route-free structural interceptor chain is rejected before ownership
+publication. Such an operation cannot synchronously wait for its own admission to finish. Ordinary
+same-domain property writes from lifecycle callbacks are supported: the domain gate is reentrant,
+and the generation protocol makes the later committed value the reconciliation winner. A nested
+operation targeting another domain follows the universal try-only rule and never waits while the
+first domain gate is held.
 
 ### Transition sequence
 
 For a potentially structural write:
 
-1. Outer write interceptors run normally and may suppress or transform the value.
-2. At the terminal boundary, Tracking sees the final proposed value and compares it with its last
+1. Core completes route-free admission or enters the captured ownership domain's reentrant gate,
+   then re-reads the ownership generation and selects the matching stable or transition action.
+2. Write interceptors run once in their characterized order and may suppress or transform the
+   value.
+3. At the terminal boundary, Tracking sees the final proposed value and compares it with its last
    committed reconciliation baseline.
-3. Tracking discovers additions, removals, transfers, and affected descendants with pooled
-   worklists. Before reading a newly discovered subject's structural properties, Core publishes
-   that subject's executor and reserves it against its current generation.
-4. Discovery completes only after every affected subject is reserved without publishing a route or
+4. Tracking discovers additions, removals, transfers, and affected descendants with pooled
+   worklists. Before reading a newly discovered subject's structural properties, Core ensures its
+   executor exists and inspects route-free admission. If a prior route-free writer is active, Core
+   cancels the complete tentative batch, releases the domain gate and publication locks, waits for
+   that writer, re-enters, and restarts terminal discovery without replaying the interceptor prefix.
+   Otherwise it reserves the subject against its current generation before reading it.
+5. Discovery completes only after every affected subject is reserved without publishing a route or
    lifecycle membership.
-5. A stale baseline or generation cancels the reservation and retries against the winning commit.
-   A true ownership-domain conflict cancels the reservation and throws. In both cases the backing
-   property is still unchanged for the rejected or retried attempt.
-6. The terminal performs the backing-field write under the existing subject synchronization.
-7. If the backing write throws, Core cancels every reservation and publishes no ownership change.
-8. Core commits the write revision and the reserved ownership ledger. Effective route visibility
+6. A stale baseline or generation cancels the complete reservation and retries the still-uncommitted
+   terminal work under the domain gate. It does not rerun an interceptor prefix. If the gate was
+   released to drain a route-free writer, another operation may commit first; after re-entry, this
+   operation revalidates its already-transformed proposed value and linearizes at its later terminal
+   commit. A true ownership-domain conflict cancels the complete reservation and throws. In both
+   retry and conflict cases the backing property is still unchanged by this operation.
+7. The terminal performs the backing-field write under the existing subject synchronization.
+8. If the backing write throws, Core cancels every reservation and publishes no ownership change.
+9. Core commits the write revision and the reserved ownership ledger. Effective route visibility
    remains unchanged until the characterized lifecycle-handler phase.
-9. `LifecycleInterceptor` records the committed reconciliation baseline before invoking callbacks,
+10. `LifecycleInterceptor` records the committed reconciliation baseline before invoking callbacks,
    then reconciles the transition under its lifecycle synchronization.
-10. At its former `ContextInheritanceHandler` position, attach publishes the selected route before
+11. At its former `ContextInheritanceHandler` position, attach publishes the selected route before
     recursive descent; detach performs recursive descent before clearing or transferring the route.
-11. It continues the established lifecycle sequence without holding Core ownership-transition
+12. It continues the established lifecycle sequence without holding Core ownership-transition
     locks.
-12. Core finalizes any deferred route work in `finally`, so a callback contract violation cannot
+13. Core finalizes any deferred route work in `finally`, so a callback contract violation cannot
     strand the ownership record on the old route.
-13. A concurrent later commit may supersede reconciliation work. Only the latest committed value
-    becomes the stable baseline, and every completed setter returns after its commit has either
-    been reconciled or proven superseded.
+14. A write from another thread enters the domain gate afterward. A reentrant write enters the same
+    monitor immediately. Exact generations stop a stale outer tail, and the final committed value
+    wins. A value whose lifecycle attachment was already published is balanced by detach before its
+    replacement attaches; a value superseded before publication produces no artificial attach and
+    detach pair.
 
 Reservation handles are compact Core values. Tracking owns and pools any multi-subject batch
 buffers. Scalar writes allocate neither.
@@ -576,7 +769,8 @@ Structural write state follows this table:
 | Owned | Active parent removal with replacement | Reserve deterministic transfer |
 | Owned | Final external-anchor removal | Reserve affected-component release |
 | Any stable state | Stale expected generation or revision | Cancel the complete batch and retry |
-| Any reserved state | Competing library transition | Observe the winning generation and retry |
+| Any reserved state | Competing write on another thread | Wait at the domain gate, then re-read and execute once |
+| Any reserved state | Reentrant write in the same domain operation | Enter reentrantly; the later committed generation wins |
 | Any committed state | Superseded before reconciliation | Reconcile the final net transition |
 
 ### Direct collection mutation
@@ -597,10 +791,13 @@ explicit property write when they need lifecycle-visible collection changes.
 2. Validate that the subject has no existing explicit attachment.
 3. Resolve and validate the prospective effective zero-or-one lifecycle coordinator before any
    factory, route, membership, or callback side effect.
-4. Activate or join the configured ownership domain.
-5. When a coordinator exists, discover the complete current subtree incrementally. Publish and
-   reserve each discovered subject through its structural-write handshake before reading its own
-   structural properties.
+4. Acquire or publish the configured domain's activation record, enter its reentrant gate under the
+   universal entry rule, then activate or join its explicit lease. A failed gate entry publishes no
+   lease or subject ownership.
+5. When a coordinator exists, discover the complete current subtree incrementally. For each
+   route-free executor, release domain and publication locks while any earlier route-free structural
+   writer finishes, then re-enter, revalidate, publish the pending domain, and read its structural
+   properties.
 6. Reject an incompatible descendant by cancelling all reservations. No route, ledger entry,
    callback, registry entry, or property write remains.
 7. Commit the explicit anchor and reserved ownership ledger. Publish the explicit root route.
@@ -611,12 +808,14 @@ explicit property write when they need lifecycle-visible collection changes.
    callbacks.
 
 A no-coordinator context attaches only the explicit subject route. It performs no graph traversal
-or lifecycle callback. The captured `null` coordinator cannot change while that attachment is
-active.
+or lifecycle callback. Its activation record serializes strict explicit transitions, but ordinary
+property writes do not enter that gate. The captured `null` coordinator cannot change while that
+attachment is active.
 
 ### Detach
 
-`DetachFromContext` first validates the exact explicit context and reserves the transition.
+`DetachFromContext` first validates the exact explicit context, enters the captured domain gate
+under the universal entry rule, and only then reserves the transition.
 
 If no compatible parent membership survives, lifecycle detach runs while the old route remains
 resolvable. Core clears the explicit record and route after the required detach callbacks, including
@@ -709,9 +908,11 @@ the fallback. Handlers ordered after it see the new route or the route-free subj
 property detach that selects another parent uses that same phase. An explicit-to-inherited transfer
 has no lifecycle callback sequence and publishes its route atomically as part of explicit detach.
 
-The coordinator is not optional and cannot be registered twice. `ContextInheritanceHandler` is no
-longer registered or functional. Its public type is removed in this coordinated breaking release;
-custom ordering attributes migrate from that type to `LifecycleInterceptor`.
+When lifecycle tracking is configured, its coordinator is required and cannot be registered twice.
+A valid domain with no coordinator still provides strict explicit ownership but performs no
+recursive lifecycle callbacks. `ContextInheritanceHandler` is no longer registered or functional.
+Its public type is removed in this coordinated breaking release; custom ordering attributes migrate
+from that type to `LifecycleInterceptor`.
 
 The built-in coordinator owns the lifecycle-handler dispatch loop. It resolves the ordered handler
 array containing its own `ILifecycleHandler` identity and, when iteration reaches that exact
@@ -755,41 +956,73 @@ or transferred by an older operation, including a later route that uses the same
 
 Structural transitions reserve all affected subjects before the backing property commits.
 Reservation acquisition never executes callbacks and never holds several subject synchronization
-locks while waiting. Competing library transitions retry or observe the winning committed
-generation. A true ownership-domain incompatibility throws; ordinary contention does not become a
-spurious incompatibility.
+locks while waiting. Potentially structural operations in one lifecycle-coordinated ownership
+domain are serialized by the activation record's reentrant monitor. Another thread waits before
+action selection; the current thread can reenter. A true ownership-domain incompatibility throws;
+ordinary contention does not become a spurious incompatibility. A no-coordinator domain has no
+inherited ownership work and does not gate ordinary property writes.
 
-Tracking uses its lifecycle synchronization for reconciliation and callback ordering. Core route
-publication uses the PR 1 context mutation protocol plus the authority publication gate. The exact
-orders are:
+The activation record's structural-write gate replaces Tracking's separate lifecycle lock for
+owned structural operations, reconciliation, and callback ordering. Core route publication uses the
+PR 1 context mutation protocol plus the authority publication gate. The exact orders are:
 
 1. a context publisher takes its one context mutation lock, completes any existing
    `TryAddService` predicate or factory work, then takes the authority publication gate for
    validation and publication;
-2. an ownership publisher takes the authority publication gate, then at most one subject
+2. an owned structural operation with a lifecycle coordinator enters its one domain gate before
+   selecting an action and retains it through reconciliation; it holds no context mutation or
+   authority publication lock while executing interceptors or callbacks;
+3. an ownership publisher takes the authority publication gate, then at most one subject
    `SyncRoot`, publishes or cancels that subject's reservation, and releases both before moving to
    another subject;
-3. Tracking takes its lifecycle synchronization only after Core publication locks have been
-   released.
+4. a route-free structural write announces itself under its subject's `SyncRoot`, releases that lock
+   while its chain runs, and clears the announcement in `finally`;
+5. an adopting operation that observes such an announcement cancels its complete tentative batch,
+   leaves the domain gate and every publication lock before waiting, then re-enters and restarts
+   terminal discovery from the winning generation.
 
-No path holding the authority publication gate waits for another context mutation lock. Generated
-backing-field writers retain the existing rule that they perform only the field write while
-`SyncRoot` is held. User callbacks, events, lifecycle handlers, reconciliation, property getters,
-and service factories never run under the authority publication gate or a Core ownership
-reservation lock. `TryAddService` predicates and factories continue to run under their one existing
-context mutation lock, exactly as documented today.
+No path holding the authority publication gate waits for another context mutation lock, a domain
+gate, or route-free writer. Generated backing-field writers retain the existing rule that they
+perform only the field write while `SyncRoot` is held. User callbacks, events, lifecycle handlers,
+reconciliation, property getters, and service factories never run under the authority publication
+gate or a Core ownership reservation lock. Synchronous lifecycle work does run under its one
+reentrant domain gate, as it runs under `LifecycleInterceptor` synchronization today.
+`TryAddService` predicates and factories continue to run under their one existing context mutation
+lock, exactly as documented today. The universal entry rule applies to structural writes and
+explicit ownership transitions invoked by those callbacks. The same rule applies when the current
+thread already holds a different domain gate or the initiating subject's `SyncRoot`. The two
+monitors used by an ordinary structural write are therefore nested domain-gate-then-`SyncRoot`, but
+the detectable same-subject reverse entry never waits. Calling a domain-gated operation while
+manually holding another subject's `SyncRoot` is an unsupported consumer/custom-interceptor lock
+order. A static lock audit and focused tests ensure first-party code never does so.
 
-Subtree discovery alternates short reserve phases with unlocked reads: reserve one subject, release
-Core locks, read that subject's structural properties, then reserve each discovered child before
-reading it. A reserved subject's structural setters observe its published executor and pending
-transition, so the snapshot cannot change behind the walk. A stale generation restarts discovery
-from the committed winner without retaining partial reservations.
+Subtree discovery alternates short reserve phases with unlocked reads: verify route-free admission,
+reserve one subject, release Core publication locks, read that subject's structural properties,
+then reserve each discovered child before reading it. Encountering an earlier route-free writer
+cancels the complete tentative batch before any wait. A reserved subject's structural setters
+observe its published executor and pending domain before choosing an action. Another thread waits
+at the domain gate; a same-thread reentrant write uses the transition-generation action. A stale
+generation restarts terminal discovery from the committed winner without retaining partial
+reservations or replaying an interceptor prefix.
 
 Deterministic schedules must pin at least these seams:
 
 - a structural write inside a reserved but previously unowned descendant;
+- an already-materialized route-free executor with a cached no-coordinator chain racing adoption in
+  both admission orders;
 - first executor publication racing a null-context structural setter;
+- two different subjects writing structurally in one domain, proving serialization and final-value
+  reconciliation;
+- reentrant structural writes joining the same domain operation without deadlock;
 - explicit activation racing a lifecycle service mutation;
+- a getter or `TryAddService` factory reentrantly publishing a coordinator-preserving mutation while
+  activation retries, and a coordinator-changing mutation failing without waiting;
+- two threads proving a `TryAddService` predicate or factory cannot wait on a contended domain gate
+  while its context mutation lock is held;
+- two lifecycle callbacks attempting A-to-B and B-to-A structural writes, and attach or detach from
+  a service factory, proving nested different-domain entry never deadlocks;
+- a structural setter invoked while its caller already holds the same subject's `SyncRoot`, proving
+  an available gate remains usable and a contended gate fails before the interceptor prefix;
 - fallback publication racing a coordinator mutation in its target or deeper cone;
 - two structural commits where the first is superseded before reconciliation;
 - callback-time route visibility before, at, and after the recursive lifecycle phase;
@@ -814,25 +1047,33 @@ Expected contract failures are fail-fast with no library-owned commit:
 - duplicate explicit attachment;
 - missing or wrong-context explicit detach;
 - more than one prospective lifecycle coordinator;
+- reuse of one lifecycle coordinator instance by another active ownership domain;
 - lifecycle coordinator mutation on an active domain;
-- incompatible property child or descendant.
+- incompatible property child or descendant;
+- an explicit ownership transition or coordinator-changing context mutation invoked reentrantly
+  from a route-free structural interceptor chain that has not reached its terminal;
+- a domain-gated operation that would wait while the caller holds another domain gate, a
+  `TryAddService` predicate/factory callback scope, or the initiating subject's `SyncRoot`.
 
 For property assignment, these failures happen before the backing property, ownership ledger,
 route, lifecycle projection, registry projection, or reference count changes. For explicit
 attachment, they happen before route publication and lifecycle callbacks.
 
 Complete-subtree validation may initialize the normal lazy executor on a traversed subject so its
-structural setters can participate in reservation. A rejected operation does not unpublish that
-executor: it is retained only by its own subject, contains no ownership record or route, and creates
-no external lifetime edge. Executor initialization is therefore infrastructure preparation, not a
-lifecycle or ownership commit.
+structural setters can participate in reservation. Prospective coordinator resolution may also fill
+the normal lazy service cache on an immutable context state. A rejected operation does not unpublish
+either preparation: the executor is retained only by its own subject, contains no ownership record
+or route, and creates no external lifetime edge; a cached service array is read-only and still
+subject to normal invalidation. These are infrastructure preparation, not lifecycle or ownership
+commits.
 
 The final proposed property value is incompatible when the child or any reachable descendant is
 already owned by a different exact configured-context domain, or when its branch composition would
 change the lifecycle coordinator identity captured by the parent's domain. An unowned subtree, a
 subtree already owned by the same exact domain, repeated references, same-domain multiple parents,
 and same-domain cycles remain compatible. Sharing one coordinator instance does not make two plain
-configured contexts the same ownership domain.
+configured contexts the same ownership domain, and the coordinator binding rule prevents both from
+being active with that instance at once.
 
 Ownership validation runs at the terminal because preceding write interceptors may transform
 `NewValue`. A custom outer interceptor may therefore observe or externally record a write attempt
@@ -856,9 +1097,15 @@ Final release clears all strong references introduced by ownership:
 - active and secondary parent memberships;
 - PR 1 route descriptor and reverse using-context entry;
 - lifecycle coordinator and ownership-domain references;
+- exact coordinator-to-domain binding entry;
+- transition-generation actions and captured provider references;
 - Tracking reconciliation baselines;
 - registry and parent projection entries;
 - pending reservations and pooled batch contents.
+
+Every route-free active-writer count returns to zero in `finally`. A transition-generation action
+is discarded with its exact generation and must not retain a coordinator or provider after the
+transition commits, cancels, or is superseded.
 
 An installed ownership route intentionally retains its source executor through the target's reverse
 dependency entry, and the executor retains its subject. This is what keeps an explicitly attached
@@ -891,6 +1138,28 @@ The migration audit includes every `new Subject(context)`, `AddFallbackContext`,
 `RemoveFallbackContext`, `WithContextInheritance`, and direct `ContextInheritanceHandler`
 registration in production, tests, samples, and documentation.
 
+### Subject factory contract
+
+`ISubjectFactory.CreateSubject` returns a route-free, unowned subject when the caller is creating a
+property child. The result may contain subject-local services and fallback composition, but it has
+no explicit attachment, parent membership, pending ownership transition, or installed ownership
+route. `DefaultSubjectFactory` must not select a context-taking constructor merely because the
+service provider can supply a context; it uses the route-free construction path for property
+children.
+
+Connector, subject-update, and OPC UA callers check the stable public indicators of this
+postcondition before publishing the result into a parent property, so an already attached or
+referenced custom result fails clearly before recursive population. This check is diagnostic, not a
+new atomic ownership API: it cannot prove that unrelated application code did not start a concurrent
+transition after the factory returned. The parent property's normal Core reservation is the atomic
+authority. If the result changes concurrently, that terminal waits or retries and applies the
+general compatibility rules; an incompatible domain is rejected, while a compatible same-domain
+membership may commit. A custom factory that races or returns an owned subject has violated its
+contract, but it cannot violate Core ownership invariants. The caller never implicitly detaches or
+steals an explicit root; its creator remains responsible for explicit detach. The interface XML
+documentation, connector documentation, default factory tests, custom factory tests, and
+DI-constructor-selection tests state this boundary.
+
 ## Documentation
 
 `docs/interceptor.md` becomes the canonical user-facing explanation of:
@@ -918,11 +1187,20 @@ A repeatable regression requires redesign, not an assumption that the new semant
 Required properties are:
 
 - a never-owned subject allocates no ownership record;
+- the route-free admission word is inline executor storage and allocates no waiter or gate object;
 - the common single parent is inline and allocates no membership collection;
 - reference counts no longer use `IInterceptorSubject.Data` or boxed integers;
 - the ordinary scalar Core write terminal is unchanged without a coordinator;
 - unowned scalar setters retain their current direct fast path;
-- only unowned potentially structural setters use the new `SyncRoot` handshake;
+- only potentially structural writes use ownership admission;
+- a warmed-up route-free structural write and a warmed-up owned structural write allocate zero
+  managed bytes beyond allocations deliberately performed by configured custom interceptors;
+- the activation record itself is the reentrant monitor target, so one domain adds no separate gate
+  allocation, waiter object, task, closure, or per-write queue node;
+- different ownership domains remain concurrent; only structural operations in the same
+  lifecycle-coordinated domain are serialized;
+- the common non-reentrant operation stores its pending reconciliation inline, and any traversal or
+  reentrant overflow storage uses reusable thread-static pools;
 - known scalar writes perform no ownership dispatch, reservation, or graph work;
 - cached reads, method calls, and service resolution add no ownership allocation;
 - the authority publication gate is absent from every stable resolution and scalar-interception
@@ -933,18 +1211,33 @@ Required properties are:
 - only route changes and legal service topology changes invalidate dependent states.
 
 Local development performs static field-layout, allocation, chain-shape, lock, and invalidation
-analysis. Local benchmark timings are diagnostic only. Before the pull request is declared ready,
-the maintainer is asked to run the agreed comparisons on the stable benchmark machine against both:
+analysis. In particular, it confirms that the normal structural path still enters the same two
+uncontended monitor domains as `master`: lifecycle-domain synchronization and the generated backing
+write's `SyncRoot`. They become explicitly nested domain-gate-then-`SyncRoot`; reverse entry is
+try-only for the initiating subject, and first-party code never enters while holding another
+subject's `SyncRoot`. The lifecycle gate moves before action selection and covers a larger region,
+but does not add a third monitor. Conservative `object`, interface, and enumerable classification
+is measured as well as concrete subject shapes. Local benchmark timings are diagnostic only. Before
+the pull request is declared ready, the maintainer is asked to run the agreed comparisons on the
+stable benchmark machine against both:
 
 - exact stacked PR 1 base `169672c3ca496e8338f1a6be62d5e900c8e605ad`;
 - exact design-time `master` `4eb5fc132fef55d0277b13d585d8b611737b23db`.
 
-The filters include the normal registry and context-depth suites plus a focused unowned structural
-initialization case that exercises the new null-context handshake. Results must show no repeatable
-regression outside control-row noise for the normal one-global-context workloads and no new
-steady-state allocation. Any signal above noise, including an unacceptable construction cost from
-the structural handshake, reopens the design. The maintainer is asked before the external handoff;
-development-machine numbers never accept the change.
+Existing unchanged registry, context-depth, construction, and structural-mutation rows compare PR 2
+with both exact bases. Focused unowned structural-initialization and contended structural-write rows
+use one temporary benchmark-only harness patch applied identically to the PR 2, PR 1, and `master`
+checkouts on the stable machine. The patch touches only the benchmark project, and its exact hash and
+application instructions are recorded with the result. It is not committed to PR 1 or treated as a
+product dependency.
+
+Results must show no repeatable regression outside control-row noise for normal one-global-context
+workloads and no new steady-state allocation. The comparison includes an uncontended structural
+write, graph attach and detach, and the existing concurrent structural stress workload so a serious
+serialization regression is not hidden by scalar rows. Any signal above noise, including an
+unacceptable construction cost from route-free admission or a material normal-workload loss from
+the longer lifecycle critical section, reopens the design. The maintainer is asked before the
+external handoff; development-machine numbers never accept the change.
 
 ## Test and Verification Design
 
@@ -955,10 +1248,18 @@ Core tests cover:
 - explicit context reporting;
 - lazy ownership allocation and final clearing;
 - zero and one coordinator activation;
+- reference-identity coordinator discovery rejecting equal-but-distinct instances while accepting
+  one instance through repeated paths;
+- one coordinator instance binding to one active domain and rebinding only after final quiescent
+  release;
+- failed first activation clearing its zero-lease record and binding so another domain can bind the
+  coordinator immediately;
+- no-coordinator explicit ownership retaining the ordinary cached property-write path;
 - rejection of coordinator mutation after activation;
 - activation racing direct service addition, conditional service creation, fallback addition, and
   mutation of a fallback target;
 - inline and overflow parent membership behavior;
+- allocation-free route-free admission and per-domain reentrant structural serialization;
 - exact generation, stale cancel, stale clear, and route transfer;
 - fallback composition without lifecycle callbacks;
 - complete public provider facade, view, enumerator, reference-count, and write-context API
@@ -967,9 +1268,13 @@ Core tests cover:
 
 Generator and Dynamic tests cover:
 
+- canonical structural classification matching for scalar, subject, object, interface, collection,
+  dictionary, and ambiguous enumerable properties;
 - a scalar null-context setter retaining the existing direct generated shape;
 - a potentially structural null-context setter locking `SyncRoot` and re-reading `_context`;
 - first executor publication racing that setter in both orders;
+- an already-materialized route-free executor draining its cached write before adoption and choosing
+  a fresh transition or routed action afterward;
 - generated and Dynamic context-taking constructors using strict explicit attachment;
 - no new steady-state allocation after an executor is present.
 
@@ -988,11 +1293,21 @@ Tracking tests cover:
   for attach, detach, registry, parents, properties, and derived initialization;
 - superseded structural commits producing the current final net reconciliation rather than a
   per-commit callback journal;
+- different-thread structural assignments serializing so the previous visible child detaches before
+  the final child attaches;
+- same-thread reentrant structural assignments completing without deadlock, with stale callback
+  tails stopped by generation checks;
 - a minimal custom `ILifecycleInterceptor` proving prepare, postcommit unwind, and Core `finally`
   finalization through the complete public provider contract;
+- a route-free fallback-composed coordinator acting as a transparent write interceptor while the
+  same instance's active domain performs lifecycle work concurrently;
 - callback contract violations without rollback machinery;
 - concurrent write, reparent, attach, detach, and stale-reservation schedules;
 - weak-reference memory release.
+
+Connector and factory tests additionally cover a route-free `ISubjectFactory` result, a custom
+factory returning an explicitly attached subject, DI constructor selection, rejection before parent
+publication, and successful recursive population only after the parent property owns the child.
 
 Consumer verification includes generator snapshots, Dynamic, Registry, Hosting, Connectors,
 non-integration OPC UA, HomeBlaze Services, public API snapshots, the full non-integration solution
@@ -1015,9 +1330,18 @@ PR 2 removes these capabilities:
 - explicit attachment to a subject executor;
 - optional shallow lifecycle without recursive inheritance;
 - several lifecycle coordinators in one effective ownership context;
+- one lifecycle coordinator instance serving several active ownership domains;
 - one subject participating in unrelated ownership domains;
 - temporary publication of an incompatible child;
 - aggregation of every parent branch as an ownership route;
+- concurrent structural execution inside one ownership domain; operations are serialized and the
+  final committed value wins;
+- synchronously attaching, detaching, or changing the lifecycle coordinator from inside a
+  route-free structural interceptor chain before its terminal completes;
+- waiting for a contended lifecycle-domain gate while already inside another domain operation, a
+  `TryAddService` predicate/factory callback, or the initiating subject's `SyncRoot`; an available
+  or same-domain reentrant gate remains usable;
+- invoking a domain-gated operation while manually holding a different subject's public `SyncRoot`;
 - retaining an unanchored cycle solely through internal reference counts.
 
 PR 2 preserves:
