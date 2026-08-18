@@ -167,6 +167,8 @@ ledger and reservation protocol.
   membership.
 - Add the complete ordered parent-reference ledger, generation-aware transition state, and
   prospective reservation before any property value commits.
+- Synchronize only potentially structural null-context setters with executor and reservation
+  publication; leave the unowned scalar fast path unchanged.
 - Support several parent references only when they share one ownership-domain identity.
 - Keep the earliest surviving compatible parent active and transfer deterministically when its
   final reference disappears.
@@ -178,8 +180,14 @@ ledger and reservation protocol.
   descendants.
 - Make `WithLifecycle()` include recursive inheritance and remove `WithContextInheritance()` and
   the functional `ContextInheritanceHandler` capability.
-- Use a deliberate public Core provider contract for Tracking ownership coordination. Add no new
-  friend-assembly access between the published packages.
+- Make `ILifecycleInterceptor` formally inherit `IWriteInterceptor` and use complete public,
+  stack-only Core operation facades for Tracking ownership coordination. Add no new friend-assembly
+  access between the published packages.
+- Reuse one short Core authority-publication gate for domain activation, reservations, routes, and
+  authority-relevant context publication. Keep resolution, scalar writes, callbacks, getters, and
+  service factories outside that gate; PR 3 extends the same activation record.
+- Merge recursive inheritance into `LifecycleInterceptor` at the former
+  `ContextInheritanceHandler` phase so callback ordering and service visibility remain unchanged.
 - Update generated and dynamic constructors, first-party root call sites, connectors, OPC UA, and
   HomeBlaze in the same coordinated change.
 - Publish connector-created children through the parent edge before recursive population and
@@ -343,7 +351,10 @@ production caller yet.
 
 PR 2 is additionally compared with exact `master`, because the semantic rewrite is expected to
 remove enough legacy fallback and reference-count machinery to keep the normal one-global-context
-case at least as fast as the released baseline. A repeatable regression reopens the design.
+case at least as fast as the released baseline. Its stable-machine handoff compares both the exact
+stacked PR 1 base and exact master, and includes unowned structural initialization so the narrow
+null-context handshake cannot hide a construction regression. A repeatable regression reopens the
+design.
 
 ## Whole-Stack Success Criteria
 
