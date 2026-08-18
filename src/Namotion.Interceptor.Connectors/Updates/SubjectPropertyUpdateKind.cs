@@ -25,18 +25,13 @@ public enum SubjectPropertyUpdateKind
 
     /// <summary>
     /// An index-based collection (array or list) of subjects.
-    /// Uses <see cref="SubjectPropertyUpdate.Operations"/> for structural changes (Insert, Remove, Move),
-    /// <see cref="SubjectPropertyUpdate.Items"/> for sparse item updates by index,
-    /// and <see cref="SubjectPropertyUpdate.Count"/> for the total count after operations.
+    /// Uses <see cref="SubjectPropertyUpdate.Items"/> for the complete ordered state.
     /// </summary>
     Collection,
 
     /// <summary>
     /// A key-based dictionary of subjects.
-    /// Uses <see cref="SubjectPropertyUpdate.Operations"/> for structural changes (Insert, Remove),
-    /// <see cref="SubjectPropertyUpdate.Items"/> for sparse item updates by key,
-    /// and <see cref="SubjectPropertyUpdate.Count"/> for the total count after operations.
-    /// Note: Move operations are not applicable to dictionaries.
+    /// Uses <see cref="SubjectPropertyUpdate.Items"/> for the complete state by key.
     /// </summary>
     Dictionary
 }

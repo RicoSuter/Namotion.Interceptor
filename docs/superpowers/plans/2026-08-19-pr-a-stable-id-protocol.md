@@ -120,7 +120,7 @@ Remove the now-unused `using System.Collections;` only if the compiler flags it 
 
 The appliers still reference the old shapes, so a full project build fails at this point; that is expected. Confirm only that the edited factory parses by building and reading the errors: every remaining error must be in `SubjectUpdateApplier.cs`, `SubjectItemsUpdateApplier.cs`, or `SubjectUpdateApplyContext.cs`.
 
-Run: `dotnet build src/Namotion.Interceptor.Connectors/Namotion.Interceptor.Connectors.csproj 2>&1 | grep -E "error" | grep -v "Applier|ApplyContext" | head`
+Run: `dotnet build src/Namotion.Interceptor.Connectors/Namotion.Interceptor.Connectors.csproj 2>&1 | grep -E "error" | grep -vE "SubjectUpdateApplier|SubjectItemsUpdateApplier|SubjectUpdateApplyContext" | head`
 Expected: no output (all errors confined to the applier trio).
 
 - [ ] **Step 5: Commit**
