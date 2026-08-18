@@ -101,8 +101,9 @@ public static void DetachFromContext(
     this IInterceptorSubject subject,
     IInterceptorSubjectContext context);
 
-public static IInterceptorSubjectContext? TryGetAttachContext(
-    this IInterceptorSubject subject);
+public static bool TryGetAttachContext(
+    this IInterceptorSubject subject,
+    out IInterceptorSubjectContext? context);
 ```
 
 The interface parameter preserves existing generated and Dynamic constructor signatures. At entry,
@@ -127,8 +128,9 @@ no explicit attachment or when the supplied context differs. It removes only exp
 Compatible parent memberships may retain lifecycle ownership without a detach and attach callback
 pair.
 
-`TryGetAttachContext` reports only the explicit attachment. It returns `null` for a subject owned
-solely through parent membership.
+`TryGetAttachContext` reports only the explicit attachment. It returns `true` with the exact attach
+context when an explicit anchor exists. It returns `false` with `null` for a subject owned solely
+through parent membership or not owned at all.
 
 ### Reference count
 
@@ -350,7 +352,14 @@ guarantees the matching gate only for attach, detach, prepare, and unwind of a c
 operation. A route-free transparent call may run concurrently with the coordinator's bound active
 domain because it does not access the coordinator's lifecycle state.
 
-The contract is an advanced provider API:
+The contract is public so the separately published Core and Tracking packages can coordinate
+without adding another friend-assembly dependency. It is advanced package infrastructure, not an
+application extension point. Applications should configure and observe the built-in
+`LifecycleInterceptor` rather than implement `ILifecycleInterceptor` or retain or construct its
+operation types. Only the built-in coordinator is supported. The infrastructure contract may
+change in a future breaking release as Core, Tracking, authority, and hosting coordination evolve.
+
+The advanced provider API has these contracts:
 
 - at most one distinct coordinator may resolve in one active effective context;
 - one coordinator instance is bound to at most one active configured-context domain;
@@ -362,7 +371,8 @@ The contract is an advanced provider API:
 - implementations must not throw from lifecycle callbacks;
 - implementations must not retain an operation context, view, enumerator, or reservation beyond
   the synchronous call;
-- application code normally configures the built-in coordinator through `WithLifecycle()`.
+- application code configures the supported built-in coordinator through `WithLifecycle()` and
+  does not implement the provider contract.
 
 Core already grants Tracking friend access for commit revision and raw timestamp propagation. PR 2
 adds no new use. Removing those two existing uses and the friend declaration is explicitly deferred
@@ -561,19 +571,24 @@ compatible publication advances the transition generation, and coordinator-chang
 is rejected under the authority publication gate. Generation retry remains library controlled and
 never reruns an already-executed write-interceptor prefix.
 
-Core applies one domain-entry rule to structural writes, explicit attach, and explicit detach. It
-tracks the current domain-entry stack and `TryAddService` predicate/factory callback depth in
-reusable thread-local state. Same-domain entry is reentrant. An ordinary caller holding neither a
-different domain gate, a context-mutation callback scope, nor the initiating subject's `SyncRoot`
-may wait for the gate. Otherwise entry is try-only: an available gate proceeds, but contention
-throws before a write-interceptor prefix or ownership mutation. No operation waits for one domain
-while holding another domain, a context mutation callback scope, or its subject synchronization.
-This prevents A-to-B/B-to-A, context-lock-to-domain-gate, and same-subject
-`SyncRoot`-to-domain-gate inversions without adding global lock ordering or redesigning atomic
-service registration. Core can detect only the initiating subject's public `SyncRoot`. Consumers
-and custom interceptors must not invoke a domain-gated operation while manually holding another
-subject's `SyncRoot`; the runtime cannot discover arbitrary externally held monitors. Library-owned
-paths never enter a domain gate while holding any subject's `SyncRoot`.
+Core applies one deterministic domain-entry rule to structural writes, explicit attach, and
+explicit detach. It tracks the current domain-entry stack and `TryAddService` predicate/factory
+callback depth in reusable thread-local state. Same-domain entry is reentrant. An ordinary caller
+holding neither a different domain gate, a context-mutation callback scope, nor the initiating
+subject's `SyncRoot` waits for the gate and proceeds. Ordinary contention never changes a valid
+operation into an exception.
+
+An operation that is not same-domain reentrancy and begins while the thread holds another domain
+gate, a context-mutation callback scope, or the initiating subject's `SyncRoot` is always rejected
+with `SubjectOwnershipNestingException` before probing whether the target gate is available and
+before a write-interceptor prefix or ownership mutation. The result therefore depends on the
+unsupported synchronous call structure, never on thread scheduling. This prevents A-to-B/B-to-A,
+context-lock-to-domain-gate, and same-subject `SyncRoot`-to-domain-gate inversions without global
+lock ordering or redesigning atomic service registration. Core can detect only the initiating
+subject's public `SyncRoot`. Consumers and custom interceptors must not invoke a domain-gated
+operation while manually holding another subject's `SyncRoot`; the runtime cannot discover
+arbitrary externally held monitors. Library-owned paths never enter a domain gate while holding
+any subject's `SyncRoot`.
 
 ## Tracking Responsibilities
 
@@ -709,8 +724,9 @@ from inside an active route-free structural interceptor chain is rejected before
 publication. Such an operation cannot synchronously wait for its own admission to finish. Ordinary
 same-domain property writes from lifecycle callbacks are supported: the domain gate is reentrant,
 and the generation protocol makes the later committed value the reconciliation winner. A nested
-operation targeting another domain follows the universal try-only rule and never waits while the
-first domain gate is held.
+operation targeting another domain is always rejected before side effects, regardless of whether
+the target gate is free or occupied. The callback must defer that work until the current domain
+operation returns.
 
 ### Transition sequence
 
@@ -992,7 +1008,8 @@ lock, exactly as documented today. The universal entry rule applies to structura
 explicit ownership transitions invoked by those callbacks. The same rule applies when the current
 thread already holds a different domain gate or the initiating subject's `SyncRoot`. The two
 monitors used by an ordinary structural write are therefore nested domain-gate-then-`SyncRoot`, but
-the detectable same-subject reverse entry never waits. Calling a domain-gated operation while
+the detectable same-subject reverse entry is rejected before gate availability is inspected.
+Calling a domain-gated operation while
 manually holding another subject's `SyncRoot` is an unsupported consumer/custom-interceptor lock
 order. A static lock audit and focused tests ensure first-party code never does so.
 
@@ -1017,17 +1034,27 @@ Deterministic schedules must pin at least these seams:
 - explicit activation racing a lifecycle service mutation;
 - a getter or `TryAddService` factory reentrantly publishing a coordinator-preserving mutation while
   activation retries, and a coordinator-changing mutation failing without waiting;
-- two threads proving a `TryAddService` predicate or factory cannot wait on a contended domain gate
-  while its context mutation lock is held;
-- two lifecycle callbacks attempting A-to-B and B-to-A structural writes, and attach or detach from
-  a service factory, proving nested different-domain entry never deadlocks;
+- ordinary callers contending for one domain gate, proving that every caller waits, commits, and
+  reconciles without a contention-dependent exception;
+- two lifecycle callbacks attempting A-to-B and B-to-A structural writes, proving each nested
+  different-domain entry fails before side effects whether its target gate is free or occupied;
+- attach, detach, and structural writes from a `TryAddService` predicate or factory, proving the
+  same deterministic rejection with a free and an occupied target gate;
 - a structural setter invoked while its caller already holds the same subject's `SyncRoot`, proving
-  an available gate remains usable and a contended gate fails before the interceptor prefix;
+  deterministic rejection before the interceptor prefix regardless of target-gate availability;
+- structural writes in two different domains, proving independent callers remain concurrent;
 - fallback publication racing a coordinator mutation in its target or deeper cone;
 - two structural commits where the first is superseded before reconciliation;
 - callback-time route visibility before, at, and after the recursive lifecycle phase;
 - stale attach, detach, transfer, and final-component release using the same route target but a
   later descriptor generation.
+
+In addition to the controlled schedules, bounded concurrent-load tests start many writers together
+and repeatedly combine structural replacement, reparenting, explicit attach and detach, repeated
+references, shared DAGs, and cycles. Ordinary contention must produce no ownership exception. Each
+round waits for quiescence and checks the property values, ownership routes, reference counts,
+registry, parents, lifecycle callbacks, and retained-object set against the final committed model.
+The tests use barriers and events, never sleeps or timing-dependent success criteria.
 
 Quiescent invariants are:
 
@@ -1052,12 +1079,28 @@ Expected contract failures are fail-fast with no library-owned commit:
 - incompatible property child or descendant;
 - an explicit ownership transition or coordinator-changing context mutation invoked reentrantly
   from a route-free structural interceptor chain that has not reached its terminal;
-- a domain-gated operation that would wait while the caller holds another domain gate, a
-  `TryAddService` predicate/factory callback scope, or the initiating subject's `SyncRoot`.
+- a domain-gated operation begun from another domain, a `TryAddService` predicate/factory callback
+  scope, or the initiating subject's `SyncRoot`, unless it is same-domain reentrancy.
 
 For property assignment, these failures happen before the backing property, ownership ledger,
 route, lifecycle projection, registry projection, or reference count changes. For explicit
 attachment, they happen before route publication and lifecycle callbacks.
+
+Exception types are part of the contract:
+
+- `ArgumentNullException` reports a null subject or context API argument;
+- `ArgumentException` reports an explicit attach or detach target that is not the exact supported
+  plain context shape;
+- `InvalidOperationException` reports an invalid ownership state, including duplicate attach,
+  missing or wrong-context detach, incompatible domains, coordinator conflicts, active-authority
+  mutation, and provider protocol misuse;
+- public `SubjectOwnershipNestingException : InvalidOperationException` reports a recognized
+  unsupported synchronous nesting scope. It is thrown deterministically before gate availability
+  is inspected and tells the caller to defer the operation until the current callback or ownership
+  operation returns;
+- ordinary contention waits and never throws a contention or timeout exception;
+- application callback exceptions propagate unchanged under the no-throw contract described
+  below.
 
 Complete-subtree validation may initialize the normal lazy executor on a traversed subject so its
 structural setters can participate in reservation. Prospective coordinator resolution may also fill
@@ -1120,6 +1163,31 @@ reservations.
 
 ## Consumer Migration
 
+The headline ownership migration is constructor choice. A context-taking constructor creates an
+explicit ownership anchor that survives removal from every parent property:
+
+```csharp
+var child = new Child(context);
+parent.Child = child;
+parent.Child = null;
+
+// Still explicitly owned. The creator releases the anchor explicitly.
+child.DetachFromContext(context);
+```
+
+A route-free child acquires and releases ownership automatically through parent membership:
+
+```csharp
+var child = new Child();
+parent.Child = child;
+parent.Child = null; // Final parent membership releases ownership.
+```
+
+If an explicitly attached child is detached while a compatible parent membership remains, it
+transfers to inherited ownership without a lifecycle detach and attach callback pair. Multiple
+references, shared DAGs, and cycles continue to use the parent-membership ledger and release when
+their final external anchor disappears.
+
 The runtime and all first-party producers migrate in one pull request:
 
 - generated context-taking constructors call `AttachToContext`;
@@ -1129,8 +1197,8 @@ The runtime and all first-party producers migrate in one pull request:
 - connector, subject-update, and OPC UA child factories create route-free children, publish them
   through the parent property, and verify the committed child before recursive population;
 - paths that intentionally create independent roots attach explicitly;
-- custom `ILifecycleInterceptor` providers implement the expanded prospective coordination
-  contract and its synchronous no-throw rules;
+- application code stops implementing custom `ILifecycleInterceptor` providers and configures the
+  supported built-in coordinator through `WithLifecycle()`;
 - old generated model assemblies must be rebuilt;
 - tests that used fallback mutation as lifecycle shorthand move to explicit APIs.
 
@@ -1213,11 +1281,12 @@ Required properties are:
 Local development performs static field-layout, allocation, chain-shape, lock, and invalidation
 analysis. In particular, it confirms that the normal structural path still enters the same two
 uncontended monitor domains as `master`: lifecycle-domain synchronization and the generated backing
-write's `SyncRoot`. They become explicitly nested domain-gate-then-`SyncRoot`; reverse entry is
-try-only for the initiating subject, and first-party code never enters while holding another
-subject's `SyncRoot`. The lifecycle gate moves before action selection and covers a larger region,
-but does not add a third monitor. Conservative `object`, interface, and enumerable classification
-is measured as well as concrete subject shapes. Local benchmark timings are diagnostic only. Before
+write's `SyncRoot`. They become explicitly nested domain-gate-then-`SyncRoot`; detectable reverse
+entry is rejected deterministically before target-gate availability is inspected, and first-party
+code never enters while holding another subject's `SyncRoot`. The lifecycle gate moves before
+action selection and covers a larger region, but does not add a third monitor. Conservative
+`object`, interface, and enumerable classification is measured as well as concrete subject shapes.
+Local benchmark timings are diagnostic only. Before
 the pull request is declared ready, the maintainer is asked to run the agreed comparisons on the
 stable benchmark machine against both:
 
@@ -1297,8 +1366,9 @@ Tracking tests cover:
   the final child attaches;
 - same-thread reentrant structural assignments completing without deadlock, with stale callback
   tails stopped by generation checks;
-- a minimal custom `ILifecycleInterceptor` proving prepare, postcommit unwind, and Core `finally`
-  finalization through the complete public provider contract;
+- a test-only provider double proving prepare, postcommit unwind, and Core `finally` finalization
+  through the complete public package-infrastructure contract without advertising application
+  implementations as supported;
 - a route-free fallback-composed coordinator acting as a transparent write interceptor while the
   same instance's active domain performs lifecycle work concurrently;
 - callback contract violations without rollback machinery;
@@ -1338,9 +1408,10 @@ PR 2 removes these capabilities:
   final committed value wins;
 - synchronously attaching, detaching, or changing the lifecycle coordinator from inside a
   route-free structural interceptor chain before its terminal completes;
-- waiting for a contended lifecycle-domain gate while already inside another domain operation, a
-  `TryAddService` predicate/factory callback, or the initiating subject's `SyncRoot`; an available
-  or same-domain reentrant gate remains usable;
+- synchronously entering a different ownership domain, or entering any domain from a
+  `TryAddService` predicate/factory callback or the initiating subject's `SyncRoot`; these calls are
+  rejected deterministically before target-gate availability is inspected, while same-domain
+  reentrancy remains supported;
 - invoking a domain-gated operation while manually holding a different subject's public `SyncRoot`;
 - retaining an unanchored cycle solely through internal reference counts.
 

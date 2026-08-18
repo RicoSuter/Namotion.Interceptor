@@ -159,7 +159,8 @@ ledger and reservation protocol.
 
 ### Included
 
-- Add strict `AttachToContext`, `DetachFromContext`, and `TryGetAttachContext` subject APIs.
+- Add strict `AttachToContext`, `DetachFromContext`, and conventional boolean/out
+  `TryGetAttachContext` subject APIs.
 - Make `AddFallbackContext` and `RemoveFallbackContext` pure service composition operations.
 - Resolve zero or one lifecycle coordinator, capture its identity for the active ownership domain,
   and reject mutations that would change it while the domain owns subjects.
@@ -190,7 +191,8 @@ ledger and reservation protocol.
   the functional `ContextInheritanceHandler` capability.
 - Make `ILifecycleInterceptor` formally inherit `IWriteInterceptor` and use complete public,
   stack-only Core operation facades for Tracking ownership coordination. Add no new friend-assembly
-  access between the published packages.
+  access between the published packages. Treat this as changeable package infrastructure and
+  support only the built-in coordinator, not application implementations.
 - Keep a coordinator reached by route-free fallback composition transparent when no committed Core
   ownership operation exists; lifecycle state is touched only under its bound domain gate.
 - Reuse one short Core authority-publication gate for domain activation, reservations, routes, and
@@ -223,8 +225,10 @@ ledger and reservation protocol.
 - Explicit ownership transitions and coordinator-changing context mutations cannot reenter from an
   unfinished route-free structural interceptor chain.
 - One lifecycle coordinator instance cannot serve several active ownership domains.
-- A nested domain operation cannot wait for a different contended domain while holding another
-  domain gate, a service predicate/factory callback scope, or its initiating subject's `SyncRoot`.
+- A nested different-domain operation, or a domain operation begun from a service
+  predicate/factory callback scope or its initiating subject's `SyncRoot`, is rejected
+  deterministically before target-gate availability is inspected. Ordinary contention waits, and
+  same-domain reentrancy remains supported.
 - Consumers and custom interceptors cannot start domain-gated work while manually holding another
   subject's `SyncRoot`; first-party code never uses that lock order.
 - Explicit attachment to another subject executor is rejected. Explicit roots attach to a plain
