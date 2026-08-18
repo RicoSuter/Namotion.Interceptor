@@ -39,6 +39,14 @@ public interface ISubjectSource : ISubjectConnector
     /// Do not retain <paramref name="changes"/> after the returned task completes: the caller may
     /// reuse or mutate the underlying buffer.
     /// When reporting an error, enumerate the failed changes; see <see cref="WriteResult.FailedChanges"/>.
+    /// <para>
+    /// Build the payload from <paramref name="changes"/> alone, never by reading subject properties.
+    /// Under transactions the built-in writer calls this on the committing flow, where property reads
+    /// and writes throw <see cref="InvalidOperationException"/>: sibling and landed-model state is
+    /// outside the frozen snapshot and can make the payload inconsistent with it. Capture any other
+    /// subject state the write needs before <see cref="Tracking.Transactions.SubjectTransaction.CommitAsync"/>,
+    /// and see <see cref="Tracking.Transactions.ITransactionWriter"/> for the full committing access boundary.
+    /// </para>
     /// </remarks>
     /// <param name="changes">The collection of subject property changes.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
