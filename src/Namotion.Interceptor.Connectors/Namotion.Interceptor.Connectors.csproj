@@ -8,9 +8,7 @@
 
 	<ItemGroup>
 		<InternalsVisibleTo Include="Namotion.Interceptor.Connectors.Tests" />
-		<InternalsVisibleTo Include="Namotion.Interceptor.WebSocket" />
 		<InternalsVisibleTo Include="Namotion.Interceptor.WebSocket.Tests" />
-		<InternalsVisibleTo Include="Namotion.Interceptor.Mqtt" />
 		<InternalsVisibleTo Include="Namotion.Interceptor.Mqtt.Tests" />
 		<InternalsVisibleTo Include="Namotion.Interceptor.OpcUa.Tests" />
 	</ItemGroup>

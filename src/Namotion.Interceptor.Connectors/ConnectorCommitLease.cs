@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Connectors;
 /// interceptor or user code run outside that lock. Retirement closes admission and allocates a
 /// completion source only when a commit was already admitted.
 /// </remarks>
-internal sealed class ConnectorCommitLease
+public sealed class ConnectorCommitLease
 {
     private readonly Lock _lock = new();
 
