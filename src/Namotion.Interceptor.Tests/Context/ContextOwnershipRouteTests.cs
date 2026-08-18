@@ -252,6 +252,33 @@ public class ContextOwnershipRouteTests
     }
 
     [Fact]
+    public void WhenSharedTargetFallbackAndOwnershipRoutesFormDelegationCycle_ThenExceptionGuidesToRemoveBothRegistrations()
+    {
+        // Arrange
+        var ownershipDomain = InterceptorSubjectContext.Create();
+        var contextA = InterceptorSubjectContext.Create();
+        var contextB = InterceptorSubjectContext.Create();
+        contextA.AddFallbackContext(contextB);
+        contextB.AddFallbackContext(contextA);
+        Assert.True(contextA.TryChangeOwnershipRoute(
+            null,
+            new InterceptorSubjectContext.ContextOwnershipRoute(contextB, ownershipDomain)));
+        Assert.True(contextB.TryChangeOwnershipRoute(
+            null,
+            new InterceptorSubjectContext.ContextOwnershipRoute(contextA, ownershipDomain)));
+
+        // Act
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => contextA.GetServices<IRouteService>());
+
+        // Assert
+        Assert.Contains(
+            "both the fallback-context and ownership-route registrations from a shared-target hop",
+            exception.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task WhenTwoThreadsInstallFirstRoute_ThenExactlyOneDescriptorWins()
     {
         const int attempts = 500;

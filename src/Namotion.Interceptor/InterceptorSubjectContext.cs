@@ -534,8 +534,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             "context, or through its ownership route when it has no fallback contexts. It also delegates " +
             "when its one fallback and ownership route target the same context. Following those " +
             "relationships leads back to a context already visited. Break the cycle by removing a " +
-            "fallback-context registration, an ownership-route registration, or both registrations from " +
-            "a shared-target hop in the cycle, or by registering a service on one of the contexts in it.");
+            "fallback-context registration from a fallback-only hop, an ownership-route registration from " +
+            "an ownership-route-only hop, or both the fallback-context and ownership-route registrations " +
+            "from a shared-target hop in the cycle, or by registering a service on one of the contexts in it.");
     }
 
     /// <summary>One context on the delegation walk and the state it was pinned on.</summary>
