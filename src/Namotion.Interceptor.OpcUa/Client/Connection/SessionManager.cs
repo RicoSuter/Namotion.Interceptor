@@ -343,8 +343,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         _logger.LogInformation(
             "Created {SubscriptionCount} subscriptions with {Subscribed} " +
             "total monitored items ({Polled} via polling).",
-            SubscriptionManager.Subscriptions.Count,
-            SubscriptionManager.MonitoredItems.Count,
+            SubscriptionManager.SubscriptionCount,
+            SubscriptionManager.MonitoredItemCount,
             PollingManager?.PollingItemCount ?? 0);
     }
 

@@ -117,7 +117,7 @@ The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconn
 |-----------|--------|-------|
 | OPC UA | Working | Server kill drops TCP connections, client kill abandons session. 1 min convergence timeout. `decimal` round-trips through `double`. |
 | MQTT | Working | Server and client kill/disconnect. 2 min convergence timeout. |
-| WebSocket | Working | Server kill cancels background loop, client kill aborts socket. Sequence gap detection triggers reconnection. |
+| WebSocket | Working | Server kill cancels the current attempt, client kill aborts socket. Sequence gap detection triggers reconnection. |
 
 ### Connector-Specific Behaviors
 
@@ -125,7 +125,7 @@ The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconn
 
 **MQTT**: Uses server-authoritative relay pattern where client publishes are intercepted, applied to the server model, and re-published to all clients. Ticks-based timestamp serialization (`UtcTicks`) for full precision. QoS=AtLeastOnce with retained messages.
 
-**WebSocket**: Uses Hello/Welcome handshake for initial state delivery. Server broadcasts all changes to all clients (including originator) with monotonic sequence numbers. Client tracks sequences and triggers reconnection on gap detection. Server kill cancels the background loop CTS; client kill aborts the underlying `ClientWebSocket`. Disconnect mode closes all server connections or aborts the client socket respectively. Circuit breaker (5 failures, 60s cooldown) pauses reconnection during prolonged outages.
+**WebSocket**: Uses Hello/Welcome handshake for initial state delivery. Server broadcasts all changes to all clients (including originator) with monotonic sequence numbers. Client tracks sequences and triggers reconnection on gap detection. Server kill cancels the current attempt, and the still-running background loop rebuilds the listener; client kill aborts the underlying `ClientWebSocket`. Disconnect mode closes all server connections or aborts the client socket respectively. Circuit breaker (5 failures, 60s cooldown) pauses reconnection during prolonged outages.
 
 ## Running
 
@@ -253,7 +253,7 @@ Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfigur
 
 | Scenario | Kill | Disconnect | Recovery Mechanism |
 |----------|------|------------|-------------------|
-| Abrupt server crash | Server loop cancelled, TCP listeners closed (RST to clients) | Delegates to Kill | Background loop auto-restarts with exponential backoff (1s-30s + jitter) |
+| Abrupt server crash | Current attempt cancelled, TCP listeners closed (RST to clients) | Delegates to Kill | Background loop auto-restarts with exponential backoff (1s-30s + jitter) |
 | Abrupt client crash | Session disposed without CloseSession RPC | Transport channel disposed, session preserved | Health check detects missing session, triggers full reconnection |
 | Network partition | N/A | Client transport disposed, keep-alive detects within 5-10s | SDK `SessionReconnectHandler.BeginReconnect` with subscription transfer |
 | Server restart (clean state) | Full server restart, new node manager | N/A | Client subscription transfer fails, falls back to full state reload |

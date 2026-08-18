@@ -29,7 +29,6 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
 
     private WebApplication? _app;
     private int _disposed;
-    private volatile ConnectorRunAttempt? _currentAttempt;
 
     /// <inheritdoc />
     public override IInterceptorSubject RootSubject { get; }
@@ -66,13 +65,7 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
         switch (faultType)
         {
             case FaultType.Kill:
-                // No current attempt means the loop is between attempts, where the teardown and backoff
-                // this fault stands for are already under way.
-                var attempt = _currentAttempt;
-                if (attempt is not null)
-                {
-                    await attempt.ForceKillAsync().ConfigureAwait(false);
-                }
+                await ForceKillCurrentAttemptAsync().ConfigureAwait(false);
                 break;
 
             case FaultType.Disconnect:
@@ -89,143 +82,136 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var attempt = new ConnectorRunAttempt(stoppingToken);
-            _currentAttempt = attempt;
-            var linkedToken = attempt.Token;
-
             // Set by the catch below only: a force-kill and a processing layer that ended without
             // throwing both restart at once, because neither repeats fast enough to need a throttle.
             var restartBackoff = TimeSpan.Zero;
 
-            try
+            await RunAttemptAsync(stoppingToken, async attempt =>
             {
+                var linkedToken = attempt.Token;
+
                 try
                 {
-                    // Build a new WebApplication each iteration because IHost doesn't support
-                    // Start/Stop cycles. On Kill, the entire Kestrel instance is torn down and
-                    // rebuilt, matching real crash behavior (like MQTT restarts its broker).
-                    _app = BuildWebApplication(linkedToken, out var listenUrl);
-
-                    _logger.LogInformation("WebSocket server starting on {Url}{Path}", listenUrl, _configuration.Path);
-                    await _app.StartAsync(stoppingToken).ConfigureAwait(false);
-                    Metrics.MarkOperational();
-
-                    using var changeQueueProcessor = _handler.CreateChangeQueueProcessor(
-                        _logger, Metrics.OutboundChanges.AddDropped);
-
-                    // Declared after the processor so it is released first, which is what lets the
-                    // next restart register its own: a second Register while one is still live throws.
-                    using var outboundRegistration = Metrics.OutboundChanges.Register(
-                        () => changeQueueProcessor.QueueDepth, capacity: null);
-
-                    var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);
-                    var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedToken);
-
-                    // Cancelling the attempt makes a cancellation the normal exit path here, so the
-                    // filter below cannot be narrowed to the force-kill and the exception is kept
-                    // and judged afterwards instead.
-                    OperationCanceledException? completionCancellation = null;
                     try
                     {
-                        // When either task completes, cancel the other to prevent blocking forever.
-                        await Task.WhenAny(processorTask, heartbeatTask).ConfigureAwait(false);
-                        await attempt.CancelAsync().ConfigureAwait(false);
-                        await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException exception) when (!stoppingToken.IsCancellationRequested)
-                    {
-                        // Kill or one task completed: linkedToken canceled
-                        completionCancellation = exception;
-                    }
+                        // Build a new WebApplication each iteration because IHost doesn't support
+                        // Start/Stop cycles. On Kill, the entire Kestrel instance is torn down and
+                        // rebuilt, matching real crash behavior (like MQTT restarts its broker).
+                        _app = BuildWebApplication(linkedToken, out var listenUrl);
 
-                    // Both tasks completed, either normally (tasks catch OCE internally and
-                    // return) or via caught OCE above. Check why we stopped:
-                    if (stoppingToken.IsCancellationRequested)
-                    {
-                        break;
-                    }
+                        _logger.LogInformation("WebSocket server starting on {Url}{Path}", listenUrl, _configuration.Path);
+                        await _app.StartAsync(stoppingToken).ConfigureAwait(false);
+                        Metrics.MarkOperational();
 
-                    // linkedToken was canceled (Kill) or completed unexpectedly, so restart.
-                    if (attempt.WasForceKilled)
-                    {
-                        // Not reported as an error: an injected fault the server recovers from by
-                        // restarting.
-                        _logger.LogWarning("WebSocket server force-killed. Restarting...");
-                    }
-                    else
-                    {
-                        // Nothing outside this loop reports its failures. The captured cancellation
-                        // is normally null, because neither task surfaces the one raised above to
-                        // stop its sibling.
-                        var error = new InvalidOperationException(
-                            "WebSocket server processing completed unexpectedly.", completionCancellation);
+                        using var changeQueueProcessor = _handler.CreateChangeQueueProcessor(
+                            _logger, Metrics.OutboundChanges.AddDropped);
 
-                        Metrics.ReportError(error);
-                        _logger.LogWarning(error, "WebSocket server processing completed unexpectedly. Restarting...");
-                    }
-                }
-                finally
-                {
-                    // Inside the try the catches below guard: disposing the WebApplication disposes its
-                    // whole service provider, and a singleton that throws on disposal would otherwise
-                    // leave RunAsync and end the connector.
-                    Metrics.MarkNotOperational();
+                        // Declared after the processor so it is released first, which is what lets the
+                        // next restart register its own: a second Register while one is still live throws.
+                        using var outboundRegistration = Metrics.OutboundChanges.Register(
+                            () => changeQueueProcessor.QueueDepth, capacity: null);
 
-                    await _handler.CloseAllConnectionsAsync().ConfigureAwait(false);
+                        var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);
+                        var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedToken);
 
-                    var app = _app;
-                    if (app is not null)
-                    {
-                        // Cleared before the teardown, so a dispose that throws cannot leave a
-                        // half-torn-down app reachable for the next iteration.
-                        _app = null;
-
+                        // Cancelling the attempt makes a cancellation the normal exit path here, so the
+                        // filter below cannot be narrowed to the force-kill and the exception is kept
+                        // and judged afterwards instead.
+                        OperationCanceledException? completionCancellation = null;
                         try
                         {
-                            // Use a short timeout to avoid the default 30-second ASP.NET graceful
-                            // shutdown. Connections are already closed above, so Kestrel should stop
-                            // quickly. The timeout is just a safety net.
-                            using var shutdownCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                            // When either task completes, cancel the other to prevent blocking forever.
+                            await Task.WhenAny(processorTask, heartbeatTask).ConfigureAwait(false);
+                            await attempt.CancelAsync().ConfigureAwait(false);
+                            await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException exception) when (!stoppingToken.IsCancellationRequested)
+                        {
+                            // Kill or one task completed: linkedToken canceled
+                            completionCancellation = exception;
+                        }
+
+                        // Both tasks completed, either normally (tasks catch OCE internally and
+                        // return) or via caught OCE above. Check why we stopped:
+                        if (stoppingToken.IsCancellationRequested)
+                        {
+                            return;
+                        }
+
+                        // linkedToken was canceled (Kill) or completed unexpectedly, so restart.
+                        if (attempt.WasForceKilled)
+                        {
+                            // Not reported as an error: an injected fault the server recovers from by
+                            // restarting.
+                            _logger.LogWarning("WebSocket server force-killed. Restarting...");
+                        }
+                        else
+                        {
+                            // Nothing outside this loop reports its failures. The captured cancellation
+                            // is normally null, because neither task surfaces the one raised above to
+                            // stop its sibling.
+                            var error = new InvalidOperationException(
+                                "WebSocket server processing completed unexpectedly.", completionCancellation);
+
+                            Metrics.ReportError(error);
+                            _logger.LogWarning(error, "WebSocket server processing completed unexpectedly. Restarting...");
+                        }
+                    }
+                    finally
+                    {
+                        // Inside the try the catches below guard: disposing the WebApplication disposes its
+                        // whole service provider, and a singleton that throws on disposal would otherwise
+                        // leave RunAsync and end the connector.
+                        Metrics.MarkNotOperational();
+
+                        await _handler.CloseAllConnectionsAsync().ConfigureAwait(false);
+
+                        // Claimed atomically, because DisposeAsync also races for this app after a stop
+                        // that timed out, and both winning would dispose it twice.
+                        var app = Interlocked.Exchange(ref _app, null);
+                        if (app is not null)
+                        {
                             try
                             {
-                                await app.StopAsync(shutdownCts.Token).ConfigureAwait(false);
+                                // Use a short timeout to avoid the default 30-second ASP.NET graceful
+                                // shutdown. Connections are already closed above, so Kestrel should stop
+                                // quickly. The timeout is just a safety net.
+                                using var shutdownCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                                try
+                                {
+                                    await app.StopAsync(shutdownCts.Token).ConfigureAwait(false);
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    // Shutdown timed out, so DisposeAsync will force-release the port.
+                                }
                             }
-                            catch (OperationCanceledException)
+                            finally
                             {
-                                // Shutdown timed out, so DisposeAsync will force-release the port.
+                                // In a finally, because a stop that fails must not skip the disposal: the
+                                // app still holds the listening port and every later bind would fail.
+                                await app.DisposeAsync().ConfigureAwait(false);
                             }
-                        }
-                        finally
-                        {
-                            // In a finally, because a stop that fails must not skip the disposal: the
-                            // app still holds the listening port and every later bind would fail.
-                            await app.DisposeAsync().ConfigureAwait(false);
                         }
                     }
                 }
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                // Nothing outside this loop reports its failures, but a stop tears the listener down
-                // with an arbitrary exception rather than a cancellation, so only the stopping token
-                // tells a shutdown apart from a genuine fault.
-                if (!stoppingToken.IsCancellationRequested)
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
-                    Metrics.ReportError(ex);
                 }
+                catch (Exception ex)
+                {
+                    // Nothing outside this loop reports its failures, but a stop tears the listener down
+                    // with an arbitrary exception rather than a cancellation, so only the stopping token
+                    // tells a shutdown apart from a genuine fault.
+                    if (!stoppingToken.IsCancellationRequested)
+                    {
+                        Metrics.ReportError(ex);
+                    }
 
-                _logger.LogError(ex, "WebSocket server processing failed. Restarting...");
-                restartBackoff = RestartBackoff;
-            }
-            finally
-            {
-                _currentAttempt = null;
-                attempt.Dispose();
-            }
+                    _logger.LogError(ex, "WebSocket server processing failed. Restarting...");
+                    restartBackoff = RestartBackoff;
+                }
+            }).ConfigureAwait(false);
 
             // After the teardown above, so the port is free rather than held for the whole delay.
             if (restartBackoff > TimeSpan.Zero)
@@ -294,9 +280,12 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
 
         await _handler.CloseAllConnectionsAsync().ConfigureAwait(false);
 
-        if (_app is not null)
+        // Claimed atomically, because a stop that timed out can leave the run loop's own teardown
+        // still racing for this app, and both winning would dispose it twice.
+        var app = Interlocked.Exchange(ref _app, null);
+        if (app is not null)
         {
-            await _app.DisposeAsync().ConfigureAwait(false);
+            await app.DisposeAsync().ConfigureAwait(false);
         }
 
         Dispose();

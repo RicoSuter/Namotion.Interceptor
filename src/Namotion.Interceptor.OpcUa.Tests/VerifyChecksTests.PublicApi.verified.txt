@@ -374,7 +374,7 @@ namespace Namotion.Interceptor.OpcUa.Server
     }
     public sealed class OpcUaServerDiagnostics : Namotion.Interceptor.Connectors.Diagnostics.ConnectorDiagnostics
     {
-        public uint ActiveSessionCount { get; }
+        public int ActiveSessionCount { get; }
         public int ConsecutiveFailures { get; }
     }
 }

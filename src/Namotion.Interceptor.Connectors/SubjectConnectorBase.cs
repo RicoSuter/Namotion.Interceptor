@@ -13,6 +13,7 @@ namespace Namotion.Interceptor.Connectors;
 public abstract class SubjectConnectorBase : BackgroundService, ISubjectConnector
 {
     private int _executionActive;
+    private volatile ConnectorRunAttempt? _currentAttempt;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubjectConnectorBase"/> class.
@@ -45,6 +46,49 @@ public abstract class SubjectConnectorBase : BackgroundService, ISubjectConnecto
     /// seals so that the diagnostics lifecycle is applied uniformly.
     /// </summary>
     protected abstract Task RunAsync(CancellationToken stoppingToken);
+
+    /// <summary>
+    /// Runs one iteration of a restart loop under a fresh <see cref="ConnectorRunAttempt"/>,
+    /// publishing it for <see cref="ForceKillCurrentAttemptAsync"/> while the body runs and
+    /// releasing it afterwards.
+    /// </summary>
+    /// <remarks>
+    /// Exception filters that read <see cref="ConnectorRunAttempt.WasForceKilled"/> must stay inside
+    /// <paramref name="body"/>: filters run before the cleanup here disposes the attempt, and the
+    /// flag is unreliable once the attempt is disposed.
+    /// </remarks>
+    protected async Task RunAttemptAsync(CancellationToken stoppingToken, Func<ConnectorRunAttempt, Task> body)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+
+        var attempt = new ConnectorRunAttempt(stoppingToken);
+        _currentAttempt = attempt;
+        try
+        {
+            await body(attempt).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Cleared before the attempt is disposed, so a kill arriving from here on finds no
+            // attempt rather than a disposed one.
+            _currentAttempt = null;
+            attempt.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Force-kills the attempt currently running under <see cref="RunAttemptAsync"/>. No current
+    /// attempt means the loop is between attempts, where the teardown the kill stands for is already
+    /// under way, and the call does nothing.
+    /// </summary>
+    protected async Task ForceKillCurrentAttemptAsync()
+    {
+        var attempt = _currentAttempt;
+        if (attempt is not null)
+        {
+            await attempt.ForceKillAsync().ConfigureAwait(false);
+        }
+    }
 
     /// <inheritdoc />
     /// <exception cref="InvalidOperationException">

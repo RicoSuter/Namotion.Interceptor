@@ -27,7 +27,7 @@ public class OpcUaServerDiagnosticsTests
 
         // Act
         var diagnostics = server.Diagnostics;
-        uint activeSessionCount = diagnostics.ActiveSessionCount;
+        int activeSessionCount = diagnostics.ActiveSessionCount;
 
         // Assert
         Assert.False(diagnostics.IsOperational);
@@ -35,7 +35,7 @@ public class OpcUaServerDiagnosticsTests
         Assert.Null(diagnostics.StartTime);
         Assert.Null(diagnostics.LastError);
         Assert.Equal(0, diagnostics.ConsecutiveFailures);
-        Assert.Equal(0u, activeSessionCount);
+        Assert.Equal(0, activeSessionCount);
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public class OpcUaServerDiagnosticsTests
         var count = server.Diagnostics.ActiveSessionCount;
 
         // Assert
-        Assert.Equal(0u, count);
+        Assert.Equal(0, count);
     }
 
     [Fact]

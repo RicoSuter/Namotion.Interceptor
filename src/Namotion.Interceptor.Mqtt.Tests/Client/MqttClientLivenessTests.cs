@@ -315,13 +315,11 @@ public partial class MqttClientLivenessTests
         // Arrange
         var brokerPort = GetFreeTcpPort();
         using var commitGate = new GatedWriteInterceptor("Old");
-        var retirementBarrier = new MqttSubjectClientSource.TransportRetirementTestBarrier();
         await using var broker = CreateBroker(brokerPort);
         await using var source = CreateClientSource(
             brokerPort,
             reconnectDelay: TimeSpan.FromSeconds(1),
-            writeInterceptor: commitGate,
-            retirementBarrier: retirementBarrier);
+            writeInterceptor: commitGate);
         var brokerRoot = (LivenessTestRoot)broker.RootSubject;
         var clientRoot = (LivenessTestRoot)source.RootSubject;
 
@@ -353,36 +351,35 @@ public partial class MqttClientLivenessTests
             oldCallback = Task.Run(() => oldMessageHandler(CreateMessageReceivedEventArgs("Old")));
             await commitGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
 
+            // Samples, at the instant the teardown's drain releases it, whether the commit the drain
+            // was supposed to wait for had already been applied. A teardown that skipped the drain
+            // reaches this while the gate still holds the commit, so it samples false.
+            var drainWaitedForCommit = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            source.AfterTransportCommitDrain = () => drainWaitedForCommit.TrySetResult(commitGate.BlockedWriteCompleted);
+
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
-            var firstLifecycleEvent = await Task.WhenAny(
-                    retirementBarrier.RetirementAwaitRegistered,
-                    retirementBarrier.ReplacementRecoveryCompleted)
-                .WaitAsync(TimeSpan.FromSeconds(10));
-            var retirementAwaitWasRegistered =
-                ReferenceEquals(firstLifecycleEvent, retirementBarrier.RetirementAwaitRegistered);
-            if (!retirementAwaitWasRegistered)
-            {
-                await AsyncTestHelpers.WaitUntilAsync(
-                    () => clientRoot.Name == "Recovered",
-                    message: "A replacement that bypassed the drain should recover before the old commit is released.");
-            }
+
+            // The ownership field is cleared right when the teardown retires the lease, so this is the
+            // point from which the drain either holds the teardown back or does not.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => GetTransportOwnership(source) is null,
+                message: "The kill teardown should retire the transport's commit lease.");
+            Assert.False(source.Diagnostics.IsOperational);
+            Assert.Equal("Awaiting recovery", clientRoot.Name);
 
             // Act
             commitGate.Release();
             await oldCallback.WaitAsync(TimeSpan.FromSeconds(10));
-
-            if (retirementAwaitWasRegistered)
-            {
-                await retirementBarrier.ReplacementRecoveryCompleted.WaitAsync(TimeSpan.FromSeconds(10));
-                await AsyncTestHelpers.WaitUntilAsync(
-                    () => clientRoot.Name == "Recovered",
-                    message: "Recovery should follow an old commit that retirement already admitted.");
-            }
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational && clientRoot.Name == "Recovered",
+                message: "Recovery should follow an old commit that retirement already admitted.");
 
             // Assert
+            Assert.True(
+                await drainWaitedForCommit.Task.WaitAsync(TimeSpan.FromSeconds(10)),
+                "The kill teardown should stay in the drain until the admitted commit has been applied.");
             Assert.Empty(GetApplicationMessageHandlers(oldClient));
             Assert.Equal("Recovered", clientRoot.Name);
-            Assert.True(retirementAwaitWasRegistered);
         }
         finally
         {
@@ -392,6 +389,7 @@ public partial class MqttClientLivenessTests
                 await oldCallback.WaitAsync(TimeSpan.FromSeconds(10));
             }
 
+            source.AfterTransportCommitDrain = null;
             await source.StopAsync(CancellationToken.None);
             await broker.StopAsync(CancellationToken.None);
         }
@@ -415,8 +413,7 @@ public partial class MqttClientLivenessTests
         int brokerPort,
         TimeSpan? reconnectDelay = null,
         IMqttValueConverter? valueConverter = null,
-        IWriteInterceptor? writeInterceptor = null,
-        MqttSubjectClientSource.TransportRetirementTestBarrier? retirementBarrier = null)
+        IWriteInterceptor? writeInterceptor = null)
     {
         var context = InterceptorSubjectContext
             .Create()
@@ -447,13 +444,17 @@ public partial class MqttClientLivenessTests
             },
             NullLogger<MqttSubjectClientSource>.Instance);
 
-        source.RetirementTestBarrier = retirementBarrier;
         return source;
     }
 
     private static MqttCompositeMapper CreateMapper() => new(
         new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
         new MqttAttributeMapper("mqtt"));
+
+    private static object? GetTransportOwnership(MqttSubjectClientSource source) =>
+        typeof(MqttSubjectClientSource)
+            .GetField("_transportOwnership", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(source);
 
     private static IMqttClient GetCurrentClient(MqttSubjectClientSource source)
     {
@@ -566,13 +567,20 @@ public partial class MqttClientLivenessTests
     }
 
     // Instance-scoped test seam. It blocks only after the source has admitted the old commit, and
-    // it runs outside MqttTransportOwnership's internal lock.
+    // it runs outside the commit lease's internal lock.
     private sealed class GatedWriteInterceptor(string blockedValue) : IWriteInterceptor, IDisposable
     {
         private readonly ManualResetEventSlim _release = new(false);
         private int _blocked;
+        private int _blockedWriteCompleted;
 
         public Task Entered => _entered.Task;
+
+        /// <summary>
+        /// Set once the blocked write has actually been applied, which happens before the commit that
+        /// carries it is released, so a drain that observes this as <c>false</c> did not wait for it.
+        /// </summary>
+        public bool BlockedWriteCompleted => Volatile.Read(ref _blockedWriteCompleted) == 1;
 
         private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -584,6 +592,9 @@ public partial class MqttClientLivenessTests
             {
                 _entered.TrySetResult();
                 _release.Wait();
+                next(ref context);
+                Volatile.Write(ref _blockedWriteCompleted, 1);
+                return;
             }
 
             next(ref context);

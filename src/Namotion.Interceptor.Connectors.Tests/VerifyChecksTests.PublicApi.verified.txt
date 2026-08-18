@@ -1,7 +1,9 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Mqtt")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Mqtt.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.OpcUa.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.WebSocket")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.WebSocket.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
 namespace Namotion.Interceptor.Connectors
@@ -111,7 +113,9 @@ namespace Namotion.Interceptor.Connectors
         public abstract Namotion.Interceptor.IInterceptorSubject RootSubject { get; }
         public override void Dispose() { }
         protected override sealed System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected System.Threading.Tasks.Task ForceKillCurrentAttemptAsync() { }
         protected abstract System.Threading.Tasks.Task RunAsync(System.Threading.CancellationToken stoppingToken);
+        protected System.Threading.Tasks.Task RunAttemptAsync(System.Threading.CancellationToken stoppingToken, System.Func<Namotion.Interceptor.Connectors.ConnectorRunAttempt, System.Threading.Tasks.Task> body) { }
         public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
     }
     public static class SubjectFactoryExtensions

@@ -5,14 +5,18 @@ namespace Namotion.Interceptor.Connectors.Diagnostics;
 /// buffer it describes may be created and destroyed many times.
 /// </summary>
 /// <remarks>
-/// All state lives in a single immutable snapshot swapped with <see cref="Interlocked"/>, so
-/// registration handover, resets and drop reports cannot overwrite one another.
+/// All state lives in a single immutable snapshot replaced under a writer lock, so registration
+/// handover, resets and drop reports cannot overwrite one another while reads stay lock-free.
 /// </remarks>
 public sealed class QueueMetrics
 {
     private sealed record Snapshot(long Accumulated, Registration? Active, int? Capacity);
 
     private readonly string _name;
+
+    // Writers serialize on this lock; readers take the immutable snapshot without locking, so no
+    // getter can throw or block. Mutations are rare (per registration or drop batch, not per item).
+    private readonly Lock _snapshotLock = new();
 
     private Snapshot _snapshot = new(0, null, null);
 
@@ -54,24 +58,19 @@ public sealed class QueueMetrics
         ArgumentNullException.ThrowIfNull(depth);
 
         var registration = new Registration(this, depth, capacity);
-        SpinWait spin = default;
-        while (true)
+        lock (_snapshotLock)
         {
-            var current = Volatile.Read(ref _snapshot);
+            var current = _snapshot;
             if (current.Active is not null)
             {
                 throw new InvalidOperationException(
                     $"A registration is already live on the '{_name}' queue metrics. Dispose its registration handle before registering again.");
             }
 
-            var updated = new Snapshot(current.Accumulated, registration, registration.Capacity);
-            if (ReferenceEquals(Interlocked.CompareExchange(ref _snapshot, updated, current), current))
-            {
-                return registration;
-            }
-
-            spin.SpinOnce();
+            Volatile.Write(ref _snapshot, new Snapshot(current.Accumulated, registration, registration.Capacity));
         }
+
+        return registration;
     }
 
     /// <summary>
@@ -84,11 +83,20 @@ public sealed class QueueMetrics
             return;
         }
 
-        Swap(count, static (current, addedCount) => current with { Accumulated = current.Accumulated + addedCount });
+        lock (_snapshotLock)
+        {
+            var current = _snapshot;
+            Volatile.Write(ref _snapshot, current with { Accumulated = current.Accumulated + count });
+        }
     }
 
-    internal void Reset() =>
-        Swap<object?>(null, static (current, _) => current with { Accumulated = 0 });
+    internal void Reset()
+    {
+        lock (_snapshotLock)
+        {
+            Volatile.Write(ref _snapshot, _snapshot with { Accumulated = 0 });
+        }
+    }
 
     internal int Depth => SafeInvokeDepth(Volatile.Read(ref _snapshot).Active?.Depth);
 
@@ -133,40 +141,13 @@ public sealed class QueueMetrics
 
     private void Release(Registration registration)
     {
-        SpinWait spin = default;
-        while (true)
+        lock (_snapshotLock)
         {
-            var current = Volatile.Read(ref _snapshot);
-            if (!ReferenceEquals(current.Active, registration))
+            var current = _snapshot;
+            if (ReferenceEquals(current.Active, registration))
             {
-                return;
+                Volatile.Write(ref _snapshot, new Snapshot(current.Accumulated, Active: null, current.Capacity));
             }
-
-            var updated = new Snapshot(current.Accumulated, Active: null, current.Capacity);
-            if (ReferenceEquals(Interlocked.CompareExchange(ref _snapshot, updated, current), current))
-            {
-                return;
-            }
-
-            spin.SpinOnce();
-        }
-    }
-
-    private void Swap<TState>(TState state, Func<Snapshot, TState, Snapshot> update)
-    {
-        // Reference equality, not Snapshot's record-generated value equality: a registration/release
-        // cycle can produce a value-equal instance, so == would read a failed exchange as success.
-        SpinWait spin = default;
-        while (true)
-        {
-            var current = Volatile.Read(ref _snapshot);
-            var updated = update(current, state);
-            if (ReferenceEquals(Interlocked.CompareExchange(ref _snapshot, updated, current), current))
-            {
-                return;
-            }
-
-            spin.SpinOnce();
         }
     }
 }

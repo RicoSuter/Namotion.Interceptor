@@ -29,51 +29,6 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         internal int Count;
     }
 
-    // Per-run final-commit lease. Mapping, conversion, and interceptor/user code stay outside
-    // the lock; retirement only allocates a completion source when a commit is already active.
-    private sealed class RunPublishLease
-    {
-        private readonly Lock _lock = new();
-
-        private TaskCompletionSource? _drained;
-        private int _activeCommits;
-        private bool _retired;
-
-        public bool TryAcquireCommit()
-        {
-            lock (_lock)
-            {
-                if (_retired) return false;
-
-                _activeCommits++;
-                return true;
-            }
-        }
-
-        public void ReleaseCommit()
-        {
-            TaskCompletionSource? drained;
-            lock (_lock)
-            {
-                _activeCommits--;
-                drained = _retired && _activeCommits == 0 ? _drained : null;
-            }
-
-            drained?.TrySetResult();
-        }
-
-        public Task RetireAsync()
-        {
-            lock (_lock)
-            {
-                _retired = true;
-                return _activeCommits == 0
-                    ? Task.CompletedTask
-                    : (_drained ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
-            }
-        }
-    }
-
     // NOTE: We cannot pool UserProperties here because InjectApplicationMessages queues messages
     // asynchronously. The server may still be serializing packets after this method returns,
     // which would cause a race condition if we returned the lists to a pool.
@@ -103,7 +58,6 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
 
     private int _disposed;
     private MqttServer? _mqttServer;
-    private volatile ConnectorRunAttempt? _currentAttempt;
     private volatile RunClientCounter? _currentClientCounter;
 
     /// <inheritdoc cref="SubjectConnectorBase.Diagnostics" />
@@ -150,13 +104,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         switch (faultType)
         {
             case FaultType.Kill:
-                // No current attempt means the loop is between attempts, where the teardown and backoff
-                // this fault stands for are already under way.
-                var attempt = _currentAttempt;
-                if (attempt is not null)
-                {
-                    await attempt.ForceKillAsync().ConfigureAwait(false);
-                }
+                await ForceKillCurrentAttemptAsync().ConfigureAwait(false);
                 break;
 
             case FaultType.Disconnect:
@@ -204,7 +152,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         var shutdownToken = shutdownCts.Token;
         var initialStateTasks = new List<Task>();
         var clientCounter = new RunClientCounter();
-        var publishLease = new RunPublishLease();
+        var publishLease = new ConnectorCommitLease();
 
         Task ClientConnectedForRunAsync(ClientConnectedEventArgs args) =>
             ClientConnectedAsync(args, server, shutdownToken, initialStateTasks, clientCounter);
@@ -233,71 +181,84 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
 
         try
         {
-            while (!stoppingToken.IsCancellationRequested)
+            var stopRequested = false;
+            while (!stoppingToken.IsCancellationRequested && !stopRequested)
             {
-                var attempt = new ConnectorRunAttempt(stoppingToken);
-                _currentAttempt = attempt;
-                var linkedToken = attempt.Token;
-
-                try
+                await RunAttemptAsync(stoppingToken, async attempt =>
                 {
-                    await server.StartAsync().ConfigureAwait(false);
-                    Metrics.MarkOperational();
-
-                    _logger.LogInformation("MQTT server started on port {Port}.", _configuration.BrokerPort);
+                    var linkedToken = attempt.Token;
 
                     try
                     {
-                        using var changeQueueProcessor = CreateChangeQueueProcessor();
+                        await server.StartAsync().ConfigureAwait(false);
+                        Metrics.MarkOperational();
 
-                        // Declared after the processor so it is released first, which is what lets the
-                        // next restart register its own: a second Register while one is still live throws.
-                        using var outboundRegistration = Metrics.OutboundChanges.Register(
-                            () => changeQueueProcessor.QueueDepth, capacity: null);
+                        _logger.LogInformation("MQTT server started on port {Port}.", _configuration.BrokerPort);
 
-                        await changeQueueProcessor.ProcessAsync(linkedToken).ConfigureAwait(false);
-                    }
-                    finally
-                    {
-                        if (!stoppingToken.IsCancellationRequested)
+                        try
                         {
-                            await server.StopAsync().ConfigureAwait(false);
+                            using var changeQueueProcessor = CreateChangeQueueProcessor();
+
+                            // Declared after the processor so it is released first, which is what lets the
+                            // next restart register its own: a second Register while one is still live throws.
+                            using var outboundRegistration = Metrics.OutboundChanges.Register(
+                                () => changeQueueProcessor.QueueDepth, capacity: null);
+
+                            await changeQueueProcessor.ProcessAsync(linkedToken).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            if (!stoppingToken.IsCancellationRequested)
+                            {
+                                await server.StopAsync().ConfigureAwait(false);
+                            }
+
+                            Metrics.MarkNotOperational();
+                        }
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        Metrics.MarkNotOperational();
+                        stopRequested = true;
+                    }
+                    catch (OperationCanceledException) when (attempt.WasForceKilled)
+                    {
+                        // Not reported as an error: an injected fault the broker recovers from by restarting.
+                        Metrics.MarkNotOperational();
+                        _logger.LogWarning("MQTT server force-killed. Restarting...");
+                    }
+                    catch (Exception ex)
+                    {
+                        Metrics.MarkNotOperational();
+
+                        if (stoppingToken.IsCancellationRequested || Volatile.Read(ref _disposed) == 1)
+                        {
+                            stopRequested = true;
+                            return;
                         }
 
-                        Metrics.MarkNotOperational();
+                        // MQTTnet latches its started flag before binding, so a start that failed on the
+                        // bind leaves the broker claiming to be started and every retry would then fail
+                        // as "already started", hiding the genuine error. Stop it to release the latch.
+                        if (server.IsStarted)
+                        {
+                            try
+                            {
+                                await server.StopAsync().ConfigureAwait(false);
+                            }
+                            catch (Exception stopException)
+                            {
+                                _logger.LogWarning(stopException, "Error stopping half-started MQTT server before retry.");
+                            }
+                        }
+
+                        // Nothing outside this loop reports its failures.
+                        Metrics.ReportError(ex);
+                        _logger.LogError(ex, "Error in MQTT server.");
+
+                        await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
                     }
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    Metrics.MarkNotOperational();
-                    return;
-                }
-                catch (OperationCanceledException) when (attempt.WasForceKilled)
-                {
-                    // Not reported as an error: an injected fault the broker recovers from by restarting.
-                    Metrics.MarkNotOperational();
-                    _logger.LogWarning("MQTT server force-killed. Restarting...");
-                }
-                catch (Exception ex)
-                {
-                    Metrics.MarkNotOperational();
-
-                    if (stoppingToken.IsCancellationRequested || Volatile.Read(ref _disposed) == 1)
-                    {
-                        return;
-                    }
-
-                    // Nothing outside this loop reports its failures.
-                    Metrics.ReportError(ex);
-                    _logger.LogError(ex, "Error in MQTT server.");
-
-                    await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
-                }
-                finally
-                {
-                    _currentAttempt = null;
-                    attempt.Dispose();
-                }
+                }).ConfigureAwait(false);
             }
         }
         finally
@@ -324,9 +285,18 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         CancellationTokenSource shutdownCts,
         List<Task> initialStateTasks,
         RunClientCounter clientCounter,
-        RunPublishLease publishLease)
+        ConnectorCommitLease publishLease)
     {
-        await shutdownCts.CancelAsync().ConfigureAwait(false);
+        try
+        {
+            await shutdownCts.CancelAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // A callback registered on the token can throw out of the cancel; skipping the rest of
+            // this cleanup would leave handlers attached and the port bound.
+            _logger.LogWarning(ex, "Error cancelling MQTT server shutdown token.");
+        }
 
         if (lifecycleInterceptor is not null)
         {
@@ -693,7 +663,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         InterceptingPublishEventArgs args,
         MqttServer server,
         CancellationToken shutdownToken,
-        RunPublishLease publishLease)
+        ConnectorCommitLease publishLease)
     {
         // Skip messages published by this server (injected messages may have null/empty ClientId)
         if (string.IsNullOrEmpty(args.ClientId) || args.ClientId == _serverClientId)

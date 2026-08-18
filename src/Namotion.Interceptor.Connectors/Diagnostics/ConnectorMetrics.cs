@@ -11,6 +11,10 @@ public class ConnectorMetrics
 {
     private sealed record Liveness(bool IsOperational, long ChangeTicks, bool IsStopped);
 
+    // Writers serialize on this lock; readers take an immutable snapshot without locking, so no
+    // getter can throw or block. Transitions are rare (per connect/disconnect, not per item).
+    private readonly Lock _livenessLock = new();
+
     private Liveness _liveness = new(false, 0, false);
     private long _startTicks;
     private Exception? _lastError;
@@ -147,35 +151,21 @@ public class ConnectorMetrics
     // "down since T" rather than inventing a new transition.
     private void ResetLiveness()
     {
-        SpinWait spin = default;
-        while (true)
+        lock (_livenessLock)
         {
-            var current = Volatile.Read(ref _liveness);
-            if (!current.IsStopped)
+            var current = _liveness;
+            if (current.IsStopped)
             {
-                return;
+                Volatile.Write(ref _liveness, current with { IsStopped = false });
             }
-
-            // Reference equality, not Liveness's record-generated value equality: a failed exchange
-            // can hand back a value-equal instance, which == would read as success.
-            var updated = current with { IsStopped = false };
-            if (ReferenceEquals(Interlocked.CompareExchange(ref _liveness, updated, current), current))
-            {
-                return;
-            }
-
-            spin.SpinOnce();
         }
     }
 
     private void SetOperational(bool isOperational, bool terminal)
     {
-        var ticks = DateTimeOffset.UtcNow.UtcTicks;
-
-        SpinWait spin = default;
-        while (true)
+        lock (_livenessLock)
         {
-            var current = Volatile.Read(ref _liveness);
+            var current = _liveness;
             if (current.IsStopped && !terminal)
             {
                 return;
@@ -188,21 +178,13 @@ public class ConnectorMetrics
             }
 
             // The timestamp moves only when the flag does, so latching the terminal bit on a connector
-            // that was never operational does not invent a transition. ticks is sampled before the
-            // loop, so it is clamped to the snapshot being replaced: a thread preempted between the
-            // sample and its exchange would otherwise move the timestamp backwards.
+            // that was never operational does not invent a transition. It is sampled inside the lock,
+            // so it cannot move backwards relative to an already published transition.
             var updated = current.IsOperational == isOperational
                 ? current with { IsStopped = stopped }
-                : new Liveness(isOperational, Math.Max(ticks, current.ChangeTicks), stopped);
+                : new Liveness(isOperational, DateTimeOffset.UtcNow.UtcTicks, stopped);
 
-            // Reference equality, not Liveness's record-generated value equality: a failed exchange
-            // can hand back a value-equal instance, which == would read as success.
-            if (ReferenceEquals(Interlocked.CompareExchange(ref _liveness, updated, current), current))
-            {
-                return;
-            }
-
-            spin.SpinOnce();
+            Volatile.Write(ref _liveness, updated);
         }
     }
 }

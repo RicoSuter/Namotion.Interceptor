@@ -45,7 +45,7 @@ public class HoistedMetricsTests
         metrics.RecordScheduled();
         metrics.RecordExecuted(2);
         metrics.RecordCoalesced();
-        metrics.RecordFailed();
+        metrics.RecordFailed(1);
 
         // Act
         metrics.Reset();

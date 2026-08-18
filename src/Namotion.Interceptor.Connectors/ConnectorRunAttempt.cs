@@ -11,9 +11,10 @@ namespace Namotion.Interceptor.Connectors;
 /// boundary and let the next iteration swallow a genuine fault as an injected one.
 /// <para>
 /// A loop creates one attempt per iteration, runs its work under <see cref="Token"/>, and disposes it
-/// in a <c>finally</c>. The connector publishes the current attempt in a <c>volatile</c> field so that
-/// <see cref="IFaultInjectable.InjectFaultAsync"/> can reach it, and clears that field before the
-/// disposal so a later kill finds no attempt rather than a disposed one.
+/// in a <c>finally</c>. <c>SubjectConnectorBase.RunAttemptAsync</c> owns that lifecycle: it publishes
+/// the current attempt so that <see cref="IFaultInjectable.InjectFaultAsync"/> can reach it through
+/// <c>ForceKillCurrentAttemptAsync</c>, and clears it before the disposal so a later kill finds no
+/// attempt rather than a disposed one.
 /// </para>
 /// </remarks>
 public sealed class ConnectorRunAttempt : IDisposable

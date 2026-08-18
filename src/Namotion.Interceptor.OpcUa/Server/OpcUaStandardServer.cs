@@ -44,14 +44,9 @@ internal class OpcUaStandardServer : StandardServer
     /// </summary>
     internal object? NodeManagerLock => _nodeManagerFactory.NodeManager?.Lock;
 
-    internal uint ActiveSessionCount
-    {
-        get
-        {
-            var count = Volatile.Read(ref _activeSessionCount);
-            return count > 0 ? (uint)count : 0;
-        }
-    }
+    // Clamped because a session-closing event can race the counter reset and briefly drive the
+    // count negative, and a negative count is a worse report than zero.
+    internal int ActiveSessionCount => Math.Max(0, Volatile.Read(ref _activeSessionCount));
 
     public void ClearPropertyData()
     {

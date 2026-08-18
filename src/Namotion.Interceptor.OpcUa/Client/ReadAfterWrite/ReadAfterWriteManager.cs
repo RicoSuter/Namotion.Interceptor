@@ -280,9 +280,9 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             foreach (var (nodeId, _) in _dueReadsList)
             {
                 _pendingReads.Remove(nodeId);
-                UpdatePendingReadCountLocked();
             }
 
+            UpdatePendingReadCountLocked();
             RecalculateEarliestLocked();
             dueCount = _dueReadsList.Count;
         }
@@ -304,7 +304,6 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         var successCount = 0;
         var failedCount = 0;
         var skippedCount = 0;
-        var completedCount = 0;
 
         try
         {
@@ -343,7 +342,6 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     if (!StatusCode.IsGood(result.StatusCode))
                     {
                         failedCount++;
-                        completedCount++;
                         continue;
                     }
 
@@ -355,19 +353,19 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     if (currentWriteTimestamp.HasValue && currentWriteTimestamp.Value >= sourceTimestamp)
                     {
                         skippedCount++;
-                        completedCount++;
                         continue;
                     }
 
                     var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
                     property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
                     successCount++;
-                    completedCount++;
                 }
             }
             catch (Exception ex)
             {
-                failedCount += dueCount - completedCount;
+                // Every due read that did not succeed or get skipped failed, including those a
+                // thrown batch never processed.
+                failedCount = dueCount - successCount - skippedCount;
                 _metrics.RecordExecuted(successCount);
                 _metrics.RecordFailed(failedCount);
                 ReportErrorIfRunning(ex);
@@ -383,7 +381,8 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 return;
             }
 
-            failedCount += dueCount - completedCount;
+            // A response can carry fewer results than requested; the unanswered remainder failed.
+            failedCount = dueCount - successCount - skippedCount;
             _metrics.RecordExecuted(successCount);
             _metrics.RecordFailed(failedCount);
             _circuitBreaker.RecordSuccess();

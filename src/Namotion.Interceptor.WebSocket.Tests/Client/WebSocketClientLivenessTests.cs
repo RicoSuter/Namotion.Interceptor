@@ -109,38 +109,23 @@ public class WebSocketClientLivenessTests
         await using var source = CreateClientSource(portLease.Port);
         await source.StartAsync(CancellationToken.None);
 
-        var livenessFell = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var livenessRose = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational);
-            source.LivenessTestHooks = new WebSocketClientLivenessTestHooks
-            {
-                ReceiveLoopLivenessChanged = isOperational =>
-                {
-                    if (!isOperational)
-                    {
-                        livenessFell.TrySetResult();
-                    }
-                    else if (livenessFell.Task.IsCompleted)
-                    {
-                        livenessRose.TrySetResult();
-                    }
-                }
-            };
+            var connectedAt = source.Diagnostics.OperationalChangeTime;
 
             // Act
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
-            await livenessFell.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            await livenessRose.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-            // Assert
-            Assert.True(source.Diagnostics.IsOperational);
+            // Assert - the transition timestamp only moves when the operational flag flips, so an
+            // operational client with a newer timestamp proves the liveness fell and rose again even
+            // when both transitions happen between two polls.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational && source.Diagnostics.OperationalChangeTime > connectedAt,
+                message: "The kill should drop liveness and a replacement attempt should raise it again.");
         }
         finally
         {
-            source.LivenessTestHooks = null;
             await source.StopAsync(CancellationToken.None);
         }
     }
@@ -148,56 +133,40 @@ public class WebSocketClientLivenessTests
     [Fact]
     public async Task WhenOrdinaryReloadIsKilled_ThenForceKillStartsReplacementAttempt()
     {
-        // Arrange
+        // Arrange - the reconnect delay leaves a wide window between the observed drop and the
+        // reconnect, so the value below is staged while the client is provably offline and can only
+        // arrive through the reconnect's initial-state reload.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = await StartServerAsync(portLease.Port);
         var reloadGate = new ReconnectReloadGate();
-        await using var source = CreateClientSource(portLease.Port, writeInterceptor: reloadGate);
+        await using var source = CreateClientSource(
+            portLease.Port, reconnectDelay: TimeSpan.FromSeconds(2), writeInterceptor: reloadGate);
         await source.StartAsync(CancellationToken.None);
+        var clientRoot = (TestRoot)source.RootSubject;
         await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational);
-
-        var ordinaryReconnectStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var allowOrdinaryReconnect = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var replacementReconnectStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var reconnectAttempts = 0;
-        source.LivenessTestHooks = new WebSocketClientLivenessTestHooks
-        {
-            BeforeReceiveLoopConnectionAttempt = () =>
-            {
-                var reconnectAttempt = Interlocked.Increment(ref reconnectAttempts);
-                if (reconnectAttempt == 1)
-                {
-                    ordinaryReconnectStarted.TrySetResult();
-                    allowOrdinaryReconnect.Task.GetAwaiter().GetResult();
-                }
-                else if (reconnectAttempt == 2)
-                {
-                    replacementReconnectStarted.TrySetResult();
-                }
-            }
-        };
-        reloadGate.Arm();
 
         try
         {
             // Act
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
-            await ordinaryReconnectStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await AsyncTestHelpers.WaitUntilAsync(() => !source.Diagnostics.IsOperational);
+            reloadGate.Arm();
             server.Root!.Name = "Reload";
-            allowOrdinaryReconnect.TrySetResult();
-            await reloadGate.ReloadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+            await reloadGate.ReloadStarted.WaitAsync(TimeSpan.FromSeconds(10));
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
             reloadGate.Release();
+            server.Root.Name = "AfterKill";
 
-            // Assert
-            await replacementReconnectStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.True(Volatile.Read(ref reconnectAttempts) >= 2);
+            // Assert - the killed reload's connection is gone, so only a working replacement
+            // connection can deliver the value staged after the kill.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientRoot.Name == "AfterKill",
+                timeout: TimeSpan.FromSeconds(15),
+                message: "A force-kill during an ordinary reconnect's reload should start a working replacement attempt.");
         }
         finally
         {
-            allowOrdinaryReconnect.TrySetResult();
             reloadGate.Release();
-            source.LivenessTestHooks = null;
             await source.StopAsync(CancellationToken.None);
         }
     }
@@ -217,16 +186,7 @@ public class WebSocketClientLivenessTests
             () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
 
         var oldLoopCompletion = GetReceiveLoopCompletion(source);
-        var previousLoopWaitBypassed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        source.LivenessTestHooks = new WebSocketClientLivenessTestHooks
-        {
-            BeforeUpdateCommitAdmission = admissionGate.Wait,
-            WaitForPreviousReceiveLoopAsync = _ =>
-            {
-                previousLoopWaitBypassed.TrySetResult();
-                return Task.CompletedTask;
-            }
-        };
+        source.BeforeUpdateCommitAdmission = admissionGate.Wait;
         admissionGate.Arm();
 
         try
@@ -235,11 +195,12 @@ public class WebSocketClientLivenessTests
             await admissionGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
             server.Root.Name = "Recovered";
 
-            // Act
+            // Act - the reconnect's join with the paused old loop genuinely times out here, which is
+            // the production path this scenario is about.
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
-            await previousLoopWaitBypassed.Task.WaitAsync(TimeSpan.FromSeconds(10));
             await AsyncTestHelpers.WaitUntilAsync(
                 () => clientRoot.Name == "Recovered",
+                timeout: TimeSpan.FromSeconds(20),
                 message: "The replacement Welcome should load while the retired old loop is still paused.");
             admissionGate.Release();
             await oldLoopCompletion.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -250,7 +211,7 @@ public class WebSocketClientLivenessTests
         finally
         {
             admissionGate.Release();
-            source.LivenessTestHooks = null;
+            source.BeforeUpdateCommitAdmission = null;
             await source.StopAsync(CancellationToken.None);
         }
     }
@@ -269,22 +230,18 @@ public class WebSocketClientLivenessTests
         await AsyncTestHelpers.WaitUntilAsync(
             () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
 
-        var previousLoopWaitStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        source.LivenessTestHooks = new WebSocketClientLivenessTestHooks
-        {
-            WaitForPreviousReceiveLoopAsync = previousLoop =>
-            {
-                previousLoopWaitStarted.TrySetResult();
-                return previousLoop;
-            }
-        };
-
         try
         {
             server.Root!.Name = "Old";
             await commitGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
             server.Root.Name = "Recovered";
             await GetReceiveCancellation(source).CancelAsync();
+
+            // Samples, at the instant the replacement's drain releases it, whether the commit the
+            // drain was supposed to wait for had already been applied. A replacement that skipped the
+            // drain reaches this while the gate still holds the commit, so it samples false.
+            var drainWaitedForCommit = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            source.AfterReceiveLoopCommitDrain = () => drainWaitedForCommit.TrySetResult(commitGate.BlockedWriteCompleted);
 
             // Act
             var replacementTask = (Task<TimeSpan>)typeof(WebSocketSubjectClientSource)
@@ -296,19 +253,29 @@ public class WebSocketClientLivenessTests
                     TimeSpan.FromSeconds(10),
                     CancellationToken.None
                 ])!;
-            var replacementAdvancedBeforeDrain = previousLoopWaitStarted.Task.IsCompleted;
-            commitGate.Release();
-            await replacementTask.WaitAsync(TimeSpan.FromSeconds(10));
-            await AsyncTestHelpers.WaitUntilAsync(() => clientRoot.Name == "Recovered");
 
-            // Assert
-            Assert.False(replacementAdvancedBeforeDrain);
+            // The lease field is cleared right when retirement starts, so this is the point from which
+            // the drain either holds the replacement back or does not.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => GetReceiveLoopCommitLease(source) is null,
+                message: "The replacement should retire the old loop's lease before anything else.");
+            Assert.False(replacementTask.IsCompleted);
+            Assert.NotEqual("Recovered", clientRoot.Name);
+
+            commitGate.Release();
+            await replacementTask.WaitAsync(TimeSpan.FromSeconds(15));
+
+            // Assert - the reload applies the Welcome before the replacement task completes, so a
+            // final value other than the Welcome's would mean the old commit landed after it.
+            Assert.True(
+                await drainWaitedForCommit.Task.WaitAsync(TimeSpan.FromSeconds(10)),
+                "The replacement should stay in the drain until the admitted commit has been applied.");
             Assert.Equal("Recovered", clientRoot.Name);
         }
         finally
         {
             commitGate.Release();
-            source.LivenessTestHooks = null;
+            source.AfterReceiveLoopCommitDrain = null;
             await source.StopAsync(CancellationToken.None);
         }
     }
@@ -328,11 +295,7 @@ public class WebSocketClientLivenessTests
             () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
 
         var oldLoopCompletion = GetReceiveLoopCompletion(source);
-        source.LivenessTestHooks = new WebSocketClientLivenessTestHooks
-        {
-            BeforeUpdateCommitAdmission = admissionGate.Wait,
-            WaitForPreviousReceiveLoopAsync = static _ => Task.CompletedTask
-        };
+        source.BeforeUpdateCommitAdmission = admissionGate.Wait;
         admissionGate.Arm();
         server.Root!.Name = "Old";
         await admissionGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
@@ -340,9 +303,10 @@ public class WebSocketClientLivenessTests
         Task? stopTask = null;
         try
         {
-            // Act
+            // Act - the stop's join with the paused old loop genuinely times out here, which is the
+            // production path this scenario is about.
             stopTask = source.StopAsync(CancellationToken.None);
-            await stopTask.WaitAsync(TimeSpan.FromSeconds(10));
+            await stopTask.WaitAsync(TimeSpan.FromSeconds(20));
             admissionGate.Release();
             await oldLoopCompletion.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
@@ -354,9 +318,9 @@ public class WebSocketClientLivenessTests
             admissionGate.Release();
             if (stopTask is not null)
             {
-                await stopTask.WaitAsync(TimeSpan.FromSeconds(10));
+                await stopTask.WaitAsync(TimeSpan.FromSeconds(20));
             }
-            source.LivenessTestHooks = null;
+            source.BeforeUpdateCommitAdmission = null;
         }
     }
 
@@ -374,19 +338,16 @@ public class WebSocketClientLivenessTests
         await AsyncTestHelpers.WaitUntilAsync(
             () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
 
-        var previousLoopWaitStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        source.LivenessTestHooks = new WebSocketClientLivenessTestHooks
-        {
-            WaitForPreviousReceiveLoopAsync = _ =>
-            {
-                previousLoopWaitStarted.TrySetResult();
-                return Task.CompletedTask;
-            }
-        };
         server.Root!.Name = "Old";
         await commitGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
         await GetReceiveCancellation(source).CancelAsync();
         await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
+
+        // Samples, at the instant the shutdown's drain releases it, whether the commit the drain was
+        // supposed to wait for had already been applied. A shutdown that skipped the drain reaches
+        // this while the gate still holds the commit, so it samples false.
+        var drainWaitedForCommit = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        source.AfterReceiveLoopCommitDrain = () => drainWaitedForCommit.TrySetResult(commitGate.BlockedWriteCompleted);
 
         Task? cleanupTask = null;
         try
@@ -395,12 +356,21 @@ public class WebSocketClientLivenessTests
             cleanupTask = ((ValueTask)typeof(WebSocketSubjectClientSource)
                 .GetMethod("DisposeWebSocketConnectionAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .Invoke(source, null)!).AsTask();
-            var shutdownAdvancedBeforeDrain = previousLoopWaitStarted.Task.IsCompleted;
+
+            // The lease field is cleared right when retirement starts, so this is the point from which
+            // the drain either holds the shutdown back or does not.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => GetReceiveLoopCommitLease(source) is null,
+                message: "The shutdown should retire the receive loop's lease before anything else.");
+            Assert.False(cleanupTask.IsCompleted);
+
             commitGate.Release();
-            await cleanupTask.WaitAsync(TimeSpan.FromSeconds(10));
+            await cleanupTask.WaitAsync(TimeSpan.FromSeconds(15));
 
             // Assert
-            Assert.False(shutdownAdvancedBeforeDrain);
+            Assert.True(
+                await drainWaitedForCommit.Task.WaitAsync(TimeSpan.FromSeconds(10)),
+                "The shutdown should stay in the drain until the admitted commit has been applied.");
             Assert.Equal("Old", clientRoot.Name);
         }
         finally
@@ -408,9 +378,9 @@ public class WebSocketClientLivenessTests
             commitGate.Release();
             if (cleanupTask is not null)
             {
-                await cleanupTask.WaitAsync(TimeSpan.FromSeconds(10));
+                await cleanupTask.WaitAsync(TimeSpan.FromSeconds(15));
             }
-            source.LivenessTestHooks = null;
+            source.AfterReceiveLoopCommitDrain = null;
             await source.StopAsync(CancellationToken.None);
         }
     }
@@ -426,19 +396,6 @@ public class WebSocketClientLivenessTests
         await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational);
 
-        var replacementAttempts = 0;
-        var secondReplacementAttemptStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        source.LivenessTestHooks = new WebSocketClientLivenessTestHooks
-        {
-            BeforeReceiveLoopConnectionAttempt = () =>
-            {
-                if (Interlocked.Increment(ref replacementAttempts) == 2)
-                {
-                    secondReplacementAttemptStarted.TrySetResult();
-                }
-            }
-        };
-
         try
         {
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
@@ -447,13 +404,12 @@ public class WebSocketClientLivenessTests
             // Act
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
 
-            // Assert
-            await secondReplacementAttemptStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            Assert.True(Volatile.Read(ref replacementAttempts) >= 2);
+            // Assert - a further connection reaching the server is the observable form of another
+            // replacement attempt.
+            await server.SecondReplacementConnected.WaitAsync(TimeSpan.FromSeconds(10));
         }
         finally
         {
-            source.LivenessTestHooks = null;
             await source.StopAsync(CancellationToken.None);
         }
     }
@@ -490,59 +446,35 @@ public class WebSocketClientLivenessTests
     }
 
     [Fact]
-    public async Task WhenAReplacementAttemptFailsAfterPreviousLoopTimeout_ThenMonitorAttemptsAnotherReconnect()
+    public async Task WhenAReplacementAttemptFails_ThenMonitorRetriesUntilTheServerReturns()
     {
-        // Arrange
+        // Arrange - the circuit breaker is disabled so the repeated genuine connection failures
+        // below exercise the monitor's own retry loop rather than the breaker's cooldown.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = await StartServerAsync(portLease.Port);
-        await using var source = CreateClientSource(portLease.Port);
-        var monitorObservedInitialLoop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        source.LivenessTestHooks = new WebSocketClientLivenessTestHooks
-        {
-            MonitorReceiveLoopObserved = receiveLoop =>
-            {
-                if (receiveLoop is not null)
-                {
-                    monitorObservedInitialLoop.TrySetResult();
-                }
-            }
-        };
+        await using var source = CreateClientSource(
+            portLease.Port,
+            reconnectDelay: TimeSpan.FromMilliseconds(100),
+            circuitBreakerFailureThreshold: 0);
 
         await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational);
-        await monitorObservedInitialLoop.Task.WaitAsync(TimeSpan.FromSeconds(5));
-
-        var staleCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var receiveCts = GetReceiveCancellation(source);
-        var reconnectAttempts = 0;
-        var secondReconnectAttempted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        source.LivenessTestHooks = new WebSocketClientLivenessTestHooks
-        {
-            BeforeReceiveLoopConnectionAttempt = () =>
-            {
-                if (Interlocked.Increment(ref reconnectAttempts) == 2)
-                {
-                    secondReconnectAttempted.TrySetResult();
-                }
-
-                throw new InvalidOperationException("The test forces this replacement attempt to fail.");
-            },
-            WaitForPreviousReceiveLoopAsync = static _ => Task.CompletedTask
-        };
-        SetReceiveLoopCompletion(source, staleCompletion);
 
         try
         {
-            // Act
-            await receiveCts.CancelAsync();
+            // Act - stopping the server fails every reconnect attempt for real until it returns.
+            await server.StopAsync();
+            await AsyncTestHelpers.WaitUntilAsync(() => !source.Diagnostics.IsOperational);
+            await server.RestartAsync();
 
             // Assert
-            await secondReconnectAttempted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational,
+                timeout: TimeSpan.FromSeconds(15),
+                message: "The monitor should keep retrying failed replacement attempts until one succeeds.");
         }
         finally
         {
-            staleCompletion.TrySetResult();
-            source.LivenessTestHooks = null;
             await source.StopAsync(CancellationToken.None);
         }
     }
@@ -563,15 +495,12 @@ public class WebSocketClientLivenessTests
         var oldLoopReachedLivenessTransition = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var allowOldLoopToContinue = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var replacementPublicationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        source.LivenessTestHooks = new WebSocketClientLivenessTestHooks
+        source.BeforeReceiveLoopLivenessTransition = () =>
         {
-            BeforeReceiveLoopLivenessTransition = () =>
-            {
-                oldLoopReachedLivenessTransition.TrySetResult();
-                allowOldLoopToContinue.Task.GetAwaiter().GetResult();
-            },
-            BeforeReceiveLoopPublication = () => replacementPublicationStarted.TrySetResult()
+            oldLoopReachedLivenessTransition.TrySetResult();
+            allowOldLoopToContinue.Task.GetAwaiter().GetResult();
         };
+        source.BeforeReceiveLoopPublication = () => replacementPublicationStarted.TrySetResult();
 
         try
         {
@@ -595,7 +524,8 @@ public class WebSocketClientLivenessTests
         finally
         {
             allowOldLoopToContinue.TrySetResult();
-            source.LivenessTestHooks = null;
+            source.BeforeReceiveLoopLivenessTransition = null;
+            source.BeforeReceiveLoopPublication = null;
             replacementCompletion.TrySetResult();
         }
     }
@@ -613,7 +543,8 @@ public class WebSocketClientLivenessTests
     private static WebSocketSubjectClientSource CreateClientSource(
         int port,
         TimeSpan? reconnectDelay = null,
-        IWriteInterceptor? writeInterceptor = null)
+        IWriteInterceptor? writeInterceptor = null,
+        int? circuitBreakerFailureThreshold = null)
     {
         var context = InterceptorSubjectContext
             .Create()
@@ -626,14 +557,21 @@ public class WebSocketClientLivenessTests
             context.AddService(writeInterceptor);
         }
 
+        var configuration = new WebSocketClientConfiguration
+        {
+            ServerUri = new Uri($"ws://localhost:{port}/ws"),
+            ReconnectDelay = reconnectDelay ?? TimeSpan.FromMilliseconds(200),
+            MaxReconnectDelay = TimeSpan.FromSeconds(10)
+        };
+
+        if (circuitBreakerFailureThreshold is { } threshold)
+        {
+            configuration.CircuitBreakerFailureThreshold = threshold;
+        }
+
         return new WebSocketSubjectClientSource(
             new TestRoot(context),
-            new WebSocketClientConfiguration
-            {
-                ServerUri = new Uri($"ws://localhost:{port}/ws"),
-                ReconnectDelay = reconnectDelay ?? TimeSpan.FromMilliseconds(200),
-                MaxReconnectDelay = TimeSpan.FromSeconds(10)
-            },
+            configuration,
             NullLogger<WebSocketSubjectClientSource>.Instance);
     }
 
@@ -702,8 +640,15 @@ public class WebSocketClientLivenessTests
         private readonly TaskCompletionSource _entered =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _blocked;
+        private int _blockedWriteCompleted;
 
         public Task Entered => _entered.Task;
+
+        /// <summary>
+        /// Set once the blocked write has actually been applied, which happens before the commit that
+        /// carries it is released, so a drain that observes this as <c>false</c> did not wait for it.
+        /// </summary>
+        public bool BlockedWriteCompleted => Volatile.Read(ref _blockedWriteCompleted) == 1;
 
         public void WriteProperty<TProperty>(
             ref PropertyWriteContext<TProperty> context,
@@ -714,6 +659,9 @@ public class WebSocketClientLivenessTests
             {
                 _entered.TrySetResult();
                 _release.Wait();
+                next(ref context);
+                Volatile.Write(ref _blockedWriteCompleted, 1);
+                return;
             }
 
             next(ref context);
@@ -729,10 +677,14 @@ public class WebSocketClientLivenessTests
         private readonly CancellationTokenSource _stopping = new();
         private readonly TaskCompletionSource _replacementWaitingForWelcome =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _secondReplacementConnected =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
         private WebApplication? _application;
         private int _connectionCount;
 
         public Task ReplacementWaitingForWelcome => _replacementWaitingForWelcome.Task;
+
+        public Task SecondReplacementConnected => _secondReplacementConnected.Task;
 
         public async Task StartAsync(int port)
         {
@@ -782,6 +734,10 @@ public class WebSocketClientLivenessTests
                 {
                     _replacementWaitingForWelcome.TrySetResult();
                 }
+                else if (connectionNumber == 3)
+                {
+                    _secondReplacementConnected.TrySetResult();
+                }
 
                 await Task.Delay(Timeout.InfiniteTimeSpan, _stopping.Token);
             }
@@ -806,6 +762,11 @@ public class WebSocketClientLivenessTests
         (CancellationTokenSource)typeof(WebSocketSubjectClientSource)
             .GetField("_receiveCts", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(source)!;
+
+    private static object? GetReceiveLoopCommitLease(WebSocketSubjectClientSource source) =>
+        typeof(WebSocketSubjectClientSource)
+            .GetField("_receiveLoopCommitLease", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(source);
 
     private static TaskCompletionSource GetReceiveLoopCompletion(WebSocketSubjectClientSource source) =>
         (TaskCompletionSource)typeof(WebSocketSubjectClientSource)

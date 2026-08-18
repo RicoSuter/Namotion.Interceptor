@@ -633,7 +633,7 @@ Every built-in connector implements it, sources through `ISubjectSource : ISubje
 
 ### Connector Diagnostics
 
-Every connector reports what its transport is doing through `ISubjectConnector.Diagnostics`. The declared type is `ConnectorDiagnostics`, narrowed to `SourceDiagnostics` on `ISubjectSource` and to a sealed per-connector type on each concrete connector, so `IOpcUaSubjectClientSource.Diagnostics` hands back an `OpcUaClientDiagnostics` with no cast. The shared members:
+Every connector reports what its transport is doing through `ISubjectConnector.Diagnostics`. The declared type is `ConnectorDiagnostics`, narrowed to `SourceDiagnostics` on `ISubjectSource` and narrowed again by a covariant override on each connector that adds protocol-specific members, so `IOpcUaSubjectClientSource.Diagnostics` hands back an `OpcUaClientDiagnostics` with no cast. The MQTT and WebSocket clients add nothing of their own and report the `SourceDiagnostics` that `SubjectSourceBase` supplies. The shared members:
 
 ```
 ConnectorDiagnostics
@@ -916,6 +916,7 @@ What the base provides around that call:
 | Leaves an expected shutdown unrecorded, so a graceful stop does not overwrite the genuine error that made the connector fail | the `OperationCanceledException` filter on the stopping token |
 | Forces liveness false when `RunAsync` exits, on every path | `MarkStopped()` in the `finally` |
 | Forces liveness false on disposal, because `BackgroundService.Dispose` cancels the token without awaiting `ExecuteAsync` | the `Dispose` override |
+| Runs one restart-loop iteration under its own `ConnectorRunAttempt`, publishing it while the body runs and clearing it before disposal, so an injected kill cancels exactly the iteration that is running and one arriving between iterations finds nothing to cancel | `RunAttemptAsync()`, paired with `ForceKillCurrentAttemptAsync()` |
 
 What a server author must implement:
 
@@ -928,7 +929,7 @@ What a server author must implement:
 
 A connector whose transport work runs in a task the loop does not await, such as a client's reconnect monitor, is outside `RunAsync` too, and has to report its own failures for the same reason.
 
-A connector that participates in chaos testing implements [`IFaultInjectable`](../src/Namotion.Interceptor.Connectors/IFaultInjectable.cs) and gives each restart-loop iteration its own [`ConnectorRunAttempt`](../src/Namotion.Interceptor.Connectors/ConnectorRunAttempt.cs), so injected-kill cancellation and the flag identifying it have the same lifetime. The [MQTT client](../src/Namotion.Interceptor.Mqtt/Client/MqttSubjectClientSource.cs), [WebSocket client](../src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs), and [OPC UA server](../src/Namotion.Interceptor.OpcUa/Server/OpcUaSubjectServer.cs) are the reference implementations. The OPC UA client instead cancels the SDK session by clearing it, or cancels the currently owned manual-reconnection token, because the SDK owns its reconnect loop.
+A connector that participates in chaos testing implements [`IFaultInjectable`](../src/Namotion.Interceptor.Connectors/IFaultInjectable.cs) and runs each restart-loop iteration through `RunAttemptAsync`, which gives the iteration its own [`ConnectorRunAttempt`](../src/Namotion.Interceptor.Connectors/ConnectorRunAttempt.cs), so injected-kill cancellation and the flag identifying it have the same lifetime. `InjectFaultAsync` kills through `ForceKillCurrentAttemptAsync`. The [MQTT client](../src/Namotion.Interceptor.Mqtt/Client/MqttSubjectClientSource.cs), [MQTT server](../src/Namotion.Interceptor.Mqtt/Server/MqttSubjectServer.cs), [WebSocket client](../src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs), [WebSocket server](../src/Namotion.Interceptor.WebSocket/Server/WebSocketSubjectServer.cs) and [OPC UA server](../src/Namotion.Interceptor.OpcUa/Server/OpcUaSubjectServer.cs) all take that route. The OPC UA client instead cancels the SDK session by clearing it, or cancels the currently owned manual-reconnection token, because the SDK owns its reconnect loop.
 
 The outbound queue is wired up by reporting drops into the lifetime-owned metrics and registering only the processor's depth provider. The registration is released when that processor goes away:
 
