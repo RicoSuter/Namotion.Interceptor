@@ -18,7 +18,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Updates;
 public class SubjectUpdateReadOnlyTypesTests
 {
     [Fact]
-    public void WhenImmutableArrayItemAdded_ThenInsertOperationIsCreated()
+    public void WhenImmutableArrayItemAdded_ThenCompleteItemStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
@@ -42,14 +42,15 @@ public class SubjectUpdateReadOnlyTypesTests
         var rootProps = update.Subjects[update.Root!];
         var itemsUpdate = rootProps[nameof(ReadOnlyTypesTestNode.ImmutableItems)];
         Assert.Equal(SubjectPropertyUpdateKind.Collection, itemsUpdate.Kind);
-        Assert.NotNull(itemsUpdate.Operations);
-        Assert.Single(itemsUpdate.Operations);
-        Assert.Equal(SubjectCollectionOperationType.Insert, itemsUpdate.Operations[0].Action);
-        Assert.Equal(1, itemsUpdate.Operations[0].Index);
+        Assert.NotNull(itemsUpdate.Items);
+        Assert.Equal(2, itemsUpdate.Items.Count);
+        Assert.Equal(item1.TryGetSubjectId(), itemsUpdate.Items[0].Id);
+        Assert.Equal(item2.TryGetSubjectId(), itemsUpdate.Items[1].Id);
+        Assert.Equal("Item2", update.Subjects[itemsUpdate.Items[1].Id][nameof(ReadOnlyTypesTestNode.Name)].Value);
     }
 
     [Fact]
-    public void WhenIReadOnlyListItemRemoved_ThenRemoveOperationIsCreated()
+    public void WhenIReadOnlyListItemRemoved_ThenCompleteItemStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
@@ -73,14 +74,13 @@ public class SubjectUpdateReadOnlyTypesTests
         var rootProps = update.Subjects[update.Root!];
         var itemsUpdate = rootProps[nameof(ReadOnlyTypesTestNode.ReadOnlyItems)];
         Assert.Equal(SubjectPropertyUpdateKind.Collection, itemsUpdate.Kind);
-        Assert.NotNull(itemsUpdate.Operations);
-        Assert.Single(itemsUpdate.Operations);
-        Assert.Equal(SubjectCollectionOperationType.Remove, itemsUpdate.Operations[0].Action);
-        Assert.Equal(1, itemsUpdate.Operations[0].Index);
+        Assert.NotNull(itemsUpdate.Items);
+        Assert.Single(itemsUpdate.Items);
+        Assert.Equal(item1.TryGetSubjectId(), itemsUpdate.Items[0].Id);
     }
 
     [Fact]
-    public void WhenIReadOnlyDictionaryKeyAdded_ThenInsertOperationIsCreated()
+    public void WhenIReadOnlyDictionaryKeyAdded_ThenCompleteEntryStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
@@ -108,14 +108,15 @@ public class SubjectUpdateReadOnlyTypesTests
         var rootProps = update.Subjects[update.Root!];
         var lookupUpdate = rootProps[nameof(ReadOnlyTypesTestNode.ReadOnlyLookup)];
         Assert.Equal(SubjectPropertyUpdateKind.Dictionary, lookupUpdate.Kind);
-        Assert.NotNull(lookupUpdate.Operations);
-        Assert.Single(lookupUpdate.Operations);
-        Assert.Equal(SubjectCollectionOperationType.Insert, lookupUpdate.Operations[0].Action);
-        Assert.Equal("key2", lookupUpdate.Operations[0].Index);
+        Assert.NotNull(lookupUpdate.Items);
+        Assert.Equal(2, lookupUpdate.Items.Count);
+        var addedItem = Assert.Single(lookupUpdate.Items, item => item.Key == "key2");
+        Assert.Equal(item2.TryGetSubjectId(), addedItem.Id);
+        Assert.Equal("Item2", update.Subjects[addedItem.Id][nameof(ReadOnlyTypesTestNode.Name)].Value);
     }
 
     [Fact]
-    public void WhenIReadOnlyDictionaryItemPropertyChanged_ThenSparseUpdateByKeyIsCreated()
+    public void WhenIReadOnlyDictionaryItemPropertyChanged_ThenItemSubjectIsUpdatedById()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
@@ -139,14 +140,15 @@ public class SubjectUpdateReadOnlyTypesTests
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
 
-        // Assert
-        var rootProps = update.Subjects[update.Root!];
-        var lookupUpdate = rootProps[nameof(ReadOnlyTypesTestNode.ReadOnlyLookup)];
-        Assert.Equal(SubjectPropertyUpdateKind.Dictionary, lookupUpdate.Kind);
-        Assert.Null(lookupUpdate.Operations);
-        Assert.NotNull(lookupUpdate.Items);
-        Assert.Single(lookupUpdate.Items);
-        Assert.Equal("key1", lookupUpdate.Items[0].Index);
+        // Assert - the changed item is addressed by its own stable ID, the parent's dictionary
+        // property is untouched because no structural change happened
+        var itemId = item1.TryGetSubjectId();
+        Assert.NotNull(itemId);
+        var itemProperties = Assert.Contains(itemId!, update.Subjects);
+        Assert.Equal("Item1Updated", itemProperties[nameof(ReadOnlyTypesTestNode.Name)].Value);
+        Assert.DoesNotContain(
+            update.Subjects,
+            entry => entry.Value.ContainsKey(nameof(ReadOnlyTypesTestNode.ReadOnlyLookup)));
     }
 
     [Fact]
@@ -169,11 +171,11 @@ public class SubjectUpdateReadOnlyTypesTests
         var rootProps = update.Subjects[update.Root!];
         var itemsUpdate = rootProps[nameof(ReadOnlyTypesTestNode.ImmutableItems)];
         Assert.Equal(SubjectPropertyUpdateKind.Collection, itemsUpdate.Kind);
-        Assert.Equal(2, itemsUpdate.Count);
         Assert.NotNull(itemsUpdate.Items);
         Assert.Equal(2, itemsUpdate.Items.Count);
-        Assert.Equal(0, itemsUpdate.Items[0].Index);
-        Assert.Equal(1, itemsUpdate.Items[1].Index);
+        Assert.Equal(item1.TryGetSubjectId(), itemsUpdate.Items[0].Id);
+        Assert.Equal(item2.TryGetSubjectId(), itemsUpdate.Items[1].Id);
+        Assert.All(itemsUpdate.Items, item => Assert.True(update.Subjects.ContainsKey(item.Id)));
     }
 
     [Fact]
@@ -235,11 +237,10 @@ public class SubjectUpdateReadOnlyTypesTests
         var rootProps = update.Subjects[update.Root!];
         var lookupUpdate = rootProps[nameof(ReadOnlyTypesTestNode.ReadOnlyLookup)];
         Assert.Equal(SubjectPropertyUpdateKind.Dictionary, lookupUpdate.Kind);
-        Assert.Equal(2, lookupUpdate.Count);
         Assert.NotNull(lookupUpdate.Items);
         Assert.Equal(2, lookupUpdate.Items.Count);
-        var keys = lookupUpdate.Items.Select(i => i.Index).Cast<string>().OrderBy(k => k).ToArray();
+        var keys = lookupUpdate.Items.Select(item => item.Key).OrderBy(key => key).ToArray();
         Assert.Equal(new[] { "key1", "key2" }, keys);
+        Assert.All(lookupUpdate.Items, item => Assert.True(update.Subjects.ContainsKey(item.Id)));
     }
-
 }
