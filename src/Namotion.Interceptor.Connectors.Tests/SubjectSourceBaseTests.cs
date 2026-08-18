@@ -492,7 +492,6 @@ public class SubjectSourceBaseTests
         };
 
         new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
-        new PropertyReference(subject, nameof(Person.LastName)).SetSource(source);
 
         // Act
         await source.StartAsync(CancellationToken.None);
@@ -500,12 +499,16 @@ public class SubjectSourceBaseTests
             () => Volatile.Read(ref initialStateApplied),
             message: "Expected initial state to be applied");
 
-        // Sentinel write after the snapshot: once it arrives at the source, any earlier flush
-        // containing the FirstName write would already have been delivered.
-        subject.LastName = "sentinel";
+        // Waited for by value rather than fenced behind a write to another property. The reconcile
+        // sends a change the model already holds straight to the source, while one the load moved the
+        // model off it restores locally and leaves to the connected processor, which delivers a buffer
+        // time later. A second property's arrival therefore proves nothing about this one, and as a
+        // fence it let the stop cancel the processor before it flushed.
         await AsyncTestHelpers.WaitUntilAsync(
-            () => receivedChanges.Any(c => c.Property.Name == nameof(Person.LastName)),
-            message: "Expected the sentinel write to reach the source");
+            () => receivedChanges.Any(c =>
+                c.Property.Name == nameof(Person.FirstName) &&
+                c.GetNewValue<string?>() == "stale-user-write"),
+            message: "Expected the write overwritten by the load to reach the source");
         await source.StopAsync(CancellationToken.None);
 
         // Assert: the user's write reaches the source rather than being discarded by the load.
