@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Testing;
@@ -625,9 +626,13 @@ internal sealed class GatedStateRaisingSource : ISubjectSource
         }
     }
 
+    public DateTimeOffset StateChangeTime { get; } = DateTimeOffset.UtcNow;
+
     public DateTimeOffset? LastSynchronizedAt => null;
 
-    public int PendingWriteCount => 0;
+    public SourceDiagnostics Diagnostics { get; } = new(new SourceMetrics());
+
+    ConnectorDiagnostics ISubjectConnector.Diagnostics => Diagnostics;
 
     public event EventHandler<SourceEvent>? StateChanged;
 

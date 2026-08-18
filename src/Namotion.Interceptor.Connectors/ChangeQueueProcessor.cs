@@ -19,6 +19,7 @@ public class ChangeQueueProcessor : IDisposable
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
     private readonly ChangeDeliveryRule _deliveryRule;
+    private readonly Action<long>? _dropHandler;
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
@@ -38,6 +39,12 @@ public class ChangeQueueProcessor : IDisposable
     /// Always zero when <c>maxQueueDepth</c> is null (unbounded).
     /// </summary>
     public long DropCount => Interlocked.Read(ref _dropCount);
+
+    /// <summary>
+    /// Gets the number of changes currently buffered. Approximate: read without a lock while the
+    /// pump is running. Always 0 when the processor is on its immediate path (no buffer time).
+    /// </summary>
+    public int QueueDepth => _changes.Count;
 
     // Scratch state used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
@@ -60,7 +67,7 @@ public class ChangeQueueProcessor : IDisposable
     /// <param name="propertyFilter">Filter to determine if a property change should be included.
     /// The <see cref="PropertyReference"/> may not have a registered property (e.g., when the subject
     /// is momentarily unregistered due to a concurrent structural mutation). Callers should handle
-    /// this case explicitly — typically by resolving via <c>TryGetRegisteredProperty()</c> and
+    /// this case explicitly, typically by resolving via <c>TryGetRegisteredProperty()</c> and
     /// returning <c>false</c> when null.</param>
     /// <param name="writeHandler">Handler to write batched changes.</param>
     /// <param name="deliveryRule">Which commits may supersede a change this processor is about to
@@ -70,11 +77,17 @@ public class ChangeQueueProcessor : IDisposable
     /// <param name="bufferTime">Time to buffer changes before flushing.</param>
     /// <param name="maxQueueDepth">Bound on the buffered change queue, or null for unbounded (existing
     /// connector behavior). When set, enqueuing past the bound drops the oldest unprocessed change and
-    /// increments <see cref="DropCount"/>, so the newest change is retained.</param>
+    /// increments <see cref="DropCount"/>, so the newest change is retained. Read only on the buffered
+    /// path, so a processor with a buffer time of zero never touches the queue this bounds.</param>
     /// <param name="logger">The logger.</param>
+    /// <param name="dropHandler">Optional handler invoked only when bounded-queue overflow drops
+    /// changes. Use this to report the count to queue diagnostics without adding work to successful
+    /// enqueue or dequeue operations.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
     /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
-    /// the first flush, where it would end delivery for this processor's lifetime.</exception>
+    /// the first flush, where it would end delivery for this processor's lifetime. Also thrown when
+    /// <paramref name="maxQueueDepth"/> is zero or negative and <paramref name="bufferTime"/> is
+    /// greater than zero, since a bound has to leave room for at least one change.</exception>
     public ChangeQueueProcessor(
         object? source,
         IInterceptorSubjectContext context,
@@ -83,18 +96,23 @@ public class ChangeQueueProcessor : IDisposable
         ChangeDeliveryRule deliveryRule,
         TimeSpan? bufferTime,
         int? maxQueueDepth,
-        ILogger logger)
+        ILogger logger,
+        Action<long>? dropHandler = null)
     {
         _source = source;
         _propertyFilter = propertyFilter;
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
-        _maxQueueDepth = maxQueueDepth;
-        _deliveryRule = ValidateRule(deliveryRule);
+        _dropHandler = dropHandler;
 
         try
         {
+            ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
+
+            _maxQueueDepth = maxQueueDepth;
+            _deliveryRule = ValidateRule(deliveryRule);
+
             _subscription = context.CreatePropertyChangeQueueSubscription();
             _ownsSubscription = true;
         }
@@ -118,17 +136,43 @@ public class ChangeQueueProcessor : IDisposable
         ChangeDeliveryRule deliveryRule,
         TimeSpan? bufferTime,
         int? maxQueueDepth,
-        ILogger logger)
+        ILogger logger,
+        Action<long>? dropHandler = null)
     {
         _source = source;
         _propertyFilter = propertyFilter;
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
-        _maxQueueDepth = maxQueueDepth;
-        _subscription = subscription;
-        _ownsSubscription = false;
-        _deliveryRule = ValidateRule(deliveryRule);
+        _dropHandler = dropHandler;
+
+        try
+        {
+            ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
+
+            _maxQueueDepth = maxQueueDepth;
+            _subscription = subscription;
+            _ownsSubscription = false;
+            _deliveryRule = ValidateRule(deliveryRule);
+        }
+        catch
+        {
+            _changeMerger.Dispose();
+            throw;
+        }
+    }
+
+    // Only on the buffered path: a buffer time of zero writes each change as it is dequeued and never
+    // fills the queue this bounds, so the bound is not read there.
+    private static void ValidateMaxQueueDepth(int? maxQueueDepth, TimeSpan bufferTime)
+    {
+        if (maxQueueDepth is <= 0 && bufferTime > TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxQueueDepth), maxQueueDepth,
+                "A bounded change queue must have room for at least one change. Pass null for an unbounded " +
+                "queue, or a buffer time of zero for the immediate path, which writes each change as it is " +
+                "dequeued and buffers nothing.");
+        }
     }
 
     // Rejects every unnamed value, not just zero: the delivery decision throws on an unknown rule from
@@ -287,9 +331,16 @@ public class ChangeQueueProcessor : IDisposable
     /// </summary>
     private void DropOverflow(int maxQueueDepth)
     {
+        var droppedCount = 0L;
         while (_changes.Count > maxQueueDepth && _changes.TryDequeue(out _))
         {
             Interlocked.Increment(ref _dropCount);
+            droppedCount++;
+        }
+
+        if (droppedCount > 0)
+        {
+            _dropHandler?.Invoke(droppedCount);
         }
     }
 

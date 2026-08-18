@@ -77,6 +77,7 @@ public class MqttConnectionMonitorTests
             CreateOptions,
             onReconnected: _ => { reconnectedCount++; return Task.CompletedTask; },
             onDisconnected: () => { disconnectedCount++; return Task.CompletedTask; },
+            onError: _ => { },
             NullLogger.Instance);
 
         // Act: let it run for several health check intervals
@@ -112,6 +113,7 @@ public class MqttConnectionMonitorTests
             CreateOptions,
             onReconnected: _ => { Interlocked.Increment(ref reconnectedCount); return Task.CompletedTask; },
             onDisconnected: () => Task.CompletedTask,
+            onError: _ => { },
             NullLogger.Instance);
 
         // Act
@@ -122,6 +124,108 @@ public class MqttConnectionMonitorTests
         // Assert
         Assert.True(reconnectedCount >= 1, $"Expected at least 1 reconnection but got {reconnectedCount}");
         client.Verify(c => c.ConnectAsync(It.IsAny<MqttClientOptions>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task WhenPeriodicPingFailsWhileClientReportsConnected_ThenTransportIsTerminatedAndReconnected()
+    {
+        // Arrange
+        var client = new Mock<IMqttClient>();
+        var isConnected = true;
+        var isOperational = true;
+        var isBuffering = false;
+        var transportTerminated = false;
+        var reconnectAttempted = false;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        client.Setup(c => c.IsConnected).Returns(() => isConnected);
+        SetupPingUnhealthy(client);
+        client
+            .Setup(c => c.DisconnectAsync(
+                It.IsAny<MqttClientDisconnectOptions>(), It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                transportTerminated = true;
+                isConnected = false;
+            })
+            .Returns(Task.CompletedTask);
+        client
+            .Setup(c => c.ConnectAsync(It.IsAny<MqttClientOptions>(), It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                reconnectAttempted = true;
+                isConnected = true;
+                SetupPingHealthy(client);
+            })
+            .ReturnsAsync(new MqttClientConnectResult());
+
+        var monitor = new MqttConnectionMonitor(
+            client.Object,
+            CreateConfiguration(
+                healthCheckInterval: TimeSpan.FromMilliseconds(10),
+                reconnectDelay: TimeSpan.Zero),
+            CreateOptions,
+            onReconnected: _ => cancellation.CancelAsync(),
+            onDisconnected: () =>
+            {
+                isOperational = false;
+                isBuffering = true;
+                return Task.CompletedTask;
+            },
+            onError: _ => { },
+            NullLogger.Instance);
+
+        // Act
+        await monitor.MonitorConnectionAsync(cancellation.Token);
+
+        // Assert
+        Assert.False(isOperational);
+        Assert.True(isBuffering);
+        Assert.True(transportTerminated);
+        Assert.True(reconnectAttempted);
+    }
+
+    [Fact]
+    public async Task WhenTransportTerminationFailsDuringShutdown_ThenTheFailureIsNotReported()
+    {
+        // Arrange
+        var client = new Mock<IMqttClient>();
+        using var cancellation = new CancellationTokenSource();
+        var errorCount = 0;
+
+        client.Setup(c => c.IsConnected).Returns(true);
+        SetupPingUnhealthy(client);
+        client
+            .Setup(c => c.DisconnectAsync(
+                It.IsAny<MqttClientDisconnectOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                cancellation.Cancel();
+                return Task.FromException(new InvalidOperationException("transport stopped"));
+            });
+
+        var monitor = new MqttConnectionMonitor(
+            client.Object,
+            CreateConfiguration(healthCheckInterval: TimeSpan.FromSeconds(30)),
+            CreateOptions,
+            onReconnected: _ => Task.CompletedTask,
+            onDisconnected: () => Task.CompletedTask,
+            onError: _ => Interlocked.Increment(ref errorCount),
+            NullLogger.Instance);
+        monitor.SignalReconnectNeeded();
+
+        // Act
+        try
+        {
+            await monitor.MonitorConnectionAsync(cancellation.Token);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+        }
+
+        // Assert
+        Assert.Equal(0, errorCount);
     }
 
     [Fact]
@@ -152,6 +256,7 @@ public class MqttConnectionMonitorTests
             CreateOptions,
             onReconnected: _ => Task.CompletedTask,
             onDisconnected: () => { disconnectedCalled = true; return Task.CompletedTask; },
+            onError: _ => { },
             NullLogger.Instance);
 
         // Signal disconnect after a short delay (enough time for MonitorConnectionAsync to start waiting)
@@ -188,6 +293,7 @@ public class MqttConnectionMonitorTests
             CreateOptions,
             onReconnected: _ => Task.CompletedTask,
             onDisconnected: () => { Interlocked.Increment(ref disconnectedCount); return Task.CompletedTask; },
+            onError: _ => { },
             NullLogger.Instance);
 
         // Signal disconnect after a short delay — this is a "stale" signal because client is actually healthy
@@ -231,6 +337,7 @@ public class MqttConnectionMonitorTests
             CreateOptions,
             onReconnected: _ => Task.CompletedTask,
             onDisconnected: () => Task.CompletedTask,
+            onError: _ => { },
             NullLogger.Instance);
 
         // Act: run long enough for failures to accumulate then circuit breaker to block further attempts
@@ -268,6 +375,7 @@ public class MqttConnectionMonitorTests
             CreateOptions,
             onReconnected: _ => Task.CompletedTask,
             onDisconnected: () => Task.CompletedTask,
+            onError: _ => { },
             NullLogger.Instance);
 
         // Act
@@ -315,6 +423,7 @@ public class MqttConnectionMonitorTests
                 return Task.CompletedTask;
             },
             onDisconnected: () => { Interlocked.Increment(ref disconnectedCount); return Task.CompletedTask; },
+            onError: _ => { },
             NullLogger.Instance);
 
         monitorRef = monitor;
@@ -342,6 +451,7 @@ public class MqttConnectionMonitorTests
             CreateOptions,
             onReconnected: _ => Task.CompletedTask,
             onDisconnected: () => Task.CompletedTask,
+            onError: _ => { },
             NullLogger.Instance);
 
         // Act & Assert: no exception on double dispose
@@ -360,6 +470,7 @@ public class MqttConnectionMonitorTests
             CreateOptions,
             onReconnected: _ => Task.CompletedTask,
             onDisconnected: () => Task.CompletedTask,
+            onError: _ => { },
             NullLogger.Instance);
 
         await monitor.DisposeAsync();
@@ -376,23 +487,27 @@ public class MqttConnectionMonitorTests
         Func<MqttClientOptions> optionsBuilder = CreateOptions;
         Func<CancellationToken, Task> onReconnected = _ => Task.CompletedTask;
         Func<Task> onDisconnected = () => Task.CompletedTask;
+        Action<Exception> onError = _ => { };
 
         Assert.Throws<ArgumentNullException>(() => new MqttConnectionMonitor(
-            null!, configuration, optionsBuilder, onReconnected, onDisconnected, NullLogger.Instance));
+            null!, configuration, optionsBuilder, onReconnected, onDisconnected, onError, NullLogger.Instance));
 
         Assert.Throws<ArgumentNullException>(() => new MqttConnectionMonitor(
-            client.Object, null!, optionsBuilder, onReconnected, onDisconnected, NullLogger.Instance));
+            client.Object, null!, optionsBuilder, onReconnected, onDisconnected, onError, NullLogger.Instance));
 
         Assert.Throws<ArgumentNullException>(() => new MqttConnectionMonitor(
-            client.Object, configuration, null!, onReconnected, onDisconnected, NullLogger.Instance));
+            client.Object, configuration, null!, onReconnected, onDisconnected, onError, NullLogger.Instance));
 
         Assert.Throws<ArgumentNullException>(() => new MqttConnectionMonitor(
-            client.Object, configuration, optionsBuilder, null!, onDisconnected, NullLogger.Instance));
+            client.Object, configuration, optionsBuilder, null!, onDisconnected, onError, NullLogger.Instance));
 
         Assert.Throws<ArgumentNullException>(() => new MqttConnectionMonitor(
-            client.Object, configuration, optionsBuilder, onReconnected, null!, NullLogger.Instance));
+            client.Object, configuration, optionsBuilder, onReconnected, null!, onError, NullLogger.Instance));
 
         Assert.Throws<ArgumentNullException>(() => new MqttConnectionMonitor(
-            client.Object, configuration, optionsBuilder, onReconnected, onDisconnected, null!));
+            client.Object, configuration, optionsBuilder, onReconnected, onDisconnected, null!, NullLogger.Instance));
+
+        Assert.Throws<ArgumentNullException>(() => new MqttConnectionMonitor(
+            client.Object, configuration, optionsBuilder, onReconnected, onDisconnected, onError, null!));
     }
 }

@@ -91,14 +91,14 @@ public class SubjectSourceBaseTests
 
         // Located rather than sliced blind: without these the slices below throw a bare range exception
         // on the refactor this test exists to survive, which reads as a broken test rather than a moved one.
-        var executeAsyncIndex = source.IndexOf("protected sealed override async Task ExecuteAsync", StringComparison.Ordinal);
-        Assert.True(executeAsyncIndex >= 0, "ExecuteAsync not found; this scan needs updating");
+        var runAsyncIndex = source.IndexOf("protected sealed override async Task RunAsync", StringComparison.Ordinal);
+        Assert.True(runAsyncIndex >= 0, "RunAsync not found; this scan needs updating");
 
-        var executeAsync = source[executeAsyncIndex..];
-        var catchIndex = executeAsync.IndexOf("catch (Exception ex)", StringComparison.Ordinal);
+        var runAsync = source[runAsyncIndex..];
+        var catchIndex = runAsync.IndexOf("catch (Exception ex)", StringComparison.Ordinal);
         Assert.True(catchIndex >= 0, "the catch block was not found; this scan needs updating");
 
-        var catchBlock = executeAsync[catchIndex..];
+        var catchBlock = runAsync[catchIndex..];
         var finallyIndex = catchBlock.IndexOf("finally", StringComparison.Ordinal);
         Assert.True(finallyIndex >= 0, "no finally after the catch; this scan needs updating");
 
@@ -107,7 +107,7 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
-    public async Task WhenExecuteAsyncExitsViaCancellation_ThenTheFinallyTransitionsToStopped()
+    public async Task WhenRunAsyncExitsViaCancellation_ThenTheFinallyTransitionsToStopped()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithLifecycle();
@@ -649,7 +649,7 @@ public class SubjectSourceBaseTests
         var subject = new Person(context);
         var source = new TestSubjectSource(subject, context, NullLogger.Instance);
 
-        // Act & Assert - StartAsync surfaces the faulted ExecuteAsync task
+        // Act & Assert - StartAsync surfaces the faulted RunAsync task
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => source.StartAsync(CancellationToken.None));
         Assert.Contains("PropertyChangeInterceptor", exception.Message);
@@ -1641,7 +1641,7 @@ public class SubjectSourceBaseTests
     public void WhenSubjectSourceBaseDeclaresState_ThenItReadsLockFreeNotUnderStateLock()
     {
         // Arrange
-        // The docs' lock-free getter contract (docs/connectors-monitoring.md: State, LastSynchronizedAt
+        // The docs' lock-free getter contract (docs/connectors-monitoring.md: State, StateChangeTime
         // and RootSubject must not acquire any lock held while StateChanged is raised) has no dynamic
         // test: SourceMonitor reads source.State while holding its own _lock, and TransitionTo raises
         // StateChanged while holding _stateLock - a regression that made State take _stateLock too
@@ -1654,11 +1654,41 @@ public class SubjectSourceBaseTests
         var sourceFilePath = GetSubjectSourceBaseFilePath();
         var source = File.ReadAllText(sourceFilePath);
         var stateProperty = ExtractExpressionBodiedMember(source, "public SourceState State =>");
+        var stateChangeTimeProperty = ExtractExpressionBodiedMember(source, "public DateTimeOffset StateChangeTime =>");
 
         // Act & Assert
-        Assert.Contains("Volatile.Read", stateProperty);
-        Assert.DoesNotContain("_stateLock", stateProperty);
-        Assert.DoesNotContain("lock (", stateProperty);
+        foreach (var getter in new[] { stateProperty, stateChangeTimeProperty })
+        {
+            Assert.Contains("Volatile.Read", getter);
+            Assert.DoesNotContain("_stateLock", getter);
+            Assert.DoesNotContain("lock (", getter);
+        }
+    }
+
+    [Fact]
+    public void WhenSubjectSourceBaseDeclaresStateAndItsTimestamp_ThenBothReadTheSameSnapshotField()
+    {
+        // Arrange
+        // Both getters dereference one immutable snapshot, so each individual read is internally
+        // consistent. Split back into two fields, a read of StateChangeTime could report the previous
+        // transition's moment beside the new state, and no dynamic test can force that: the wall
+        // clock is far coarser than the window between the two writes, so a torn pair is
+        // indistinguishable from a legal one. Hence the static scan, like the getter pinned above.
+        var source = File.ReadAllText(GetSubjectSourceBaseFilePath());
+
+        // Act
+        var stateProperty = ExtractExpressionBodiedMember(source, "public SourceState State =>");
+        var stateChangeTimeProperty = ExtractExpressionBodiedMember(source, "public DateTimeOffset StateChangeTime =>");
+
+        // Located rather than sliced blind, like the sibling scans above: without this a renamed field
+        // fails as a raw string-contains diff that reads as a broken invariant rather than a move.
+        const string snapshotFieldDeclaration = "private SourceStateSnapshot _stateSnapshot";
+        Assert.True(source.Contains(snapshotFieldDeclaration, StringComparison.Ordinal),
+            $"'{snapshotFieldDeclaration}' not found; this scan needs updating");
+
+        // Assert
+        Assert.Contains("Volatile.Read(ref _stateSnapshot)", stateProperty);
+        Assert.Contains("Volatile.Read(ref _stateSnapshot)", stateChangeTimeProperty);
     }
 
     private static string ExtractExpressionBodiedMember(string source, string signature)

@@ -45,7 +45,7 @@ machine.Speed = 100; // Writes to OPC UA server
 
 // Access diagnostics via DI (unnamed singleton)
 var source = serviceProvider.GetRequiredService<IOpcUaSubjectClientSource>();
-Console.WriteLine(source.Diagnostics.IsConnected);
+Console.WriteLine(source.Diagnostics.IsOperational);
 ```
 
 See [OPC UA Client](connectors-opcua-client.md) for configuration, authentication, monitoring, resilience, and extensibility, and [Source Monitoring](connectors-monitoring.md) for waiting until the model is in sync rather than merely connected.
@@ -73,7 +73,7 @@ await host.StartAsync();
 
 // Access diagnostics via DI (unnamed singleton)
 var server = serviceProvider.GetRequiredService<IOpcUaSubjectServer>();
-Console.WriteLine(server.Diagnostics.IsRunning);
+Console.WriteLine(server.Diagnostics.IsOperational);
 ```
 
 See [OPC UA Server](connectors-opcua-server.md) for configuration, security, companion specifications, and diagnostics.
