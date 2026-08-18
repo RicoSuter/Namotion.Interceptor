@@ -20,7 +20,11 @@ public class ContextInheritanceHandler : ILifecycleHandler
             {
                 change.Subject.Context.AddFallbackContext(change.Property.Value.Subject.Context);
             }
-            else if (change is { ReferenceCount: 0, IsPropertyReferenceRemoved: true })
+            // Keyed off IsContextDetach, not ReferenceCount: under a batch scope the count can be
+            // transiently 0 while last-detach processing is deferred, and the scope stamps
+            // IsContextDetach only once the detach actually lands. That keeps the inherited context
+            // alive while a subject moves between structural properties within one update.
+            else if (change is { IsContextDetach: true, IsPropertyReferenceRemoved: true })
             {
                 change.Subject.Context.RemoveFallbackContext(change.Property.Value.Subject.Context);
             }

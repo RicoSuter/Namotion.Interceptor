@@ -16,6 +16,28 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [ThreadStatic]
     private static Stack<HashSet<IInterceptorSubject>>? _subjectHashSetPool;
 
+    [ThreadStatic]
+    private static int s_batchScopeCount;
+
+    [ThreadStatic]
+    private static IInterceptorSubjectContext? s_batchScopeRootContext;
+
+    [ThreadStatic]
+    private static Dictionary<IInterceptorSubject, PropertyReference>? s_deferredLastDetaches;
+
+    private sealed class BatchScope(LifecycleInterceptor lifecycle) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                lifecycle.EndBatchScope();
+            }
+        }
+    }
+
     /// <summary>
     /// Raised when a subject is attached to the object graph.
     /// Handlers must be exception-free and fast (invoked inside lock).
@@ -29,6 +51,104 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// Handlers must be exception-free and fast (invoked inside lock).
     /// </summary>
     public event Action<SubjectLifecycleChange>? SubjectDetaching;
+
+    /// <summary>
+    /// Creates a batch scope that defers isLastDetach processing.
+    /// Subjects whose last property reference is removed during the scope
+    /// stay in _attachedSubjects as a present-but-empty entry. On dispose,
+    /// only subjects whose entry is still empty are detached.
+    /// PropertyReferenceRemoved/Added always fire immediately.
+    /// </summary>
+    public IDisposable CreateBatchScope(IInterceptorSubjectContext rootContext)
+    {
+        s_batchScopeCount++;
+        s_deferredLastDetaches ??= [];
+        if (s_batchScopeCount == 1)
+        {
+            s_batchScopeRootContext = rootContext;
+        }
+        return new BatchScope(this);
+    }
+
+    private void EndBatchScope()
+    {
+        lock (_attachedSubjects)
+        {
+            s_batchScopeCount--;
+            if (s_batchScopeCount == 0 && s_deferredLastDetaches is { Count: > 0 })
+            {
+                foreach (var (subject, deferredProperty) in s_deferredLastDetaches)
+                {
+                    if (_attachedSubjects.TryGetValue(subject, out var set) && set.IsEmpty)
+                    {
+                        // Genuinely orphaned, execute full detach.
+                        _attachedSubjects.Remove(subject);
+
+                        List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
+                        foreach (var entry in subject.Properties)
+                        {
+                            var subjectProperty = new PropertyReference(subject, entry.Key);
+                            var metadata = entry.Value;
+                            if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
+                            {
+                                if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
+                                {
+                                    children ??= GetList();
+                                    FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
+                                }
+
+                                _lastProcessedValues.Remove(subjectProperty);
+                            }
+
+                            subject.DetachSubjectProperty(subjectProperty);
+                        }
+
+                        var count = subject.GetReferenceCount();
+                        var change = new SubjectLifecycleChange
+                        {
+                            Subject = subject,
+                            Property = deferredProperty,
+                            ReferenceCount = count,
+                            IsPropertyReferenceRemoved = true,
+                            IsContextDetach = true
+                        };
+
+                        SubjectDetaching?.Invoke(change);
+
+                        if (subject is ILifecycleHandler subjectHandler)
+                        {
+                            subjectHandler.HandleLifecycleChange(change);
+                        }
+
+                        // Use the root context for service resolution. The subject's own
+                        // context and intermediate parent contexts may have their fallbacks
+                        // removed by ContextInheritanceHandler during processing. The root
+                        // context never loses its fallback and can always resolve services.
+                        var resolveContext = s_batchScopeRootContext!;
+                        var array = resolveContext.GetServices<ILifecycleHandler>();
+                        for (var i = 0; i < array.Length; i++)
+                        {
+                            array[i].HandleLifecycleChange(change);
+                        }
+
+                        if (children is not null)
+                        {
+                            foreach (var child in children)
+                            {
+                                DetachFromProperty(child.subject, resolveContext, child.property, child.index);
+                            }
+
+                            ReturnList(children);
+                        }
+                    }
+                    // else: re-attached during batch (entry not empty), skip
+                }
+
+                s_deferredLastDetaches.Clear();
+                s_batchScopeRootContext = null;
+            }
+        }
+    }
 
     public void AttachSubjectToContext(IInterceptorSubject subject)
     {
@@ -215,31 +335,46 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
         if (isLastDetach)
         {
-            _attachedSubjects.Remove(subject);
-
-            foreach (var entry in subject.Properties)
+            if (s_batchScopeCount > 0)
             {
-                var subjectProperty = new PropertyReference(subject, entry.Key);
+                // Defer the full detach. The entry stays in _attachedSubjects as a present-but-empty
+                // PropertyReferenceSet (the ref-mutated struct is already empty), so a re-attach within
+                // the batch is seen as existing (isFirstAttach == false). EndBatchScope runs the real
+                // detach only for entries that are still empty.
+                s_deferredLastDetaches ??= [];
+                s_deferredLastDetaches[subject] = property;
+            }
+            else
+            {
+                // Immediate detach (existing behavior). Structurally modifies _attachedSubjects,
+                // so the ref to set must not be used after this point.
+                _attachedSubjects.Remove(subject);
 
-                var metadata = entry.Value;
-                if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
+                foreach (var entry in subject.Properties)
                 {
-                    // Use _lastProcessedValues (what was actually attached) instead of the backing
-                    // store, which may contain unattached children from a concurrent next() call.
-                    if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
+                    var subjectProperty = new PropertyReference(subject, entry.Key);
+
+                    var metadata = entry.Value;
+                    if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
                     {
-                        children ??= GetList();
-                        FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
+                        // Use _lastProcessedValues (what was actually attached) instead of the backing
+                        // store, which may contain unattached children from a concurrent next() call.
+                        if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
+                        {
+                            children ??= GetList();
+                            FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
+                        }
+
+                        _lastProcessedValues.Remove(subjectProperty);
                     }
 
-                    _lastProcessedValues.Remove(subjectProperty);
+                    subject.DetachSubjectProperty(subjectProperty);
                 }
-
-                subject.DetachSubjectProperty(subjectProperty);
             }
         }
 
         var count = subject.DecrementReferenceCount();
+        var contextDetach = isLastDetach && s_batchScopeCount == 0;
         var change = new SubjectLifecycleChange
         {
             Subject = subject,
@@ -247,10 +382,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             Index = index,
             ReferenceCount = count,
             IsPropertyReferenceRemoved = true,
-            IsContextDetach = isLastDetach
+            IsContextDetach = contextDetach
         };
 
-        if (isLastDetach)
+        if (contextDetach)
         {
             SubjectDetaching?.Invoke(change);
         }
