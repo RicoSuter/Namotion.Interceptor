@@ -196,7 +196,9 @@ public sealed class SubjectTransaction : IDisposable
         {
             throw new InvalidOperationException(
                 "Cannot access transactional property while commit is in progress. " +
-                "This typically indicates the transaction is being used from multiple threads.");
+                "Source writes and transaction writer callbacks run on the committing flow: build the " +
+                "payload from the supplied changes instead of reading or writing subject properties. " +
+                "This is also reported when the transaction is used from another thread.");
         }
     }
 
