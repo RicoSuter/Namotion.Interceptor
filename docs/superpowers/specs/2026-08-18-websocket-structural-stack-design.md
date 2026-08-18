@@ -22,32 +22,22 @@ Approved 2026-08-18:
 
 ## The stack
 
-Four PRs, each targeting master and landing before the next starts. No stacked branches.
+Three PRs, each targeting master and landing before the next starts. No stacked branches. The original four-PR shape had a separate PR B for the lifecycle batch scope; it is folded into PR A because PR A's structural-churn chaos gate needs the scope to be meaningful (the branch added the scope precisely because ID-based keep/move applies exposed the transient-detach race under structural churn, the exact workload that gate runs), and because splitting produced a strip-then-re-add seam in the applier with no reviewing benefit. PR C and PR D keep their established names.
 
-### PR A: stable-ID protocol model and serialize/apply pipeline
+### PR A: stable-ID protocol model, serialize/apply pipeline, and lifecycle batch scope
 
 Method: take the branch's `Updates/` files wholesale, then hand-merge the applier trio. This is stated plainly: the appliers are a hand-merge of two divergent rewrites of the same methods. Master's side added `ChangeOrigin` stamping with the sent-value survival-evidence rule (including the double-conversion reference-equality subtlety in `SubjectUpdateApplyContext`); the branch's side restructured the same methods for ID resolution. Master's origin-survival tests (#366, #374) passing unmodified is a merge gate alongside the ported StableId suites.
 
 - Protocol model per the approved break. Stable base62 subject IDs minted by `SubjectUpdateBuilder`, stored in `subject.Data` (bounded: IDs die with the subject; the registry reverse index is removed on detach).
 - Rewritten `SubjectUpdateFactory`, `SubjectUpdateBuilder`, `SubjectItemsUpdateFactory`; ID-resolving `SubjectUpdateApplier`, `SubjectItemsUpdateApplier`, `SubjectUpdateApplyContext`. `CollectionDiffBuilder` deleted.
 - **Unregistered-subject serialization: `ProcessSubjectFromMetadata` is kept.** Its trigger is demonstrable on master today: the serializer mints a subject ID and then bails for a subject whose registration has not completed, emitting a reference to an ID with no properties entry; the receiver materializes a default-valued subject that cannot converge later because the applier skips properties absent from an update. Metadata-based complete serialization closes that hole at the emit site. With it in place, no receiver ever gets a reference to a subject it lacks data for, which is what makes dropping the inbound `PendingApplyBuffer` and outbound lazy ID minting coherent as a pair (see below).
-- Stripped from the wholesale port, re-added later or never: the `CreateBatchScope` call in the applier (PR B re-adds it with the scope itself), `PendingApplyBuffer` wiring, the per-root apply lock and `GetApplyLock` API (master's callers serialize applies; dropped, stated here so nobody re-derives it), and the branch's `Diag*` public counters (replaced by the diagnostics tripwire below).
+- The lifecycle batch scope lands in this PR: the `LifecycleInterceptor` scope keeping a subject attached and registered while it moves between structural properties within a single update, the small `ContextInheritanceHandler` adjustment, `BatchScopeTests`, and the applier's `CreateBatchScope` call. Re-validated against registry-before-inheritance ordering (#427) and restricted context inheritance (#407), which the branch has never seen.
+- Stripped from the wholesale port, never re-added: `PendingApplyBuffer` wiring, the per-root apply lock and `GetApplyLock` API (master's callers serialize applies; dropped, stated here so nobody re-derives it), and the branch's `Diag*` public counters (replaced by the diagnostics tripwire below).
 - Semantic drift to fix while porting: typed `ChangeOrigin` with one-shot source stamping (#366, unseen by the branch), the per-subject commit revision field (#399), lean readonly-struct `PropertyReference` (#389), commit-order delivery interactions (#420).
 - Mechanical consumer adaptation in the same PR: WebSocket serializer, handler, and client compile against the new shapes with existing behavior preserved (value sync both directions, server-to-client structural updates now ID-based) and the protocol version bumped; no new client-to-server structural capability yet. ConnectorTester `SnapshotComparer` and `SnapshotIdMap` adapted to the ID-based shape.
 - Docs in the same PR: `docs/connectors-subject-updates.md` rewritten for the ID protocol (the branch's rewrite as the draft). With a hard wire break, protocol docs must change the day the shape does.
 
-Gates: branch test suites ported as the spec (`StableIdApplyTests`, `StableIdCollectionTests`, update flow and snapshot tests), master's origin-survival tests passing unmodified, a regression test for the unregistered-subject emit path, review agent pass, benchmark comparison for `*SubjectUpdateBenchmark*` (partial-update building is a connector hot path), and two Connector Tester runs: `websocket-load` as the new-protocol baseline (recording payload sizes, since 22-character base62 IDs replace small per-update integers on every subject key), and a new server-side structural-churn profile (`StructuralMutationRate` above zero on the server, transactions off). No profile in the repo exercises structural mutation today; PR A rewrites the structural pipeline, so it gets the first structural gate.
-
-### PR B: lifecycle batch scope
-
-Method: cherry-pick from the branch, re-validate against master's lifecycle ordering.
-
-- `LifecycleInterceptor` batch scope keeping a subject attached and registered while it moves between structural properties within a single update; the small `ContextInheritanceHandler` adjustment; `BatchScopeTests`.
-- Wired to its caller in the same PR: the applier from PR A uses the scope during apply, so ID-based keep/move semantics cannot transiently detach a subject and drop a concurrent write.
-- A-before-B is safe: PR A without the scope is the status quo. Master's cross-property moves already transiently detach, and within-property moves never detach; the scope removes the existing transient, it does not fix a regression A would introduce.
-- Re-validated against registry-before-inheritance ordering (#427) and restricted context inheritance (#407), which the branch has never seen.
-
-Gates: `BatchScopeTests`, an integration test proving no transient detach during a move-within-update, review agent pass.
+Gates: branch test suites ported as the spec (`StableIdApplyTests`, `StableIdCollectionTests`, update flow and snapshot tests), `BatchScopeTests` plus an integration test proving no transient detach during a move-within-update, master's origin-survival tests passing unmodified, a regression test for the unregistered-subject emit path, review agent pass, benchmark comparison for `*SubjectUpdateBenchmark*` (partial-update building is a connector hot path), and two Connector Tester runs: `websocket-load` as the new-protocol baseline (recording payload sizes, since 22-character base62 IDs replace small per-update integers on every subject key), and a new server-side structural-churn profile (`StructuralMutationRate` above zero on the server, transactions off). No profile in the repo exercises structural mutation today; PR A rewrites the structural pipeline, so it gets the first structural gate, and that gate runs with the batch scope in place.
 
 ### PR C: WebSocket transport reliability
 
@@ -85,7 +75,7 @@ Gates: transactional structural end-to-end tests, review agent pass, the full Co
 
 ## Verification schedule
 
-Long-running verification, agreed now per AGENTS.md: PR A `websocket-load` (with payload-size recording) plus the server-side structural-churn profile; PR C `websocket-chaos`, `websocket-load`, `websocket-transactions`; PR D the full matrix enumerated in its section, which is the acceptance bar. PR B needs no chaos run. Benchmarks: PR A compares `*SubjectUpdateBenchmark*` against master.
+Long-running verification, agreed now per AGENTS.md: PR A `websocket-load` (with payload-size recording) plus the server-side structural-churn profile; PR C `websocket-chaos`, `websocket-load`, `websocket-transactions`; PR D the full matrix enumerated in its section, which is the acceptance bar. Benchmarks: PR A compares `*SubjectUpdateBenchmark*` against master.
 
 ## Deferred to per-PR design
 

@@ -1,10 +1,10 @@
-# PR A: Stable-ID Protocol Model and Serialize/Apply Pipeline Implementation Plan
+# PR A: Stable-ID Protocol, Pipeline, and Batch Scope Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Land the stable-ID subject-update protocol (base62 subject IDs, ID-referenced structural items, `CompleteSubjectIds` guard) and the ID-resolving serialize/apply pipeline on master, replacing the index-based protocol, with all consumers adapted and the WebSocket protocol version bumped.
+**Goal:** Land the stable-ID subject-update protocol (base62 subject IDs, ID-referenced structural items, `CompleteSubjectIds` guard), the ID-resolving serialize/apply pipeline, and the lifecycle batch scope on master, replacing the index-based protocol, with all consumers adapted and the WebSocket protocol version bumped.
 
-**Architecture:** Take the reference branch's protocol model and factory files wholesale (master never touched them), hand-merge the applier trio to preserve master's `ChangeOrigin` stamping and sent-value survival-evidence rule inside the branch's ID-resolving structure, and adapt the two consumers with shape-level code (ConnectorTester snapshots) plus the protocol version bump. The branch's `PendingApplyBuffer`, lazy outbound ID minting, per-root apply lock, batch-scope call, and `Diag*` public counters are NOT ported (spec tenet 1); `ProcessSubjectFromMetadata` IS ported with its trigger documented.
+**Architecture:** Take the reference branch's protocol model and factory files wholesale (master never touched them), port the `LifecycleInterceptor` batch scope (the applier depends on it to keep subjects attached while they move within one update), hand-merge the applier trio to preserve master's `ChangeOrigin` stamping and sent-value survival-evidence rule inside the branch's ID-resolving structure, and adapt the two consumers with shape-level code (ConnectorTester snapshots) plus the protocol version bump. The branch's `PendingApplyBuffer`, lazy outbound ID minting, per-root apply lock, and `Diag*` public counters are NOT ported (spec tenet 1); `ProcessSubjectFromMetadata` IS ported with its trigger documented.
 
 **Tech Stack:** .NET 9, xUnit, Verify (snapshot tests), PublicApiGenerator, BenchmarkDotNet, Connector Tester (chaos harness).
 
@@ -35,8 +35,8 @@
 | `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectUpdateFactory.cs` | replace + edit | branch, fallback block removed |
 | `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectItemsUpdateFactory.cs` | replace | branch wholesale |
 | `src/Namotion.Interceptor.Connectors/Updates/Internal/CollectionDiffBuilder.cs` | delete | |
-| `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectUpdateApplyContext.cs` | replace | hand-merged (full code in Task 2) |
-| `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectUpdateApplier.cs` | replace | hand-merged (full code in Task 2) |
+| `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectUpdateApplyContext.cs` | replace | hand-merged (full code in Task 3) |
+| `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectUpdateApplier.cs` | replace | hand-merged (full code in Task 3) |
 | `src/Namotion.Interceptor.Connectors/Updates/Internal/SubjectItemsUpdateApplier.cs` | replace + edit | branch, writes routed through context |
 | `src/Namotion.Interceptor.Connectors/Updates/SubjectUpdateExtensions.cs` | keep master | already correct signature |
 | `src/Namotion.Interceptor.Connectors/Updates/SubjectUpdateDiagnostics.cs` | create | tripwire counters |
@@ -44,10 +44,12 @@
 | `src/Namotion.Interceptor.WebSocket/Server/WebSocketServerDiagnostics.cs` | edit | tripwire gauges |
 | `src/Namotion.Interceptor.ConnectorTester/Snapshot/SnapshotComparer.cs`, `SnapshotIdMap.cs`, `SnapshotDiffer.cs` | edit | branch delta |
 | `src/Namotion.Interceptor.ConnectorTester/appsettings.websocket-structural.json` | create | new chaos profile |
-| `src/Namotion.Interceptor.Connectors.Tests/Updates/*` and `ModuleInitializer.cs` | port + adapt | branch, see Task 3 |
+| `src/Namotion.Interceptor.Connectors.Tests/Updates/*` and `ModuleInitializer.cs` | port + adapt | branch, see Task 4 |
 | `docs/connectors-subject-updates.md` | rewrite | branch draft, adjusted |
 
-NOT ported, ever (spec): `Updates/Internal/PendingApplyBuffer.cs`, the `ProcessPropertyChange` unregistered-subject fallback ("lazy minting"), `GetApplyLock`/per-root apply lock, `Diag*` public counters on `SubjectUpdateExtensions`, the `CreateBatchScope` call in the applier (PR B re-adds it with the scope itself).
+Additional files for the batch scope (Task 2): `src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleInterceptor.cs` (port branch delta), `src/Namotion.Interceptor.Tracking/Lifecycle/ContextInheritanceHandler.cs` (one-line condition change), `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/BatchScopeTests.cs` (port from branch), plus the Tracking PublicApi snapshot if `CreateBatchScope` is public.
+
+NOT ported, ever (spec): `Updates/Internal/PendingApplyBuffer.cs`, the `ProcessPropertyChange` unregistered-subject fallback ("lazy minting"), `GetApplyLock`/per-root apply lock, `Diag*` public counters on `SubjectUpdateExtensions`.
 
 Not touched at all: `Namotion.Interceptor.Registry` (the stable-ID infrastructure `GetOrAddSubjectId`, `SetSubjectId`, `TryGetSubjectId`, `ISubjectIdRegistry.TryGetSubjectById`, and detach cleanup already exist on master), `ISubjectFactory`/`SubjectFactoryExtensions` (both needed overloads exist on master), `Namotion.Interceptor.AspNetCore` (read-only consumer, compiles unchanged), WebSocket serializer/client/handler code (no direct `Index`/`Operations` references; the shape rides through `System.Text.Json`).
 
@@ -61,7 +63,7 @@ Not touched at all: `Namotion.Interceptor.Registry` (the stable-ID infrastructur
 
 **Interfaces:**
 - Produces: `SubjectUpdate { string? Root; Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects; HashSet<string>? CompleteSubjectIds; }`; `SubjectPropertyItemUpdate { required string Id; string? Key; }`; `SubjectPropertyUpdate` without `Operations` and without `Count`; internal `SubjectUpdateBuilder.GetOrCreateIdWithStatus`, `MarkSubjectComplete`, `SubjectsWithPartialChanges`; internal `SubjectItemsUpdateFactory.BuildCollectionComplete/BuildDictionaryComplete/BuildCollectionUpdate/BuildDictionaryUpdate`; internal counters `SubjectUpdateFactory.MetadataFallbackSerializationCount`, `SubjectUpdateFactory.DroppedUnregisteredChangeCount`.
-- Consumed by: Task 2 (appliers), Task 3 (tests), Task 5 (ConnectorTester).
+- Consumed by: Task 3 (appliers), Task 4 (tests), Task 6 (ConnectorTester).
 
 - [ ] **Step 1: Copy the wholesale files from the reference commit**
 
@@ -130,7 +132,71 @@ git commit -m "Port stable-ID protocol model and factories from reference branch
 
 ---
 
-### Task 2: Hand-merge the applier trio
+### Task 2: Port the lifecycle batch scope
+
+The batch scope keeps a subject attached and registered while it moves between structural properties within a single update, deferring last-detach processing to scope end. The merged applier (Task 3) wraps its whole apply body in it, and the structural-churn chaos gate (Task 9) depends on it: the branch added the scope precisely because ID-based keep/move applies exposed the transient-detach race under structural churn.
+
+**Files:**
+- Modify: `src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleInterceptor.cs` (apply branch delta; master moved only +3/-2 here since the merge-base, so the 3-way apply is near-clean)
+- Modify: `src/Namotion.Interceptor.Tracking/Lifecycle/ContextInheritanceHandler.cs:23`
+- Create: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/BatchScopeTests.cs` (from branch)
+- Modify: `src/Namotion.Interceptor.Tracking.Tests/VerifyChecksTests.PublicApi.verified.txt` (accept: `CreateBatchScope` is public)
+
+**Interfaces:**
+- Produces: `public IDisposable LifecycleInterceptor.CreateBatchScope(IInterceptorSubjectContext rootContext)`; `TryGetLifecycleInterceptor` already exists on master (`LifecycleInterceptorExtensions.cs:11`).
+- Consumed by: Task 3's merged applier.
+
+- [ ] **Step 1: Apply the branch's LifecycleInterceptor delta onto master's file**
+
+```bash
+git diff 36dcd520 6898d3f7 -- src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleInterceptor.cs > /tmp/batchscope.patch
+git apply --3way /tmp/batchscope.patch
+```
+
+If the 3-way apply conflicts (master's +3/-2 overlap), resolve by keeping master's lines and adding the branch's scope machinery around them; the branch's additions are the `BatchScope` nested class, `CreateBatchScope`, `EndBatchScope`, the deferred-detach bookkeeping they manage, and any `IsContextDetach` stamping changes. Read the surrounding master code before resolving: master reordered the registry ahead of the context-inheritance descent (#427) and restricted context inheritance (#407) after the branch forked, so any conflict here is a semantic checkpoint, not a textual one. If a resolution would change WHEN a detach event fires relative to registry removal, stop and surface it rather than guessing.
+
+- [ ] **Step 2: Apply the ContextInheritanceHandler condition change**
+
+At `ContextInheritanceHandler.cs:23`, change:
+
+```csharp
+            else if (change is { ReferenceCount: 0, IsPropertyReferenceRemoved: true })
+```
+
+to:
+
+```csharp
+            else if (change is { IsContextDetach: true, IsPropertyReferenceRemoved: true })
+```
+
+Rationale to preserve in a short comment above the line: under a batch scope, `ReferenceCount` can be transiently 0 while last-detach processing is deferred; keying fallback-context removal off `IsContextDetach` (which the scope stamps only when the detach actually lands) keeps a subject's inherited context alive while it moves between structural properties within one update. `IsContextDetach` already exists on master's `SubjectLifecycleChange` (line 30).
+
+- [ ] **Step 3: Port BatchScopeTests**
+
+```bash
+git show 6898d3f7:src/Namotion.Interceptor.Tracking.Tests/Lifecycle/BatchScopeTests.cs > src/Namotion.Interceptor.Tracking.Tests/Lifecycle/BatchScopeTests.cs
+```
+
+Adapt only what fails to compile against master's current lifecycle types; assertions stay.
+
+- [ ] **Step 4: Run the Tracking suite**
+
+Run: `DiffEngine_Disabled=true dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj`
+Expected: clean pass including every existing lifecycle, registry-ordering, and context-inheritance test unmodified, plus the ported `BatchScopeTests`. Accept the PublicApi snapshot if its only delta is `CreateBatchScope`. Any existing lifecycle test that the port breaks is a semantic regression against #427/#407: fix the port, never the test.
+
+Also run the registry suite, which pins the #427 ordering: `dotnet test src/Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj`
+Expected: clean pass, unmodified.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A src/Namotion.Interceptor.Tracking src/Namotion.Interceptor.Tracking.Tests
+git commit -m "Port lifecycle batch scope for move-within-update apply"
+```
+
+---
+
+### Task 3: Hand-merge the applier trio
 
 This is the merge of two divergent rewrites. Master's side contributes `ChangeOrigin` routing (every graph write during apply must carry the update's origin so echo suppression works) and the sent-value survival-evidence rule with its convert-once reference-equality subtlety. The branch's side contributes ID resolution, `CompleteSubjectIds` gating, pre-resolution, deferred retry, and the new-subject populate-before-attach ordering. The public `ApplySubjectUpdate` signature stays exactly master's (including `Action<RegisteredSubjectProperty, SubjectPropertyUpdate>?` for the transform) so no unapproved API break occurs.
 
@@ -298,6 +364,7 @@ using System.Text.Json;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Performance;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
@@ -328,54 +395,62 @@ internal static class SubjectUpdateApplier
             context.Initialize(subject.Context, update.Subjects, update.CompleteSubjectIds, subjectFactory, origin, transformValueBeforeApply);
             context.PreResolveSubjects(update.Subjects.Keys);
 
-            if (update.Root is not null && update.Subjects.TryGetValue(update.Root, out var rootProperties))
+            // Batch scope: defer last-detach processing so subjects moving between structural
+            // properties within this update stay attached and registered throughout.
+            // PreResolveSubjects above handles the concurrent-mutation race (different thread);
+            // the scope handles the apply-path move race (same thread).
+            var lifecycle = subject.Context.TryGetLifecycleInterceptor();
+            using (lifecycle?.CreateBatchScope(subject.Context))
             {
-                // The Root field identifies which subject ID in the update corresponds to the
-                // local root subject. The root's ID may differ between sender and receiver;
-                // Root is a mapping hint, not an identity assignment.
-                context.TryMarkAsProcessed(update.Root);
-                ApplyPropertyUpdates(subject, rootProperties, context);
-            }
-
-            // Process remaining subjects by ID lookup. Partial updates can contain changes to
-            // subjects not reachable from the root's changed properties. Subjects not found on
-            // the first pass are retried after all known subjects are processed: structural
-            // processing in the first pass may create them.
-            List<(string SubjectId, Dictionary<string, SubjectPropertyUpdate> Properties)>? deferred = null;
-            foreach (var (subjectId, properties) in update.Subjects)
-            {
-                if (context.TryResolveSubject(subjectId, out var targetSubject))
+                if (update.Root is not null && update.Subjects.TryGetValue(update.Root, out var rootProperties))
                 {
-                    if (context.TryMarkAsProcessed(subjectId))
-                    {
-                        ApplyPropertyUpdates(targetSubject, properties, context);
-                    }
+                    // The Root field identifies which subject ID in the update corresponds to the
+                    // local root subject. The root's ID may differ between sender and receiver;
+                    // Root is a mapping hint, not an identity assignment.
+                    context.TryMarkAsProcessed(update.Root);
+                    ApplyPropertyUpdates(subject, rootProperties, context);
                 }
-                else
-                {
-                    deferred ??= [];
-                    deferred.Add((subjectId, properties));
-                }
-            }
 
-            if (deferred is not null)
-            {
-                foreach (var (subjectId, properties) in deferred)
+                // Process remaining subjects by ID lookup. Partial updates can contain changes to
+                // subjects not reachable from the root's changed properties. Subjects not found on
+                // the first pass are retried after all known subjects are processed: structural
+                // processing in the first pass may create them.
+                List<(string SubjectId, Dictionary<string, SubjectPropertyUpdate> Properties)>? deferred = null;
+                foreach (var (subjectId, properties) in update.Subjects)
                 {
-                    if (context.SubjectIdRegistry.TryGetSubjectById(subjectId, out var targetSubject) &&
-                        context.TryMarkAsProcessed(subjectId))
+                    if (context.TryResolveSubject(subjectId, out var targetSubject))
                     {
-                        ApplyPropertyUpdates(targetSubject, properties, context);
+                        if (context.TryMarkAsProcessed(subjectId))
+                        {
+                            ApplyPropertyUpdates(targetSubject, properties, context);
+                        }
                     }
                     else
                     {
-                        // The subject was not created by structural processing and is not in the
-                        // registry: drop the update. The next update carrying the subject's
-                        // complete state converges it. The counter is the production tripwire.
-                        Interlocked.Increment(ref DroppedInboundSubjectUpdateCount);
-                        System.Diagnostics.Trace.TraceInformation(
-                            $"SubjectUpdateApplier: Dropped update for unresolvable subject {subjectId} " +
-                            $"({properties.Count} properties: {string.Join(", ", properties.Keys)}).");
+                        deferred ??= [];
+                        deferred.Add((subjectId, properties));
+                    }
+                }
+
+                if (deferred is not null)
+                {
+                    foreach (var (subjectId, properties) in deferred)
+                    {
+                        if (context.SubjectIdRegistry.TryGetSubjectById(subjectId, out var targetSubject) &&
+                            context.TryMarkAsProcessed(subjectId))
+                        {
+                            ApplyPropertyUpdates(targetSubject, properties, context);
+                        }
+                        else
+                        {
+                            // The subject was not created by structural processing and is not in the
+                            // registry: drop the update. The next update carrying the subject's
+                            // complete state converges it. The counter is the production tripwire.
+                            Interlocked.Increment(ref DroppedInboundSubjectUpdateCount);
+                            System.Diagnostics.Trace.TraceInformation(
+                                $"SubjectUpdateApplier: Dropped update for unresolvable subject {subjectId} " +
+                                $"({properties.Count} properties: {string.Join(", ", properties.Keys)}).");
+                        }
                     }
                 }
             }
@@ -567,7 +642,7 @@ internal static class SubjectUpdateApplier
 }
 ```
 
-Merge provenance, for the reviewer: the structure (pre-resolve, root-optional, deferred retry, `CompleteSubjectIds` gate, populate-before-attach) is the branch's; the origin parameter, `SetPropertyValue` routing on every graph write, and the whole `ApplyValueUpdate` transform block are master's, with `RegisteredSubjectProperty` replaced by `PropertyReference` where registry independence is required. Differences from BOTH parents: no `CreateBatchScope` (PR B), no `PendingApplyBuffer` (spec), drop-with-counter instead of buffering.
+Merge provenance, for the reviewer: the structure (pre-resolve, batch scope, root-optional, deferred retry, `CompleteSubjectIds` gate, populate-before-attach) is the branch's; the origin parameter, `SetPropertyValue` routing on every graph write, and the whole `ApplyValueUpdate` transform block are master's, with `RegisteredSubjectProperty` replaced by `PropertyReference` where registry independence is required. Difference from BOTH parents: no `PendingApplyBuffer` (spec), drop-with-counter instead of buffering.
 
 - [ ] **Step 3: Port and edit `SubjectItemsUpdateApplier.cs`**
 
@@ -624,7 +699,7 @@ git commit -m "Hand-merge ID-resolving appliers with origin stamping and add pip
 
 ---
 
-### Task 3: Port and adapt the Connectors test suite
+### Task 4: Port and adapt the Connectors test suite
 
 **Files:**
 - Create (from branch): `src/Namotion.Interceptor.Connectors.Tests/ModuleInitializer.cs`, `Updates/StableIdApplyTests.cs`, `Updates/StableIdCollectionTests.cs`, `Updates/ReconnectionConvergenceTests.cs`, `Updates/DetachedSubjectUpdateDropTests.cs`, and every `Updates/*.verified.txt` the branch adds or modifies
@@ -634,7 +709,7 @@ git commit -m "Hand-merge ID-resolving appliers with origin stamping and add pip
 - Modify: `VerifyChecksTests.PublicApi.verified.txt` (accept the received snapshot)
 
 **Interfaces:**
-- Consumes: everything Tasks 1-2 produced.
+- Consumes: everything Tasks 1-3 produced.
 - Produces: the regression test `WhenStructuralChangeReferencesUnregisteredSubject_ThenCompleteStateIsSerializedFromMetadata` that later tasks and the spec's gate list refer to.
 
 - [ ] **Step 1: Copy the branch's test files**
@@ -730,7 +805,7 @@ git commit -m "Port stable-ID test suites, keep read-only-types coverage, pin dr
 
 ---
 
-### Task 4: WebSocket adaptation and protocol bump
+### Task 5: WebSocket adaptation and protocol bump
 
 **Files:**
 - Modify: `src/Namotion.Interceptor.WebSocket/Protocol/WebSocketProtocol.cs:11`
@@ -739,7 +814,7 @@ git commit -m "Port stable-ID test suites, keep read-only-types coverage, pin dr
 - Modify: `src/Namotion.Interceptor.WebSocket.Tests/VerifyChecksTests.PublicApi.verified.txt` if the received output changes
 
 **Interfaces:**
-- Consumes: `SubjectUpdateDiagnostics` from Task 2.
+- Consumes: `SubjectUpdateDiagnostics` from Task 3.
 
 - [ ] **Step 1: Bump the protocol version**
 
@@ -764,7 +839,7 @@ Add to `WebSocketServerDiagnostics` (after `CurrentSequence`):
 - [ ] **Step 3: Build and repair the WebSocket projects**
 
 Run: `dotnet build src/Namotion.Interceptor.WebSocket/Namotion.Interceptor.WebSocket.csproj src/Namotion.Interceptor.WebSocket.Tests/Namotion.Interceptor.WebSocket.Tests.csproj 2>&1 | grep -E "error|Build succeeded" | head -20`
-Production code is expected to compile without edits (no direct `Index`/`Operations` references exist). Test files that construct update shapes (`Serialization/SubjectUpdateFlowTests.cs`, `Protocol/PayloadTests.cs`, possibly `Server/WebSocketEchoSuppressionTests.cs`) will not; for each, first check whether the branch has an adapted version (`git show 6898d3f7:<path>`) and start from that, applying the same three adaptations as Task 3 Step 2. Otherwise adapt in place: `Index = i` becomes ordered `Items` entries with `Id`, dictionary items gain `Key`, `Operations` constructions become complete-state `Items` lists.
+Production code is expected to compile without edits (no direct `Index`/`Operations` references exist). Test files that construct update shapes (`Serialization/SubjectUpdateFlowTests.cs`, `Protocol/PayloadTests.cs`, possibly `Server/WebSocketEchoSuppressionTests.cs`) will not; for each, first check whether the branch has an adapted version (`git show 6898d3f7:<path>`) and start from that, applying the same three adaptations as Task 4 Step 2. Otherwise adapt in place: `Index = i` becomes ordered `Items` entries with `Id`, dictionary items gain `Key`, `Operations` constructions become complete-state `Items` lists.
 
 - [ ] **Step 4: Run WebSocket unit tests**
 
@@ -785,7 +860,7 @@ git commit -m "Bump WebSocket protocol to version 2 and surface pipeline drop tr
 
 ---
 
-### Task 5: ConnectorTester adaptation and structural chaos profile
+### Task 6: ConnectorTester adaptation and structural chaos profile
 
 **Files:**
 - Modify: `src/Namotion.Interceptor.ConnectorTester/Snapshot/SnapshotComparer.cs`, `SnapshotIdMap.cs`, `SnapshotDiffer.cs`
@@ -853,7 +928,7 @@ git commit -m "Adapt ConnectorTester snapshots to stable IDs and add server stru
 
 ---
 
-### Task 6: Protocol documentation
+### Task 7: Protocol documentation
 
 **Files:**
 - Rewrite: `docs/connectors-subject-updates.md` (branch's rewrite as draft)
@@ -875,7 +950,7 @@ git commit -m "Document the stable-ID subject update protocol"
 
 ---
 
-### Task 7: Benchmark gate
+### Task 8: Benchmark gate
 
 - [ ] **Step 1: Read the benchmarking guide**
 
@@ -892,7 +967,7 @@ No commit from this task unless the guide's process produces artifacts that belo
 
 ---
 
-### Task 8: Chaos gates and PR
+### Task 9: Chaos gates and PR
 
 - [ ] **Step 1: Connector Tester runs (agreed long-running verification)**
 
@@ -911,6 +986,6 @@ Push and open a draft PR titled "Stable-ID subject update protocol and ID-resolv
 
 ## Self-Review Notes
 
-- Spec coverage: model+pipeline (Tasks 1-2), metadata-serialization keep with named trigger and regression test (Tasks 1-3), drop policy with tripwire counters and `WebSocketServerDiagnostics` exposure (Tasks 2, 4), consumer adaptation in the same PR (Tasks 4-5), protocol bump (Task 4), docs (Task 6), benchmark + payload sizes (Task 7), `websocket-load` baseline + structural-churn transactions-off gate (Task 8), origin-survival tests unmodified as merge gate (Task 3 Step 5), release-notes and versioning line (Task 8). Registry untouched (verified: infrastructure already on master). PR B's batch scope and PR C/D items are out of scope by design.
+- Spec coverage: model+pipeline (Tasks 1, 3), lifecycle batch scope with `BatchScopeTests` and lifecycle re-validation (Task 2), metadata-serialization keep with named trigger and regression test (Tasks 1, 4), drop policy with tripwire counters and `WebSocketServerDiagnostics` exposure (Tasks 3, 5), consumer adaptation in the same PR (Tasks 5-6), protocol bump (Task 5), docs (Task 7), benchmark + payload sizes (Task 8), `websocket-load` baseline + structural-churn transactions-off gate (Task 9), origin-survival tests unmodified as merge gate (Task 4 Step 5), release-notes and versioning line (Task 9). Registry untouched (verified: infrastructure already on master). PR C/D items are out of scope by design.
 - Deviations from spec discovered during planning, to surface to the user: `SubjectPropertyUpdate.Count` removal (6th break item), `CompleteSubjectIds` addition, branch deleted read-only-types coverage (this plan keeps and adapts it).
-- Type consistency: `SubjectUpdateDiagnostics` property names match Task 2's counter fields; `ApplyUpdate` signature in Task 2 matches `SubjectUpdateExtensions` (master, unchanged); the regression test name in Task 3 matches the gate reference.
+- Type consistency: `SubjectUpdateDiagnostics` property names match Task 3's counter fields; `ApplyUpdate` signature in Task 3 matches `SubjectUpdateExtensions` (master, unchanged); `CreateBatchScope` produced by Task 2 matches the call in Task 3's applier; the regression test name in Task 4 matches the gate reference.
