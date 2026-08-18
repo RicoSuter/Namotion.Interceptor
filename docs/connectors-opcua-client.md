@@ -82,7 +82,7 @@ builder.Services.AddOpcUaSubjectClientSource(
         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
 
         // Optional
-        RootName = "Machines",
+        RootPath = ["Machines"],
         DefaultNamespaceUri = "http://factory.com/machines",
         ApplicationName = "MyOpcUaClient",
         ReconnectInterval = TimeSpan.FromSeconds(5),
