@@ -231,7 +231,7 @@ public class ContextOwnershipRouteTests
     }
 
     [Fact]
-    public void WhenOwnershipRoutesFormDelegationCycle_ThenResolutionThrows()
+    public void WhenOwnershipRoutesFormDelegationCycle_ThenExceptionGuidesToRemoveOwnershipRoute()
     {
         // Arrange
         var ownershipDomain = InterceptorSubjectContext.Create();
@@ -248,6 +248,7 @@ public class ContextOwnershipRouteTests
 
         // Assert
         Assert.Contains("delegation cycle", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("ownership-route registration", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -286,11 +287,18 @@ public class ContextOwnershipRouteTests
                 }, TaskCreationOptions.LongRunning)
             };
 
-            // Act
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => installers.All(installer => installer.IsCompleted),
-                message: $"Concurrent ownership-route installation did not complete on attempt {attempt}");
-            await Task.WhenAll(installers);
+            // Act: event-driven so completed attempts do not wait for a polling interval, while
+            // the timeout still turns a deadlock into a useful failure.
+            try
+            {
+                await Task.WhenAll(installers).WaitAsync(TimeSpan.FromSeconds(15));
+            }
+            catch (TimeoutException exception)
+            {
+                throw new TimeoutException(
+                    $"Concurrent ownership-route installation did not complete on attempt {attempt} of {attempts}.",
+                    exception);
+            }
 
             // Assert
             Assert.NotEqual(results[0], results[1]);
@@ -338,11 +346,18 @@ public class ContextOwnershipRouteTests
                 }, TaskCreationOptions.LongRunning)
             };
 
-            // Act
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => transfers.All(transfer => transfer.IsCompleted),
-                message: $"Concurrent ownership-route transfer did not complete on attempt {attempt}");
-            await Task.WhenAll(transfers);
+            // Act: event-driven so completed attempts do not wait for a polling interval, while
+            // the timeout still turns a deadlock into a useful failure.
+            try
+            {
+                await Task.WhenAll(transfers).WaitAsync(TimeSpan.FromSeconds(15));
+            }
+            catch (TimeoutException exception)
+            {
+                throw new TimeoutException(
+                    $"Concurrent ownership-route transfer did not complete on attempt {attempt} of {attempts}.",
+                    exception);
+            }
 
             // Assert
             Assert.NotEqual(results[0], results[1]);

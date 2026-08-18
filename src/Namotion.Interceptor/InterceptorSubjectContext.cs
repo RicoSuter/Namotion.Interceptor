@@ -96,6 +96,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return new InterceptorSubjectContext();
     }
 
+    /// <summary>
+    /// A single-install generation token for an internal ownership route. Once a descriptor has
+    /// been cleared or replaced, internal callers must never install that exact instance again.
+    /// </summary>
     internal sealed class ContextOwnershipRoute
     {
         internal ContextOwnershipRoute(
@@ -143,10 +147,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 return false;
             }
 
-            var replacementState = CreateContextState(
+            var replacementState = CreateStateReplacement(
+                state,
                 state.Services,
-                state.FallbackContexts.Add(contextImpl),
-                GetOwnershipRoute(state));
+                state.FallbackContexts.Add(contextImpl));
 
             // R4: register into the fallback BEFORE publishing, so its _usedByContexts is always a
             // superset of the true using set. A missing entry leaves a compiled chain above
@@ -180,10 +184,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 return false;
             }
 
-            var replacementState = CreateContextState(
+            var replacementState = CreateStateReplacement(
+                state,
                 state.Services,
-                state.FallbackContexts.RemoveAt(index),
-                GetOwnershipRoute(state));
+                state.FallbackContexts.RemoveAt(index));
             PublishState(replacementState);
 
             // R4: unregister from the fallback only AFTER publishing so that its _usedByContexts
@@ -199,12 +203,15 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return true;
     }
 
+    /// <summary>
+    /// Atomically changes the internal ownership route when <paramref name="expected"/> is still
+    /// installed. Callers own all lifecycle side effects of the transition, and must never call
+    /// this while holding another context's mutation lock.
+    /// </summary>
     internal bool TryChangeOwnershipRoute(
         ContextOwnershipRoute? expected,
         ContextOwnershipRoute? replacement)
     {
-        var changed = false;
-
         lock (_mutationLock)
         {
             var state = Volatile.Read(ref _state);
@@ -235,15 +242,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             {
                 UnregisterUsingContext(current.Target);
             }
-
-            changed = true;
         }
 
-        if (changed)
-        {
-            InvalidateUsingContexts();
-        }
-
+        InvalidateUsingContexts();
         return true;
     }
 
@@ -266,10 +267,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             // the state to not lose it. Mutating a different context from here is forbidden, see
             // the lock order note at the top of the class.
             state = Volatile.Read(ref _state);
-            var replacementState = CreateContextState(
+            var replacementState = CreateStateReplacement(
+                state,
                 state.Services.Add(service!),
-                state.FallbackContexts,
-                GetOwnershipRoute(state));
+                state.FallbackContexts);
             PublishState(replacementState);
         }
 
@@ -282,10 +283,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         lock (_mutationLock)
         {
             var state = Volatile.Read(ref _state);
-            var replacementState = CreateContextState(
+            var replacementState = CreateStateReplacement(
+                state,
                 state.Services.Add(service!),
-                state.FallbackContexts,
-                GetOwnershipRoute(state));
+                state.FallbackContexts);
             PublishState(replacementState);
         }
 
@@ -528,11 +529,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private static InvalidOperationException CreateDelegationCycleException()
     {
         return new InvalidOperationException(
-            "The fallback contexts form a delegation cycle, so no service can be resolved. A context " +
-            "without own services and with exactly one fallback context resolves everything through " +
-            "that fallback context, and following those references leads back to a context already " +
-            "visited. Break the cycle by removing one of the fallback context registrations or by " +
-            "registering a service on one of the contexts on it.");
+            "The fallback-context and ownership-route relationships form a delegation cycle, so no " +
+            "service can be resolved. A context without own services delegates through its one fallback " +
+            "context, or through its ownership route when it has no fallback contexts. It also delegates " +
+            "when its one fallback and ownership route target the same context. Following those " +
+            "relationships leads back to a context already visited. Break the cycle by removing a " +
+            "fallback-context registration, an ownership-route registration, or both registrations from " +
+            "a shared-target hop in the cycle, or by registering a service on one of the contexts in it.");
     }
 
     /// <summary>One context on the delegation walk and the state it was pinned on.</summary>
@@ -610,11 +613,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Resolves services from the given pinned snapshot, normally one whose delegation the caller
-    /// already resolved. That is an expectation and not a precondition: the walk re-follows
-    /// delegation from whatever state it is handed. The cache entry is computed from the same
-    /// snapshot that owns the cache, so a topology change (which publishes a new state) can never
-    /// receive a stale entry.
+    /// Resolves services from a pinned snapshot whose delegation callers have already resolved.
+    /// The cache entry is computed from the same snapshot that owns the cache, so a topology
+    /// change (which publishes a new state) can never receive a stale entry.
     /// </summary>
     private ImmutableArray<TInterface> GetServicesFromState<TInterface>(ContextState state)
     {
@@ -1145,7 +1146,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         /// </summary>
         internal ContextState WithoutCaches()
         {
-            return CreateContextState(Services, FallbackContexts, GetOwnershipRoute(this));
+            return CreateStateReplacement(this, Services, FallbackContexts);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1260,4 +1261,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             ? new ContextState(services, fallbackContexts)
             : new RoutedContextState(services, fallbackContexts, ownershipRoute);
     }
+
+    private static ContextState CreateStateReplacement(
+        ContextState state,
+        ImmutableArray<object> services,
+        ImmutableArray<InterceptorSubjectContext> fallbackContexts)
+    {
+        return CreateContextState(services, fallbackContexts, GetOwnershipRoute(state));
+    }
+
 }
