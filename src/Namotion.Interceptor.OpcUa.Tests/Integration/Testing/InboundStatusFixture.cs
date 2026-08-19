@@ -95,6 +95,12 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
 {
     private const string InitialValue = "initial";
 
+    /// <summary>
+    /// The value the Other node starts with, distinct from <c>Value</c>'s so a test can reject exactly
+    /// one property of the initial snapshot and observe the sibling arriving.
+    /// </summary>
+    internal const string OtherInitialValue = "other-initial";
+
     /// <summary>The two numeric properties carrying a Percent deadband, which the server cannot honour.</summary>
     private const int PolledPropertyCount = 2;
 
@@ -137,15 +143,15 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
     public PropertyReference DoubleProperty =>
         new(ServerRoot.Child!, nameof(InboundStatusChild.DoubleValue));
 
-    // waitForInitialValue: false only waits for the client's subscriptions, not for the initial value.
-    // A test whose interceptor rejects that very value would otherwise fail here in its Arrange phase
-    // rather than on its own assertion.
+    // waitForClientConnection: false skips the client's stable-connection waits. A test that keeps
+    // every connect attempt failing needs it, because such a client never holds the session those
+    // waits poll for.
     public static async Task<InboundStatusFixture> StartAsync(
         ITestOutputHelper output,
         OpcUaValueConverter? valueConverter = null,
         IWriteInterceptor? clientInterceptor = null,
-        bool waitForInitialValue = true,
-        ILoggerProvider? extraClientLoggerProvider = null)
+        ILoggerProvider? extraClientLoggerProvider = null,
+        bool waitForClientConnection = true)
     {
         var logger = new TestLogger(output);
         var port = await OpcUaTestPortPool.AcquireAsync();
@@ -157,7 +163,7 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
             await server.StartAsync(
                 createRoot: context => new InboundStatusRoot(context),
                 initializeDefaults: (context, root) =>
-                    root.Child = new InboundStatusChild(context) { Value = InitialValue, Other = InitialValue },
+                    root.Child = new InboundStatusChild(context) { Value = InitialValue, Other = OtherInitialValue },
                 baseAddress: port.BaseAddress,
                 certificateStoreBasePath: port.CertificateStoreBasePath);
 
@@ -187,9 +193,10 @@ internal sealed class InboundStatusFixture : IAsyncDisposable
 
                     return new InboundStatusRoot(context);
                 },
-                isConnected: root => !waitForInitialValue || root.Child?.Value == InitialValue,
+                isConnected: root => root.Child?.Value == InitialValue,
                 serverUrl: port.ServerUrl,
-                certificateStoreBasePath: port.CertificateStoreBasePath);
+                certificateStoreBasePath: port.CertificateStoreBasePath,
+                waitForConnection: waitForClientConnection);
 
             // Wait for the node tree, so a test can drive it immediately.
             await AsyncTestHelpers.WaitUntilAsync(

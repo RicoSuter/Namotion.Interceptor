@@ -167,25 +167,27 @@ public class OpcUaInboundStatusTests
     }
 
     [Fact]
-    public async Task WhenOnePropertysApplyThrowsDuringInitialLoad_ThenTheSourceStillReachesSynchronized()
+    public async Task WhenOnePropertysApplyThrowsDuringInitialLoad_ThenTheOtherValuesStillApplyAndTheFailureStaysVisible()
     {
-        // Arrange: the interceptor rejects the value both string nodes hold on the server, so applying
-        // the loaded snapshot throws. The connected-wait is relaxed because that value can never land,
-        // and the fixture would otherwise time out before this test's own assertion runs.
+        // Arrange & Act: starting the client runs the initial state load, and the interceptor rejects
+        // the value the Other node holds on the server, so applying the loaded snapshot throws for
+        // that one property on every connect attempt. The stable-connection waits are skipped because
+        // each of those attempts is torn down within milliseconds.
         await using var fixture = await InboundStatusFixture.StartAsync(
             _output,
-            clientInterceptor: new ThrowOnValueInterceptor("initial"),
-            waitForInitialValue: false);
+            clientInterceptor: new ThrowOnValueInterceptor(InboundStatusFixture.OtherInitialValue),
+            waitForClientConnection: false);
 
-        // Act & Assert: a rejected value must not abort the load, which would retry the connect forever.
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(() => fixture.ClientSource.State == SourceState.Synchronized);
-        }
-        catch (TimeoutException)
-        {
-            // Read here rather than passed to WaitUntilAsync, whose message is built before the wait.
-            Assert.Fail($"The source should reach Synchronized, but it is {fixture.ClientSource.State}.");
-        }
+        // Assert: the sibling arriving proves the rejected value did not keep the rest of the
+        // server's state out of the model.
+        await fixture.WaitForClientValueAsync("initial");
+        Assert.NotEqual(InboundStatusFixture.OtherInitialValue, fixture.ClientRoot.Child!.Other);
+
+        // The model refused part of the snapshot, so the load must keep failing visibly rather than
+        // certify a state it only partially holds.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => fixture.ClientSource.Diagnostics.LastError is not null,
+            message: "the rejected value should be recorded on the source diagnostics");
+        Assert.NotEqual(SourceState.Synchronized, fixture.ClientSource.State);
     }
 }

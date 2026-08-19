@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Connection;
@@ -313,6 +314,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         return () =>
         {
             var applied = 0;
+            ExceptionDispatchInfo? firstFailure = null;
             foreach (var (property, dataValue) in result)
             {
                 try
@@ -323,13 +325,18 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 }
                 catch (Exception e)
                 {
-                    // Per property, not per load: one rejected value must not stop the source reaching
-                    // Synchronized, because the connect would then retry forever.
+                    // Contained per property, so one rejected value cannot discard the rest of the
+                    // snapshot, but rethrown below so the load still fails: every caller answers a
+                    // failed load with its own teardown and error report, and a load that certified a
+                    // partially applied snapshot as successful would hide the failure from the source
+                    // diagnostics for good.
+                    firstFailure ??= ExceptionDispatchInfo.Capture(e);
                     _logger.LogError(e, "Failed to apply the loaded value for {PropertyName}.", property.Name);
                 }
             }
 
             _logger.LogInformation("Applied {Count} of {Loaded} OPC UA node values.", applied, result.Count);
+            firstFailure?.Throw();
         };
     }
 
