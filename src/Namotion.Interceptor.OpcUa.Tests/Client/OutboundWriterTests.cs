@@ -56,6 +56,90 @@ public class OutboundWriterTests
     }
 
     [Fact]
+    public async Task WhenTheValueConverterRefusesOneChangeOfTwo_ThenTheOtherIsStillWrittenAndOnlyTheRefusedOneIsEnumerated()
+    {
+        // Arrange: a value the converter persistently throws for would otherwise fail its whole batch
+        // on every flush, and with it every other property sharing that batch, forever.
+        var sent = new List<WriteValueCollection>();
+        var (writer, writableChange) = CreateWriter(
+            CaptureAndAnswerGood(sent),
+            valueConverter: new ThrowOnOutboundSentinelConverter("poison"));
+
+        var refusedChange = CreateMappedChange(writableChange, nameof(TestPerson.LastName), "poison", "Refused");
+
+        // Act
+        var result = await writer.WriteChangesAsync(new[] { writableChange, refusedChange }, CancellationToken.None);
+
+        // Assert: the convertible change went out and was answered Good, so only the refused one is
+        // reported, enumerated so it is retried like any other refusal instead of stopping the flush.
+        Assert.NotNull(result.Error);
+        Assert.IsType<InvalidOperationException>(result.Error);
+        Assert.Equal(refusedChange.Property, Assert.Single(result.FailedChanges).Property);
+        var sentValue = Assert.Single(Assert.Single(sent));
+        Assert.Equal("Node", sentValue.NodeId.Identifier);
+    }
+
+    [Fact]
+    public async Task WhenTheValueConverterRefusesAMiddleChange_ThenAServerRefusalIsAttributedToTheRightChange()
+    {
+        // Arrange: three mapped changes of which the middle one never reaches the request, so the
+        // server's answer positions are shifted against the batch positions. The server refuses the
+        // last node, and that refusal must land on the last change, not on the excluded middle one.
+        var sent = new List<WriteValueCollection>();
+        var (writer, firstChange) = CreateWriter(
+            AnswerPerNode(sent, writeValue => Equals(writeValue.NodeId.Identifier, "Scores")
+                ? StatusCodes.BadOutOfRange
+                : StatusCodes.Good),
+            valueConverter: new ThrowOnOutboundSentinelConverter("poison"));
+
+        var refusedByConverter = CreateMappedChange(firstChange, nameof(TestPerson.LastName), "poison", "Refused");
+        var refusedByServer = CreateMappedChange(firstChange, nameof(TestPerson.Scores), new[] { 1.0 }, "Scores");
+
+        // Act
+        var result = await writer.WriteChangesAsync(
+            new[] { firstChange, refusedByConverter, refusedByServer }, CancellationToken.None);
+
+        // Assert: both refusals are enumerated and the written first change is not, and both errors
+        // are reported so neither the node refusal nor the converter throw is dropped.
+        Assert.NotNull(result.Error);
+        Assert.Equal(2, sent.Single().Count);
+        Assert.Equal(2, result.FailedChanges.Length);
+        var failedProperties = result.FailedChanges.Select(failed => failed.Property).ToArray();
+        Assert.Contains(refusedByConverter.Property, failedProperties);
+        Assert.Contains(refusedByServer.Property, failedProperties);
+        var aggregate = Assert.IsType<AggregateException>(result.Error);
+        Assert.Contains(aggregate.InnerExceptions, inner => inner is OpcUaWriteException);
+        Assert.Contains(aggregate.InnerExceptions, inner => inner is InvalidOperationException);
+    }
+
+    [Fact]
+    public async Task WhenTheValueConverterRefusesTheFirstChange_ThenTheReadBackIsScheduledForTheChangeActuallyWritten()
+    {
+        // Arrange: the refused change comes first, so an answer walk that re-derived the request
+        // selection from the batch would attribute the server's one Good result to the refused change
+        // and schedule the read-back for the node that was never written.
+        await using var manager = CreateReadAfterWriteManager();
+        var (writer, writableChange) = CreateWriter(
+            AnswerWith(StatusCodes.Good),
+            valueConverter: new ThrowOnOutboundSentinelConverter("poison"),
+            readAfterWriteManager: manager);
+
+        var refusedChange = CreateMappedChange(writableChange, nameof(TestPerson.LastName), "poison", "Refused");
+
+        // Only the written node is tracked, so a read-back misattributed to the refused node would
+        // find no registration and leave nothing pending.
+        TrackForReadBack(manager, writableChange);
+
+        // Act
+        var result = await writer.WriteChangesAsync(new[] { refusedChange, writableChange }, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result.Error);
+        Assert.Equal(1, manager.PendingReadCount);
+        Assert.Equal(refusedChange.Property, Assert.Single(result.FailedChanges).Property);
+    }
+
+    [Fact]
     public async Task WhenTheWriteCallTimesOut_ThenNoChangesAreEnumerated()
     {
         // Arrange
@@ -243,6 +327,33 @@ public class OutboundWriterTests
     }
 
     /// <summary>
+    /// Records every request and answers each of its nodes with what <paramref name="answer"/> decides
+    /// for that node.
+    /// </summary>
+    private static Action<Mock<ISession>> AnswerPerNode(List<WriteValueCollection> sent, Func<WriteValue, StatusCode> answer)
+    {
+        return session => session
+            .Setup(s => s.WriteAsync(It.IsAny<RequestHeader>(), It.IsAny<WriteValueCollection>(), It.IsAny<CancellationToken>()))
+            .Returns((RequestHeader _, WriteValueCollection nodesToWrite, CancellationToken _) =>
+            {
+                sent.Add(nodesToWrite);
+
+                var results = new StatusCodeCollection(nodesToWrite.Count);
+                foreach (var writeValue in nodesToWrite)
+                {
+                    results.Add(answer(writeValue));
+                }
+
+                return Task.FromResult(new WriteResponse
+                {
+                    ResponseHeader = new ResponseHeader(),
+                    Results = results,
+                    DiagnosticInfos = []
+                });
+            });
+    }
+
+    /// <summary>
     /// Answers every write with one result per requested node, all carrying <paramref name="statusCode"/>.
     /// </summary>
     private static Action<Mock<ISession>> AnswerWith(uint statusCode)
@@ -264,6 +375,20 @@ public class OutboundWriterTests
                     DiagnosticInfos = []
                 });
             });
+    }
+
+    /// <summary>
+    /// Maps another writable property of the same subject to its own node and returns a change
+    /// carrying <paramref name="newValue"/> for it.
+    /// </summary>
+    private static SubjectPropertyChange CreateMappedChange(
+        SubjectPropertyChange existingChange, string propertyName, object? newValue, string nodeIdentifier)
+    {
+        var property = new PropertyReference(existingChange.Property.Subject, propertyName);
+        property.SetPropertyData(NodeIdKey, new NodeId(nodeIdentifier, 2));
+
+        return SubjectPropertyChange.Create(
+            property, ChangeOrigin.Local, DateTimeOffset.UtcNow, null, null, newValue);
     }
 
     /// <summary>

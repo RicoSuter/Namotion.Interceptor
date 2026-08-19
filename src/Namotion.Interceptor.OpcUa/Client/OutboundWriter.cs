@@ -38,9 +38,10 @@ internal sealed class OutboundWriter
 
     /// <summary>
     /// Writes one batch. A failure these changes themselves caused comes back with them enumerated,
-    /// whether the server refused them per node, the value converter would not convert one, the request
+    /// whether the server refused them per node, the value converter refused one of them, the request
     /// they encode cannot be sent at all, or the answer does not cover every node the request carried;
-    /// the batches behind them are then still attempted.
+    /// the batches behind them are then still attempted. A conversion refusal names only the refused
+    /// change, so the others in the same batch are still sent and written.
     /// A call that never got an answer comes back with none, which is what tells the batching loop to
     /// stop rather than spend another operation timeout per remaining batch on a session that is not
     /// answering.
@@ -53,22 +54,16 @@ internal sealed class OutboundWriter
             return WriteResult.CallFailed(new InvalidOperationException("OPC UA session is not connected."));
         }
 
-        WriteValueCollection writeValues;
-        try
-        {
-            writeValues = CreateWriteValuesCollection(changes);
-        }
-        catch (Exception ex)
-        {
-            // The value converter is a user extension point and runs before anything is sent, so this is
-            // these changes being refused, not a call that failed. Reporting it as a failed call would
-            // condemn every batch behind them unattempted, on this flush and on every retry of it.
-            return WriteResult.Failure(changes, ex);
-        }
+        var request = CreateWriteRequest(changes);
+        var writeValues = request.WriteValues;
 
         if (writeValues.Count is 0)
         {
-            return WriteResult.Success;
+            // Only unmapped changes, which count as written, and conversion refusals, which come back
+            // enumerated so they are retried like any other refusal instead of stopping the flush.
+            return request.ConversionFailures is null
+                ? WriteResult.Success
+                : WriteResult.Failure(request.ConversionFailures.ToArray(), CombineErrors(request.ConversionErrors!));
         }
 
         WriteResponse writeResponse;
@@ -110,12 +105,11 @@ internal sealed class OutboundWriter
 
         try
         {
-            var result = ProcessWriteResults(writeResponse.Results, changes);
-            var successCount = writeValues.Count - result.FailedChanges.Length;
-            if (successCount > 0)
+            var result = ProcessWriteResults(writeResponse.Results, changes, request, out var writtenCount);
+            if (writtenCount > 0)
             {
-                _outgoingThroughput.Add(successCount);
-                NotifyPropertiesWritten(changes, writeResponse.Results);
+                _outgoingThroughput.Add(writtenCount);
+                NotifyPropertiesWritten(changes, writeResponse.Results, request);
             }
 
             return result;
@@ -138,44 +132,71 @@ internal sealed class OutboundWriter
         return statusCode is StatusCodes.BadRequestTooLarge or StatusCodes.BadEncodingLimitsExceeded;
     }
 
-    private WriteResult ProcessWriteResults(StatusCodeCollection results, ReadOnlyMemory<SubjectPropertyChange> allChanges)
+    private WriteResult ProcessWriteResults(
+        StatusCodeCollection results,
+        ReadOnlyMemory<SubjectPropertyChange> allChanges,
+        in WriteRequest request,
+        out int writtenCount)
     {
-        var failureCount = 0;
+        var refusedCount = 0;
         for (var i = 0; i < results.Count; i++)
         {
             if (!StatusCode.IsGood(results[i]))
             {
-                failureCount++;
+                refusedCount++;
             }
         }
 
-        if (failureCount == 0)
+        writtenCount = results.Count - refusedCount;
+
+        var conversionFailures = request.ConversionFailures;
+        if (refusedCount == 0 && conversionFailures is null)
         {
             return WriteResult.Success;
         }
 
-        var failedChanges = new List<SubjectPropertyChange>(failureCount);
-        var resultIndex = 0;
         var span = allChanges.Span;
-        for (var i = 0; i < span.Length && resultIndex < results.Count; i++)
+        var failedChanges = new List<SubjectPropertyChange>(refusedCount + (conversionFailures?.Count ?? 0));
+        for (var i = 0; i < results.Count; i++)
         {
-            var change = span[i];
-            if (!TryGetWritableNodeId(change, out _, out _))
-                continue;
-
-            if (!StatusCode.IsGood(results[resultIndex]))
+            if (!StatusCode.IsGood(results[i]))
             {
-                failedChanges.Add(change);
+                // Attributed through the index recorded when this request position was built, never by
+                // re-deriving the selection: the selection consults live registry state, which a
+                // concurrent detach can change between building the request and processing the answer,
+                // and a skewed walk would pin a status on the wrong change.
+                failedChanges.Add(span[request.ChangeIndices[i]]);
             }
-            resultIndex++;
         }
 
-        _logger.LogWarning(
-            "OPC UA write batch failure: {FailedCount} of {TotalCount} writes failed.",
-            failedChanges.Count, results.Count);
+        Exception error;
+        if (refusedCount > 0)
+        {
+            _logger.LogWarning(
+                "OPC UA write batch failure: {FailedCount} of {TotalCount} writes failed.",
+                refusedCount, results.Count);
 
-        var error = new OpcUaWriteException(failedChanges.Count, results.Count);
+            var writeError = new OpcUaWriteException(refusedCount, results.Count);
+            error = request.ConversionErrors is null
+                ? writeError
+                : new AggregateException([writeError, .. request.ConversionErrors]);
+        }
+        else
+        {
+            error = CombineErrors(request.ConversionErrors!);
+        }
+
+        if (conversionFailures is not null)
+        {
+            failedChanges.AddRange(conversionFailures);
+        }
+
         return WriteResult.Failure(failedChanges.ToArray(), error);
+    }
+
+    private static Exception CombineErrors(List<Exception> errors)
+    {
+        return errors.Count == 1 ? errors[0] : new AggregateException(errors);
     }
 
     private bool TryGetWritableNodeId(SubjectPropertyChange change, out NodeId nodeId, out RegisteredSubjectProperty registeredProperty)
@@ -198,10 +219,30 @@ internal sealed class OutboundWriter
         return true;
     }
 
-    private WriteValueCollection CreateWriteValuesCollection(ReadOnlyMemory<SubjectPropertyChange> changes)
+    /// <summary>
+    /// What <see cref="CreateWriteRequest"/> built from one batch: the request itself, the change index
+    /// each request position was built from, and the changes the value converter refused. Only the
+    /// first <c>WriteValues.Count</c> entries of <see cref="ChangeIndices"/> are meaningful.
+    /// </summary>
+    private readonly struct WriteRequest(
+        WriteValueCollection writeValues,
+        int[] changeIndices,
+        List<SubjectPropertyChange>? conversionFailures,
+        List<Exception>? conversionErrors)
+    {
+        public WriteValueCollection WriteValues { get; } = writeValues;
+        public int[] ChangeIndices { get; } = changeIndices;
+        public List<SubjectPropertyChange>? ConversionFailures { get; } = conversionFailures;
+        public List<Exception>? ConversionErrors { get; } = conversionErrors;
+    }
+
+    private WriteRequest CreateWriteRequest(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
         var span = changes.Span;
         var writeValues = new WriteValueCollection(span.Length);
+        var changeIndices = new int[span.Length];
+        List<SubjectPropertyChange>? conversionFailures = null;
+        List<Exception>? conversionErrors = null;
 
         for (var i = 0; i < span.Length; i++)
         {
@@ -212,10 +253,28 @@ internal sealed class OutboundWriter
                 continue;
             }
 
-            var convertedValue = _configuration.ValueConverter.ConvertToNodeValue(
-                change.GetNewValue<object?>(),
-                registeredProperty);
+            object? convertedValue;
+            try
+            {
+                convertedValue = _configuration.ValueConverter.ConvertToNodeValue(
+                    change.GetNewValue<object?>(),
+                    registeredProperty);
+            }
+            catch (Exception ex)
+            {
+                // The value converter is a user extension point and runs before anything is sent, so
+                // this is this change being refused, not a call that failed. Contained per change and
+                // enumerated in the result like a node the server refuses: condemning the batch would
+                // fail every other change in it, on this flush and on every retry, for as long as this
+                // value converts to a throw. The value stays out of the log, it is process data.
+                (conversionFailures ??= []).Add(change);
+                (conversionErrors ??= []).Add(ex);
+                _logger.LogError(ex, "Failed to convert the outbound value for '{PropertyName}'.",
+                    registeredProperty.Name);
+                continue;
+            }
 
+            changeIndices[writeValues.Count] = i;
             writeValues.Add(new WriteValue
             {
                 NodeId = nodeId,
@@ -237,7 +296,7 @@ internal sealed class OutboundWriter
             });
         }
 
-        return writeValues;
+        return new WriteRequest(writeValues, changeIndices, conversionFailures, conversionErrors);
     }
 
     /// <summary>
@@ -246,11 +305,12 @@ internal sealed class OutboundWriter
     /// re-send, so the model would flip to the stale value and back.
     /// </summary>
     /// <remarks>
-    /// Walks the same selection <see cref="CreateWriteValuesCollection"/> built the request from, so the
-    /// result at each position answers about the writable change at the same position. The result count
-    /// is checked against the request before this runs, which is what makes that alignment exact.
+    /// The result at each position answers about the change whose index was recorded when that request
+    /// position was built, so the alignment holds even when the registry state the selection consulted
+    /// has changed since. The result count is checked against the request before this runs.
     /// </remarks>
-    private void NotifyPropertiesWritten(ReadOnlyMemory<SubjectPropertyChange> changes, StatusCodeCollection results)
+    private void NotifyPropertiesWritten(
+        ReadOnlyMemory<SubjectPropertyChange> changes, StatusCodeCollection results, in WriteRequest request)
     {
         var manager = _readAfterWriteManager;
         if (manager is null)
@@ -259,16 +319,10 @@ internal sealed class OutboundWriter
         }
 
         var span = changes.Span;
-        var resultIndex = 0;
-        for (var i = 0; i < span.Length && resultIndex < results.Count; i++)
+        var writeValues = request.WriteValues;
+        for (var i = 0; i < results.Count; i++)
         {
-            var change = span[i];
-            if (!TryGetWritableNodeId(change, out var nodeId, out _))
-            {
-                continue;
-            }
-
-            var status = results[resultIndex++];
+            var status = results[i];
 
             // GoodCompletesAsynchronously confirms the write was taken, which a gateway queueing writes
             // down to a device answers with, but says the processing is not finished. A read-back firing
@@ -277,7 +331,7 @@ internal sealed class OutboundWriter
             if (StatusCode.IsGood(status) && status.CodeBits != StatusCodes.GoodCompletesAsynchronously)
             {
                 // The change's own revision, not the property's current one, see OnPropertyWritten.
-                manager.OnPropertyWritten(nodeId, change.Revision);
+                manager.OnPropertyWritten(writeValues[i].NodeId, span[request.ChangeIndices[i]].Revision);
             }
         }
     }
