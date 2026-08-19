@@ -19,6 +19,7 @@ namespace Namotion.Interceptor.WebSocket.Client
         public System.TimeSpan RetryTime { get; set; }
         public System.Uri? ServerUri { get; set; }
         public Namotion.Interceptor.Connectors.ISubjectFactory? SubjectFactory { get; set; }
+        public System.TimeSpan TeardownFlushTimeout { get; set; }
         public int WriteBatchSize { get; set; }
         public int WriteRetryQueueSize { get; set; }
         public void Validate() { }
@@ -153,6 +154,7 @@ namespace Namotion.Interceptor.WebSocket.Server
         public Namotion.Interceptor.Connectors.Updates.ISubjectUpdateProcessor[] Processors { get; set; }
         public System.TimeSpan SendLockTimeout { get; set; }
         public Namotion.Interceptor.Connectors.ISubjectFactory? SubjectFactory { get; set; }
+        public System.TimeSpan TeardownFlushTimeout { get; set; }
         public int WriteBatchSize { get; set; }
         public void Validate() { }
     }

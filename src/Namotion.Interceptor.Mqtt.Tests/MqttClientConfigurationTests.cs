@@ -90,6 +90,20 @@ public class MqttClientConfigurationTests
     }
 
     [Fact]
+    public void Validate_NegativeTeardownFlushTimeout_ThrowsArgumentException()
+    {
+        // Arrange
+        var config = new MqttClientConfiguration
+        {
+            BrokerHost = "localhost",
+            TeardownFlushTimeout = TimeSpan.FromMilliseconds(-1)
+        };
+
+        // Act & Assert
+        Assert.Throws<ArgumentException>(() => config.Validate());
+    }
+
+    [Fact]
     public void Validate_NegativeWriteRetryQueueSize_ThrowsArgumentException()
     {
         // Arrange

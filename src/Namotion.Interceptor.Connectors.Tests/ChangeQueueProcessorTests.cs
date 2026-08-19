@@ -983,4 +983,211 @@ public class ChangeQueueProcessorTests
         await processing;
     }
 
+    [Fact]
+    public async Task WhenProcessingStopsWithBufferedChanges_ThenTheyAreStillWritten()
+    {
+        // Arrange: a buffer time no periodic tick reaches during the test, so the change is taken off the
+        // subscription and left in the processor buffer, where only the teardown drain can deliver it.
+        // Nothing else can recover it there: it is gone from the subscription a source would drain.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var writtenValues = new ConcurrentQueue<string>();
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    writtenValues.Enqueue(change.GetNewValue<string>()!);
+                }
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "buffered";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processor.QueueDepth == 1,
+            message: "The change should be buffered by the processor before it stops");
+
+        // Act
+        await cancellation.CancelAsync();
+        await processing;
+
+        // Assert
+        Assert.Equal(["buffered"], writtenValues.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenTeardownFlushTimeoutIsZero_ThenBufferedChangesAreDiscardedOnStop()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var writeCount = 0;
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) =>
+            {
+                Interlocked.Increment(ref writeCount);
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            teardownFlushTimeout: TimeSpan.Zero);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "buffered";
+        await AsyncTestHelpers.WaitUntilAsync(() => processor.QueueDepth == 1);
+
+        // Act
+        await cancellation.CancelAsync();
+        await processing;
+
+        // Assert
+        Assert.Equal(0, Volatile.Read(ref writeCount));
+    }
+
+    [Fact]
+    public async Task WhenTheTeardownWriteBlocks_ThenStopEndsAtTheConfiguredTimeout()
+    {
+        // Arrange: a write that never returns on its own, which is what a dead transport looks like here.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var writeStarted = new ManualResetEventSlim(false);
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: async (_, teardownToken) =>
+            {
+                writeStarted.Set();
+                await Task.Delay(Timeout.Infinite, teardownToken);
+            },
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            teardownFlushTimeout: TimeSpan.FromMilliseconds(200));
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "buffered";
+        await AsyncTestHelpers.WaitUntilAsync(() => processor.QueueDepth == 1);
+
+        // Act: asserts only that this completes, since a wall-clock upper edge would trip on a loaded agent.
+        await cancellation.CancelAsync();
+        await processing.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.True(writeStarted.IsSet, "The teardown drain should have reached the write handler.");
+    }
+
+    [Fact]
+    public void WhenTeardownFlushTimeoutIsNegative_ThenConstructionThrows()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChangeQueueProcessor(
+            source: null,
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            bufferTime: TimeSpan.FromMilliseconds(8),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            teardownFlushTimeout: TimeSpan.FromMilliseconds(-1)));
+    }
+
+    [Fact]
+    public async Task WhenTheTeardownWriteBlocksAndIgnoresCancellation_ThenStoppingStillCompletes()
+    {
+        // Arrange: a write handler that blocks synchronously and never reads its token, which is what the
+        // OPC UA server does while it holds the SDK's node manager lock. The token the drain writes under
+        // therefore bounds nothing, so a stop that only asked for cancellation would wait here as long as
+        // the handler cares to block.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) =>
+            {
+                writeEntered.TrySetResult();
+                releaseWrite.Task.GetAwaiter().GetResult();
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        // Lets the handler out even when nothing else does, so a regression of the bound fails this test
+        // instead of wedging the run on a permanently blocked thread.
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() => releaseWrite.TrySetResult());
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "buffered";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processor.QueueDepth == 1,
+            message: "The change should be buffered by the processor before it stops");
+
+        try
+        {
+            // Act
+            await cancellation.CancelAsync();
+            await writeEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await processing.WaitAsync(TimeSpan.FromSeconds(30));
+
+            // Assert: the stop completed while the handler was still inside the write, which nothing but
+            // an externally enforced deadline can do.
+            Assert.False(releaseWrite.Task.IsCompleted,
+                "The drain waited for the blocked write handler instead of abandoning it at the deadline.");
+        }
+        finally
+        {
+            releaseWrite.TrySetResult();
+        }
+    }
 }

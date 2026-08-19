@@ -196,6 +196,14 @@ If a transaction repair write fails, the source keeps the older value and the su
 - Re-apply on reconnection by commit order: after loading initial state, each queued change is kept unless a later *local* write superseded it, in which case that later write is delivered instead. A kept change is sent as a fresh write, restored locally first if the load moved the model off it. Values the load brought in do not supersede a write that already committed, because the load cannot be ranked against it.
 - In-memory only: queued writes are lost on process restart
 
+### Flushing On Stop
+
+When a connector stops, the change processor writes whatever it had buffered but not yet flushed, instead of discarding it. A source writes it through the retry queue above, so a live transport takes the batch and a dead one parks it; a server broadcasts it to the clients still connected. Without this the batch is unrecoverable rather than merely late, because it has already left the change subscription that the retry queue is fed from.
+
+The cost is that a stop can block on an unreachable endpoint, so the wait is bounded by `TeardownFlushTimeout`, which each connector exposes on its own configuration (for example `OpcUaClientConfiguration.TeardownFlushTimeout`) and which defaults to `ChangeQueueProcessor.DefaultTeardownFlushTimeout`, 5 seconds. That bound is per connector and the connectors stop one after another, under the host's shared `HostOptions.ShutdownTimeout` of 30 seconds by default, so a host running several connectors that can hang wants a shorter bound than one running a single local connector. Set it to zero to skip the flush and discard the batch, which is the fastest stop and the only one that loses data. When implementing a custom source, pass `teardownFlushTimeout` to the `SubjectSourceBase` constructor, which rejects a negative value there rather than when the source next connects.
+
+The batch is one more write through the normal handler, not a privileged one, so for a source the handler flushes the write retry queue first: that backlog holds older commits and must keep its place in commit order. A deep backlog on a slow transport can consume the whole bound on its own, in which case the batch is parked for the next attempt rather than written.
+
 ### Monitoring Synchronization State
 
 Every source reports whether it is connecting, synchronized, or stopped, through a per-tree registry, a typed event stream, and an awaitable wait. Add `WithSourceMonitoring()` to the context recipe to enable it:

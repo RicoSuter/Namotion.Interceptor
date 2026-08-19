@@ -13,6 +13,12 @@ namespace Namotion.Interceptor.Connectors;
 /// </summary>
 public class ChangeQueueProcessor : IDisposable
 {
+    /// <summary>
+    /// The teardown flush bound a processor uses when none is given. Public so a connector configuration
+    /// states this default rather than restating the value.
+    /// </summary>
+    public static readonly TimeSpan DefaultTeardownFlushTimeout = TimeSpan.FromSeconds(5);
+
     private readonly Func<PropertyReference, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
     private readonly object? _source;
@@ -23,6 +29,8 @@ public class ChangeQueueProcessor : IDisposable
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
+
+    private readonly TimeSpan _teardownFlushTimeout;
     private readonly int? _maxQueueDepth;
     private long _dropCount;
     private int _flushGate; // 0 = free, 1 = flushing
@@ -83,11 +91,17 @@ public class ChangeQueueProcessor : IDisposable
     /// <param name="dropHandler">Optional handler invoked only when bounded-queue overflow drops
     /// changes. Use this to report the count to queue diagnostics without adding work to successful
     /// enqueue or dequeue operations.</param>
+    /// <param name="teardownFlushTimeout">How long the teardown drain may block, or null for
+    /// <see cref="DefaultTeardownFlushTimeout"/>. Connectors stop one after another under the host's
+    /// shared <c>HostOptions.ShutdownTimeout</c>, 30 seconds by default, so enough of them blocked on
+    /// unreachable endpoints still exhaust it. <see cref="TimeSpan.Zero"/> discards the batch
+    /// instead.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
     /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
     /// the first flush, where it would end delivery for this processor's lifetime. Also thrown when
     /// <paramref name="maxQueueDepth"/> is zero or negative and <paramref name="bufferTime"/> is
-    /// greater than zero, since a bound has to leave room for at least one change.</exception>
+    /// greater than zero, since a bound has to leave room for at least one change, and when
+    /// <paramref name="teardownFlushTimeout"/> is negative.</exception>
     public ChangeQueueProcessor(
         object? source,
         IInterceptorSubjectContext context,
@@ -97,7 +111,8 @@ public class ChangeQueueProcessor : IDisposable
         TimeSpan? bufferTime,
         int? maxQueueDepth,
         ILogger logger,
-        Action<long>? dropHandler = null)
+        Action<long>? dropHandler = null,
+        TimeSpan? teardownFlushTimeout = null)
     {
         _source = source;
         _propertyFilter = propertyFilter;
@@ -109,6 +124,7 @@ public class ChangeQueueProcessor : IDisposable
         try
         {
             ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
+            _teardownFlushTimeout = ValidateTeardownFlushTimeout(teardownFlushTimeout);
 
             _maxQueueDepth = maxQueueDepth;
             _deliveryRule = ValidateRule(deliveryRule);
@@ -137,7 +153,8 @@ public class ChangeQueueProcessor : IDisposable
         TimeSpan? bufferTime,
         int? maxQueueDepth,
         ILogger logger,
-        Action<long>? dropHandler = null)
+        Action<long>? dropHandler = null,
+        TimeSpan? teardownFlushTimeout = null)
     {
         _source = source;
         _propertyFilter = propertyFilter;
@@ -149,6 +166,7 @@ public class ChangeQueueProcessor : IDisposable
         try
         {
             ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
+            _teardownFlushTimeout = ValidateTeardownFlushTimeout(teardownFlushTimeout);
 
             _maxQueueDepth = maxQueueDepth;
             _subscription = subscription;
@@ -173,6 +191,19 @@ public class ChangeQueueProcessor : IDisposable
                 "queue, or a buffer time of zero for the immediate path, which writes each change as it is " +
                 "dequeued and buffers nothing.");
         }
+    }
+
+    internal static TimeSpan ValidateTeardownFlushTimeout(TimeSpan? teardownFlushTimeout)
+    {
+        var timeout = teardownFlushTimeout ?? DefaultTeardownFlushTimeout;
+        if (timeout < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(teardownFlushTimeout), timeout,
+                "A teardown flush timeout must not be negative. Pass TimeSpan.Zero to skip the drain " +
+                "and discard whatever is still buffered when the processor stops.");
+        }
+
+        return timeout;
     }
 
     // Rejects every unnamed value, not just zero: the delivery decision throws on an unknown rule from
@@ -231,7 +262,7 @@ public class ChangeQueueProcessor : IDisposable
                         _logger.LogError(ex, "Failed to flush changes.");
                     }
                 }
-            }, linkedTokenSource.Token)
+            })
             : Task.CompletedTask;
 
         if (periodicTimer is null)
@@ -320,7 +351,68 @@ public class ChangeQueueProcessor : IDisposable
         finally
         {
             try { await linkedTokenSource.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
+
+            // Cannot throw: the delegate catches everything and Task.Run was given no token.
             await flushTask.ConfigureAwait(false);
+
+            await FlushRemainingChangesAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Writes the changes that were taken off the subscription but never flushed. Nothing else can
+    /// recover them: they have already left the subscription, so the retry queue drain on the next
+    /// attempt cannot see them, and a reconnecting connector's initial load then hides the loss by
+    /// making both sides agree on a value the caller never wrote.
+    /// </summary>
+    private async Task FlushRemainingChangesAsync()
+    {
+        if (_teardownFlushTimeout <= TimeSpan.Zero || _changes.IsEmpty)
+        {
+            return;
+        }
+
+        // A fresh token, not the one ProcessAsync was given: that one is already cancelled here, so
+        // writing under it would fail every change, which is the loss this exists to prevent.
+        using var teardownTokenSource = new CancellationTokenSource(_teardownFlushTimeout);
+        try
+        {
+            // The gate is free: the dequeue loop has exited and the periodic flush task is awaited above,
+            // so nothing else is flushing unless a concurrent Dispose is in progress.
+            //
+            // Off this thread, because the token only bounds a handler that observes it and the OPC UA
+            // server writes synchronously under the SDK's node manager lock. Awaiting inline would then
+            // bound nothing. What is abandoned still finishes on its own and cleans up after itself.
+            await Task
+                .Run(() => TryFlushAsync(teardownTokenSource.Token).AsTask())
+                .WaitAsync(_teardownFlushTimeout)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+        {
+            // The deadline, reached either by abandoning the flush or by a handler that took the hint.
+            // An abandoned write can still reach the wire after the caller has begun tearing the
+            // transport down; every client here rejects a write once disposed, so that fails cleanly.
+            _logger.LogWarning(ex,
+                "Gave up waiting after {Timeout} for the remaining buffered changes to be written while " +
+                "stopping. A write handler that ignores cancellation may still complete it.",
+                _teardownFlushTimeout);
+            return;
+        }
+        catch (Exception ex)
+        {
+            // Never rethrown: a throw here would replace the failure that ended the processing loop.
+            _logger.LogError(ex, "Failed to write the remaining buffered changes while stopping.");
+        }
+
+        if (!_changes.IsEmpty)
+        {
+            // A concurrent Dispose held the flush gate, so the drain returned without taking the batch.
+            // Nothing else refills the queue once the dequeue loop has exited, and no later drain can
+            // recover these, so the one thing this must not do is lose them quietly.
+            _logger.LogWarning(
+                "{Count} buffered changes were not written while stopping because the flush gate was held " +
+                "by a concurrent dispose. They are discarded.", _changes.Count);
         }
     }
 

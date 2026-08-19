@@ -23,7 +23,8 @@ namespace Namotion.Interceptor.Connectors
     }
     public class ChangeQueueProcessor : System.IDisposable
     {
-        public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, Namotion.Interceptor.Connectors.ChangeDeliveryRule deliveryRule, System.TimeSpan? bufferTime, int? maxQueueDepth, Microsoft.Extensions.Logging.ILogger logger, System.Action<long>? dropHandler = null) { }
+        public static readonly System.TimeSpan DefaultTeardownFlushTimeout;
+        public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, Namotion.Interceptor.Connectors.ChangeDeliveryRule deliveryRule, System.TimeSpan? bufferTime, int? maxQueueDepth, Microsoft.Extensions.Logging.ILogger logger, System.Action<long>? dropHandler = null, System.TimeSpan? teardownFlushTimeout = default) { }
         public long DropCount { get; }
         public int QueueDepth { get; }
         public void Dispose() { }
@@ -136,7 +137,7 @@ namespace Namotion.Interceptor.Connectors
     }
     public abstract class SubjectSourceBase : Namotion.Interceptor.Connectors.SubjectConnectorBase, Namotion.Interceptor.Connectors.ISubjectConnector, Namotion.Interceptor.Connectors.ISubjectSource
     {
-        protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000, Namotion.Interceptor.Connectors.ThroughputCounter? incomingThroughput = null, Namotion.Interceptor.Connectors.ThroughputCounter? outgoingThroughput = null) { }
+        protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000, System.TimeSpan? teardownFlushTimeout = default, Namotion.Interceptor.Connectors.ThroughputCounter? incomingThroughput = null, Namotion.Interceptor.Connectors.ThroughputCounter? outgoingThroughput = null) { }
         [get: System.Runtime.CompilerServices.PreserveBaseOverrides]
         public new virtual Namotion.Interceptor.Connectors.Diagnostics.SourceDiagnostics Diagnostics { get; }
         public System.DateTimeOffset? LastSynchronizedAt { get; }

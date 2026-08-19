@@ -1864,4 +1864,96 @@ public class SubjectSourceBaseTests
         await AsyncTestHelpers.WaitUntilAsync(() => source.State == SourceState.Synchronized);
         Assert.Equal(1, Volatile.Read(ref loads));
     }
+
+    [Fact]
+    public async Task WhenSourceStopsWithBufferedChanges_ThenTheyStillReachTheSource()
+    {
+        // Arrange: a buffer time no periodic tick reaches during the test, so every change the pump takes
+        // off its subscription stays in the change processor buffer until the source stops. A change left
+        // there is invisible to the retry queue, which is only fed from the subscription.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        var receivedWrites = new ConcurrentQueue<string>();
+
+        using var source = new TestSubjectSource(person, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMinutes(5))
+        {
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    receivedWrites.Enqueue($"{change.Property.Name}={change.GetNewValue<object?>()}");
+                }
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source);
+
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            // The probe is re-written on each poll because writes captured before the change processor
+            // runs are parked in the retry queue and reconciled rather than buffered.
+            var probeValue = 0;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    person.LastName = "Probe" + probeValue++;
+                    return source.Diagnostics.OutboundChanges.Depth > 0;
+                },
+                message: "The pump did not start buffering changes.");
+
+            // The probe written by the last predicate evaluation may not be dequeued yet, and one that
+            // lands after the depth is read would satisfy the wait below on its own: the wait would then
+            // return before FirstName is dequeued, and the stop strands it in the subscription. Wait for
+            // the depth to hold across two polls first, so only the FirstName write can still grow it.
+            var previousDepth = -1;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    var depth = source.Diagnostics.OutboundChanges.Depth;
+                    var isSettled = depth == previousDepth;
+                    previousDepth = depth;
+                    return isSettled;
+                },
+                message: "The buffered depth did not settle after the probe loop.");
+
+            // Act
+            var bufferedBeforeWrite = previousDepth;
+            person.FirstName = "John";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundChanges.Depth > bufferedBeforeWrite,
+                message: "The write was not buffered by the change processor.");
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+
+        // Assert
+        Assert.Contains("FirstName=John", receivedWrites);
+    }
+
+    [Fact]
+    public void WhenTeardownFlushTimeoutIsNegative_ThenConstructionThrows()
+    {
+        // Arrange: the source builds its processor only after connecting, so a guard left to the
+        // processor would surface as an attempt failure the retry loop repeats forever.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() => new TestSubjectSource(
+            person, context, NullLogger.Instance, teardownFlushTimeout: TimeSpan.FromMilliseconds(-1)));
+    }
 }

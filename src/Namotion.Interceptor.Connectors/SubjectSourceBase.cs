@@ -26,6 +26,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     // must agree; if only one ranked against the last commit, the other would still deliver an older one.
     private const ChangeDeliveryRule DeliveryRule = ChangeDeliveryRule.SourceValuesMayBeStale;
     private readonly TimeSpan _retryTime;
+    private readonly TimeSpan? _teardownFlushTimeout;
     private readonly SubjectPropertyWriter _propertyWriter;
 
     private static readonly TimeSpan ConnectWindowDrainInterval = TimeSpan.FromSeconds(1);
@@ -41,6 +42,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     private SourceStateSnapshot _stateSnapshot = new(SourceState.Synchronizing, DateTimeOffset.UtcNow, null);
     private int _started;
 
+    // The run's stopping token, so a write can still tell a shutdown from a genuine failure when it was
+    // handed a different token. Reference-sized, so it is written and read atomically.
+    private CancellationToken _stoppingToken;
+
     private ImmutableArray<SourceMonitor> _registeredMonitors = [];
 
     internal WriteRetryQueue? WriteRetryQueue { get; }
@@ -51,9 +56,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         TimeSpan? bufferTime = null,
         TimeSpan? retryTime = null,
         int writeRetryQueueSize = 1000,
+        TimeSpan? teardownFlushTimeout = null,
         ThroughputCounter? incomingThroughput = null,
         ThroughputCounter? outgoingThroughput = null)
-        : this(context, logger, bufferTime, retryTime, writeRetryQueueSize,
+        : this(context, logger, bufferTime, retryTime, writeRetryQueueSize, teardownFlushTimeout,
             new SourceMetrics(incomingThroughput, outgoingThroughput))
     {
     }
@@ -66,6 +72,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         TimeSpan? bufferTime,
         TimeSpan? retryTime,
         int writeRetryQueueSize,
+        TimeSpan? teardownFlushTimeout,
         SourceMetrics metrics)
         : base(metrics)
     {
@@ -76,6 +83,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
+        // Validated here and not only in the processor, which a source builds after connecting: a bad
+        // value would otherwise throw inside the retry loop, be swallowed as an attempt failure and be
+        // retried every retry interval forever instead of failing at construction.
+        ChangeQueueProcessor.ValidateTeardownFlushTimeout(teardownFlushTimeout);
+        _teardownFlushTimeout = teardownFlushTimeout;
 
         // The retry queue also carries writes captured while (re)connecting. With size 0 it is
         // disabled, and those connect/reconnect-window writes are dropped rather than reconciled.
@@ -219,6 +231,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// <inheritdoc />
     protected sealed override async Task RunAsync(CancellationToken stoppingToken)
     {
+        _stoppingToken = stoppingToken;
+
         // Inside the try, so the finally below still publishes Stopped when startup fails. Outside it, a
         // configuration error leaves the source registered as Synchronizing for the process lifetime:
         // the DI path tears the host down, but on the graph-attach path the faulted task is swallowed and
@@ -296,7 +310,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         _bufferTime,
                         maxQueueDepth: null,
                         logger: _logger,
-                        dropHandler: Metrics.OutboundChanges.AddDropped);
+                        dropHandler: Metrics.OutboundChanges.AddDropped,
+                        teardownFlushTimeout: _teardownFlushTimeout);
 
                     // Declared after the processor so it is released first, which is what lets the
                     // retry loop's next attempt register its own: a second Register while one is
@@ -411,9 +426,16 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// Its second consumer is the drop counting in <see cref="WriteChangesViaRetryQueueAsync"/>, which
     /// uses it to keep writes that only failed because the host was stopping out of the loss total.
     /// </para>
+    /// <para>
+    /// The run's own stopping token is consulted as well as the caller's, because a write is not always
+    /// handed that token: <see cref="ChangeQueueProcessor"/> drains what it still holds on its way out
+    /// under a fresh one, deliberately, since the stopping token is already cancelled there and writing
+    /// under it would fail every change. Judging that drain by its token alone would report a loss caused
+    /// solely by the host stopping as a counted drop, which is what this guard exists to prevent.
+    /// </para>
     /// </remarks>
-    private static bool IsExpectedShutdown(CancellationToken cancellationToken) =>
-        cancellationToken.IsCancellationRequested;
+    private bool IsExpectedShutdown(CancellationToken cancellationToken) =>
+        cancellationToken.IsCancellationRequested || _stoppingToken.IsCancellationRequested;
 
     /// <summary>
     /// Parks owned writes into the retry queue at intervals while the initial state loads, so a slow
