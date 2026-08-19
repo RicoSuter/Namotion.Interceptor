@@ -8,7 +8,7 @@ internal static class SubjectPropertySymbolClassifier
 {
     public static bool CanContainSubjects(ITypeSymbol? type)
     {
-        if (type is null || type.TypeKind is TypeKind.Error or TypeKind.TypeParameter)
+        if (type is null || type.TypeKind is TypeKind.Dynamic or TypeKind.Error or TypeKind.TypeParameter)
         {
             return true;
         }

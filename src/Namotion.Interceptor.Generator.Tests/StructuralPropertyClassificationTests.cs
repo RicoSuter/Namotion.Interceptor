@@ -83,6 +83,7 @@ public class StructuralPropertyClassificationTests
             public string Text { get; set; } = string.Empty;
             public Subject Subject { get; set; } = new();
             public object Value { get; set; } = new();
+            public dynamic DynamicValue { get; set; } = new object();
             public IComparable Interface { get; set; } = 0;
             public IEnumerable<Subject> Enumerable { get; set; } = [];
             public IReadOnlyList<Subject> ReadOnlyList { get; set; } = [];
