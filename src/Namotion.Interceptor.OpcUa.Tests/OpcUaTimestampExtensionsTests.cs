@@ -1,6 +1,4 @@
-using Namotion.Interceptor.OpcUa.Client;
-
-namespace Namotion.Interceptor.OpcUa.Tests.Client;
+namespace Namotion.Interceptor.OpcUa.Tests;
 
 /// <summary>
 /// Every assertion here is independent of the machine's time zone, which is what makes them a guard
