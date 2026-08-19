@@ -18,10 +18,23 @@
 
 <!-- The problem this solves, when the summary does not already make it obvious. Drop this heading if it does. -->
 
+## Contract
+
+<!-- Optional. What a caller can now rely on: the invariants this change establishes or alters.
+     One guarantee per bullet, stating the limit as plainly as the promise, for example "serialization
+     is per subscription, an observer shared by several subscriptions may still be invoked
+     concurrently" or "disposal drops queued work, a delivery already in flight may still complete".
+     Drop this heading when the change establishes no new guarantee. -->
+
 ## Breaking changes
 
-<!-- Public API changes, renamed or removed members, and behavior changes a consumer must act on,
-     each with the migration step that follows from it.
+<!-- What a consumer must act on, each with the migration step that follows from it. Cover all three
+     kinds, since only the first announces itself:
+
+     - API:      a signature, rename or removal. The compiler catches it, or a failed recompile does.
+     - Behavior: compiles and runs, and does something different.
+     - Contract: compiles and runs, and the caller is now wrong unless it changes. State the new
+                 obligation, for example an interface implementer that must now stamp a timestamp.
 
      Write "None" rather than deleting this heading, so an empty section is a decision rather than
      an oversight. This is the section the release notes most often need and most often lack.
