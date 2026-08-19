@@ -71,8 +71,9 @@ internal sealed class WriteRetryQueue : IDisposable
         int droppedCount;
         lock (_lock)
         {
-            // Add all new items
             var span = changes.Span;
+
+            // Add all new items
             for (var i = 0; i < span.Length; i++)
             {
                 _pendingWrites.Add(span[i]);
@@ -233,7 +234,8 @@ internal sealed class WriteRetryQueue : IDisposable
     /// reach this queue: every change published to a source comes from a write terminal, which stamps one.
     /// The collapses that manufacture a revisionless survivor do so only from a revisionless input, so none
     /// can produce one here either. A revisionless change arriving anyway means a write interceptor or a
-    /// source is not honouring its contract, which the queue reports on entry rather than defending against.
+    /// source is not honouring its contract, an invariant the publish sites assert rather than this
+    /// queue defending against.
     /// </para>
     /// </remarks>
     private int CollapsePerProperty(int count)
