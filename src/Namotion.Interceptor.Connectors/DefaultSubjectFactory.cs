@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Connectors.Updates.Internal;
 
@@ -14,6 +15,7 @@ public class DefaultSubjectFactory : ISubjectFactory
 
     private static readonly ConcurrentDictionary<Type, Type> ListTypeCache = new();
     private static readonly ConcurrentDictionary<Type, Type> DictionaryTypeCache = new();
+    private static readonly ConcurrentDictionary<Type, Func<IList, object>> CollectionMaterializerCache = new();
 
     /// <inheritdoc />
     public virtual IInterceptorSubject CreateSubject(Type itemType, IServiceProvider? serviceProvider)
@@ -51,7 +53,83 @@ public class DefaultSubjectFactory : ISubjectFactory
             collection.Add(subject);
         }
 
-        return (IEnumerable<IInterceptorSubject?>)collection;
+        // A List<T> satisfies the usual declared types (List<T>, IList<T>, IReadOnlyList<T>, ...).
+        // Read-only and immutable declared types such as ImmutableArray<T> are not assignable from
+        // it, so they are materialized from the working list instead of failing on assignment.
+        var materialize = CollectionMaterializerCache.GetOrAdd(propertyType, CreateCollectionMaterializer);
+        return (IEnumerable<IInterceptorSubject?>)materialize(collection);
+    }
+
+    private static Func<IList, object> CreateCollectionMaterializer(Type propertyType)
+    {
+        var itemType = propertyType.GenericTypeArguments[0];
+        var listType = typeof(List<>).MakeGenericType(itemType);
+        if (propertyType.IsAssignableFrom(listType))
+        {
+            return static list => list;
+        }
+
+        var enumerableType = typeof(IEnumerable<>).MakeGenericType(itemType);
+
+        // Immutable collections expose a static empty instance and a range append returning
+        // their own type (ImmutableArray<T>, ImmutableList<T>, ImmutableHashSet<T>, ...).
+        var empty = TryGetStaticEmptyInstance(propertyType);
+        if (empty is not null)
+        {
+            var addRange = TryFindSingleParameterMethod(propertyType, "AddRange", enumerableType);
+            if (addRange is not null && propertyType.IsAssignableFrom(addRange.ReturnType))
+            {
+                return list => addRange.Invoke(empty, [list])!;
+            }
+        }
+
+        // Read-only wrappers are constructed from the working list (e.g. ReadOnlyCollection<T>).
+        var constructor = propertyType.GetConstructor([enumerableType])
+                          ?? propertyType.GetConstructor([typeof(IList<>).MakeGenericType(itemType)]);
+        if (constructor is not null)
+        {
+            return list => constructor.Invoke([list]);
+        }
+
+        throw new InvalidOperationException(
+            $"Could not create a subject collection of type '{propertyType}': the type is not assignable " +
+            $"from 'List<{itemType.Name}>' and provides no way to build it from a sequence of items.");
+    }
+
+    private static object? TryGetStaticEmptyInstance(Type type)
+    {
+        var field = type.GetField("Empty", BindingFlags.Public | BindingFlags.Static);
+        if (field is not null && type.IsAssignableFrom(field.FieldType))
+        {
+            return field.GetValue(null);
+        }
+
+        var property = type.GetProperty("Empty", BindingFlags.Public | BindingFlags.Static);
+        if (property is not null && type.IsAssignableFrom(property.PropertyType))
+        {
+            return property.GetValue(null);
+        }
+
+        return null;
+    }
+
+    private static MethodInfo? TryFindSingleParameterMethod(Type type, string name, Type parameterType)
+    {
+        foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (method.Name != name || method.IsGenericMethodDefinition)
+            {
+                continue;
+            }
+
+            var parameters = method.GetParameters();
+            if (parameters.Length == 1 && parameters[0].ParameterType == parameterType)
+            {
+                return method;
+            }
+        }
+
+        return null;
     }
 
     /// <inheritdoc />

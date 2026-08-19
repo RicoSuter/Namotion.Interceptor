@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -192,7 +191,7 @@ internal static class SubjectUpdateFactory
             update.Kind = SubjectPropertyUpdateKind.Dictionary;
             if (value is not null)
             {
-                SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value as IDictionary, builder);
+                SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value, builder);
             }
         }
         else if (property.IsSubjectCollection)
@@ -200,7 +199,7 @@ internal static class SubjectUpdateFactory
             update.Kind = SubjectPropertyUpdateKind.Collection;
             if (value is not null)
             {
-                SubjectItemsUpdateFactory.BuildCollectionComplete(update, value as IEnumerable<IInterceptorSubject>, builder);
+                SubjectItemsUpdateFactory.BuildCollectionComplete(update, value, builder);
             }
         }
         else if (property.IsSubjectReference)
@@ -230,26 +229,30 @@ internal static class SubjectUpdateFactory
     {
         update.Timestamp = change.ChangedTimestamp;
 
+        // Collection and dictionary values are read as object: the change storage only satisfies a
+        // typed read when the requested type matches the stored one exactly or is a reference type
+        // the stored value can be cast to, so a struct-typed collection such as ImmutableArray<T>
+        // would throw. SubjectItemsUpdateFactory normalizes the raw value.
         if (property.IsSubjectDictionary)
         {
             update.Kind = SubjectPropertyUpdateKind.Dictionary;
 
-            var newValue = change.GetNewValue<IDictionary?>();
+            var newValue = change.GetNewValue<object?>();
             if (newValue is not null)
             {
                 SubjectItemsUpdateFactory.BuildDictionaryUpdate(update,
-                    change.GetOldValue<IDictionary?>(), newValue, builder);
+                    change.GetOldValue<object?>(), newValue, builder);
             }
         }
         else if (property.IsSubjectCollection)
         {
             update.Kind = SubjectPropertyUpdateKind.Collection;
 
-            var newValue = change.GetNewValue<IEnumerable<IInterceptorSubject>?>();
+            var newValue = change.GetNewValue<object?>();
             if (newValue is not null)
             {
                 SubjectItemsUpdateFactory.BuildCollectionUpdate(update,
-                    change.GetOldValue<IEnumerable<IInterceptorSubject>?>(),
+                    change.GetOldValue<object?>(),
                     newValue, builder);
             }
         }
@@ -403,7 +406,7 @@ internal static class SubjectUpdateFactory
                 update.Kind = SubjectPropertyUpdateKind.Dictionary;
                 if (value is not null)
                 {
-                    SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value as IDictionary, builder);
+                    SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value, builder);
                 }
             }
             else if (propertyType.IsSubjectCollectionType())
@@ -411,7 +414,7 @@ internal static class SubjectUpdateFactory
                 update.Kind = SubjectPropertyUpdateKind.Collection;
                 if (value is not null)
                 {
-                    SubjectItemsUpdateFactory.BuildCollectionComplete(update, value as IEnumerable<IInterceptorSubject>, builder);
+                    SubjectItemsUpdateFactory.BuildCollectionComplete(update, value, builder);
                 }
             }
             else if (propertyType.IsSubjectReferenceType())

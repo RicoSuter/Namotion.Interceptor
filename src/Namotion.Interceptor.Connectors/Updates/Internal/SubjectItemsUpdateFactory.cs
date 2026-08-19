@@ -5,6 +5,10 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// <summary>
 /// Builds collection and dictionary updates for <see cref="SubjectUpdate"/> instances.
 /// Handles both complete updates (full snapshot) and diff updates (changes only).
+/// Collection and dictionary values arrive as <see cref="object"/> and are normalized through
+/// <see cref="SubjectValueConvert"/>, so read-only and immutable property types that implement
+/// neither <see cref="IDictionary"/> nor <see cref="IEnumerable{T}"/> of subject are serialized
+/// with their real contents instead of being seen as empty.
 /// </summary>
 internal static class SubjectItemsUpdateFactory
 {
@@ -14,15 +18,15 @@ internal static class SubjectItemsUpdateFactory
     /// </summary>
     internal static void BuildCollectionComplete(
         SubjectPropertyUpdate update,
-        IEnumerable<IInterceptorSubject>? collection,
+        object? collectionValue,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Collection;
 
-        if (collection is null)
+        if (collectionValue is null)
             return;
 
-        var items = collection as IReadOnlyList<IInterceptorSubject> ?? collection.ToList();
+        var items = SubjectValueConvert.ToSubjectList(collectionValue);
         update.Items = new List<SubjectPropertyItemUpdate>(items.Count);
 
         for (var i = 0; i < items.Count; i++)
@@ -46,23 +50,24 @@ internal static class SubjectItemsUpdateFactory
     /// </summary>
     internal static void BuildCollectionUpdate(
         SubjectPropertyUpdate update,
-        IEnumerable<IInterceptorSubject>? oldCollection,
-        IEnumerable<IInterceptorSubject> newCollection,
+        object? oldCollectionValue,
+        object newCollectionValue,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Collection;
 
-        var newItems = newCollection as IReadOnlyList<IInterceptorSubject> ?? newCollection.ToList();
+        var newItems = SubjectValueConvert.ToSubjectList(newCollectionValue);
         update.Items = new List<SubjectPropertyItemUpdate>(newItems.Count);
 
         // Items in the old collection are assumed known to receivers (via Welcome or previous updates)
         HashSet<IInterceptorSubject>? oldItemSet = null;
-        if (oldCollection is not null)
+        if (oldCollectionValue is not null)
         {
-            foreach (var item in oldCollection)
+            var oldItems = SubjectValueConvert.ToSubjectList(oldCollectionValue);
+            for (var i = 0; i < oldItems.Count; i++)
             {
                 oldItemSet ??= new(ReferenceEqualityComparer.Instance);
-                oldItemSet.Add(item);
+                oldItemSet.Add(oldItems[i]);
             }
         }
 
@@ -91,14 +96,15 @@ internal static class SubjectItemsUpdateFactory
     /// </summary>
     internal static void BuildDictionaryComplete(
         SubjectPropertyUpdate update,
-        IDictionary? dictionary,
+        object? dictionaryValue,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Dictionary;
 
-        if (dictionary is null)
+        if (dictionaryValue is null)
             return;
 
+        var dictionary = SubjectValueConvert.ToSubjectDictionary(dictionaryValue);
         update.Items = new List<SubjectPropertyItemUpdate>(dictionary.Count);
 
         foreach (DictionaryEntry entry in dictionary)
@@ -124,12 +130,17 @@ internal static class SubjectItemsUpdateFactory
     /// </summary>
     internal static void BuildDictionaryUpdate(
         SubjectPropertyUpdate update,
-        IDictionary? oldDictionary,
-        IDictionary newDictionary,
+        object? oldDictionaryValue,
+        object newDictionaryValue,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Dictionary;
 
+        var oldDictionary = oldDictionaryValue is not null
+            ? SubjectValueConvert.ToSubjectDictionary(oldDictionaryValue)
+            : null;
+
+        var newDictionary = SubjectValueConvert.ToSubjectDictionary(newDictionaryValue);
         update.Items = new List<SubjectPropertyItemUpdate>(newDictionary.Count);
 
         foreach (DictionaryEntry entry in newDictionary)
