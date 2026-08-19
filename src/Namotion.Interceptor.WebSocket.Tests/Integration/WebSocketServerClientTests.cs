@@ -1,5 +1,8 @@
 using System;
 using System.Threading.Tasks;
+using Namotion.Interceptor.Connectors.Monitoring;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
 using Xunit;
 using Xunit.Abstractions;
@@ -253,8 +256,13 @@ public class WebSocketServerClientTests
             message: "Initial sync should complete");
 
         // Act: the client writes while the server is down, so the write parks. The server does not write,
-        // so its value has not moved on and there is exactly one writer for this property.
+        // so its value has not moved on and there is exactly one writer for this property. Waits for the
+        // client to notice the drop first: otherwise the socket can still read as open, the write can
+        // succeed into a closing connection, and nothing parks.
         await server.StopAsync();
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Source!.State != SourceState.Synchronized,
+            message: "Client should notice the server is down before the write below.");
         client.Root!.Name = "WrittenWhileDown";
         await server.RestartAsync();
 

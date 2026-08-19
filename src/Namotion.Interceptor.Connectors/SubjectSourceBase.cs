@@ -53,6 +53,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     // against a view the reconcile has not judged it against, and an older value can win over a newer one.
     private int _resumeInProgress;
 
+    // The gate has no single owner: a connector whose reconnect runs inside its own loop can have that
+    // loop and the attempt loop both holding it during the same connect window. The epoch is what lets
+    // a completing resume tell whether it still owns the gate before clearing it.
+    private int _resumeEpoch;
+
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
     protected SubjectSourceBase(
@@ -274,8 +279,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     // This also caps memory across repeated failed attempts.
                     DrainOwnedWritesToRetryQueue(subscription);
 
-                    // Also clears a gate left set by a reconnect that failed before completing.
-                    BeginResume();
+                    // Closes the connect window against an abandoned teardown flush from the previous
+                    // attempt, which can otherwise still be writing when this one starts and would send
+                    // pre-load values on the new connection.
+                    var resumeEpoch = BeginResume();
                     _propertyWriter.StartBuffering();
                     await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
 
@@ -305,7 +312,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
                     // Single reconcile point: send (model already holds it), restore (the load moved the
                     // model off it), drop (a later local write supersedes it).
-                    await CompleteResumeAsync(stoppingToken).ConfigureAwait(false);
+                    await CompleteResumeAsync(resumeEpoch, stoppingToken).ConfigureAwait(false);
 
                     // Connected phase reuses the source-lifetime subscription and does not own it.
                     using var processor = new ChangeQueueProcessor(
@@ -391,10 +398,16 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             return;
         }
 
-        if (Volatile.Read(ref _resumeInProgress) == 1)
+        if (Volatile.Read(ref _resumeInProgress) == 1 && !_stoppingToken.IsCancellationRequested)
         {
-            // Parked rather than dropped: CompleteResumeAsync judges it against the loaded state.
-            WriteRetryQueue.Enqueue(changes);
+            // Parked rather than dropped: CompleteResumeAsync judges it against the loaded state. Falls
+            // through when stopping: there is no new connection left to protect at that point, and
+            // parking here would make the teardown drain "succeed" by moving the batch into a retry
+            // queue that is disposed with the source, silently losing changes the drain exists to report.
+            //
+            // Collapsed per property before parking, the same as the connect-window drain: a burst on
+            // one property must not evict other properties' parked writes from the bounded ring.
+            WriteRetryQueue.Enqueue(CollapsePerProperty(changes.ToArray()).ToArray());
             return;
         }
 
@@ -567,26 +580,46 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     }
 
     /// <summary>
-    /// Suspends outbound delivery until <see cref="CompleteResumeAsync"/> runs, so that writes captured
-    /// while the connection is being replaced are parked rather than sent.
+    /// Suspends outbound delivery until the returned epoch is passed to <see cref="CompleteResumeAsync"/>
+    /// or <see cref="AbortResume"/>, so that writes captured while the connection is being replaced are
+    /// parked rather than sent.
     /// </summary>
     /// <remarks>
-    /// Call before the new connection can accept a write, and pair every call with
-    /// <see cref="CompleteResumeAsync"/>. A connector whose reconnect happens inside its own monitor
-    /// loop needs this: the attempt loop that normally drains and reconciles does not iterate on a
-    /// transport reconnect, so without the pair the parked writes are replayed against the peer's new
-    /// state without ever being judged against it.
+    /// The epoch exists because more than one loop can hold the gate. A connector's own reconnect loop
+    /// runs concurrently with the attempt loop for the whole first connect window, so without it the
+    /// attempt loop's completion clears a gate the reconnect is still holding and leaves a writable
+    /// socket unguarded.
+    /// <para>
+    /// A transactional commit bypasses this gate entirely, because it reaches the source without passing
+    /// through the retry-queue wrapper. That is acceptable: it carries fresh intent, and the reconcile
+    /// drops any parked entry the commit supersedes.
+    /// </para>
     /// </remarks>
-    protected void BeginResume()
+    protected int BeginResume()
     {
+        var epoch = Interlocked.Increment(ref _resumeEpoch);
         Volatile.Write(ref _resumeInProgress, 1);
+        return epoch;
+    }
+
+    /// <summary>
+    /// Re-opens outbound delivery if <paramref name="resumeEpoch"/> is still the newest one, so that a
+    /// completing resume cannot clear a gate a later resume has taken over.
+    /// </summary>
+    protected void AbortResume(int resumeEpoch)
+    {
+        if (Volatile.Read(ref _resumeEpoch) == resumeEpoch)
+        {
+            Volatile.Write(ref _resumeInProgress, 0);
+        }
     }
 
     /// <summary>
     /// Reconciles the parked writes against the state that was just loaded, then re-opens outbound
-    /// delivery. Runs after the initial-state load, never before it.
+    /// delivery unless a later resume has already taken the gate over. Runs after the initial-state
+    /// load, never before it.
     /// </summary>
-    protected async Task CompleteResumeAsync(CancellationToken cancellationToken)
+    protected async Task CompleteResumeAsync(int resumeEpoch, CancellationToken cancellationToken)
     {
         try
         {
@@ -596,13 +629,26 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         {
             // Cleared even when the reconcile throws: a stuck gate parks every later write for the
             // life of the source, which is a worse failure than an unreconciled flush.
-            Volatile.Write(ref _resumeInProgress, 0);
+            AbortResume(resumeEpoch);
+        }
+
+        // The reconcile's own restores are local commits, so a live processor consuming the same
+        // subscription can park them right back while the gate is still held above, and an empty later
+        // batch means the write handler is never called again to drain them. They were parked after the
+        // drain that fed the reconcile above, so nothing has judged them yet: a second pass judges them
+        // rather than leaving them stuck, now that the gate is clear so their own send reaches the source
+        // through the normal connected path instead of being parked again.
+        if (Volatile.Read(ref _resumeInProgress) == 0 && WriteRetryQueue is { IsEmpty: false })
+        {
+            await ReconcileRetryQueueAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
     internal async Task ReconcileRetryQueueAsync(CancellationToken cancellationToken)
     {
-        var retryChanges = WriteRetryQueue?.DrainForLocalReapply();
+        var retryChanges = WriteRetryQueue is null
+            ? null
+            : await WriteRetryQueue.DrainForLocalReapplyAsync(cancellationToken).ConfigureAwait(false);
         if (retryChanges is null || retryChanges.Length == 0)
         {
             return;

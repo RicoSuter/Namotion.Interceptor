@@ -28,9 +28,12 @@ public sealed class TestSubjectSource : SubjectSourceBase
     /// <summary>Exposes the protected ReportConnectionLost seam for tests.</summary>
     public void SimulateConnectionLost() => ReportConnectionLost();
 
-    public void BeginResumeForTest() => BeginResume();
+    /// <summary>Exposes the protected BeginResume seam for tests, returning the epoch it opened.</summary>
+    public int BeginResumeForTest() => BeginResume();
 
-    public Task CompleteResumeForTestAsync(CancellationToken cancellationToken) => CompleteResumeAsync(cancellationToken);
+    /// <summary>Exposes the protected CompleteResumeAsync seam for tests.</summary>
+    public Task CompleteResumeForTestAsync(int resumeEpoch, CancellationToken cancellationToken) =>
+        CompleteResumeAsync(resumeEpoch, cancellationToken);
 
     public int WriteBatchSizeOverride { get; init; }
 

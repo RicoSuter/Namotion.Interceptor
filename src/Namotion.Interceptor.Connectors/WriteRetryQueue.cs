@@ -204,14 +204,28 @@ internal sealed class WriteRetryQueue : IDisposable
     /// Used on reconnection: instead of flushing stale changes to the server, the caller compares
     /// each change's old value with the current (post-reconnection) value and re-applies locally if non-conflicting.
     /// </summary>
-    public SubjectPropertyChange[] DrainForLocalReapply()
+    /// <remarks>
+    /// Takes the same flush semaphore as <see cref="FlushAsync"/> so the two cannot interleave: without
+    /// it, this drain can run while a flush is holding a batch in its scratch buffer, and if that flush
+    /// then fails, its requeue puts those stale values back at the front of the queue after the reconcile
+    /// has already judged them, moving a property backwards.
+    /// </remarks>
+    public async Task<SubjectPropertyChange[]> DrainForLocalReapplyAsync(CancellationToken cancellationToken)
     {
-        lock (_lock)
+        await _flushSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            var changes = _pendingWrites.ToArray();
-            _pendingWrites.Clear();
-            Volatile.Write(ref _count, 0);
-            return changes;
+            lock (_lock)
+            {
+                var changes = _pendingWrites.ToArray();
+                _pendingWrites.Clear();
+                Volatile.Write(ref _count, 0);
+                return changes;
+            }
+        }
+        finally
+        {
+            _flushSemaphore.Release();
         }
     }
 

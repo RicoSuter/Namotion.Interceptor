@@ -458,7 +458,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
         try
         {
-            // Capture once — this receive loop is tied to a single connection.
+            // Capture once: this receive loop is tied to a single connection.
             var webSocket = _webSocket;
             while (!cancellationToken.IsCancellationRequested && webSocket?.State == WebSocketState.Open)
             {
@@ -674,6 +674,11 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         var maxDelay = _configuration.MaxReconnectDelay;
         var forceReconnect = false;
 
+        // Carries the epoch across loop iterations the same way forceReconnect does: BeginResume runs
+        // in one iteration (drop detection or a force-kill catch) and the matching CompleteResumeAsync
+        // or AbortResume runs in the ReconnectAndResumeAsync call that follows, possibly on a later one.
+        var resumeEpoch = 0;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var stopMonitoring = false;
@@ -688,7 +693,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                     {
                         forceReconnect = false;
                         reconnectDelay = await ReconnectAndResumeAsync(
-                            "WebSocket reconnected after force-kill", reconnectDelay, maxDelay, linkedToken).ConfigureAwait(false);
+                            "WebSocket reconnected after force-kill", resumeEpoch, reconnectDelay, maxDelay, linkedToken).ConfigureAwait(false);
                         return;
                     }
 
@@ -708,7 +713,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
                     _logger.LogWarning("WebSocket connection lost. Attempting reconnection in {Delay}...", reconnectDelay);
 
-                    BeginResume();
+                    resumeEpoch = BeginResume();
                     _propertyWriter?.StartBuffering();
 
                     // Circuit breaker: pause reconnection if too many consecutive failures
@@ -729,7 +734,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                     await Task.Delay(reconnectDelay, linkedToken).ConfigureAwait(false);
 
                     reconnectDelay = await ReconnectAndResumeAsync(
-                        "WebSocket reconnected successfully", reconnectDelay, maxDelay, linkedToken).ConfigureAwait(false);
+                        "WebSocket reconnected successfully", resumeEpoch, reconnectDelay, maxDelay, linkedToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -738,7 +743,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                 {
                     _logger.LogWarning("WebSocket client force-killed. Restarting...");
                     _webSocket?.Abort();
-                    BeginResume();
+                    resumeEpoch = BeginResume();
                     _propertyWriter?.StartBuffering();
                     forceReconnect = true;
                 }
@@ -764,7 +769,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     }
 
     private async Task<TimeSpan> ReconnectAndResumeAsync(
-        string successMessage, TimeSpan reconnectDelay, TimeSpan maxDelay, CancellationToken cancellationToken)
+        string successMessage, int resumeEpoch, TimeSpan reconnectDelay, TimeSpan maxDelay, CancellationToken cancellationToken)
     {
         try
         {
@@ -773,6 +778,10 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
             _circuitBreaker?.RecordSuccess();
             _logger.LogInformation(successMessage);
+
+            // The socket is writable and the receive loop is already running at this point, but the
+            // model still holds the pre-reconnect view: this is the window D4 is about.
+            BeforeReconnectInitialStateLoad?.Invoke();
 
             if (_propertyWriter is not null)
             {
@@ -783,7 +792,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             // After the load, never before: the parked writes are judged against the state the server
             // just sent rather than replayed over it, and a write a later local commit supersedes is
             // dropped instead of being sent after the newer one.
-            await CompleteResumeAsync(cancellationToken).ConfigureAwait(false);
+            await CompleteResumeAsync(resumeEpoch, cancellationToken).ConfigureAwait(false);
 
             return _configuration.ReconnectDelay;
         }
@@ -798,6 +807,12 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             Metrics.ReportError(ex);
 
             _logger.LogError(ex, "Failed to reconnect to WebSocket server");
+
+            // ConnectAsync can have already succeeded, with the socket open and the receive loop running,
+            // when the load that follows it throws. Nothing else clears this gate for that connection: the
+            // attempt loop does not iterate on a transport reconnect, so leaving it set would park every
+            // write for the life of the connection.
+            AbortResume(resumeEpoch);
 
             if (_circuitBreaker is not null && _circuitBreaker.RecordFailure())
             {
@@ -853,8 +868,9 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
     // Test seams for interleavings that have no externally observable synchronization point: the
     // instant between a received update and its lease admission, the two sides of the liveness
-    // lock, and the instant the commit drain releases the teardown. Always null in production; the
-    // tests block inside them or sample ordering from them.
+    // lock, the instant the commit drain releases the teardown, and the instant a reconnect has a
+    // live connection but has not yet loaded and reconciled. Always null in production; the tests
+    // block inside them or sample ordering from them.
     internal Action? BeforeUpdateCommitAdmission { get; set; }
 
     internal Action? BeforeReceiveLoopLivenessTransition { get; set; }
@@ -862,4 +878,6 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     internal Action? BeforeReceiveLoopPublication { get; set; }
 
     internal Action? AfterReceiveLoopCommitDrain { get; set; }
+
+    internal Action? BeforeReconnectInitialStateLoad { get; set; }
 }
