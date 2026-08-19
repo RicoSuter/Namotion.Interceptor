@@ -19,8 +19,22 @@
 
 ## Performance
 
-<!-- Measured numbers, with the benchmark they came from. Include a known regression as readily as an
-     improvement. Drop this heading when nothing was measured; an unmeasured claim is worse than silence. -->
+<!-- Start with a paragraph in plain terms: what the change costs or saves, and where. State a known
+     regression as readily as an improvement, and say when a cost was accepted on purpose.
+
+     Then condense the numbers into the table below, one row per benchmark the change can reach. Do not
+     paste raw BenchmarkDotNet output for both arms; a reader cannot diff two 15-column tables by eye.
+
+     Include at least one row the change cannot reach, marked as the noise reference. A delta means
+     nothing until it clears what that row did in the same run, and picking a reference is subtler than
+     it looks, because [GlobalSetup] is per class. See docs/benchmarking.md.
+
+     Drop this heading when nothing was measured; an unmeasured claim is worse than silence. -->
+
+| Benchmark | Before | After | Delta | Allocated |
+|---|---:|---:|---:|---|
+|  |  |  |  |  |
+| _noise reference_ |  |  |  |  |
 
 ## Diff composition
 
@@ -38,7 +52,7 @@
 
 - [ ] Unit tests, `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"`
 - [ ] Integration tests, per project, for connector or HomeBlaze UI changes
-- [ ] Benchmarks, `pwsh scripts/benchmark.ps1`, for changes that can affect a hot path
+- [ ] Benchmarks, `pwsh scripts/benchmark.ps1`, covering every benchmark the change can reach (find them with `--list flat`, and add a row it cannot reach as the noise reference)
 - [ ] Connector Tester load profile, for risky connector work
 - [ ] Connector Tester chaos profile, for risky connector work
 
