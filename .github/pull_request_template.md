@@ -75,4 +75,4 @@
 - [ ] Integration tests
 - [ ] Benchmarks
 - [ ] Load tests
-- [ ] Choas tests
+- [ ] Chaos tests
