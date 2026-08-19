@@ -69,6 +69,13 @@ public class MqttServerConfiguration
     public TimeSpan BufferTime { get; init; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
+    /// Gets or sets how long a stop may block while the last buffered batch is written. Default is 5
+    /// seconds, which is also the budget the host gives all connectors together, since they stop one
+    /// after another under a single <c>HostOptions.ShutdownTimeout</c>. Zero discards the batch instead.
+    /// </summary>
+    public TimeSpan TeardownFlushTimeout { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// Gets or sets the delay before publishing the initial state to a newly connected client.
     /// This allows time for the client to complete its subscription setup.
     /// Set to zero to disable initial state publishing (relies on retained messages only).
@@ -128,6 +135,11 @@ public class MqttServerConfiguration
         if (BufferTime < TimeSpan.Zero)
         {
             throw new ArgumentException($"BufferTime must be non-negative, got: {BufferTime}", nameof(BufferTime));
+        }
+
+        if (TeardownFlushTimeout < TimeSpan.Zero)
+        {
+            throw new ArgumentException($"TeardownFlushTimeout must be non-negative, got: {TeardownFlushTimeout}", nameof(TeardownFlushTimeout));
         }
 
         if (InitialStateDelay < TimeSpan.Zero)

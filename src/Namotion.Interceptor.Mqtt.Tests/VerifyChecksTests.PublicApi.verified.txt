@@ -56,6 +56,7 @@ namespace Namotion.Interceptor.Mqtt.Client
         public System.Func<System.ReadOnlyMemory<byte>, System.DateTimeOffset?> SourceTimestampDeserializer { get; init; }
         public string? SourceTimestampPropertyName { get; init; }
         public System.Func<System.DateTimeOffset, byte[]> SourceTimestampSerializer { get; init; }
+        public System.TimeSpan TeardownFlushTimeout { get; init; }
         public string? TopicPrefix { get; init; }
         public bool UseRetainedMessages { get; init; }
         public bool UseTls { get; init; }
@@ -158,6 +159,7 @@ namespace Namotion.Interceptor.Mqtt.Server
         public System.Func<System.ReadOnlyMemory<byte>, System.DateTimeOffset?> SourceTimestampDeserializer { get; init; }
         public string? SourceTimestampPropertyName { get; init; }
         public System.Func<System.DateTimeOffset, byte[]> SourceTimestampSerializer { get; init; }
+        public System.TimeSpan TeardownFlushTimeout { get; init; }
         public string? TopicPrefix { get; init; }
         public bool UseRetainedMessages { get; init; }
         public Namotion.Interceptor.Mqtt.IMqttValueConverter ValueConverter { get; init; }

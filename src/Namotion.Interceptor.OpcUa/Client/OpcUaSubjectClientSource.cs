@@ -118,7 +118,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             configuration.RetryTime,
             configuration.WriteRetryQueueSize,
             new ThroughputCounter(),
-            new ThroughputCounter())
+            new ThroughputCounter(),
+            configuration.TeardownFlushTimeout)
     {
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(configuration);

@@ -56,6 +56,13 @@ public class OpcUaServerConfiguration
     public TimeSpan? BufferTime { get; set; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
+    /// Gets or sets how long a stop may block while the last buffered batch is written. Default is 5
+    /// seconds, which is also the budget the host gives all connectors together, since they stop one
+    /// after another under a single <c>HostOptions.ShutdownTimeout</c>. Zero discards the batch instead.
+    /// </summary>
+    public TimeSpan TeardownFlushTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// Gets or sets the base address for the OPC UA server.
     /// Default is "opc.tcp://localhost:4840/".
     /// </summary>

@@ -117,7 +117,8 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
             propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
             DeliveryRule,
             _configuration.BufferTime, maxQueueDepth: null, logger: _logger,
-            dropHandler: Metrics.OutboundChanges.AddDropped);
+            dropHandler: Metrics.OutboundChanges.AddDropped,
+            teardownFlushTimeout: _configuration.TeardownFlushTimeout);
 
     private bool IsPropertyIncluded(PropertyReference propertyReference)
     {

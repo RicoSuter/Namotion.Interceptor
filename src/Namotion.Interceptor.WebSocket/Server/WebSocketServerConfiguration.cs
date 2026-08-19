@@ -31,6 +31,13 @@ public class WebSocketServerConfiguration
     public TimeSpan BufferTime { get; set; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
+    /// Gets or sets how long a stop may block while the last buffered batch is written. Default is 5
+    /// seconds, which is also the budget the host gives all connectors together, since they stop one
+    /// after another under a single <c>HostOptions.ShutdownTimeout</c>. Zero discards the batch instead.
+    /// </summary>
+    public TimeSpan TeardownFlushTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// Maximum number of property changes per WebSocket message. Default: 1000.
     /// Smaller batches reduce latency, larger batches reduce per-message overhead.
     /// Set to 0 for unlimited (not recommended for large object graphs).
@@ -112,6 +119,11 @@ public class WebSocketServerConfiguration
         if (BufferTime < TimeSpan.Zero)
         {
             throw new ArgumentException($"BufferTime must be non-negative, got: {BufferTime}", nameof(BufferTime));
+        }
+
+        if (TeardownFlushTimeout < TimeSpan.Zero)
+        {
+            throw new ArgumentException($"TeardownFlushTimeout must be non-negative, got: {TeardownFlushTimeout}", nameof(TeardownFlushTimeout));
         }
 
         if (MaxMessageSize <= 0)

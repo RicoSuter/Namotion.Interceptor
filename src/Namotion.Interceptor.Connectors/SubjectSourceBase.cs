@@ -26,6 +26,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     // must agree; if only one ranked against the last commit, the other would still deliver an older one.
     private const ChangeDeliveryRule DeliveryRule = ChangeDeliveryRule.SourceValuesMayBeStale;
     private readonly TimeSpan _retryTime;
+    private readonly TimeSpan? _teardownFlushTimeout;
     private readonly SubjectPropertyWriter _propertyWriter;
 
     private static readonly TimeSpan ConnectWindowDrainInterval = TimeSpan.FromSeconds(1);
@@ -52,9 +53,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         TimeSpan? retryTime = null,
         int writeRetryQueueSize = 1000,
         ThroughputCounter? incomingThroughput = null,
-        ThroughputCounter? outgoingThroughput = null)
+        ThroughputCounter? outgoingThroughput = null,
+        TimeSpan? teardownFlushTimeout = null)
         : this(context, logger, bufferTime, retryTime, writeRetryQueueSize,
-            new SourceMetrics(incomingThroughput, outgoingThroughput))
+            new SourceMetrics(incomingThroughput, outgoingThroughput), teardownFlushTimeout)
     {
     }
 
@@ -66,7 +68,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         TimeSpan? bufferTime,
         TimeSpan? retryTime,
         int writeRetryQueueSize,
-        SourceMetrics metrics)
+        SourceMetrics metrics,
+        TimeSpan? teardownFlushTimeout)
         : base(metrics)
     {
         Metrics = metrics;
@@ -76,6 +79,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
+        _teardownFlushTimeout = teardownFlushTimeout;
 
         // The retry queue also carries writes captured while (re)connecting. With size 0 it is
         // disabled, and those connect/reconnect-window writes are dropped rather than reconciled.
@@ -296,7 +300,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         _bufferTime,
                         maxQueueDepth: null,
                         logger: _logger,
-                        dropHandler: Metrics.OutboundChanges.AddDropped);
+                        dropHandler: Metrics.OutboundChanges.AddDropped,
+                        teardownFlushTimeout: _teardownFlushTimeout);
 
                     // Declared after the processor so it is released first, which is what lets the
                     // retry loop's next attempt register its own: a second Register while one is

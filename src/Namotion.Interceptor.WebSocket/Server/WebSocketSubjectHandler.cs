@@ -409,7 +409,7 @@ public sealed class WebSocketSubjectHandler
             // this handler, so none of them is skipped here as our own echo and every superseding value
             // is broadcast on. Applying them under this handler would break it.
             ChangeDeliveryRule.SourceValuesAreSettled,
-            BufferTime, null, logger, dropHandler);
+            BufferTime, null, logger, dropHandler, _configuration.TeardownFlushTimeout);
 
     public async ValueTask CloseAllConnectionsAsync()
     {
