@@ -312,12 +312,13 @@ internal sealed class WriteRetryQueue : IDisposable
             return;
         }
 
-        // Same rule as the collapses either side of this queue: the revision decides which new value is
-        // the current state, and a change carrying none orders against nothing, so the merged survivor
-        // carries none either rather than being ranked against a value it was not ordered by.
-        held = held.Revision == 0 || change.Revision == 0
-            ? held.MergeWithNewer(change).WithoutRevision()
-            : held.MergeByRevision(change);
+        // Ranked like the dequeue collapse: a revisionless change cannot reach this queue, since every
+        // change published to a source comes from a write terminal, which stamps one. Stripping the
+        // revision here would be the misuse the WithoutRevision contract warns against: held writes are
+        // released into the pending queue and drained by DrainForLocalReapply for local re-apply, and a
+        // change carrying no revision passes the supersession check unconditionally, so it could be
+        // restored over a newer local commit.
+        held = held.MergeByRevision(change);
     }
 
     /// <summary>
