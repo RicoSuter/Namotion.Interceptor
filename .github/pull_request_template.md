@@ -4,12 +4,10 @@
 
 ## Summary
 
-<!-- What changed and why it matters to a consumer. A few sentences or bullets. -->
+<!-- What changed and why it matters to a consumer. A few sentences or bullets.
 
-## Issues
-
-<!-- Optional; drop this heading when nothing applies. Three line types, because the first has a
-     mechanical effect on merge and the others do not:
+     Where issues are involved, list them here, one per line. The first form has a mechanical effect
+     on merge and the others do not:
 
      Closes #123          closes the issue on merge. Only GitHub's keywords do this:
                           close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved.
