@@ -4,9 +4,12 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
-/// The one rule by which this layer's collapses pick a survivor when two changes to one property meet.
+/// How the write retry queue's collapse picks a survivor when two changes to one property meet. The
+/// retry queue is its only consumer: the flush merge (<see cref="ChangeMerger"/>) implements its own
+/// ranking because it must fall back to arrival order for a change that carries no revision, which
+/// this rule does not do.
 /// </summary>
-public static class SubjectPropertyChangeMergeExtensions
+internal static class SubjectPropertyChangeMergeExtensions
 {
     /// <summary>
     /// Merges two changes to the same property, taking the new value from the higher revision and the old
