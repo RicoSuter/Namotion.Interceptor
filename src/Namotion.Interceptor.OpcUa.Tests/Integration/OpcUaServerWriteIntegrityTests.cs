@@ -34,15 +34,24 @@ public class OpcUaServerWriteIntegrityTests
             _output, writeInterceptor: new ThrowOnValueInterceptor(WriteIntegrityChild.RejectedValue));
 
         var nodeId = fixture.NodeId(nameof(WriteIntegrityChild.Value));
+        var modelTimestamp = fixture.Property(nameof(WriteIntegrityChild.Value)).TryGetWriteTimestamp();
+        Assert.NotNull(modelTimestamp);
+
+        // A timestamp no accepted write could plausibly carry, so the assertion cannot pass by coincidence.
+        var clientTimestamp = DateTime.UtcNow.AddDays(-1);
 
         // Act
-        var statusCode = await fixture.Session.WriteAsync(nodeId, WriteIntegrityChild.RejectedValue);
+        var statusCode = await fixture.Session.WriteAsync(
+            nodeId, WriteIntegrityChild.RejectedValue, sourceTimestamp: clientTimestamp);
 
-        // Assert
+        // Assert: the node still serves the model's value, so it must serve the model's timestamp with
+        // it. A refused write that leaves the client's timestamp behind dates a value that never changed.
         var readBack = await fixture.Session.ReadAsync(nodeId);
         Assert.Equal(WriteIntegrityFixture.InitialValue, fixture.Child.Value);
         Assert.Equal(WriteIntegrityFixture.InitialValue, readBack.Value);
         Assert.Equal((StatusCode)StatusCodes.BadOutOfRange, statusCode);
+        Assert.NotEqual(clientTimestamp, readBack.SourceTimestamp);
+        Assert.Equal(modelTimestamp!.Value.UtcDateTime, readBack.SourceTimestamp);
     }
 
     [Fact]
@@ -495,30 +504,6 @@ public class OpcUaServerWriteIntegrityTests
     }
 
     [Fact]
-    public async Task WhenAWriteIsRefused_ThenTheNodeTimestampReflectsTheModel()
-    {
-        // Arrange
-        await using var fixture = await WriteIntegrityFixture.StartAsync(
-            _output, writeInterceptor: new ThrowOnValueInterceptor(WriteIntegrityChild.RejectedValue));
-
-        var nodeId = fixture.NodeId(nameof(WriteIntegrityChild.Value));
-        var modelTimestamp = fixture.Property(nameof(WriteIntegrityChild.Value)).TryGetWriteTimestamp();
-        Assert.NotNull(modelTimestamp);
-
-        // A timestamp no accepted write could plausibly carry, so the assertion cannot pass by coincidence.
-        var clientTimestamp = DateTime.UtcNow.AddDays(-1);
-
-        // Act
-        await fixture.Session.WriteAsync(nodeId, WriteIntegrityChild.RejectedValue, sourceTimestamp: clientTimestamp);
-
-        // Assert: the node still serves the model's value, so it must serve the model's timestamp with it.
-        // A refused write that leaves the client's timestamp behind dates a value that never changed.
-        var readBack = await fixture.Session.ReadAsync(nodeId);
-        Assert.NotEqual(clientTimestamp, readBack.SourceTimestamp);
-        Assert.Equal(modelTimestamp!.Value.UtcDateTime, readBack.SourceTimestamp);
-    }
-
-    [Fact]
     public async Task WhenARefusedWriteTargetsANeverWrittenProperty_ThenTheNodeKeepsItsOwnTimestamp()
     {
         // Arrange: nothing seeds ClampedValue, so the model has no write timestamp for the node to fall
@@ -577,21 +562,6 @@ public class OpcUaServerWriteIntegrityTests
     }
 
     [Fact]
-    public async Task WhenAClientOmitsTheSourceTimestamp_ThenTheWriteSucceeds()
-    {
-        // Arrange
-        await using var fixture = await WriteIntegrityFixture.StartAsync(_output);
-        var nodeId = fixture.NodeId(nameof(WriteIntegrityChild.Value));
-
-        // Act: an unset source timestamp is what the SDK reads as not supplied and fills in itself.
-        var statusCode = await fixture.Session.WriteAsync(nodeId, "undated", sourceTimestamp: DateTime.MinValue);
-
-        // Assert: directly, with no wait, because the apply runs inside the write.
-        Assert.True(StatusCode.IsGood(statusCode), $"An undated write must not be answered with '{statusCode}'.");
-        Assert.Equal("undated", fixture.Child.Value);
-    }
-
-    [Fact]
     public async Task WhenAClientWritesANonGoodStatusCode_ThenTheServerRefusesTheCombination()
     {
         // Arrange
@@ -636,5 +606,15 @@ public class OpcUaServerWriteIntegrityTests
 
         var readBack = await fixture.Session.ReadAsync(nodeId);
         Assert.Equal("accepted", readBack.Value);
+
+        // Act: an unset source timestamp is what the SDK reads as not supplied and fills in itself.
+        var undatedStatusCode = await fixture.Session.WriteAsync(
+            nodeId, "undated", sourceTimestamp: DateTime.MinValue);
+
+        // Assert: directly, with no wait, because the apply runs inside the write.
+        Assert.True(
+            StatusCode.IsGood(undatedStatusCode),
+            $"An undated write must not be answered with '{undatedStatusCode}'.");
+        Assert.Equal("undated", fixture.Child.Value);
     }
 }
