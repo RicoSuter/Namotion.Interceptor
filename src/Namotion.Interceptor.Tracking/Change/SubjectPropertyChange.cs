@@ -262,10 +262,12 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     /// <para>
     /// Scope it to changes on their way out to a sink. There a change carrying no revision is never
     /// dropped as superseded, so using it where it was not needed costs a redundant delivery rather than
-    /// a value. Do <b>not</b> use it on a change that will be parked and later re-applied locally, for
-    /// example into a retry queue: the same supersession check is what stops an older parked write from
-    /// being restored over a newer local one, and a missing revision makes that check pass
-    /// unconditionally, which loses the newer write instead.
+    /// a value. Using it on a change that will be parked and later re-applied locally, for example into a
+    /// retry queue, is the case to avoid: the same supersession check is what stops an older parked write
+    /// from being restored over a newer local one, and a missing revision makes that check pass
+    /// unconditionally. Two collapses do it anyway, because ranking by revision is not available to them
+    /// when a member carries none: the buffered flush collapse and the parking collapse. Both are reachable
+    /// only from a revisionless input, which no write terminal produces.
     /// </para>
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -38,6 +38,7 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly PollingManager? _pollingManager;
     private readonly ReadAfterWriteManager? _readAfterWriteManager;
     private readonly OpcUaClientConfiguration _configuration;
+    private readonly SubscriptionMetrics _metrics;
     private readonly Action<Exception> _reportError;
     private readonly ILogger _logger;
     private readonly Func<Subscription, CancellationToken, Task> _applyChangesAsync;
@@ -54,6 +55,10 @@ internal class SubscriptionManager : IAsyncDisposable
     // instead of being retried forever. With polling disabled there is no escalation target, so the
     // item keeps being retried and self-heals once the node recovers.
     internal const int MaxHealAttemptsBeforeEscalation = 3;
+
+    // The largest revised sampling interval a read-back is scheduled from, 48 days, which leaves the
+    // read-after-write buffer room under the delay a Timer can be armed for.
+    private const double MaxRevisedSamplingIntervalMilliseconds = 48d * 24 * 60 * 60 * 1000;
 
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
 
@@ -103,6 +108,7 @@ internal class SubscriptionManager : IAsyncDisposable
         PollingManager? pollingManager,
         ReadAfterWriteManager? readAfterWriteManager,
         OpcUaClientConfiguration configuration,
+        SubscriptionMetrics metrics,
         Action<Exception> reportError,
         ILogger logger,
         Func<Subscription, CancellationToken, Task>? applyChangesAsync = null)
@@ -112,6 +118,7 @@ internal class SubscriptionManager : IAsyncDisposable
         _pollingManager = pollingManager;
         _readAfterWriteManager = readAfterWriteManager;
         _configuration = configuration;
+        _metrics = metrics;
         _reportError = reportError;
         _logger = logger;
         _applyChangesAsync = applyChangesAsync ??
@@ -213,15 +220,59 @@ internal class SubscriptionManager : IAsyncDisposable
             for (var i = 0; i < monitoredItemsCount; i++)
             {
                 var item = notification.MonitoredItems[i];
-                if (_monitoredItems.TryGetValue(item.ClientHandle, out var property))
+
+                if (!_monitoredItems.TryGetValue(item.ClientHandle, out var property))
                 {
-                    changes.Add(new PropertyUpdate
-                    {
-                        Property = property,
-                        Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property),
-                        Timestamp = item.Value.SourceTimestamp
-                    });
+                    continue;
                 }
+
+                // Uncertain is a reading the server doubts, not a missing one. Bad may carry no value at all.
+                if (!StatusCode.IsNotBad(item.Value.StatusCode))
+                {
+                    // Counted, because the log below is the only other trace and it is off by default,
+                    // which would leave a permanently faulted sensor invisible: the property simply
+                    // stops changing while the source stays Synchronized. The polling path skips a Bad
+                    // value under the same rule and counts it as a failed read.
+                    _metrics.RecordSkippedBadValue();
+
+                    // Debug, not Warning: a Bad status is sticky, so a permanently faulted sensor would
+                    // repeat this at whatever rate its path delivers at. Guarded because that same
+                    // stickiness would otherwise pay for the params array and the boxes on every
+                    // delivery, at every log level, on a per-item path.
+                    if (_logger.IsEnabled(LogLevel.Debug))
+                    {
+                        _logger.LogDebug("Skipped an inbound value for '{PropertyName}' (ClientHandle: {ClientHandle}): {Status}.",
+                            property.Name, item.ClientHandle, item.Value.StatusCode);
+                    }
+
+                    continue;
+                }
+
+                object? converted;
+                try
+                {
+                    converted = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property);
+                }
+                catch (Exception e)
+                {
+                    // Contained per item: one property whose conversion fails must not discard the other
+                    // values in the same notification. Reported rather than rethrown, because the SDK does
+                    // nothing with a callback exception beyond ending the callback, which would discard
+                    // exactly those other values. During shutdown the report is suppressed, so a teardown
+                    // artifact cannot overwrite a genuine sticky error in the source diagnostics.
+                    // The value stays out of the log, it is process data.
+                    ReportErrorIfRunning(e);
+                    _logger.LogError(e, "Failed to convert an inbound value of type {ValueType} for '{PropertyName}' (ClientHandle: {ClientHandle}).",
+                        item.Value.Value?.GetType(), property.Name, item.ClientHandle);
+                    continue;
+                }
+
+                changes.Add(new PropertyUpdate
+                {
+                    Property = property,
+                    Value = converted,
+                    Timestamp = item.Value.SourceTimestamp.ToUtcDateTimeOffset()
+                });
             }
         }
         catch (Exception error)
@@ -386,8 +437,11 @@ internal class SubscriptionManager : IAsyncDisposable
         // BadNotSupported - Server doesn't support subscriptions for this node
         // BadMonitoredItemFilterUnsupported - Filter not supported (data change filter)
         // Note: BadAttributeIdInvalid is a permanent error - polling won't work either, so excluded
-        return statusCode == StatusCodes.BadNotSupported ||
-               statusCode == StatusCodes.BadMonitoredItemFilterUnsupported;
+        //
+        // Code bits only: the low 16 bits describe the answer rather than name it, and a server that
+        // sets one would otherwise leave the item kept for retry instead of falling back to polling.
+        return statusCode.CodeBits == StatusCodes.BadNotSupported ||
+               statusCode.CodeBits == StatusCodes.BadMonitoredItemFilterUnsupported;
     }
 
     /// <summary>
@@ -550,10 +604,32 @@ internal class SubscriptionManager : IAsyncDisposable
             if (item.Handle is RegisteredSubjectProperty property && item.Status?.Created == true)
             {
                 var requestedInterval = GetRequestedSamplingInterval(property);
-                var revisedInterval = TimeSpan.FromMilliseconds(item.Status.SamplingInterval);
+                var revisedInterval = ToRevisedSamplingInterval(item.Status.SamplingInterval);
                 _readAfterWriteManager.RegisterProperty(item.StartNodeId, property, requestedInterval, revisedInterval);
             }
         }
+    }
+
+    /// <summary>
+    /// Turns the server's revised sampling interval, a raw double, into one a read-back can be scheduled
+    /// from. Zero is returned for a value that cannot be one, which leaves the property untracked.
+    /// </summary>
+    /// <remarks>
+    /// A Timer refuses a delay past roughly 49.7 days, and the read-back timer is armed from this on the
+    /// write path, so an interval past that would throw there and report the whole batch failed on every
+    /// retry. The SDK server can legitimately revise to a year. Clamping keeps the read-back late enough
+    /// that the server has sampled, which is the only thing the interval is used for.
+    /// </remarks>
+    internal static TimeSpan ToRevisedSamplingInterval(double revisedMilliseconds)
+    {
+        if (double.IsNaN(revisedMilliseconds) || revisedMilliseconds <= 0)
+        {
+            return TimeSpan.Zero;
+        }
+
+        return revisedMilliseconds >= MaxRevisedSamplingIntervalMilliseconds
+            ? TimeSpan.FromMilliseconds(MaxRevisedSamplingIntervalMilliseconds)
+            : TimeSpan.FromMilliseconds(revisedMilliseconds);
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Tracking.Change;
@@ -19,6 +20,9 @@ internal sealed class WriteRetryQueue : IDisposable
     // Reusable buffer to avoid allocation on each flush (capped at 1024 items, loops for larger queues)
     private const int MaxBatchSize = 1024;
     private SubjectPropertyChange[] _scratchBuffer = new SubjectPropertyChange[64];
+
+    // Reused across flushes so a persistent outage does not allocate one per tick. Only used under _lock.
+    private readonly Dictionary<PropertyReference, int> _collapseIndices = new(PropertyReference.Comparer);
 
     private readonly ILogger _logger;
     private readonly QueueMetrics _metrics;
@@ -67,8 +71,9 @@ internal sealed class WriteRetryQueue : IDisposable
         int droppedCount;
         lock (_lock)
         {
-            // Add all new items
             var span = changes.Span;
+
+            // Add all new items
             for (var i = 0; i < span.Length; i++)
             {
                 _pendingWrites.Add(span[i]);
@@ -142,17 +147,19 @@ internal sealed class WriteRetryQueue : IDisposable
                 int count;
                 lock (_lock)
                 {
-                    count = Math.Min(_scratchBuffer.Length, _pendingWrites.Count);
-                    if (count == 0)
+                    var dequeuedCount = Math.Min(_scratchBuffer.Length, _pendingWrites.Count);
+                    if (dequeuedCount == 0)
                     {
                         break;
                     }
 
-                    for (var i = 0; i < count; i++)
+                    for (var i = 0; i < dequeuedCount; i++)
                     {
                         _scratchBuffer[i] = _pendingWrites[i];
                     }
-                    _pendingWrites.RemoveRange(0, count);
+                    _pendingWrites.RemoveRange(0, dequeuedCount);
+
+                    count = CollapsePerProperty(dequeuedCount);
                     Volatile.Write(ref _count, _pendingWrites.Count);
                 }
 
@@ -213,6 +220,72 @@ internal sealed class WriteRetryQueue : IDisposable
             Volatile.Write(ref _count, 0);
             return changes;
         }
+    }
+
+    /// <summary>
+    /// Compacts the dequeued batch in <see cref="_scratchBuffer"/> to one change per property, in place,
+    /// and returns the compacted length. Each survivor stays at its first occurrence's position.
+    /// </summary>
+    /// <remarks>
+    /// Collapsing at dequeue rather than on the requeued span is what bounds the queue: a failed flush
+    /// requeues its batch and the caller then appends the same tick's changes, so only the dequeue sees both.
+    /// <para>
+    /// Two changes for one property always merge, ranked by revision. A change carrying no revision cannot
+    /// reach this queue: every change published to a source comes from a write terminal, which stamps one.
+    /// The collapses that manufacture a revisionless survivor do so only from a revisionless input, so none
+    /// can produce one here either. A revisionless change arriving anyway means a write interceptor or a
+    /// source is not honouring its contract, an invariant the publish sites assert rather than this
+    /// queue defending against.
+    /// </para>
+    /// </remarks>
+    private int CollapsePerProperty(int count)
+    {
+        if (count < 2)
+        {
+            return count;
+        }
+
+        _collapseIndices.Clear();
+
+        var kept = 0;
+        for (var i = 0; i < count; i++)
+        {
+            // By reference: this struct is more than a dozen words wide, and every change is read here.
+            ref readonly var change = ref _scratchBuffer[i];
+
+            // Single lookup per change: the ref is only read and written before the next add.
+            ref var survivorIndex = ref CollectionsMarshal.GetValueRefOrAddDefault(_collapseIndices, change.Property, out var propertyAlreadySeen);
+            if (propertyAlreadySeen)
+            {
+                ref var survivor = ref _scratchBuffer[survivorIndex];
+
+                // Queue order is chronological, but changes are enqueued after their commit and outside
+                // the subject lock, so the revision decides which new value is the current state.
+                survivor = survivor.MergeByRevision(change);
+                continue;
+            }
+
+            survivorIndex = kept;
+            if (kept != i)
+            {
+                // Guarded because nothing collapsing is the common case, and a self-assignment still copies.
+                _scratchBuffer[kept] = change;
+            }
+
+            kept++;
+        }
+
+        // Cleared on the way out too: every key holds its subject alive until the next collapse otherwise.
+        _collapseIndices.Clear();
+
+        if (kept < count)
+        {
+            // The slots past the compacted prefix still reference the merged-away changes'
+            // subjects and boxed values, and the flush only clears the prefix it hands to the source.
+            Array.Clear(_scratchBuffer, kept, count - kept);
+        }
+
+        return kept;
     }
 
     private int RequeueChanges(ReadOnlySpan<SubjectPropertyChange> changes)

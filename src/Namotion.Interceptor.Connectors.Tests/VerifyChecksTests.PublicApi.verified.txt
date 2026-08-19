@@ -170,10 +170,9 @@ namespace Namotion.Interceptor.Connectors
         public System.Exception? Error { get; }
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> FailedChanges { get; }
         public bool IsFullySuccessful { get; }
-        public bool IsPartialFailure { get; }
         public static Namotion.Interceptor.Connectors.WriteResult Success { get; }
+        public static Namotion.Interceptor.Connectors.WriteResult CallFailed(System.Exception error) { }
         public static Namotion.Interceptor.Connectors.WriteResult Failure(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> failedChanges, System.Exception error) { }
-        public static Namotion.Interceptor.Connectors.WriteResult PartialFailure(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> failedChanges, System.Exception error) { }
     }
 }
 namespace Namotion.Interceptor.Connectors.Diagnostics

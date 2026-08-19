@@ -166,6 +166,14 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `PollingCircuitBreakerThreshold` | 5 | Consecutive failures before circuit breaker opens |
 | `PollingCircuitBreakerCooldown` | 30s | Cooldown after circuit breaker opens |
 
+**Writing:**
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `WriteSourceTimestamp` | true | Send the change's own timestamp as the value's SourceTimestamp |
+
+On by default, so the far end records when the change was made rather than when it arrived. Turn it off only for a server that refuses the combination: Part 4 permits that, answering `BadWriteNotSupported` and performing no write, and the refusal is permanent for the session, so it costs every write to that server. No such server is known here. The reference stack accepts a SourceTimestamp on a Value write unconditionally and rejects only a ServerTimestamp. Turned off, the server stamps its own receive time, the origin timestamp is lost, and the two ends disagree about when a value changed.
+
 **Read After Write:**
 
 | Property | Default | Description |
@@ -254,6 +262,17 @@ public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
 ```
 
 ## Monitoring & Subscriptions
+
+### Inbound Values
+
+Server values reach the model through four paths: subscription notifications, [polling](#polling-fallback-for-unsupported-nodes), the state load that runs on connect and after every reconnection, and [read-after-write](#read-after-write-fallback). All four handle a value the same way:
+
+- A value whose status is **Good** or **Uncertain** is applied. Uncertain means the server doubts the quality of the reading, not that there is none, and it is routine on industrial servers.
+- A value whose status is **Bad** is skipped and the property keeps the value it already has. A Bad status usually carries no value at all, so applying it would clear the property. Subscriptions and polling log the skipped node at Debug, so a faulted node stays distinguishable there from one that simply stopped changing, and both count the skip at any log level (`SkippedBadSubscriptionValues` and `Polling.TotalFailedReads`, see [Diagnostics](#diagnostics)). The state load reports only how many of the requested nodes came back readable, and read-after-write counts it among the failed read-backs of its completion log without naming the node (`ReadAfterWrite.TotalFailedReads`; `TotalNotAppliedReads` is strictly for values the server answered that could not be converted or applied).
+- Values are converted with the configured `ValueConverter` (see [Custom Value Converter](connectors-opcua.md#custom-value-converter)), so `decimal`, arrays and custom conversions behave the same whichever path delivered the value.
+- A value that fails to convert or to apply is logged, recorded as the source's `LastError` and skipped on its own. The other values delivered in the same notification, poll, load or read-back are still applied. The state load additionally fails as a whole after applying what it could, because completing it certifies the model as synchronized: the connect attempt or state sync that ran it tears down, reports the failure and retries, so a load that could not apply everything also shows in the source's liveness.
+
+The state load's whole-load failure is deliberate, and it has a consequence worth stating plainly: one node whose value can never convert keeps the connector down indefinitely. The load rethrows, the connect loop tears down and retries, and the next load re-reads the same value, so the cycle repeats until the value or the converter changes. That is the trade the load makes on purpose. A completed load certifies that the model matches the source, and both the reconcile after a reconnection and the `Synchronized` state depend on that certificate; a load that shrugged off an unconvertible node would hand out the certificate for a model that silently disagrees with the server. It also means the per-item containment described above is unreachable for a persistently bad value: the load always meets that value first, so the containment only ever applies to values that turned bad after a completed load. A value that legitimately cannot convert belongs out of the model or handled inside a custom `ValueConverter`, not tolerated by the load.
 
 ### Sampling vs Exception-Based Monitoring
 
@@ -353,6 +372,7 @@ var config = new OpcUaClientConfiguration
 
 **Behavior:**
 - Only triggers for properties where `SamplingInterval = 0` was revised to > 0
+- A read-back is discarded when the property has already moved on, either through a local write that committed after the one being verified or through a newer value from the server
 - Multiple rapid writes are coalesced into a single read
 - Reads are batched for efficiency
 - Circuit breaker prevents repeated failures from overwhelming the server
@@ -419,7 +439,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 **Automatic behavior:**
 - Nodes automatically switch to polling when subscriptions fail
 - Batched reads for efficiency (reduces network overhead)
-- Same value change detection as subscriptions (only updates on actual changes)
+- Same value change detection as subscriptions (only updates on actual changes), and the same status and conversion rules (see [Inbound Values](#inbound-values))
 - No configuration required - works out of the box
 
 ### Auto-Healing of Failed Monitored Items
@@ -642,7 +662,7 @@ Round-trip identity is preserved for the common cross-parent DAG: if the server-
 
 ## Write Error Handling
 
-When a batch write to the OPC UA server partially fails, the client throws an `OpcUaWriteException`. The exception distinguishes between transient failures (connectivity issues, timeouts that may succeed on retry) and permanent failures (invalid nodes, access denied; should not be retried). The write retry queue (see [Resilience](#write-retry-queue-during-disconnection)) handles transient failures automatically during disconnection, but writes that fail while connected surface this exception.
+When a batch write to the OPC UA server partially fails, the client reports an `OpcUaWriteException` stating how many of the attempted writes failed; the refused changes themselves are enumerated in the returned `WriteResult`, which is what the retry queue restores. The write retry queue (see [Resilience](#write-retry-queue-during-disconnection)) handles transient failures automatically during disconnection, but writes that fail while connected surface this exception.
 
 ## Diagnostics
 
@@ -662,6 +682,7 @@ This client measures both throughput directions, so `Throughput.IncomingPerSecon
 | `SessionId` | The current session identifier, `null` when there is no session. |
 | `SubscriptionCount` | Active OPC UA subscriptions. |
 | `MonitoredItemCount` | Monitored items across all subscriptions. |
+| `SkippedBadSubscriptionValues` | Values delivered by a subscription that were skipped because the server marked them Bad. The property keeps its last value, so a rising count is what tells a faulted node from a quiet one. The polled equivalent is `Polling.TotalFailedReads`, and like it this counts from the moment the source started listening, surviving a reconnection but not a restart. |
 
 `Reconnects` is the reconnection history. Every counter is monotonic since `StartTime`, so a reconnect storm is visible as `TotalAttempts` climbing without `TotalSucceeded` keeping up. `LastConnectionTime` is the exception listed first below: it is not a counter and deliberately survives the epoch reset, because it records a discrete past event rather than an amount accumulated during the run.
 
@@ -694,6 +715,8 @@ This client measures both throughput directions, so `Throughput.IncomingPerSecon
 | `ReadAfterWrite.TotalScheduledReads` | Verification reads scheduled. |
 | `ReadAfterWrite.TotalExecutedReads` | Verification reads executed. |
 | `ReadAfterWrite.TotalCoalescedReads` | Scheduled reads replaced by a subsequent write. |
+| `ReadAfterWrite.TotalSkippedReads` | Verification reads whose answer was discarded because the property had already moved on to a value the read-back cannot rank above. The read succeeded and discarding its answer was the correct outcome. |
+| `ReadAfterWrite.TotalNotAppliedReads` | Verification reads the server answered whose value could not be converted or applied locally. Unlike a skip this is a failure, but one contained to a single node rather than failing the batch, so it never counts as `TotalFailedReads`. |
 | `ReadAfterWrite.TotalFailedReads` | Verification reads that failed. |
 
 The sub-block counters survive a reconnect. `PollingManager` and `ReadAfterWriteManager` are rebuilt on every connect attempt, including failed ones, but their counters are owned by the source, so they do not rebase to zero during the reconnect storm that is exactly when they matter.

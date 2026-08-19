@@ -17,6 +17,12 @@ namespace Namotion.Interceptor.OpcUa.Client.Polling;
 /// </summary>
 internal sealed class PollingManager : IAsyncDisposable
 {
+    /// <summary>
+    /// How long one node's conversion failures stay quiet after being reported. A value the converter
+    /// refuses is retried at the polling rate, which defaults to once a second and never stops.
+    /// </summary>
+    private const long ConversionErrorLogIntervalMilliseconds = 5000;
+
     private readonly OpcUaSubjectClientSource _source;
     private readonly ILogger _logger;
     private readonly Func<ISession?> _sessionProvider;
@@ -351,16 +357,23 @@ internal sealed class PollingManager : IAsyncDisposable
                 var dataValue = response.Results[i];
                 var pollingItem = batch[i];
 
-                if (StatusCode.IsGood(dataValue.StatusCode))
+                // Uncertain is a reading the server doubts, not a missing one. Bad may carry no value at all.
+                if (StatusCode.IsNotBad(dataValue.StatusCode))
                 {
                     _metrics.RecordRead();
                     ProcessValueChange(pollingItem, dataValue, DateTimeOffset.UtcNow);
                 }
-                else if (StatusCode.IsBad(dataValue.StatusCode))
+                else
                 {
+                    // Same rule and same guard as the subscription path, see SubscriptionManager,
+                    // at the polling rate instead of the publishing rate. The failed-read metric
+                    // keeps the count visible without a log line per poll.
                     _metrics.RecordFailedRead();
-                    _logger.LogWarning("Polling read failed for {NodeId}: {Status}",
-                        pollingItem.NodeId, dataValue.StatusCode);
+                    if (_logger.IsEnabled(LogLevel.Debug))
+                    {
+                        _logger.LogDebug("Skipped an inbound value for {NodeId}: {Status}.",
+                            pollingItem.NodeId, dataValue.StatusCode);
+                    }
                 }
             }
         }
@@ -389,8 +402,38 @@ internal sealed class PollingManager : IAsyncDisposable
         // Only notify on actual change (same as subscription behavior)
         if (!ValuesAreEqual(newValue, oldValue))
         {
+            object? converted;
+            try
+            {
+                converted = _configuration.ValueConverter.ConvertToPropertyValue(newValue, pollingItem.Property);
+            }
+            catch (Exception e)
+            {
+                // Reported like every other contained inbound failure, so the recurring conversion
+                // failure stays visible on the source diagnostics instead of only in the log.
+                ReportErrorIfRunning(e);
+
+                // The cache stays behind on purpose: advancing it would make the next poll see no change
+                // and lose this value permanently, so a converter that starts working could not recover
+                // it. That is also why the same value is retried at the polling rate, which is why only
+                // the log needs holding back.
+                var now = Environment.TickCount64;
+                if (now - pollingItem.LastConversionErrorTimestamp >= ConversionErrorLogIntervalMilliseconds)
+                {
+                    _pollingItems.TryUpdate(
+                        pollingItem.NodeId.ToString(),
+                        pollingItem with { LastConversionErrorTimestamp = now },
+                        pollingItem);
+
+                    _logger.LogError(e, "Failed to convert a polled value for {NodeId}.", pollingItem.NodeId);
+                }
+
+                return;
+            }
+
             // Update cached value atomically - only if item still exists and hasn't changed
             // This prevents resurrection of items removed between snapshot and processing
+            // The cache keeps the raw value so change detection keeps comparing like with like.
             var key = pollingItem.NodeId.ToString();
             var updatedItem = pollingItem with { LastValue = newValue };
 
@@ -405,8 +448,8 @@ internal sealed class PollingManager : IAsyncDisposable
             var update = new PropertyUpdate
             {
                 Property = pollingItem.Property,
-                Value = newValue,
-                Timestamp = dataValue.SourceTimestamp
+                Value = converted,
+                Timestamp = dataValue.SourceTimestamp.ToUtcDateTimeOffset()
             };
 
             // Queue update using same pattern as subscriptions
@@ -512,6 +555,7 @@ internal sealed class PollingManager : IAsyncDisposable
     private record struct PollingItem(
         NodeId NodeId,
         RegisteredSubjectProperty Property,
-        object? LastValue
+        object? LastValue,
+        long LastConversionErrorTimestamp = 0
     );
 }

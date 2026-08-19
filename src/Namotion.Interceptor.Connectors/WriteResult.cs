@@ -12,8 +12,16 @@ public readonly struct WriteResult
     /// <summary>
     /// Gets the changes not confirmed written to the external source; empty on full success, and
     /// unlisted changes count as written. Failed means unconfirmed, not rejected: consumers may retry
-    /// a failed change but never revert it. An empty list with <see cref="Error"/> set means the whole
-    /// attempted batch failed (normalized by <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/>).
+    /// a failed change but never revert it.
+    /// <para>
+    /// This is the source's answer about named changes, so enumerate the ones it refused. Leave the
+    /// list empty, by way of <see cref="CallFailed"/>, only when the call itself failed and there is no
+    /// per-change answer. <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/> expands the
+    /// empty list to the batch's own changes, so nothing about that batch is lost either way. What
+    /// differs is everything else in the same flush: an empty list stops the flush, so the batches behind
+    /// it are reported unconfirmed as well, where an enumerated one reports only this batch's own
+    /// refusals and lets them be attempted.
+    /// </para>
     /// </summary>
     public ImmutableArray<SubjectPropertyChange> FailedChanges { get; }
 
@@ -27,54 +35,52 @@ public readonly struct WriteResult
     /// </summary>
     public bool IsFullySuccessful => Error is null;
 
-    /// <summary>
-    /// Gets a value indicating whether some changes succeeded while others failed.
-    /// </summary>
-    public bool IsPartialFailure { get; }
-
-    private WriteResult(ImmutableArray<SubjectPropertyChange> failedChanges, Exception? error, bool isPartialFailure)
+    private WriteResult(ImmutableArray<SubjectPropertyChange> failedChanges, Exception? error)
     {
         FailedChanges = failedChanges;
         Error = error;
-        IsPartialFailure = isPartialFailure;
     }
 
     /// <summary>
     /// Gets a successful result where all changes were written (zero allocation).
     /// </summary>
-    public static WriteResult Success { get; } = new([], null, false);
+    public static WriteResult Success { get; } = new([], null);
 
     /// <summary>
-    /// Creates a failure result where all provided changes failed.
+    /// Creates a failure result where the provided changes failed.
     /// </summary>
     /// <param name="failedChanges">The changes that failed to write.</param>
     /// <param name="error">The error that occurred.</param>
     public static WriteResult Failure(ReadOnlyMemory<SubjectPropertyChange> failedChanges, Exception error)
     {
         ArgumentNullException.ThrowIfNull(error);
-        return new([..failedChanges.Span], error, isPartialFailure: false);
+        return new([..failedChanges.Span], error);
     }
 
     /// <summary>
-    /// Creates a partial failure result where some changes succeeded and some failed.
+    /// Creates a result for a call that failed without answering about any single change, such as a
+    /// timeout, a dropped connection or a source that is not running. The whole attempted batch counts
+    /// as failed, and naming no change additionally tells
+    /// <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/> to stop rather than spend another
+    /// transport timeout on each remaining batch of the same flush. Use <see cref="Failure(ReadOnlyMemory{SubjectPropertyChange}, Exception)"/> instead
+    /// whenever the source did answer about these changes and refused them.
     /// </summary>
-    /// <param name="failedChanges">The changes that failed to write.</param>
     /// <param name="error">The error that occurred.</param>
-    public static WriteResult PartialFailure(ReadOnlyMemory<SubjectPropertyChange> failedChanges, Exception error)
+    public static WriteResult CallFailed(Exception error)
     {
         ArgumentNullException.ThrowIfNull(error);
-        return new([..failedChanges.Span], error, isPartialFailure: true);
+        return new([], error);
     }
 
     /// <summary>
-    /// Creates a partial failure result taking ownership of <paramref name="failedChanges"/> without
+    /// Creates a failure result taking ownership of <paramref name="failedChanges"/> without
     /// copying. The caller must not retain or mutate the underlying array.
     /// </summary>
     /// <param name="failedChanges">The changes that failed to write.</param>
     /// <param name="error">The error that occurred.</param>
-    internal static WriteResult PartialFailure(ImmutableArray<SubjectPropertyChange> failedChanges, Exception error)
+    internal static WriteResult Failure(ImmutableArray<SubjectPropertyChange> failedChanges, Exception error)
     {
         ArgumentNullException.ThrowIfNull(error);
-        return new(failedChanges, error, isPartialFailure: true);
+        return new(failedChanges, error);
     }
 }

@@ -191,6 +191,7 @@ If a transaction repair write fails, the source keeps the older value and the su
 
 **Behavior:**
 - Ring buffer semantics: oldest writes dropped when capacity reached
+- At most one change per property per write to the source: queued entries for the same property are collapsed as they are dequeued, so a property the source keeps refusing costs a fixed number of entries instead of one more per retry
 - Memory while disconnected is bounded per connection attempt: the change subscription is drained into this queue before each attempt and again after the initial state is applied, so repeated failed attempts do not compound. Within one attempt the initial-state load is drained on a timer as well, so what accumulates without a bound is the retry delay and `StartListeningAsync`, and peak memory follows the write rate times the length of those two legs
 - Automatic retry when `WriteChangesAsync` fails during normal operation
 - Re-apply on reconnection by commit order: after loading initial state, each queued change is kept unless a later *local* write superseded it, in which case that later write is delivered instead. A kept change is sent as a fresh write, restored locally first if the load moved the model off it. Values the load brought in do not supersede a write that already committed, because the load cannot be ranked against it.
@@ -357,8 +358,17 @@ public sealed class DatabaseSource : SubjectSourceBase
             await WriteToDatabaseAsync(changes, cancellationToken);
             return WriteResult.Success;
         }
+        catch (DbException ex) when (ex.IsTransient)
+        {
+            // The call itself failed, so no change got an answer. Naming none stops the
+            // flush instead of spending another connection timeout on each batch behind it.
+            return WriteResult.CallFailed(ex);
+        }
         catch (Exception ex)
         {
+            // The database answered and refused these changes: a constraint violation, a
+            // type mismatch, a serializer. Naming them keeps the batches behind them
+            // attempted, which a blanket CallFailed would condemn on every retry.
             return WriteResult.Failure(changes, ex);
         }
     }
@@ -369,7 +379,7 @@ public sealed class DatabaseSource : SubjectSourceBase
 
 **Build the payload from `changes` only**: never read subject properties in `WriteChangesAsync`. Under transactions the built-in writer calls the source on the committing flow, where property reads and writes throw `InvalidOperationException`, because sibling and landed-model state is outside the frozen snapshot and can make the payload inconsistent with it. Capture any other subject state the write needs before `CommitAsync`, and see [Transactions](tracking-transactions.md) for the full committing access boundary.
 
-**WriteResult**: Return `WriteResult.Success` when all changes were written. Return `WriteResult.Failure(changes, exception)` when all changes failed, or `WriteResult.PartialFailure(changes, exception)` when some succeeded. The failed changes list everything not confirmed written; unlisted changes count as written, and an error with an empty list is treated as the whole batch having failed. The base class enqueues the failed changes into the write retry queue automatically.
+**WriteResult**: Return `WriteResult.Success` when all changes were written. Return `WriteResult.Failure(changes, exception)` when changes failed, whether or not others in the batch succeeded. The failed changes list everything not confirmed written; unlisted changes count as written. Enumerate the changes the source refused, and use `WriteResult.CallFailed(exception)` only when the call itself failed (a timeout, a dropped connection, a faulted session): that reports the whole attempted batch failed and additionally stops the flush. A set of changes larger than `WriteBatchSize` is split into batches, and a batch that names the changes it refused does not hold back the ones behind it; their failures are reported together in a single result. A batch that fails without naming one stops there, so the batches behind it are not each handed to a source that is not answering, and they are reported unconfirmed. The base class enqueues the failed changes into the write retry queue automatically.
 
 #### Registering a Source
 

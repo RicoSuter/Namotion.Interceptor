@@ -551,7 +551,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
                 if (failedChanges.Count > 0)
                 {
                     return new ValueTask<WriteResult>(
-                        WriteResult.PartialFailure(
+                        WriteResult.Failure(
                             failedChanges.ToArray(),
                             new InvalidOperationException("FirstName write failed")));
                 }
@@ -603,7 +603,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
                         if (span[i].Property.Metadata.Name == nameof(Person.FirstName))
                         {
                             return new ValueTask<WriteResult>(
-                                WriteResult.PartialFailure(
+                                WriteResult.Failure(
                                     new[] { span[i] },
                                     new InvalidOperationException("FirstName write failed")));
                         }

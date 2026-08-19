@@ -59,6 +59,16 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     public int MonitoredItemCount => ActiveSessionManager?.SubscriptionManager.MonitoredItemCount ?? 0;
 
     /// <summary>
+    /// Gets the number of values delivered by a subscription that were skipped because the server marked them Bad.
+    /// The property keeps its last value, so a rising count is what tells a faulted node from a quiet one.
+    /// The polled equivalent is <see cref="PollingDiagnostics.TotalFailedReads"/>, and like it this counts
+    /// from the moment the source started listening, surviving a reconnection but not a restart. The
+    /// total is owned by the source rather than by the session, so a listen attempt rebuilding the
+    /// subscription machinery does not rebase it.
+    /// </summary>
+    public long SkippedBadSubscriptionValues => _source.SubscriptionMetrics.SkippedBadValues;
+
+    /// <summary>
     /// Gets the reconnection history.
     /// </summary>
     public ReconnectDiagnostics Reconnects { get; }
@@ -218,6 +228,20 @@ public sealed class ReadAfterWriteDiagnostics
     /// Gets the number of scheduled verification reads replaced by a subsequent write.
     /// </summary>
     public long TotalCoalescedReads => _metrics.Coalesced;
+
+    /// <summary>
+    /// Gets the number of verification reads whose answer was discarded because the property had
+    /// already moved on to a value the read-back cannot rank above. The read itself succeeded and
+    /// discarding its answer was the correct outcome.
+    /// </summary>
+    public long TotalSkippedReads => _metrics.Skipped;
+
+    /// <summary>
+    /// Gets the number of verification reads the server answered whose value could not be converted
+    /// or applied locally. Unlike a skip this is a failure, but one contained to a single node
+    /// rather than failing the batch, so it never counts as <see cref="TotalFailedReads"/>.
+    /// </summary>
+    public long TotalNotAppliedReads => _metrics.NotApplied;
 
     /// <summary>
     /// Gets the number of verification reads that failed.

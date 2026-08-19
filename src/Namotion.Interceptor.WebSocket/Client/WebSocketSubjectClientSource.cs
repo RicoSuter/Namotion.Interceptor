@@ -388,9 +388,12 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     {
         _logger.LogDebug("WriteChangesAsync called with {Count} changes", changes.Length);
 
+        // A disposed client, a closed socket and a failing send all count as the call failing rather than
+        // these changes being refused, which is what keeps a half-open socket from costing a blocking
+        // send per remaining batch of the same flush.
         if (Volatile.Read(ref _disposed) == 1)
         {
-            return WriteResult.Failure(changes, new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
+            return WriteResult.CallFailed(new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
         }
 
         try
@@ -399,28 +402,45 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
         catch (ObjectDisposedException)
         {
-            return WriteResult.Failure(changes, new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
+            return WriteResult.CallFailed(new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
         }
 
         try
         {
             if (Volatile.Read(ref _disposed) == 1)
             {
-                return WriteResult.Failure(changes, new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
+                return WriteResult.CallFailed(new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
             }
 
             var webSocket = _webSocket;
             if (webSocket?.State != WebSocketState.Open)
             {
-                return WriteResult.Failure(changes, new InvalidOperationException("WebSocket is not connected"));
+                return WriteResult.CallFailed(new InvalidOperationException("WebSocket is not connected"));
             }
 
-            var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.Span, _processors);
-            _sendBuffer.Clear();
-            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, update);
-            _logger.LogDebug("Sending {ByteCount} bytes ({SubjectCount} subjects) to server",
-                _sendBuffer.WrittenCount, update.Subjects.Count);
+            try
+            {
+                var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.Span, _processors);
+                _sendBuffer.Clear();
+                _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, update);
+                _logger.LogDebug("Sending {ByteCount} bytes ({SubjectCount} subjects) to server",
+                    _sendBuffer.WrittenCount, update.Subjects.Count);
+            }
+            catch (Exception ex)
+            {
+                // The processors are a user extension point and run before anything is sent, so this is
+                // these changes being refused, not the socket failing. Reporting it as a failed call
+                // would condemn every batch behind them unattempted, on this flush and on every retry.
+                _logger.LogError(ex, "Failed to build the update message");
+                return WriteResult.Failure(changes, ex);
+            }
+
             await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+
+            // These run after the bytes are on the wire, so a throw here reports an already-sent batch
+            // as an unanswered call. Only an out-of-memory buffer rent or a throwing ILogger gets that
+            // far, and neither could reach a corrected result anyway: the catch below allocates and
+            // logs before it returns.
             MaybeShrinkSendBuffer();
             _logger.LogDebug("Sent update successfully");
             return WriteResult.Success;
@@ -428,7 +448,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send update to server");
-            return WriteResult.Failure(changes, ex);
+            return WriteResult.CallFailed(ex);
         }
         finally
         {

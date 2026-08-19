@@ -167,6 +167,20 @@ public class OpcUaClientConfiguration
     public TimeSpan ReadAfterWriteBuffer { get; set; } = TimeSpan.FromMilliseconds(50);
 
     /// <summary>
+    /// Gets or sets whether a write carries the change's own timestamp as the value's SourceTimestamp
+    /// (default: true), so the far end records when the change was made rather than when it arrived.
+    /// <para>
+    /// Turn it off only for a server that refuses the combination. Part 4 permits that, answering
+    /// BadWriteNotSupported and performing no write, which is permanent for the session and so costs
+    /// every write to that server. No such server is known here: the reference stack accepts a
+    /// SourceTimestamp on a Value write unconditionally and rejects only a ServerTimestamp, and this
+    /// client has always sent one. Left off, the server stamps its own receive time and the origin
+    /// timestamp is lost, which also makes the two ends disagree about when a value changed.
+    /// </para>
+    /// </summary>
+    public bool WriteSourceTimestamp { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the default publishing interval for subscriptions in milliseconds (default: 0).
     /// Larger values reduce overhead by batching more notifications per publish.
     /// </summary>

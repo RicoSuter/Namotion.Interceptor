@@ -116,22 +116,18 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public void WhenWriteResultIsPartialFailure_ThenItIsDistinctFromFullFailure()
+    public void WhenWriteResultIsFailure_ThenFailedChangesAndErrorAreReported()
     {
         // Arrange - create a dummy change for testing
         var dummyChanges = new SubjectPropertyChange[1];
 
-        // Act - Full failure
-        var fullFailure = WriteResult.Failure(dummyChanges.AsMemory(), new Exception("Full"));
-
-        // Act - Partial failure
-        var partialFailure = WriteResult.PartialFailure(dummyChanges.AsMemory(), new Exception("Partial"));
+        // Act
+        var failure = WriteResult.Failure(dummyChanges.AsMemory(), new Exception("Failed"));
 
         // Assert
-        Assert.False(fullFailure.IsPartialFailure);
-        Assert.True(partialFailure.IsPartialFailure);
-        Assert.False(fullFailure.IsFullySuccessful);
-        Assert.False(partialFailure.IsFullySuccessful);
+        Assert.False(failure.IsFullySuccessful);
+        Assert.Equal("Failed", failure.Error!.Message);
+        Assert.Single(failure.FailedChanges);
     }
 
     [Fact]
@@ -144,8 +140,6 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
         // Assert - both should be the same singleton value (empty ImmutableArray)
         Assert.True(success1.IsFullySuccessful);
         Assert.True(success2.IsFullySuccessful);
-        Assert.False(success1.IsPartialFailure);
-        Assert.False(success2.IsPartialFailure);
         Assert.Empty(success1.FailedChanges);
         Assert.Empty(success2.FailedChanges);
     }
