@@ -17,10 +17,10 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     // overwriting each other's BaseDataVariableState reference on shared properties.
     internal string OpcUaVariableKey { get; } = "OpcUaVariable:" + Guid.NewGuid();
 
-    // A client write reaches the node before UpdateProperty applies it, so an applied value is settled
-    // here by construction, which is what SourceValuesAreSettled requires. Named once because the write
-    // loop and the processor must agree: if only one of them ranked against the last commit, the other
-    // would still write an older one out.
+    // A client write is applied to the subject from inside the node's own write, with the node already
+    // holding the value, so an applied value is settled here by construction, which is what
+    // SourceValuesAreSettled requires. Named once because the write loop and the processor must agree:
+    // if only one of them ranked against the last commit, the other would still write an older one out.
     internal const ChangeDeliveryRule DeliveryRule = ChangeDeliveryRule.SourceValuesAreSettled;
 
     private readonly IInterceptorSubject _subject;
@@ -35,20 +35,9 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
 
     internal ThroughputCounter OutgoingThroughput => Metrics.Outgoing!;
 
-    // Thread-scoped, not an instance field: a client write on another thread must not be caught by it.
-    [ThreadStatic]
-    internal static bool IsWritingOwnNodeValues;
-
-    // The value the loop just wrote, so our own reflection is identified by what it carries rather than
-    // by the flag alone. The flag says only that this thread is in the loop, which stops being the same
-    // thing as soon as anything sets node.Value between our assignment and our ClearChangeMasks: the
-    // flush then reports THEIR value on our thread, and dropping it loses the value permanently, since
-    // the node keeps serving it to clients while the subject never receives it.
-    //
-    // The SDK's own write service cannot do that, because it takes the node manager lock we hold for the
-    // whole batch. This is what makes the identification exact rather than a guess about who else writes.
-    [ThreadStatic]
-    internal static object? SelfWrittenNodeValue;
+    // Both reached from SubjectVariableState, which applies a client write inside the node's own write.
+    internal OpcUaValueConverter ValueConverter => _configuration.ValueConverter;
+    internal ILogger Logger => _logger;
 
     /// <inheritdoc />
     public override IInterceptorSubject RootSubject => _subject;
@@ -158,45 +147,78 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         var written = 0;
         lock (nodeManagerLock)
         {
-            IsWritingOwnNodeValues = true;
-            try
+            for (var i = 0; i < span.Length; i++)
             {
-                for (var i = 0; i < span.Length; i++)
+                var change = span[i];
+
+                // Decided again here rather than only when the batch was assembled: a client write
+                // takes this same lock, so one can land between the two and leave the node holding
+                // its value while we are about to overwrite it with an older commit.
+                if (ChangeDelivery.IsSuperseded(in change, DeliveryRule))
                 {
-                    var change = span[i];
+                    continue;
+                }
 
-                    // Decided again here rather than only when the batch was assembled: a client write
-                    // takes this same lock, so one can land between the two and leave the node holding
-                    // its value while we are about to overwrite it with an older commit.
-                    if (ChangeDelivery.IsSuperseded(in change, DeliveryRule))
+                if (change.Property.TryGetPropertyData(OpcUaVariableKey, out var data) &&
+                    data is BaseDataVariableState node &&
+                    change.Property.TryGetRegisteredProperty() is { } registeredProperty)
+                {
+                    // Per change, so one converter that cannot represent a value costs its own property
+                    // rather than every property merged into the batch behind it. A plain try because
+                    // this runs per change at the connector's full throughput.
+                    try
                     {
-                        continue;
-                    }
-
-                    if (change.Property.TryGetPropertyData(OpcUaVariableKey, out var data) &&
-                        data is BaseDataVariableState node &&
-                        change.Property.TryGetRegisteredProperty() is { } registeredProperty)
-                    {
-                        var value = change.GetNewValue<object?>();
-                        var convertedValue = _configuration.ValueConverter
-                            .ConvertToNodeValue(value, registeredProperty);
+                        object? convertedValue;
+                        try
+                        {
+                            convertedValue = _configuration.ValueConverter
+                                .ConvertToNodeValue(change.GetNewValue<object?>(), registeredProperty);
+                        }
+                        catch (Exception e) when (e is not OperationCanceledException)
+                        {
+                            // Separate from the rest, because this is the one failure that leaves the node
+                            // serving a value the model has moved past. Nothing retries the change, so it
+                            // serves it until the property changes again, and Good would have subscribers
+                            // read a frozen value as live data. Same answer the inbound write path gives
+                            // the same condition. Flushed, so the drop reaches them at all.
+                            node.StatusCode = StatusCodes.UncertainLastUsableValue;
+                            node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
+                            _logger.LogError(e,
+                                "Failed to represent the value of property '{Property}' on its OPC UA node.",
+                                change.Property.Name);
+                            continue;
+                        }
 
                         node.Value = convertedValue;
                         node.Timestamp = change.ChangedTimestamp.UtcDateTime;
-                        SelfWrittenNodeValue = convertedValue;
+
+                        // A representable value clears an Uncertain left by one that was not. The Value
+                        // setter only resets the status while the value has never been touched, and node
+                        // creation already touched it, so the reset has to be explicit.
+                        node.StatusCode = StatusCodes.Good;
+
+                        // The flush is what dispatches the value to the monitored items, so it is what
+                        // decides whether this change became traffic. One that throws served nobody.
                         node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
                         written++;
                     }
+                    catch (Exception e) when (e is not OperationCanceledException)
+                    {
+                        // The merger marked this change published before handing it over, so nothing
+                        // retries it. The setters above only assign fields and raise the change mask,
+                        // so the flush is the one thing left that can throw, and by then the node
+                        // already holds the new value: readers see it immediately, and the still-set
+                        // mask has the node's next flush deliver it to subscribers late. This log is
+                        // the only trace of that delay.
+                        _logger.LogError(e,
+                            "Failed to write property '{Property}' to its OPC UA node.", change.Property.Name);
+                    }
                 }
-            }
-            finally
-            {
-                IsWritingOwnNodeValues = false;
-                SelfWrittenNodeValue = null;
             }
         }
 
-        // What reached a node, not what the batch offered: a superseded or unmapped change is not traffic.
+        // What a node published, not what the batch offered: a superseded, unmapped or failed change is
+        // not traffic.
         OutgoingThroughput.Add(written);
         return ValueTask.CompletedTask;
     }
@@ -409,34 +431,6 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to clean certificate store at {Path}. Continuing with existing certificates.", path);
-        }
-    }
-
-    internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, object? value)
-    {
-        if (IsWritingOwnNodeValues && Equals(value, SelfWrittenNodeValue))
-        {
-            // Our own node write, reflected back synchronously by ClearChangeMasks. Compared by value
-            // rather than by the flag alone, for the reason on the field above.
-            return;
-        }
-
-        IncomingThroughput.Add(1);
-        var receivedTimestamp = DateTimeOffset.UtcNow;
-
-        var registeredProperty = property.TryGetRegisteredProperty();
-        if (registeredProperty is not null)
-        {
-            var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(value, registeredProperty);
-
-            try
-            {
-                property.SetValueFromSource(this, changedTimestamp, receivedTimestamp, convertedValue);
-            }
-            catch (Exception e)
-            {
-                _logger.LogError(e, "Failed to apply property update from OPC UA client.");
-            }
         }
     }
 

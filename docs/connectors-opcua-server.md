@@ -253,6 +253,27 @@ public class MyServerConfiguration : OpcUaServerConfiguration
 
 The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedded in the assembly of type `T`. The resource name follows the pattern `{AssemblyName}.{ResourcePath}`.
 
+## Writes
+
+A client write is applied to the subject inside the write request, and the node is then reconciled with the value the subject ends up holding, with the one exception described at the end of this section. A read-back therefore returns the server's value, which is not necessarily the value that was written: a model that clamps or rounds reports its own value. This is deliberate.
+
+| Answer | When |
+|--------|------|
+| `Good` | The model took the write, including when a hook or a value converter adjusted the value. A write a hook cancels without throwing leaves exactly what an adjustment onto the current value leaves, so the two are indistinguishable and both answer `Good`. |
+| `BadOutOfRange` | The model rejected the write by throwing, for example from a validation interceptor. |
+| `BadWriteNotSupported` | The client wrote a non-`Good` `StatusCode` alongside the value. Nothing carries a quality into the model, so the server refuses the combination rather than taking the value and dropping the quality. |
+
+A node whose value the server cannot represent, for example when an outbound value converter throws, keeps the last value it could represent and reports `UncertainLastUsableValue`. It returns to `Good` as soon as the property changes to a value the server can represent.
+
+The inbound path enters the same state for a second reason: reading the model's value after a write runs the read chain, which is as extensible as the write chain, so a read interceptor can throw where the converter would not. The write itself already committed in that case, so the client is answered `Good` while the node keeps the older value at `UncertainLastUsableValue`. The Uncertain status is the signal to a client that what it is reading is not current.
+
+How long the two stay apart depends on what the model did with the value:
+
+- **Stored as this server applied it.** The change the write produced carries this server as its origin and is dropped as its echo, so nothing corrects the node. It stays behind until that property changes from another origin, or until the next client write to the same node, which re-runs the reconciliation whatever the model then answers. **An inbound value converter belongs here, not below**: it runs before the apply, so its output is both what the model stores and what the write is stamped as having sent, and the origin survives.
+- **Adjusted inside the write chain**, by a changing hook or a write interceptor. The stored value then differs from the one this server applied, the origin is demoted to a local one, and the change is no longer an echo. It reaches the outbound path and sets the node to the model's value at `Good` on the next flush.
+
+An adjustment that lands on the value the property already holds publishes no change at all, so it repairs nothing either way.
+
 ## Diagnostics
 
 `IOpcUaSubjectServer.Diagnostics` exposes a live facade of type `OpcUaServerDiagnostics`. Resolve it once and poll (see [Resolving the Server](#resolving-the-server)).
@@ -261,7 +282,7 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 **`IsOperational` here means the server has started and is accepting client connections.** The server restarts itself internally on failure, and the two timestamps split along that line: `OperationalChangeTime` moves on every internal restart, while the inherited `StartTime` marks the current run of the hosted service and does not.
 
-This server measures both throughput directions, so `Throughput.IncomingPerSecond` (client writes to the server) and `Throughput.OutgoingPerSecond` (subject changes pushed to OPC UA nodes) are never `null` here. `OutboundChanges` is the change queue feeding the address space, and its `Capacity` is `null` because that queue is unbounded.
+This server measures both throughput directions, so `Throughput.IncomingPerSecond` (client writes that reached a registered property, counted once each) and `Throughput.OutgoingPerSecond` (subject changes pushed to OPC UA nodes) are never `null` here. `OutboundChanges` is the change queue feeding the address space, and its `Capacity` is `null` because that queue is unbounded.
 
 | Member | Meaning |
 |---|---|
