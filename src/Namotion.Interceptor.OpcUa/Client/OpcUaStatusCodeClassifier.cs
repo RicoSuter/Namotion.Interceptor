@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// <summary>
 /// Classifies OPC UA <see cref="StatusCode"/>s as transient (worth retrying) or permanent.
 /// A single shared list backs every callsite, so a code is classified the same way whether
-/// it surfaced from a write or from a subscription.
+/// it surfaced at subscription setup or in the health monitor.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -21,9 +21,8 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// This type only classifies; each caller decides the disposition. Subscription setup acts on it
 /// via <c>FailedMonitoredItemDisposition</c>, where a permanent code drops the monitored item and
 /// forfeits both in-session recovery routes (health-monitor healing and escalation to polling).
-/// The write path currently uses it for diagnostics only: <c>WriteResult.FailedChanges</c> must
-/// stay complete for the retry queue and the transaction writer, so permanently-failed writes are
-/// still requeued (#332).
+/// The write path does not consult it: <c>WriteResult.FailedChanges</c> must stay complete for
+/// the retry queue and the transaction writer, so permanently-failed writes are still requeued.
 /// </para>
 /// </remarks>
 internal static class OpcUaStatusCodeClassifier

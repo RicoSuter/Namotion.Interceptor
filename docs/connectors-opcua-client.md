@@ -660,7 +660,7 @@ Round-trip identity is preserved for the common cross-parent DAG: if the server-
 
 ## Write Error Handling
 
-When a batch write to the OPC UA server partially fails, the client throws an `OpcUaWriteException`. The exception distinguishes between transient failures (connectivity issues, timeouts that may succeed on retry) and permanent failures (invalid nodes, access denied; should not be retried). The write retry queue (see [Resilience](#write-retry-queue-during-disconnection)) handles transient failures automatically during disconnection, but writes that fail while connected surface this exception.
+When a batch write to the OPC UA server partially fails, the client reports an `OpcUaWriteException` stating how many of the attempted writes failed; the refused changes themselves are enumerated in the returned `WriteResult`, which is what the retry queue restores. The write retry queue (see [Resilience](#write-retry-queue-during-disconnection)) handles transient failures automatically during disconnection, but writes that fail while connected surface this exception.
 
 ## Diagnostics
 
