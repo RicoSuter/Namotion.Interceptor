@@ -13,7 +13,11 @@ namespace Namotion.Interceptor.Connectors;
 /// </summary>
 public class ChangeQueueProcessor : IDisposable
 {
-    private static readonly TimeSpan DefaultTeardownFlushTimeout = TimeSpan.FromSeconds(5);
+    /// <summary>
+    /// The teardown flush bound a processor uses when none is given. Public so a connector configuration
+    /// states this default rather than restating the value.
+    /// </summary>
+    public static readonly TimeSpan DefaultTeardownFlushTimeout = TimeSpan.FromSeconds(5);
 
     private readonly Func<PropertyReference, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;

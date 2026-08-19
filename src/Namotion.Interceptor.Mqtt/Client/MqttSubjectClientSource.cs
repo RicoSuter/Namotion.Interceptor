@@ -54,7 +54,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         MqttClientConfiguration configuration,
         ILogger<MqttSubjectClientSource> logger)
         : base(subject.Context, logger, configuration.BufferTime, configuration.RetryTime, configuration.WriteRetryQueueSize,
-            teardownFlushTimeout: configuration.TeardownFlushTimeout)
+            configuration.TeardownFlushTimeout)
     {
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(configuration);

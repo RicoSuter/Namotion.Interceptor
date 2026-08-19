@@ -53,11 +53,11 @@ public class WebSocketClientConfiguration
     public int WriteRetryQueueSize { get; set; } = 1000;
 
     /// <summary>
-    /// Gets or sets how long a stop may block while the last buffered batch is written. Default is 5
-    /// seconds, which is also the budget the host gives all connectors together, since they stop one
-    /// after another under a single <c>HostOptions.ShutdownTimeout</c>. Zero discards the batch instead.
+    /// Gets or sets how long a stop may block while the last buffered batch is written. The default is
+    /// also the budget the host gives all connectors together, since they stop one after another under a
+    /// single <c>HostOptions.ShutdownTimeout</c>. Zero discards the batch instead.
     /// </summary>
-    public TimeSpan TeardownFlushTimeout { get; set; } = TimeSpan.FromSeconds(5);
+    public TimeSpan TeardownFlushTimeout { get; set; } = ChangeQueueProcessor.DefaultTeardownFlushTimeout;
 
     /// <summary>
     /// Maximum message size in bytes. Messages larger than this will be rejected. Default: 10MB

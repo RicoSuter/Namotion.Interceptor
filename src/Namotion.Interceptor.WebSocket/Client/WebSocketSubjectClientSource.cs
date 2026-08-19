@@ -65,7 +65,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             (configuration ?? throw new ArgumentNullException(nameof(configuration))).BufferTime,
             configuration.RetryTime,
             configuration.WriteRetryQueueSize,
-            teardownFlushTimeout: configuration.TeardownFlushTimeout)
+            configuration.TeardownFlushTimeout)
     {
         _subject = subject;
         _configuration = configuration;

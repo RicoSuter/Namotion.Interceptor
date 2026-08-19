@@ -52,11 +52,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         TimeSpan? bufferTime = null,
         TimeSpan? retryTime = null,
         int writeRetryQueueSize = 1000,
+        TimeSpan? teardownFlushTimeout = null,
         ThroughputCounter? incomingThroughput = null,
-        ThroughputCounter? outgoingThroughput = null,
-        TimeSpan? teardownFlushTimeout = null)
-        : this(context, logger, bufferTime, retryTime, writeRetryQueueSize,
-            new SourceMetrics(incomingThroughput, outgoingThroughput), teardownFlushTimeout)
+        ThroughputCounter? outgoingThroughput = null)
+        : this(context, logger, bufferTime, retryTime, writeRetryQueueSize, teardownFlushTimeout,
+            new SourceMetrics(incomingThroughput, outgoingThroughput))
     {
     }
 
@@ -68,8 +68,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         TimeSpan? bufferTime,
         TimeSpan? retryTime,
         int writeRetryQueueSize,
-        SourceMetrics metrics,
-        TimeSpan? teardownFlushTimeout)
+        TimeSpan? teardownFlushTimeout,
+        SourceMetrics metrics)
         : base(metrics)
     {
         Metrics = metrics;
