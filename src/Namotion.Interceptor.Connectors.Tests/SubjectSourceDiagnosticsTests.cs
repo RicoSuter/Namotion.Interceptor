@@ -5,6 +5,7 @@ using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests;
 
@@ -87,6 +88,52 @@ public class SubjectSourceDiagnosticsTests
         Assert.IsType<InvalidOperationException>(source.Diagnostics.LastError);
         Assert.Equal(SourceState.Synchronizing, source.State);
         await ((IHostedService)source).StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public void WhenAWriteIsHeldBack_ThenTheHeldWritesDiagnosticsReportIt()
+    {
+        // Arrange: the refusal is handed to the retry queue directly rather than through the pump, so
+        // the test pins the diagnostics registration without depending on the pump's timing.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
+        var subject = new Person(context);
+        using var source = new TestSubjectSource(subject, context, NullLogger.Instance);
+
+        var change = SubjectPropertyChange.Create(
+            new PropertyReference(subject, nameof(Person.FirstName)),
+            ChangeOrigin.Local, DateTimeOffset.UtcNow, null, "Old", "New", revision: 1);
+
+        var result = WriteResult
+            .Failure(new[] { change }, new InvalidOperationException("Refused"))
+            .WithRefusedUntilReconnect([change]);
+
+        // Act
+        source.WriteRetryQueue!.EnqueueFailures(in result, source.WriteRetryQueue.ConnectionGeneration);
+
+        // Assert
+        // A held write is owed to the source rather than queued for retry, so it counts here and not
+        // in OutboundRetries. The null capacity is deliberate: the held set is bounded by the model's
+        // property count, not by writeRetryQueueSize.
+        Assert.Equal(1, source.Diagnostics.HeldWrites.Depth);
+        Assert.Null(source.Diagnostics.HeldWrites.Capacity);
+        Assert.Equal(0, source.Diagnostics.OutboundRetries.Depth);
+    }
+
+    [Fact]
+    public void WhenTheRetryQueueIsDisabled_ThenHeldWritesReportsACapacityOfZero()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
+        var subject = new Person(context);
+
+        // Act
+        using var source = new TestSubjectSource(subject, context, NullLogger.Instance, writeRetryQueueSize: 0);
+
+        // Assert
+        // Without a retry queue nothing can hold a write back, and a capacity of 0 is what says so:
+        // an unregistered block would report null, which reads as unbounded.
+        Assert.Equal(0, source.Diagnostics.HeldWrites.Capacity);
+        Assert.Equal(0, source.Diagnostics.HeldWrites.Depth);
     }
 
     [Fact]

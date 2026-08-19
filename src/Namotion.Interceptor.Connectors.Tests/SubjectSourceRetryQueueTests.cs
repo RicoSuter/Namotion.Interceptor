@@ -182,7 +182,7 @@ public class SubjectSourceRetryQueueTests
             }
 
             // A held-back write stays visible and must not read as a stalled connection.
-            Assert.Equal(1, source.RefusedWriteCount);
+            Assert.Equal(1, source.Diagnostics.HeldWrites.Depth);
             Assert.Equal(0, source.Diagnostics.OutboundRetries.Depth);
         }
         finally
@@ -256,7 +256,7 @@ public class SubjectSourceRetryQueueTests
 
             person.FirstName = "Refused";
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.RefusedWriteCount == 1,
+                () => source.Diagnostics.HeldWrites.Depth == 1,
                 message: "The refused write was never held back.");
 
             // Act: the source takes the property now, and a newer value reaches it
@@ -272,7 +272,7 @@ public class SubjectSourceRetryQueueTests
             // Assert: releasing must not put the superseded value back on the source, which would then
             // report it and take the model down with it.
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.OutboundRetries.Depth == 0 && source.RefusedWriteCount == 0,
+                () => source.Diagnostics.OutboundRetries.Depth == 0 && source.Diagnostics.HeldWrites.Depth == 0,
                 message: "The held write was never resolved after the connection was replaced.");
 
             lock (gate)

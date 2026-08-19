@@ -50,14 +50,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
-    /// <summary>
-    /// Gets the number of writes held back because the source refuses them until it reconnects. They
-    /// are still owed to the source and are retried on its next connection; they are simply not
-    /// re-sent on this one, which is why they are not counted in the retry queue's depth.
-    /// </summary>
-    public int RefusedWriteCount => WriteRetryQueue?.RefusedWriteCount ?? 0;
-
-
     protected SubjectSourceBase(
         IInterceptorSubjectContext context,
         ILogger logger,
@@ -108,12 +100,18 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             // readable after Dispose.
             _ = metrics.OutboundRetries.Register(
                 () => writeRetryQueue.PendingWriteCount, capacity: writeRetryQueueSize);
+
+            // Capacity null deliberately: the held set is bounded by the model's property count, not
+            // by writeRetryQueueSize, which the queue does not apply to writes it holds back.
+            _ = metrics.HeldWrites.Register(
+                () => writeRetryQueue.RefusedWriteCount, capacity: null);
         }
         else
         {
             // Registered as disabled rather than left unregistered: an unregistered QueueMetrics
             // reports a null capacity, which reads as unbounded, the opposite of the truth.
             _ = metrics.OutboundRetries.Register(static () => 0, capacity: 0);
+            _ = metrics.HeldWrites.Register(static () => 0, capacity: 0);
         }
 
         _propertyWriter = new SubjectPropertyWriter(this, logger, metrics.InboundBuffer);
@@ -124,9 +122,9 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// </summary>
     /// <remarks>
     /// A derived source must not register on <see cref="Diagnostics.ConnectorMetrics.OutboundChanges"/>,
-    /// <see cref="SourceMetrics.OutboundRetries"/> or <see cref="SourceMetrics.InboundBuffer"/>: this
-    /// base owns all three, and a second live registration makes
-    /// <see cref="Diagnostics.QueueMetrics.Register"/> throw.
+    /// <see cref="SourceMetrics.OutboundRetries"/>, <see cref="SourceMetrics.HeldWrites"/> or
+    /// <see cref="SourceMetrics.InboundBuffer"/>: this base owns all four, and a second live
+    /// registration makes <see cref="Diagnostics.QueueMetrics.Register"/> throw.
     /// </remarks>
     protected new SourceMetrics Metrics { get; }
 

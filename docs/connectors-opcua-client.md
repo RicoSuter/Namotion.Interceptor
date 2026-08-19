@@ -668,7 +668,7 @@ When a batch write to the OPC UA server partially fails, the client reports an `
 
 Eight status codes say the server will answer a Write the same way for the rest of the session. `BadAttributeIdInvalid`, `BadTypeMismatch` and `BadWriteNotSupported` are permanent by spec. `BadNodeIdUnknown`, `BadUserAccessDenied` and `BadNotWritable` follow from address-space membership, role permissions and the `AccessLevel` attribute, all fixed for the session. `BadNodeIdInvalid` and `BadIndexRangeInvalid` are decided by the request itself, so re-sending the identical change cannot change the answer. Changes refused with one of these are held back rather than re-sent on every write cycle, and returned to the queue on the next session, which can bring a different address space and different permissions. See [Connectors: Writes Refused Until Reconnect](connectors.md#writes-refused-until-reconnect) for why re-sending them stalls the whole write path.
 
-Nothing is dropped and nothing is configurable: a held-back change is still owed to the server and is retried on the next session. Each refused node is named once per session at warning level, and `Diagnostics.RefusedWriteCount` reports how many changes are currently held back.
+Nothing is dropped and nothing is configurable: a held-back change is still owed to the server and is retried on the next session. Each refused node is named once per session at warning level, and `Diagnostics.HeldWrites.Depth` reports how many changes are currently held back.
 
 The list is deliberately not the one `OpcUaStatusCodeClassifier` uses for subscriptions, which drops a monitored item and forfeits its in-session recovery routes and therefore excludes the access-scoped codes.
 
@@ -691,7 +691,8 @@ This client measures both throughput directions, so `Throughput.IncomingPerSecon
 | `SubscriptionCount` | Active OPC UA subscriptions. |
 | `MonitoredItemCount` | Monitored items across all subscriptions. |
 | `SkippedBadSubscriptionValues` | Values delivered by a subscription that were skipped because the server marked them Bad. The property keeps its last value, so a rising count is what tells a faulted node from a quiet one. The polled equivalent is `Polling.TotalFailedReads`, and like it this counts from the moment the source started listening, surviving a reconnection but not a restart. |
-| `RefusedWriteCount` | Writes the server refused for this session, held back until the client reconnects instead of being re-sent on every write cycle. Not a loss count: they are still owed to the server. A value that stays above zero across reconnections is a node the server will not take. See [Writes refused for a session](#writes-refused-for-a-session). |
+
+Writes the server refused for the session are not client-specific: the shared `HeldWrites` block reports them, and a depth that stays above zero across reconnections is a node the server will not take. See [Writes refused for a session](#writes-refused-for-a-session).
 
 `Reconnects` is the reconnection history. Every counter is monotonic since `StartTime`, so a reconnect storm is visible as `TotalAttempts` climbing without `TotalSucceeded` keeping up. `LastConnectionTime` is the exception listed first below: it is not a counter and deliberately survives the epoch reset, because it records a discrete past event rather than an amount accumulated during the run.
 

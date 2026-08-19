@@ -212,8 +212,8 @@ A source can name a subset of its failed changes as refused for the lifetime of 
 Without this, one permanently refused property stalls the whole write path: the flush reports failure, the pump diverts the tick's own changes into the queue unattempted, and every later write reaches the source one flush window late for as long as the refusal lasts.
 
 - The set is additive. `FailedChanges` stays the complete answer about what did not reach the source, so a transaction still counts a refused change unwritten and rolls it back. Removing it from `FailedChanges` instead would count it written and skip the rollback.
-- Nothing is dropped on the way in. Refused changes are held one per property and returned to the queue when the connection is replaced, so a node a reconnect would have accepted is still delivered. They are reported separately from `PendingWriteCount`, which falls back to zero, through `SubjectSourceBase.RefusedWriteCount`.
-- The held set sits **outside** `writeRetryQueueSize` rather than inside it, because dropping a held write loses one the next connection would have taken. One entry per property is what bounds it, so it follows the model's property count rather than the write rate, and a model with more properties than the configured queue size can hold more changes than that size suggests. Once released they are ordinary pending writes and the ring buffer applies to them from there.
+- Nothing is dropped on the way in. Refused changes are held one per property and returned to the queue when the connection is replaced, so a node a reconnect would have accepted is still delivered. They are counted by `Diagnostics.HeldWrites` rather than in `Diagnostics.OutboundRetries.Depth`, which falls back to zero.
+- The held set sits **outside** `writeRetryQueueSize` rather than inside it, because dropping a held write loses one the next connection would have taken. One entry per property is what bounds it, so it follows the model's property count rather than the write rate, and a model with more properties than the configured queue size can hold more changes than that size suggests, which is why `Diagnostics.HeldWrites` reports a `null` capacity. Once released they are ordinary pending writes and the ring buffer applies to them from there.
 - `SubjectSourceBase.ReportConnectionLost` releases them. A connector whose connection can be replaced without an outage it reported calls the protected `RetryRefusedWrites` itself; the OPC UA client does this on every session transition.
 - Only the OPC UA client names refusals today, from eight status codes. See [Writes refused for a session](connectors-opcua-client.md#writes-refused-for-a-session).
 
@@ -312,7 +312,7 @@ public MySource() => Diagnostics = new SourceDiagnostics(_metrics);
 
 The `SourceMetrics` instance is the writable side and stays private to the source: it is what the source calls `MarkStarted()`, `MarkOperational()`, `ReportError()` and the queue registrations on, and nothing outside the source can reach it through the returned view. See [Connector Diagnostics](#connector-diagnostics).
 
-A direct source must register `ClaimedPropertyCount` and all queue gauges: `OutboundChanges`, `OutboundRetries`, and `InboundBuffer`. Give a disabled queue a capacity of `0`; use a `null` capacity only when the queue is actually unbounded. If the source owns custom `IResettableMetrics` instances, register each one once before `MarkStarted()` so its totals join the run's first epoch.
+A direct source must register `ClaimedPropertyCount` and all queue gauges: `OutboundChanges`, `OutboundRetries`, `HeldWrites`, and `InboundBuffer`. Give a disabled queue a capacity of `0`; use a `null` capacity only when the queue is actually unbounded. If the source owns custom `IResettableMetrics` instances, register each one once before `MarkStarted()` so its totals join the run's first epoch.
 
 Deriving from `SubjectSourceBase` instead gets both members, the start epoch, the recording of a failed connect attempt, and the drop of liveness on the way out. **Raising liveness is the derived class's job**: the base never calls `MarkOperational()`, because each protocol becomes usable at a different point and that point is what `IsOperational` means for that connector. A source that never calls it reports not operational for its entire life while its `State` reaches `Synchronized`. The three in-tree clients show where to put the call: the MQTT client raises it once `ConnectAsync` returns, the WebSocket client once the server's Welcome has been accepted, and the OPC UA client only once a session it has already created is confirmed usable, which is several steps later and which step depends on how that session came about (see [OPC UA Client](connectors-opcua-client.md#diagnostics)). Each drops it again from the path that detects the loss.
 
@@ -684,6 +684,7 @@ ConnectorDiagnostics
 SourceDiagnostics : ConnectorDiagnostics
   ClaimedPropertyCount   int                properties this source currently owns
   OutboundRetries        writes parked for retry, same three members
+  HeldWrites             writes the source refuses until it reconnects, same three members
   InboundBuffer          inbound updates held while the initial state loads, same three members
 ```
 
@@ -693,10 +694,11 @@ Direction is stated once, from the subject tree's point of view, and means the s
 
 `Capacity` is what the connector registered the buffer as, which for a source's `OutboundRetries` is its configured `writeRetryQueueSize`, where a `0` means the queue is switched off. It is not the same number as `ChangeQueueProcessor`'s `maxQueueDepth`, which is that processor's own bound on its buffered queue: the three servers register their outbound change queue with a `Capacity` of `null` because that queue is unbounded.
 
-The three buffers answer three different questions, and reading which one is growing is how you tell them apart:
+The four buffers answer four different questions, and reading which one is growing is how you tell them apart:
 
 - `OutboundChanges` growing means changes are produced faster than they flush.
 - `OutboundRetries` growing means the far end is rejecting writes.
+- `HeldWrites` above zero means the source refuses writes to those properties and is waiting for its next connection to deliver them. Unlike the other three it is a held set rather than a queue, bounded by the model's property count, which is why its `Capacity` is `null`. See [Writes refused until reconnect](#writes-refused-until-reconnect).
 - `InboundBuffer` growing means an initial load is still in progress.
 
 `InboundBuffer.TotalDropped` is the one drop count that is not data loss: it counts buffered updates discarded when a connect attempt was abandoned before its load completed, and applying a superseded snapshot would have been wrong. It is still worth watching, because it is the only signal of how often initial loads are being superseded, which is reconnect thrash.
@@ -989,7 +991,7 @@ Cases where the local model and the external system can end up disagreeing, or w
 
 **Writes to properties a source has not claimed yet are discarded.** Ownership is established inside `StartListeningAsync`, and the drain must empty the subscription to keep it bounded, so a write it cannot attribute is dropped without an error. First connection only, since ownership persists across reconnects. These discards are not counted by `Diagnostics.OutboundRetries.TotalDropped`: with no owner recorded yet, there is nothing to attribute them to.
 
-**Connector-internal reconnects skip the reconcile.** Transport-level reconnects handled inside a connector (the OPC UA health loop, the MQTT and WebSocket monitors) reload initial state without running the connect-window reconciliation. They also do not flush the retry queue: the queue is flushed only when the change processor hands it a change, or by the reconcile that these reconnects skip. So a write parked before such a reconnect is not merely delivered without the supersession check, it may not be delivered at all until some other owned property changes, while the source still reports `Synchronized`. A write parked by the retry queue shows in `Diagnostics.OutboundRetries.Depth`; one the source refused for the connection does not, and shows in `RefusedWriteCount` instead. Tracked as [#362](https://github.com/RicoSuter/Namotion.Interceptor/issues/362).
+**Connector-internal reconnects skip the reconcile.** Transport-level reconnects handled inside a connector (the OPC UA health loop, the MQTT and WebSocket monitors) reload initial state without running the connect-window reconciliation. They also do not flush the retry queue: the queue is flushed only when the change processor hands it a change, or by the reconcile that these reconnects skip. So a write parked before such a reconnect is not merely delivered without the supersession check, it may not be delivered at all until some other owned property changes, while the source still reports `Synchronized`. A write parked by the retry queue shows in `Diagnostics.OutboundRetries.Depth`; one the source refused for the connection does not, and shows in `Diagnostics.HeldWrites.Depth` instead. Tracked as [#362](https://github.com/RicoSuter/Namotion.Interceptor/issues/362).
 
 **A property with no setter cannot be restored.** If the load moves the model off a parked write for a derived or getter-only property, there is nothing to write back locally, so the change is dropped and logged by name rather than silently counted as restored.
 

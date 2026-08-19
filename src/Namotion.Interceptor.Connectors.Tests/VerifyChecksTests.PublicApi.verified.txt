@@ -142,7 +142,6 @@ namespace Namotion.Interceptor.Connectors
         public new virtual Namotion.Interceptor.Connectors.Diagnostics.SourceDiagnostics Diagnostics { get; }
         public System.DateTimeOffset? LastSynchronizedAt { get; }
         protected new Namotion.Interceptor.Connectors.Diagnostics.SourceMetrics Metrics { get; }
-        public int RefusedWriteCount { get; }
         public Namotion.Interceptor.Connectors.Monitoring.SourceState State { get; }
         public System.DateTimeOffset StateChangeTime { get; }
         public virtual int WriteBatchSize { get; }
@@ -225,12 +224,14 @@ namespace Namotion.Interceptor.Connectors.Diagnostics
     {
         public SourceDiagnostics(Namotion.Interceptor.Connectors.Diagnostics.SourceMetrics metrics) { }
         public int ClaimedPropertyCount { get; }
+        public Namotion.Interceptor.Connectors.Diagnostics.QueueDiagnostics HeldWrites { get; }
         public Namotion.Interceptor.Connectors.Diagnostics.QueueDiagnostics InboundBuffer { get; }
         public Namotion.Interceptor.Connectors.Diagnostics.QueueDiagnostics OutboundRetries { get; }
     }
     public class SourceMetrics : Namotion.Interceptor.Connectors.Diagnostics.ConnectorMetrics
     {
         public SourceMetrics(Namotion.Interceptor.Connectors.ThroughputCounter? incoming = null, Namotion.Interceptor.Connectors.ThroughputCounter? outgoing = null) { }
+        public Namotion.Interceptor.Connectors.Diagnostics.QueueMetrics HeldWrites { get; }
         public Namotion.Interceptor.Connectors.Diagnostics.QueueMetrics InboundBuffer { get; }
         public Namotion.Interceptor.Connectors.Diagnostics.QueueMetrics OutboundRetries { get; }
         public void RegisterClaimedProperties(System.Func<int> count) { }

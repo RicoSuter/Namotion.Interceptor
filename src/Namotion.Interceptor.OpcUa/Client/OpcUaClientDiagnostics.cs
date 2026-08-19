@@ -69,14 +69,6 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     public long SkippedBadSubscriptionValues => _source.SubscriptionMetrics.SkippedBadValues;
 
     /// <summary>
-    /// Gets the number of writes the server refused for this session, held back until the client
-    /// reconnects instead of being re-sent on every write cycle. They are still owed to the server, so
-    /// this is not a loss count; a value that stays above zero across reconnections is a node the
-    /// server will not take. The refused nodes are named once per session in the log.
-    /// </summary>
-    public int RefusedWriteCount => _source.RefusedWriteCount;
-
-    /// <summary>
     /// Gets the reconnection history.
     /// </summary>
     public ReconnectDiagnostics Reconnects { get; }
