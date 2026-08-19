@@ -2,42 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(dotnet build:*)",
-      "Bash(dotnet test:*)",
-      "Bash(DiffEngine_Disabled=true dotnet test src/Namotion.Interceptor.Tracking.Tests --no-build)",
-      "Bash(DiffEngine_Disabled=true dotnet test src/Namotion.Interceptor.Tracking.Tests --filter \"FullyQualifiedName~PerPropertySubscriptionTests\")",
-      "Bash(DiffEngine_Disabled=true dotnet test src/Namotion.Interceptor.slnx --filter \"Category!=Integration\")",
-      "Bash(echo \"emdash: $?\")",
-      "Bash(recursion\\\\|same policy *)",
-      "Bash(grep -n \"leaf slot\\\\|while holding the tracker lock\\\\|generation counter\\\\|Lock` recursion\\\\|same policy as\" docs/superpowers/specs/2026-07-18-path-subscriptions-design.md)",
-      "Bash(echo \"emdash-exit: $?\")",
-      "Read(//Users/ricosuter/Projects/GitHub/Namotion.Interceptor-path-subscriptions/**)",
-      "Bash(sed -n '/DispatchLateConsumers/,/^    }$/p' src/Namotion.Interceptor.Tracking/Change/PropertyChangeInterceptor.cs)",
-      "Bash(git add *)",
-      "Bash(git commit *)",
-      "Bash(/Users/ricosuter/.claude/plugins/cache/superpowers-marketplace/superpowers/6.1.1/skills/subagent-driven-development/scripts/task-brief docs/superpowers/plans/2026-07-21-path-subscriptions.md 15)",
-      "Bash(perl -0pi -e 's/            if \\\\\\(_segmentObservers\\\\[observer\\\\.Position\\\\] != observer\\\\\\)\\\\n            \\\\{\\\\n                return;\\\\n            \\\\}/            \\\\/\\\\/ TEMP-DISABLED\\\\n            \\\\/\\\\/ if \\(_segmentObservers[observer.Position] != observer\\) { return; }/' src/Namotion.Interceptor.Tracking/Paths/SubjectPathSubscription.cs)",
-      "Bash(DiffEngine_Disabled=true dotnet test src/Namotion.Interceptor.Tracking.Tests --filter \"FullyQualifiedName~WhenLateCallbackArrivesForRetrackedObserver\")",
-      "Bash(DiffEngine_Disabled=true dotnet test src/Namotion.Interceptor.Tracking.Tests --filter \"FullyQualifiedName~WhenLateCallbackArrivesForRetrackedObserver\" --no-restore --no-build)",
-      "Bash(DiffEngine_Disabled=true dotnet run -c Release --no-build -- --filter \"*Benchmark.PathDeliverDepth4\" \"*Benchmark.BareDeliverDepth4\" \"*Benchmark.PathHotLeafSuppressedDepth4\" \"*Benchmark.PathStructuralRetrackDepth4\" \"*Benchmark.CurrentReadDepth1\" \"*Benchmark.CurrentReadDepth4\" \"*Benchmark.SubscribeDisposeChurnDepth4\" \"*Benchmark.PathDeliverMixedDepth\" --job Short)",
-      "Bash(DiffEngine_Disabled=true dotnet run -c Release --no-build -- --filter \"*Benchmark.PathDeliverDepth1\" \"*Benchmark.BareDeliverDepth1\" \"*Benchmark.PathDeliverStringDepth1\" \"*Benchmark.PathDeliverImmutableArrayIntermediate\" \"*Benchmark.PathDeliverStructLeafDepth1\" \"*Benchmark.PathDeliverDepth4\" \"*Benchmark.CurrentReadDepth1\" \"*Benchmark.CurrentReadDepth4\" --job Short)",
-      "mcp__plugin_playwright_playwright__browser_navigate",
-      "mcp__plugin_playwright_playwright__browser_find",
-      "mcp__plugin_playwright_playwright__browser_click",
-      "mcp__plugin_playwright_playwright__browser_take_screenshot",
-      "Bash(awk -v s=9 '{printf \"%d:%s\\\\n\", NR+s, substr\\($0, index\\($0,\"\\\\t\"\\)+1\\)}')",
-      "WebFetch(domain:mudblazor.com)",
-      "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(DiffEngine_Disabled=true dotnet test src/HomeBlaze/HomeBlaze.History.Tests)",
-      "Bash(DiffEngine_Disabled=true dotnet test *)",
-      "Bash(python3 -)"
+      "Bash(dotnet test:*)"
     ],
     "deny": [],
     "ask": [],
     "additionalDirectories": [
       "C:\\Users\\rsute\\GitHub\\HomeBlaze"
     ]
-  },
-  "disabledMcpjsonServers": [
-    "homeblaze"
-  ]
+  }
 }
