@@ -43,11 +43,8 @@ public enum ChangeDeliveryRule
     /// the destination already holds the value the subject will settle on, which is why a converter that
     /// clamps, scales or narrows no longer breaks it: the OPC UA server reconciles the node with the
     /// model's own value rather than leaving the client's there. The one case it cannot reconcile inside
-    /// the write is a model value it fails to read or represent after taking the write, where the node
-    /// keeps the older value and says so with an Uncertain status. Whether it catches up afterwards
-    /// depends on the origin the write ended up carrying: an adjustment made inside the write chain
-    /// publishes a local change that does reach the node, while a value stored as this server applied it
-    /// publishes this server's own echo, which is dropped, and the node stays behind.
+    /// the write, and how long the node then stays behind, are covered by the divergence section in
+    /// docs/connectors-opcua-server.md.
     /// Choosing <see cref="SourceValuesMayBeStale"/> here delivers a commit the clients have already moved
     /// past, leaving them behind the model with nothing to correct them.
     /// </remarks>
