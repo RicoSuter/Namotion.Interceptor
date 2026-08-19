@@ -222,11 +222,13 @@ internal sealed class OutboundWriter
 
         if (newlyRefusedNodeIds is not null)
         {
-            // Once per node per session: the retry queue stops re-sending these, so an entry per
-            // attempt would report an outage that is not happening while the first one is what an
-            // operator needs.
+            // Once per node per session: the answer repeats for the session, so an entry per attempt
+            // would report an outage that is not happening while the first one is what an operator
+            // needs. The message names only what the server answered, because what becomes of the
+            // writes is decided elsewhere: the retry queue holds a pump write back unless the session
+            // moved on mid-flight or buffering is off, and a transaction write never reaches it.
             _logger.LogWarning(
-                "OPC UA write: {Count} node(s) refused for this session, held back until the client reconnects: {NodeIds}.",
+                "OPC UA write: {Count} node(s) refused with a status the server will keep returning for this session: {NodeIds}. Diagnostics.HeldWrites reports the writes currently held back.",
                 newlyRefusedNodeIds.Count, newlyRefusedNodeIds);
         }
 
