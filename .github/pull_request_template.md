@@ -22,7 +22,24 @@
 <!-- Measured numbers, with the benchmark they came from. Include a known regression as readily as an
      improvement. Drop this heading when nothing was measured; an unmeasured claim is worse than silence. -->
 
+## Diff composition
+
+<!-- Generate with: pwsh scripts/diff-composition.ps1
+     Add -PerProject to break production code down per project on a change that spans several. -->
+
+| Area | Files | Added | Removed | Net |
+|---|---:|---:|---:|---:|
+
 ## Verification
 
-<!-- What you ran and what it reported: test suites and counts, integration or connector tester runs,
-     benchmarks, manual checks. Say plainly what you did not run. -->
+<!-- Tick what you ran. Strike an entry through with ~~two tildes~~ and a short reason when it does not
+     apply, so an unticked box always means "not done yet" rather than "not relevant".
+     Where a suite has a count or a number, give it. -->
+
+- [ ] Unit tests, `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"`
+- [ ] Integration tests, per project, for connector or HomeBlaze UI changes
+- [ ] Benchmarks, `pwsh scripts/benchmark.ps1`, for changes that can affect a hot path
+- [ ] Connector Tester load profile, for risky connector work
+- [ ] Connector Tester chaos profile, for risky connector work
+
+<!-- Say plainly what you did not run and why. -->
