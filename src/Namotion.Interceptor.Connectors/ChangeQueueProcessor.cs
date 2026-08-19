@@ -91,10 +91,11 @@ public class ChangeQueueProcessor : IDisposable
     /// <param name="dropHandler">Optional handler invoked only when bounded-queue overflow drops
     /// changes. Use this to report the count to queue diagnostics without adding work to successful
     /// enqueue or dequeue operations.</param>
-    /// <param name="teardownFlushTimeout">How long the teardown drain may block, or null for 5 seconds,
-    /// which is also the budget the host gives all connectors together, since they stop one after another
-    /// under a single <c>HostOptions.ShutdownTimeout</c>. <see cref="TimeSpan.Zero"/> discards
-    /// the batch instead.</param>
+    /// <param name="teardownFlushTimeout">How long the teardown drain may block, or null for
+    /// <see cref="DefaultTeardownFlushTimeout"/>. Connectors stop one after another under the host's
+    /// shared <c>HostOptions.ShutdownTimeout</c>, 30 seconds by default, so enough of them blocked on
+    /// unreachable endpoints still exhaust it. <see cref="TimeSpan.Zero"/> discards the batch
+    /// instead.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
     /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
     /// the first flush, where it would end delivery for this processor's lifetime. Also thrown when

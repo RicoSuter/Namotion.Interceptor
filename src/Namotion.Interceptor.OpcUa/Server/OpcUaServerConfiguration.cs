@@ -57,9 +57,10 @@ public class OpcUaServerConfiguration
     public TimeSpan? BufferTime { get; set; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
-    /// Gets or sets how long a stop may block while the last buffered batch is written. The default is
-    /// also the budget the host gives all connectors together, since they stop one after another under a
-    /// single <c>HostOptions.ShutdownTimeout</c>. Zero discards the batch instead.
+    /// Gets or sets how long a stop may block while the last buffered batch is written. Connectors stop
+    /// one after another under the host's shared <c>HostOptions.ShutdownTimeout</c>, 30 seconds by
+    /// default, so enough of them blocked on unreachable endpoints still exhaust it. Zero discards the
+    /// batch instead.
     /// </summary>
     public TimeSpan TeardownFlushTimeout { get; set; } = ChangeQueueProcessor.DefaultTeardownFlushTimeout;
 
