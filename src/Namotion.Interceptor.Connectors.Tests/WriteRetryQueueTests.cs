@@ -862,6 +862,57 @@ public class WriteRetryQueueTests
         Assert.Equal(5, queue.PendingWriteCount);
     }
 
+    /// <summary>
+    /// A refused write is held for the connection that refused it, so the release that follows a reconnect
+    /// can push the queue past its bound. Trimming there would discard exactly what the release exists to
+    /// deliver, which a previous fix to this class got wrong once.
+    /// </summary>
+    [Fact]
+    public async Task WhenReleasedRefusalsOverflowTheQueue_ThenEveryOneIsWrittenOnTheNextConnection()
+    {
+        // Arrange - three held properties against a bound of two, so the release overshoots it
+        var queue = new WriteRetryQueue(2, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var refusing = true;
+        var writtenProperties = new List<string>();
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                var batch = changes.ToArray();
+                if (!refusing)
+                {
+                    writtenProperties.AddRange(batch.Select(change => change.Property.Name));
+                    return new ValueTask<WriteResult>(WriteResult.Success);
+                }
+
+                return new ValueTask<WriteResult>(WriteResult
+                    .Failure(batch, new InvalidOperationException("Refused"))
+                    .WithRefusedUntilReconnect(batch.ToImmutableArray()));
+            });
+
+        for (var i = 0; i < 3; i++)
+        {
+            queue.Enqueue(new[] { CreateChange(CreateProperty($"Refused{i}"), i, revision: i + 1) });
+            await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        }
+
+        Assert.Equal(3, queue.RefusedWriteCount);
+
+        // Act - the connection is replaced and the new one takes every write
+        refusing = false;
+        queue.RetryRefusedWrites();
+        var flushed = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - all three held writes were delivered, not just the two the bound would keep
+        Assert.True(flushed);
+        Assert.Equal(0, queue.RefusedWriteCount);
+        Assert.Equal(0, queue.PendingWriteCount);
+        Assert.Equal(
+            new[] { "Refused0", "Refused1", "Refused2" },
+            writtenProperties.OrderBy(name => name, StringComparer.Ordinal).ToArray());
+    }
+
     [Fact]
     public async Task WhenOneFailureIsRefusedAndAnotherIsNot_ThenOnlyTheRefusedOneIsHeldBack()
     {
