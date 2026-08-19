@@ -76,7 +76,7 @@ Badge every bullet there with its kind, matching the labels a pull request descr
 - `Behavior:` compiles and runs, and does something different.
 - `Contract:` compiles and runs, and the caller is now wrong unless it changes. State the new obligation.
 
-Badge all three consistently rather than only the surprising ones, so a reader can scan for `Contract:` and trust that its absence means there is none. That kind is the rare and dangerous one: nothing in a build or an API snapshot reveals it, and both instances in the last ten releases were of it, `LastSynchronizedAt` becoming a correctness obligation for direct `ISubjectSource` implementers and `WriteChangesAsync` no longer permitted to read the model.
+Badge all three consistently rather than only the surprising ones, so a reader can scan for `Contract:` and trust that its absence means there is none. Two kinds of bullet take no badge, because neither is a change a caller acts on in code: a scope note such as "no public API is added or removed", and a packaging change such as a new transitive dependency. That kind is the rare and dangerous one: nothing in a build or an API snapshot reveals it, and both instances in the last ten releases were of it, `LastSynchronizedAt` becoming a correctness obligation for direct `ISubjectSource` implementers and `WriteChangesAsync` no longer permitted to read the model.
 
 `## Migration` is a numbered list, one instruction per line, harvested from the migration step each breaking bullet in the pull request carries. Keep measured numbers (percentages, byte sizes, allocation counts) wherever the source has them, and never invent one.
 
