@@ -360,38 +360,11 @@ public class ChangeQueueProcessor : IDisposable
     }
 
     /// <summary>
-    /// Writes the changes that were taken off the subscription but never flushed. Without this they are
-    /// discarded at teardown and no later drain can recover them: they are gone from the subscription, so
-    /// <see cref="SubjectSourceBase"/> parking its subscription into the write retry queue on the next
-    /// attempt cannot see them, and a reconnecting connector then masks the loss when its initial load
-    /// makes both sides agree on a value the caller never wrote.
+    /// Writes the changes that were taken off the subscription but never flushed. Nothing else can
+    /// recover them: they have already left the subscription, so the retry queue drain on the next
+    /// attempt cannot see them, and a reconnecting connector's initial load then hides the loss by
+    /// making both sides agree on a value the caller never wrote.
     /// </summary>
-    /// <remarks>
-    /// Runs on its own timeout token rather than the token <see cref="ProcessAsync"/> was given, which is
-    /// already cancelled by the time a stop reaches this: writing under it would fail every change
-    /// immediately, which is the loss this exists to prevent. The transport is still up here, because
-    /// every caller disposes the processor before the connection it writes through, so a live source
-    /// takes the batch. When it does not, the timeout keeps teardown bounded and a write handler that
-    /// parks its failures (<see cref="SubjectSourceBase"/> writes through its retry queue) still keeps
-    /// the changes for the next attempt.
-    /// <para>
-    /// That token only bounds a handler that observes it, and one in this repository observes neither it
-    /// nor any other: the OPC UA server writes synchronously under the SDK's node manager lock, which is
-    /// also held while the SDK serves client reads, writes and browses. The deadline is therefore enforced
-    /// from the outside as well, by running the flush on the thread pool and abandoning it. The price is a
-    /// window this method introduces: on the deadline the drain returns while such a handler may still be
-    /// writing, so a change can reach the wire shortly after <see cref="ProcessAsync"/> returns and after
-    /// its caller has begun tearing the transport down. Every client in this repository rejects a write
-    /// once disposed, so it fails cleanly rather than resurrecting a connection.
-    /// </para>
-    /// <para>
-    /// The batch is one more write through the normal handler, not a privileged one. For a source that
-    /// handler flushes the entire write retry queue first, because the backlog holds older commits and
-    /// must keep its place in commit order, and only writes this batch once that succeeded. A deep backlog
-    /// on a slow transport can therefore consume the whole deadline on its own, in which case this batch
-    /// is parked in the retry queue rather than written.
-    /// </para>
-    /// </remarks>
     private async Task FlushRemainingChangesAsync()
     {
         if (_teardownFlushTimeout <= TimeSpan.Zero || _changes.IsEmpty)
@@ -399,15 +372,17 @@ public class ChangeQueueProcessor : IDisposable
             return;
         }
 
+        // A fresh token, not the one ProcessAsync was given: that one is already cancelled here, so
+        // writing under it would fail every change, which is the loss this exists to prevent.
         using var teardownTokenSource = new CancellationTokenSource(_teardownFlushTimeout);
         try
         {
             // The gate is free: the dequeue loop has exited and the periodic flush task is awaited above,
             // so nothing else is flushing unless a concurrent Dispose is in progress.
             //
-            // Off this thread, because a handler is free to block before the flush ever yields, and then
-            // awaiting it here would bound nothing at all: the token is a request, the deadline below is
-            // not. What is abandoned still finishes on its own and cleans up after itself, see the remarks.
+            // Off this thread, because the token only bounds a handler that observes it and the OPC UA
+            // server writes synchronously under the SDK's node manager lock. Awaiting inline would then
+            // bound nothing. What is abandoned still finishes on its own and cleans up after itself.
             await Task
                 .Run(() => TryFlushAsync(teardownTokenSource.Token).AsTask())
                 .WaitAsync(_teardownFlushTimeout)
@@ -416,6 +391,8 @@ public class ChangeQueueProcessor : IDisposable
         catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
         {
             // The deadline, reached either by abandoning the flush or by a handler that took the hint.
+            // An abandoned write can still reach the wire after the caller has begun tearing the
+            // transport down; every client here rejects a write once disposed, so that fails cleanly.
             _logger.LogWarning(ex,
                 "Gave up waiting after {Timeout} for the remaining buffered changes to be written while " +
                 "stopping. A write handler that ignores cancellation may still complete it.",

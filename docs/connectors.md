@@ -202,7 +202,7 @@ When a connector stops, the change processor writes whatever it had buffered but
 
 The cost is that a stop can block on an unreachable endpoint, so the wait is bounded by `TeardownFlushTimeout`, which each connector exposes on its own configuration (for example `OpcUaClientConfiguration.TeardownFlushTimeout`) and which defaults to `ChangeQueueProcessor.DefaultTeardownFlushTimeout`, 5 seconds. That bound is per connector and the connectors stop one after another, under the host's shared `HostOptions.ShutdownTimeout` of 30 seconds by default, so a host running several connectors that can hang wants a shorter bound than one running a single local connector. Set it to zero to skip the flush and discard the batch, which is the fastest stop and the only one that loses data. When implementing a custom source, pass `teardownFlushTimeout` to the `SubjectSourceBase` constructor, which rejects a negative value there rather than when the source next connects.
 
-The bound covers the flush, not the write beneath it: a `WriteChangesAsync` that ignores its cancellation token can still outrun it.
+The batch is one more write through the normal handler, not a privileged one, so for a source the handler flushes the write retry queue first: that backlog holds older commits and must keep its place in commit order. A deep backlog on a slow transport can consume the whole bound on its own, in which case the batch is parked for the next attempt rather than written.
 
 ### Monitoring Synchronization State
 
