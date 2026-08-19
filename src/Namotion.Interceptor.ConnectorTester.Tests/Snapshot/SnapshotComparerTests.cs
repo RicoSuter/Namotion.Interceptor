@@ -393,6 +393,130 @@ public class SnapshotComparerTests
         Assert.NotEqual(snapshotA, snapshotB);
     }
 
+    /// <summary>
+    /// root -> Collection[0] -> holder -> Collection[0] -> shared, and root -> ObjectRef -> shared.
+    /// The shared node is reachable by two paths, so the model is a DAG rather than a tree.
+    /// </summary>
+    private static TestNode BuildSharedReferenceGraph(IInterceptorSubjectContext context)
+    {
+        var shared = CreateLeaf(context, "shared", 7);
+        var holder = new TestNode(context)
+        {
+            StringValue = "holder", IntValue = 2, DecimalValue = 2, LongValue = 2,
+            Collection = [shared]
+        };
+
+        return new TestNode(context)
+        {
+            StringValue = "root", IntValue = 1, DecimalValue = 1, LongValue = 1,
+            Collection = [holder],
+            ObjectRef = shared
+        };
+    }
+
+    [Fact]
+    public void WhenGraphIsADagWithASharedNode_ThenCaptureTerminatesAndCountsTheNodeOnce()
+    {
+        // Arrange
+        using var _ = SubjectChangeContext.WithChangedTimestamp(FixedTimestamp);
+        var root = BuildSharedReferenceGraph(CreateContext());
+
+        // Act
+        var snapshot = SnapshotComparer.Capture(root);
+
+        // Assert: root, holder and the shared node, with the shared node emitted a single time.
+        var (subjects, properties) = SnapshotComparer.CountSubjectsAndProperties(snapshot);
+        Assert.Equal(3, subjects);
+        Assert.True(properties > 0);
+    }
+
+    [Fact]
+    public void WhenTwoParticipantsHoldTheSameDag_ThenCapturesMatch()
+    {
+        // Arrange: independently built graphs, so raw subject IDs differ throughout.
+        using var _ = SubjectChangeContext.WithChangedTimestamp(FixedTimestamp);
+        var rootA = BuildSharedReferenceGraph(CreateContext());
+        var rootB = BuildSharedReferenceGraph(CreateContext());
+
+        // Act
+        var snapshotA = SnapshotComparer.Capture(rootA);
+        var snapshotB = SnapshotComparer.Capture(rootB);
+
+        // Assert
+        Assert.Equal(snapshotA, snapshotB);
+        Assert.True(SnapshotComparer.SnapshotsMatch(snapshotA, snapshotB));
+    }
+
+    [Fact]
+    public void WhenOneParticipantFabricatesASecondInstanceOfASharedNode_ThenCapturesDiffer()
+    {
+        // Arrange: the reference side shares one node between two parents. The other side holds
+        // two distinct instances that carry identical values, which is exactly what a receiver
+        // produces when it fabricates a phantom subject instead of reusing the one it holds.
+        using var _ = SubjectChangeContext.WithChangedTimestamp(FixedTimestamp);
+
+        var rootA = BuildSharedReferenceGraph(CreateContext());
+
+        var contextB = CreateContext();
+        var sharedInCollection = CreateLeaf(contextB, "shared", 7);
+        var sharedInObjectRef = CreateLeaf(contextB, "shared", 7);
+        var holderB = new TestNode(contextB)
+        {
+            StringValue = "holder", IntValue = 2, DecimalValue = 2, LongValue = 2,
+            Collection = [sharedInCollection]
+        };
+        var rootB = new TestNode(contextB)
+        {
+            StringValue = "root", IntValue = 1, DecimalValue = 1, LongValue = 1,
+            Collection = [holderB],
+            ObjectRef = sharedInObjectRef
+        };
+
+        // Act
+        var snapshotA = SnapshotComparer.Capture(rootA);
+        var snapshotB = SnapshotComparer.Capture(rootB);
+
+        // Assert: the duplicate is visible as an extra subject, so the oracle still separates
+        // converged from diverged once the model is a DAG.
+        Assert.NotEqual(snapshotA, snapshotB);
+        Assert.False(SnapshotComparer.SnapshotsMatch(snapshotA, snapshotB));
+        Assert.Equal(3, SnapshotComparer.CountSubjectsAndProperties(snapshotA).Subjects);
+        Assert.Equal(4, SnapshotComparer.CountSubjectsAndProperties(snapshotB).Subjects);
+    }
+
+    [Fact]
+    public void WhenSharedNodeIsReachedByDifferentPathsOnEachSide_ThenCapturesDiffer()
+    {
+        // Arrange: both sides share one node between two parents, but the second parent edge
+        // hangs off a different property. Normalization must not flatten that away.
+        using var _ = SubjectChangeContext.WithChangedTimestamp(FixedTimestamp);
+
+        var rootA = BuildSharedReferenceGraph(CreateContext());
+
+        var contextB = CreateContext();
+        var shared = CreateLeaf(contextB, "shared", 7);
+        var holderB = new TestNode(contextB)
+        {
+            StringValue = "holder", IntValue = 2, DecimalValue = 2, LongValue = 2,
+            Collection = [shared]
+        };
+        var rootB = new TestNode(contextB)
+        {
+            StringValue = "root", IntValue = 1, DecimalValue = 1, LongValue = 1,
+            Collection = [holderB],
+            Items = new Dictionary<string, TestNode> { ["shared"] = shared }
+        };
+
+        // Act
+        var snapshotA = SnapshotComparer.Capture(rootA);
+        var snapshotB = SnapshotComparer.Capture(rootB);
+
+        // Assert: same three subjects on both sides, but the edge differs.
+        Assert.Equal(3, SnapshotComparer.CountSubjectsAndProperties(snapshotA).Subjects);
+        Assert.Equal(3, SnapshotComparer.CountSubjectsAndProperties(snapshotB).Subjects);
+        Assert.NotEqual(snapshotA, snapshotB);
+    }
+
     // Raw-JSON tests for SnapshotComparer.SnapshotsMatch — no Capture or SubjectChangeContext needed.
 
     private const string SampleSnapshotPropertiesAB = """
