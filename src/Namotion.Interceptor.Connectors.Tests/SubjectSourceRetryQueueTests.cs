@@ -5,6 +5,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Connectors.Tests;
 
@@ -267,6 +268,111 @@ public class SubjectSourceRetryQueueTests
                 message: "The accepted write never reached the source.");
 
             var acceptedIndex = IndexOfBatchWith(gate, batches, "FirstName=Accepted");
+            source.SimulateConnectionLost();
+
+            // Assert: releasing must not put the superseded value back on the source, which would then
+            // report it and take the model down with it.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundRetries.Depth == 0 && source.Diagnostics.HeldWrites.Depth == 0,
+                message: "The held write was never resolved after the connection was replaced.");
+
+            lock (gate)
+            {
+                var sentAfterAcceptance = batches.Skip(acceptedIndex + 1);
+                Assert.DoesNotContain(sentAfterAcceptance, batch => batch.Contains("FirstName=Refused"));
+            }
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenATransactionWritesAHeldPropertySuccessfully_ThenTheHeldWriteIsNotSentOnTheNextConnection()
+    {
+        // Arrange: the same grant-mid-session case as the pump test above, but the newer value reaches
+        // the source through the transaction writer, which does not pass the pump. The held write has
+        // to be discarded on this path too, or it survives the value that replaced it, is released when
+        // the connection is replaced, and puts the source back on the superseded value.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithTransactions()
+            .WithFullPropertyTracking()
+            .WithSourceTransactions();
+
+        var person = new Person(context);
+
+        var gate = new object();
+        var batches = new List<string[]>();
+        var refusing = true;
+
+        var source = new TestSubjectSource(person, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(8))
+        {
+            WriteChangesOverride = (changes, _) =>
+            {
+                lock (gate)
+                {
+                    var batch = changes.ToArray();
+                    batches.Add(batch
+                        .Select(change => $"{change.Property.Name}={change.GetNewValue<object?>()}")
+                        .ToArray());
+
+                    var refused = refusing
+                        ? batch.Where(change => change.Property.Name == nameof(Person.FirstName)).ToImmutableArray()
+                        : ImmutableArray<SubjectPropertyChange>.Empty;
+
+                    return ValueTask.FromResult(refused.IsEmpty
+                        ? WriteResult.Success
+                        : WriteResult
+                            .Failure(refused.AsSpan().ToArray(), new InvalidOperationException("Refused"))
+                            .WithRefusedUntilReconnect(refused));
+                }
+            },
+        };
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source);
+
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            var probeValue = 0;
+            var probe = string.Empty;
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                if (IndexOfBatchWith(gate, batches, probe) >= 0)
+                {
+                    return true;
+                }
+
+                probe = $"{nameof(Person.LastName)}=Probe{probeValue++}";
+                person.LastName = $"Probe{probeValue - 1}";
+                return false;
+            }, message: "Pump did not start processing changes.");
+
+            person.FirstName = "Refused";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.HeldWrites.Depth == 1,
+                message: "The refused write was never held back.");
+
+            // Act: the source takes the property now, and a newer value reaches it through a transaction
+            lock (gate)
+            {
+                refusing = false;
+            }
+
+            using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+            {
+                person.FirstName = "Accepted";
+                await transaction.CommitAsync(CancellationToken.None);
+            }
+
+            var acceptedIndex = IndexOfBatchWith(gate, batches, "FirstName=Accepted");
+            Assert.True(acceptedIndex >= 0, "The transaction write never reached the source.");
+
             source.SimulateConnectionLost();
 
             // Assert: releasing must not put the superseded value back on the source, which would then
