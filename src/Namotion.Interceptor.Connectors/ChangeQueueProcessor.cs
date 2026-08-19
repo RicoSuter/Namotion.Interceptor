@@ -23,6 +23,12 @@ public class ChangeQueueProcessor : IDisposable
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
+
+    // Bounds the teardown drain below, and matches the bound the WebSocket client already puts on its
+    // close handshake: long enough for a live transport to take one more batch, short enough that a dead
+    // one cannot turn a lost change into a stuck shutdown.
+    private static readonly TimeSpan TeardownFlushTimeout = TimeSpan.FromSeconds(2);
+
     private readonly int? _maxQueueDepth;
     private long _dropCount;
     private int _flushGate; // 0 = free, 1 = flushing
@@ -320,7 +326,56 @@ public class ChangeQueueProcessor : IDisposable
         finally
         {
             try { await linkedTokenSource.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
-            await flushTask.ConfigureAwait(false);
+
+            try
+            {
+                await flushTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // The flush task was cancelled before its body started, so nothing was flushed. Swallowed
+                // rather than left to propagate, because the drain below has to run either way.
+            }
+
+            await FlushRemainingChangesAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Writes the changes that were taken off the subscription but never flushed. Without this they are
+    /// discarded at teardown and no later drain can recover them: they are gone from the subscription, so
+    /// <see cref="SubjectSourceBase"/> parking its subscription into the write retry queue on the next
+    /// attempt cannot see them, and a reconnecting connector then masks the loss when its initial load
+    /// makes both sides agree on a value the caller never wrote.
+    /// </summary>
+    /// <remarks>
+    /// Runs on its own timeout token rather than the token <see cref="ProcessAsync"/> was given, which is
+    /// already cancelled by the time a stop reaches this: writing under it would fail every change
+    /// immediately, which is the loss this exists to prevent. The transport is still up here, because
+    /// every caller disposes the processor before the connection it writes through, so a live source
+    /// takes the batch. When it does not, the timeout keeps teardown bounded and a write handler that
+    /// parks its failures (<see cref="SubjectSourceBase"/> writes through its retry queue) still keeps
+    /// the changes for the next attempt.
+    /// </remarks>
+    private async Task FlushRemainingChangesAsync()
+    {
+        if (_changes.IsEmpty)
+        {
+            return;
+        }
+
+        using var teardownTokenSource = new CancellationTokenSource(TeardownFlushTimeout);
+        try
+        {
+            // The gate is free: the dequeue loop has exited and the periodic flush task is awaited above,
+            // so nothing else is flushing unless a concurrent Dispose is in progress.
+            await TryFlushAsync(teardownTokenSource.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Never rethrown: this runs inside a finally, where a throw would replace the failure that
+            // ended the processing loop with this one.
+            _logger.LogError(ex, "Failed to write the remaining buffered changes while stopping.");
         }
     }
 

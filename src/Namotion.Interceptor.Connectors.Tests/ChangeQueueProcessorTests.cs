@@ -983,4 +983,49 @@ public class ChangeQueueProcessorTests
         await processing;
     }
 
+    [Fact]
+    public async Task WhenProcessingStopsWithBufferedChanges_ThenTheyAreStillWritten()
+    {
+        // Arrange: a buffer time no periodic tick reaches during the test, so the change is taken off the
+        // subscription and left in the processor buffer, where only the teardown drain can deliver it.
+        // Nothing else can recover it there: it is gone from the subscription a source would drain.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var writtenValues = new ConcurrentQueue<string>();
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    writtenValues.Enqueue(change.GetNewValue<string>()!);
+                }
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "buffered";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processor.QueueDepth == 1,
+            message: "The change should be buffered by the processor before it stops");
+
+        // Act
+        await cancellation.CancelAsync();
+        await processing;
+
+        // Assert
+        Assert.Equal(["buffered"], writtenValues.ToArray());
+    }
 }

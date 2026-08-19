@@ -1864,4 +1864,64 @@ public class SubjectSourceBaseTests
         await AsyncTestHelpers.WaitUntilAsync(() => source.State == SourceState.Synchronized);
         Assert.Equal(1, Volatile.Read(ref loads));
     }
+
+    [Fact]
+    public async Task WhenSourceStopsWithBufferedChanges_ThenTheyStillReachTheSource()
+    {
+        // Arrange: a buffer time no periodic tick reaches during the test, so every change the pump takes
+        // off its subscription stays in the change processor buffer until the source stops. A change left
+        // there is invisible to the retry queue, which is only fed from the subscription.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        var receivedWrites = new ConcurrentQueue<string>();
+
+        using var source = new TestSubjectSource(person, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMinutes(5))
+        {
+            WriteChangesOverride = (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    receivedWrites.Enqueue($"{change.Property.Name}={change.GetNewValue<object?>()}");
+                }
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source);
+
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            // The probe is re-written on each poll because writes captured before the change processor
+            // runs are parked in the retry queue and reconciled rather than buffered.
+            var probeValue = 0;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    person.LastName = "Probe" + probeValue++;
+                    return source.Diagnostics.OutboundChanges.Depth > 0;
+                },
+                message: "The pump did not start buffering changes.");
+
+            // Act: nothing writes after this poll loop, so the depth can only grow by this change.
+            var bufferedBeforeWrite = source.Diagnostics.OutboundChanges.Depth;
+            person.FirstName = "John";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundChanges.Depth > bufferedBeforeWrite,
+                message: "The write was not buffered by the change processor.");
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+
+        // Assert
+        Assert.Contains("FirstName=John", receivedWrites);
+    }
 }
