@@ -68,7 +68,15 @@ Headings are sentence case exactly as spelled above.
 
 Keep it compact: one sentence per bullet, two at most, each ending with its pull request reference like `(#420)`. Detail belongs in the pull request, which the reader can open.
 
-`## Breaking changes` is the exception, because a reader acts on it. Group by area with `### Area (#PR)` subsections when there is more than one, and allow two sentences per bullet. `## Migration` is a numbered list, one instruction per line. Keep measured numbers (percentages, byte sizes, allocation counts) wherever the source has them, and never invent one.
+`## Breaking changes` is the exception, because a reader acts on it. Group by area with `### Area (#PR)` subsections when there is more than one, and allow two sentences per bullet.
+
+Badge every bullet there with its kind, matching the labels a pull request description uses, so the note can carry the author's own classification through instead of re-deriving it:
+
+- `API:` a signature, rename or removal. The compiler catches it, or a failed recompile does.
+- `Behavior:` compiles and runs, and does something different.
+- `Contract:` compiles and runs, and the caller is now wrong unless it changes. State the new obligation.
+
+Badge all three consistently rather than only the surprising ones, so a reader can scan for `Contract:` and trust that its absence means there is none. That kind is the rare and dangerous one: nothing in a build or an API snapshot reveals it, and both instances in the last ten releases were of it, `LastSynchronizedAt` becoming a correctness obligation for direct `ISubjectSource` implementers and `WriteChangesAsync` no longer permitted to read the model. `## Migration` is a numbered list, one instruction per line. Keep measured numbers (percentages, byte sizes, allocation counts) wherever the source has them, and never invent one.
 
 ## Doc links
 
