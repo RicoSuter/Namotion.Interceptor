@@ -110,7 +110,7 @@ internal sealed class SubjectVariableState : BaseDataVariableState
             property.SetValueFromSource(_server, Timestamp.ToUtcDateTimeOffset(), DateTimeOffset.UtcNow, requestedValue);
             isApplied = true;
         }
-        catch (Exception e)
+        catch (Exception e) when (e is not OperationCanceledException)
         {
             var now = Environment.TickCount64;
             if (now - _lastApplyFailureLogTimestamp >= ApplyFailureLogIntervalMilliseconds)
