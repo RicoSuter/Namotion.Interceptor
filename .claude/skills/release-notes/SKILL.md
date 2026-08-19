@@ -29,7 +29,15 @@ HomeBlaze must not appear in any prose chapter: not in the intro, Features, Fixe
 
 HomeBlaze appears only inside `## What's Changed`, under a `### HomeBlaze` subheading at the end of that list.
 
-Classify by the paths a pull request touches, not by its title: if every changed file is under `src/HomeBlaze/`, it is a HomeBlaze entry. One that ships core code and also touches HomeBlaze is a core entry, and stays in the main list; write up only its core half in the prose. If removing HomeBlaze content empties a section, drop the section. A short body is the correct outcome for a release that was mostly HomeBlaze; do not pad it.
+Classify by the paths a pull request touches, not by its title. Anything under `src/` that is not `src/Namotion.Interceptor*` is HomeBlaze: today that is `src/HomeBlaze/`, and on older tags the device libraries that sat at `src/Namotion.Devices.*` before they moved.
+
+```
+git show --pretty=format: --name-only <commit> | grep '^src/Namotion\.Interceptor'
+```
+
+A pull request that changes `src/Namotion.Interceptor*` source as well is a core entry and stays in the main list; write up only its core half. Judge on source files and ignore incidental ones, since almost every HomeBlaze change also touches the solution file, `Directory.Build.props`, a workflow or a doc. Titles mislead in both directions: "HomeBlaze: Philips Hue" (#243) shipped seven source files in `Namotion.Interceptor.Mcp` and is a core entry, while "HomeBlaze: Add myStrom WiFi Switch integration" (#245) touched nothing outside HomeBlaze but the solution file.
+
+If removing HomeBlaze content empties a section, drop the section. A short body is the correct outcome for a release that was mostly HomeBlaze; do not pad it.
 
 ## Structure
 
