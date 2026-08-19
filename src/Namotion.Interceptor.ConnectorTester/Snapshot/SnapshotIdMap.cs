@@ -6,17 +6,20 @@ namespace Namotion.Interceptor.ConnectorTester.Snapshot;
 /// Builds a stable raw-subject-id -> normalized-id map for a SubjectUpdate.
 /// The root is renamed to "ROOT"; reachable subjects are numbered SUBJ_1, SUBJ_2, ...
 /// in BFS order, with property names sorted ordinally and dictionary items sorted
-/// by their stringified Index. Used by SnapshotComparer to make snapshots from
+/// by their key. Used by SnapshotComparer to make snapshots from
 /// independently-constructed contexts produce equal byte strings for equal source state.
 /// </summary>
 public static class SnapshotIdMap
 {
     public static Dictionary<string, string> Build(SubjectUpdate update)
     {
-        var idMap = new Dictionary<string, string>(StringComparer.Ordinal)
+        var idMap = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (update.Root is null)
         {
-            [update.Root] = "ROOT"
-        };
+            return idMap;
+        }
+
+        idMap[update.Root] = "ROOT";
         var queue = new Queue<string>();
         queue.Enqueue(update.Root);
 
@@ -48,12 +51,12 @@ public static class SnapshotIdMap
                 {
                     IEnumerable<SubjectPropertyItemUpdate> orderedItems =
                         property.Kind == SubjectPropertyUpdateKind.Dictionary
-                            ? items.OrderBy(item => item.Index?.ToString(), StringComparer.Ordinal)
+                            ? items.OrderBy(item => item.Key, StringComparer.Ordinal)
                             : items;
 
                     foreach (var item in orderedItems)
                     {
-                        if (item.Id is not null && !idMap.ContainsKey(item.Id))
+                        if (!idMap.ContainsKey(item.Id))
                         {
                             idMap[item.Id] = $"SUBJ_{counter++}";
                             queue.Enqueue(item.Id);
