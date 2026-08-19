@@ -239,6 +239,49 @@ public class SubjectSourceRetryQueueTests
     }
 
     [Fact]
+    public async Task WhenTheGateClearsBetweenTheEnqueueAndTheSecondRead_ThenTheSelfHealSendsTheParkedWriteWithNoFurtherWrite()
+    {
+        // Arrange: a live pump with the resume gate held. AfterResumeGateObservedForTest fires between
+        // the retry-queue enqueue and the second gate read inside WriteChangesViaRetryQueueAsync, which
+        // has no other externally observable synchronization point, so clearing the gate from inside it
+        // reproduces the TOCTOU window the self-heal exists for: the write parks while the gate still
+        // reads as held, and by the time the write handler re-reads it, it has already cleared, with no
+        // CompleteResumeAsync ever having run for this epoch.
+        var (source, person, gate, receivedWrites) = await StartPumpAsync();
+        var resumeEpoch = source.BeginResumeForTest();
+
+        var hookRan = 0;
+        source.AfterResumeGateObservedForTest = () =>
+        {
+            if (Interlocked.Exchange(ref hookRan, 1) == 0)
+            {
+                source.AbortResumeForTest(resumeEpoch);
+            }
+        };
+
+        try
+        {
+            // Act: the only write in this test. Nothing else ever triggers the write handler again, so
+            // only the self-heal inside the parked branch can still deliver it.
+            person.FirstName = "SelfHealed";
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                lock (gate)
+                {
+                    return receivedWrites.Contains("FirstName=SelfHealed");
+                }
+            }, message: "The self-heal should have sent the write parked in the window between the gate read and the enqueue.");
+        }
+        finally
+        {
+            source.AfterResumeGateObservedForTest = null;
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task WhenTheReconcilesOwnRestoreIsReParkedWhileTheGateIsStillHeld_ThenTheSecondPassRescuesIt()
     {
         // Arrange: one property parked under the gate, then moved off that parked value by a
@@ -301,12 +344,25 @@ public class SubjectSourceRetryQueueTests
 
             // The probe loop above can write a value the pump has not flushed yet by the time it exits
             // (it only waits for the first one to land, not for its own last write). Draining here
-            // keeps that leftover from later masking the fix under test: an unrelated LastName flush
-            // after the gate clears would flush the backed-up retry queue as a side effect, rescuing
-            // the restore even without the second pass.
+            // keeps that leftover from later masking the fix under test: left parked, it would sit in
+            // the retry queue alongside the write under test, the reconcile would classify it as
+            // sendable because the model still holds it, and the reconcile's own send would flush the
+            // whole queue, including the re-parked restore, before the gate is cleared, rescuing the
+            // restore even without the second pass.
+            //
+            // The depth is required to hold at zero across two consecutive polls: a bare zero read can
+            // land in the microseconds between a drain and the handler running, which is a false red
+            // here rather than a false green, but the stronger check costs nothing.
+            var previousDepth = -1;
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.OutboundChanges.Depth == 0,
-                message: "The processor's buffer did not drain after the warmup probe.");
+                () =>
+                {
+                    var depth = source.Diagnostics.OutboundChanges.Depth;
+                    var isSettled = depth == 0 && depth == previousDepth;
+                    previousDepth = depth;
+                    return isSettled;
+                },
+                message: "The processor's buffer did not settle at zero after the warmup probe.");
 
             // Act: park the write, move the model off it with a source-tagged commit so the reconcile
             // takes the restore branch, then arm the interceptor and start the resume without awaiting

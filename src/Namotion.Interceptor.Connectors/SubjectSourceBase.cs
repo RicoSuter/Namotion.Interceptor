@@ -58,6 +58,12 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     // a completing resume tell whether it still owns the gate before clearing it.
     private int _resumeEpoch;
 
+    // Test seam for the window between the retry-queue enqueue and the second gate read in
+    // WriteChangesViaRetryQueueAsync, which has no externally observable synchronization point: a test
+    // can clear the gate from inside this hook to land exactly in that window. Always null in
+    // production.
+    internal Action? AfterResumeGateObservedForTest { get; set; }
+
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
     protected SubjectSourceBase(
@@ -405,7 +411,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                 // Nothing comes back for these: the queue is disposed with the source, and the
                 // connection they were captured against is being replaced, so writing them now would
                 // put pre-load values on a socket whose peer has moved on. Counted and reported rather
-                // than parked, so a stop cannot hide the loss.
+                // than parked, so a stop cannot hide the loss. This disagrees with the write path above,
+                // which filters a stop-caused failure out of this same total through IsExpectedShutdown:
+                // that guard is for a write torn by the stop itself, while this is a deliberate discard
+                // under a replaced connection, and is counted as a real loss rather than excused by the
+                // shutdown.
                 Metrics.OutboundRetries.AddDropped(changes.Length);
                 _logger.LogError(
                     "Discarded {Count} change(s) while stopping: a connection replacement was in progress.",
@@ -415,6 +425,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
             // Parked rather than dropped: CompleteResumeAsync judges it against the loaded state.
             WriteRetryQueue.Enqueue(changes);
+
+            AfterResumeGateObservedForTest?.Invoke();
 
             if (Volatile.Read(ref _resumeInProgress) == 0)
             {
@@ -610,6 +622,17 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// through the retry-queue wrapper. That is acceptable: it carries fresh intent, and the reconcile
     /// drops any parked entry the commit supersedes.
     /// </para>
+    /// <para>
+    /// Callers must take this gate at the moment the drop is detected, not just before the reconnect
+    /// begins, and the backoff between the two is not incidental slack. The gate read in the write
+    /// handler and the socket becoming writable again are not atomic, so a flush that races past the
+    /// gate check an instant before this call still targets the socket that just failed and simply
+    /// parks, because that socket stays unwritable for at least the reconnect delay. Taking the gate
+    /// later, just before the reconnect itself, would move that same race onto a socket about to become
+    /// writable: the raced flush would block on the connection lock instead of failing, and be released
+    /// the instant the new connection opens, sending the whole unjudged retry queue ahead of the
+    /// initial-state load.
+    /// </para>
     /// </remarks>
     protected int BeginResume()
     {
@@ -644,6 +667,20 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// delivery unless a later resume has already taken the gate over. Runs after the initial-state
     /// load, never before it.
     /// </summary>
+    /// <remarks>
+    /// The second reconcile pass below and the self-heal inside
+    /// <see cref="WriteChangesViaRetryQueueAsync"/> both exist because judged and unjudged entries share
+    /// one retry queue and the flush that drains it is edge-triggered on a non-empty batch rather than
+    /// level-triggered on the queue's contents. The second pass covers entries parked during the
+    /// reconcile above, and the self-heal covers the entry parked in the window between the gate read
+    /// and the enqueue, which the second pass's emptiness check cannot see.
+    /// <para>
+    /// Two shapes would genuinely reduce this to one mechanism, and neither belongs in this stack:
+    /// tagging retry-queue entries as judged or unjudged so the two kinds stop sharing a queue, and a
+    /// single-writer discipline where resume transitions are executed on the processor's flush thread so
+    /// there is no cross-thread gate at all. Both are larger rewrites of shared infrastructure.
+    /// </para>
+    /// </remarks>
     protected async Task CompleteResumeAsync(int resumeEpoch, CancellationToken cancellationToken)
     {
         bool clearedByThisResume;
