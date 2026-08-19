@@ -155,7 +155,6 @@ internal sealed class OutboundWriter
         }
 
         var failedChanges = new List<SubjectPropertyChange>(failureCount);
-        var transientCount = 0;
         var resultIndex = 0;
         var span = allChanges.Span;
         for (var i = 0; i < span.Length && resultIndex < results.Count; i++)
@@ -167,20 +166,15 @@ internal sealed class OutboundWriter
             if (!StatusCode.IsGood(results[resultIndex]))
             {
                 failedChanges.Add(change);
-                if (OpcUaStatusCodeClassifier.IsTransientError(results[resultIndex]))
-                    transientCount++;
             }
             resultIndex++;
         }
 
-        var successCount = results.Count - failedChanges.Count;
-        var permanentCount = failedChanges.Count - transientCount;
-
         _logger.LogWarning(
-            "OPC UA write batch partial failure: {SuccessCount} succeeded, {TransientCount} transient, {PermanentCount} permanent out of {TotalCount}.",
-            successCount, transientCount, permanentCount, results.Count);
+            "OPC UA write batch failure: {FailedCount} of {TotalCount} writes failed.",
+            failedChanges.Count, results.Count);
 
-        var error = new OpcUaWriteException(transientCount, permanentCount, results.Count);
+        var error = new OpcUaWriteException(failedChanges.Count, results.Count);
         return WriteResult.Failure(failedChanges.ToArray(), error);
     }
 
