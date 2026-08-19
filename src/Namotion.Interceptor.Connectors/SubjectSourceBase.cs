@@ -26,6 +26,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     // must agree; if only one ranked against the last commit, the other would still deliver an older one.
     private const ChangeDeliveryRule DeliveryRule = ChangeDeliveryRule.SourceValuesMayBeStale;
     private readonly TimeSpan _retryTime;
+    private readonly TimeSpan? _teardownFlushTimeout;
     private readonly SubjectPropertyWriter _propertyWriter;
 
     private static readonly TimeSpan ConnectWindowDrainInterval = TimeSpan.FromSeconds(1);
@@ -55,9 +56,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         TimeSpan? bufferTime = null,
         TimeSpan? retryTime = null,
         int writeRetryQueueSize = 1000,
+        TimeSpan? teardownFlushTimeout = null,
         ThroughputCounter? incomingThroughput = null,
         ThroughputCounter? outgoingThroughput = null)
-        : this(context, logger, bufferTime, retryTime, writeRetryQueueSize,
+        : this(context, logger, bufferTime, retryTime, writeRetryQueueSize, teardownFlushTimeout,
             new SourceMetrics(incomingThroughput, outgoingThroughput))
     {
     }
@@ -70,6 +72,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         TimeSpan? bufferTime,
         TimeSpan? retryTime,
         int writeRetryQueueSize,
+        TimeSpan? teardownFlushTimeout,
         SourceMetrics metrics)
         : base(metrics)
     {
@@ -80,6 +83,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
+        // Validated here and not only in the processor, which a source builds after connecting: a bad
+        // value would otherwise throw inside the retry loop, be swallowed as an attempt failure and be
+        // retried every retry interval forever instead of failing at construction.
+        ChangeQueueProcessor.ValidateTeardownFlushTimeout(teardownFlushTimeout);
+        _teardownFlushTimeout = teardownFlushTimeout;
 
         // The retry queue also carries writes captured while (re)connecting. With size 0 it is
         // disabled, and those connect/reconnect-window writes are dropped rather than reconciled.
@@ -302,7 +310,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         _bufferTime,
                         maxQueueDepth: null,
                         logger: _logger,
-                        dropHandler: Metrics.OutboundChanges.AddDropped);
+                        dropHandler: Metrics.OutboundChanges.AddDropped,
+                        teardownFlushTimeout: _teardownFlushTimeout);
 
                     // Declared after the processor so it is released first, which is what lets the
                     // retry loop's next attempt register its own: a second Register while one is
