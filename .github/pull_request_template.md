@@ -52,8 +52,8 @@
 
 - [ ] Unit tests, `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"`
 - [ ] Integration tests, per project, for connector or HomeBlaze UI changes
-- [ ] Benchmarks, `pwsh scripts/benchmark.ps1`, covering every benchmark the change can reach (find them with `--list flat`, and add a row it cannot reach as the noise reference)
-- [ ] Connector Tester load profile, for risky connector work
-- [ ] Connector Tester chaos profile, for risky connector work
+- [ ] Benchmarks per [Benchmarking](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/benchmarking.md), covering every benchmark the change can reach plus a noise reference
+- [ ] [Connector Tester](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/connector-tester.md) load profile, for risky connector work
+- [ ] [Connector Tester](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/connector-tester.md) chaos profile, for risky connector work
 
 <!-- Say plainly what you did not run and why. -->
