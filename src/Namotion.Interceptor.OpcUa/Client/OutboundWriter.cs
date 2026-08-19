@@ -26,11 +26,11 @@ internal sealed class OutboundWriter
     // flush warning.
     private long _lastRefusedWriteLogTimestamp;
 
-    // Nodes already reported as refused for this session, so the warning fires once per node rather
-    // than once per write. The lock guards the write path's add against the session-change clear,
-    // which runs from the session-transition drain on another task.
-    private readonly Lock _refusedNodeIdsLock = new();
-    private readonly HashSet<NodeId> _refusedNodeIds = [];
+    // Throttled rather than deduplicated per session: on the pump path a session-scoped refusal is
+    // held and not re-sent, so the warning quiets by itself, and what can repeat, a transaction
+    // writing the property again or a source configured without a queue, is kept to one line per
+    // window. This is the only log line that names the refused nodes.
+    private long _lastRefusedNodeLogTimestamp;
 
     public OutboundWriter(
         Func<ISession?> sessionProvider,
@@ -49,19 +49,6 @@ internal sealed class OutboundWriter
     }
 
     public int WriteBatchSize => (int)(_sessionProvider()?.OperationLimits?.MaxNodesPerWrite ?? 0);
-
-    /// <summary>
-    /// Forgets which nodes were reported refused, so the next session reports its own. A new session can
-    /// hold different permissions, a different address space and different access levels, so a node
-    /// refused before is worth a fresh line whether it now writes or still does not.
-    /// </summary>
-    public void ClearRefusedNodeLog()
-    {
-        lock (_refusedNodeIdsLock)
-        {
-            _refusedNodeIds.Clear();
-        }
-    }
 
     /// <summary>
     /// Writes one batch. A failure these changes themselves caused comes back with them enumerated,
@@ -185,7 +172,7 @@ internal sealed class OutboundWriter
         var span = allChanges.Span;
         var failedChanges = new List<SubjectPropertyChange>(refusedCount + (conversionFailures?.Count ?? 0));
         List<SubjectPropertyChange>? refusedChanges = null;
-        List<NodeId>? newlyRefusedNodeIds = null;
+        List<NodeId>? refusedNodeIds = null;
         for (var i = 0; i < results.Count; i++)
         {
             var status = results[i];
@@ -207,32 +194,25 @@ internal sealed class OutboundWriter
                 if (OpcUaStatusCodeClassifier.IsRefusedUntilReconnect(status))
                 {
                     (refusedChanges ??= []).Add(change);
-
-                    bool isFirstRefusalOfNode;
-                    var nodeId = request.WriteValues[i].NodeId;
-                    lock (_refusedNodeIdsLock)
-                    {
-                        isFirstRefusalOfNode = _refusedNodeIds.Add(nodeId);
-                    }
-
-                    if (isFirstRefusalOfNode)
-                    {
-                        (newlyRefusedNodeIds ??= []).Add(nodeId);
-                    }
+                    (refusedNodeIds ??= []).Add(request.WriteValues[i].NodeId);
                 }
             }
         }
 
-        if (newlyRefusedNodeIds is not null)
+        if (refusedNodeIds is not null)
         {
-            // Once per node per session: the answer repeats for the session, so an entry per attempt
-            // would report an outage that is not happening while the first one is what an operator
-            // needs. The message names only what the server answered, because what becomes of the
-            // writes is decided elsewhere: the retry queue holds a pump write back unless the session
-            // moved on mid-flight or buffering is off, and a transaction write never reaches it.
-            _logger.LogWarning(
-                "OPC UA write: {Count} node(s) refused with a status the server will keep returning for this session: {NodeIds}. Diagnostics.HeldWrites reports the writes currently held back.",
-                newlyRefusedNodeIds.Count, newlyRefusedNodeIds);
+            var now = Environment.TickCount64;
+            if (now - _lastRefusedNodeLogTimestamp >= RefusedWriteLogIntervalMilliseconds)
+            {
+                _lastRefusedNodeLogTimestamp = now;
+
+                // The message names only what the server answered, because what becomes of the writes
+                // is decided elsewhere: the retry queue holds a pump write back unless the session
+                // moved on mid-flight or buffering is off, and a transaction write is never held.
+                _logger.LogWarning(
+                    "OPC UA write: {Count} node(s) refused with a status re-sending cannot change on this session: {NodeIds}. Diagnostics.HeldWrites reports the writes currently held back.",
+                    refusedNodeIds.Count, refusedNodeIds);
+            }
         }
 
         Exception error;

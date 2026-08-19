@@ -694,7 +694,6 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         // precedes, such as the manual reconnect a subscription that stopped publishing triggers. A
         // refusal is scoped to the session that gave it, so this is where it stops applying.
         RetryRefusedWrites();
-        _writer?.ClearRefusedNodeLog();
 
         var handler = CurrentSessionChanged;
         if (handler is null)
