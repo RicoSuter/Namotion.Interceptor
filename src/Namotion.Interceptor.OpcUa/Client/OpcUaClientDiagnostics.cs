@@ -228,6 +228,20 @@ public sealed class ReadAfterWriteDiagnostics
     public long TotalCoalescedReads => _metrics.Coalesced;
 
     /// <summary>
+    /// Gets the number of verification reads whose answer was discarded because the property had
+    /// already moved on to a value the read-back cannot rank above. The read itself succeeded and
+    /// discarding its answer was the correct outcome.
+    /// </summary>
+    public long TotalSkippedReads => _metrics.Skipped;
+
+    /// <summary>
+    /// Gets the number of verification reads the server answered whose value could not be converted
+    /// or applied locally. Unlike a skip this is a failure, but one contained to a single node
+    /// rather than failing the batch, so it never counts as <see cref="TotalFailedReads"/>.
+    /// </summary>
+    public long TotalNotAppliedReads => _metrics.NotApplied;
+
+    /// <summary>
     /// Gets the number of verification reads that failed.
     /// </summary>
     public long TotalFailedReads => _metrics.Failed;

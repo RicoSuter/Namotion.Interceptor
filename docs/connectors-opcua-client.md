@@ -713,6 +713,8 @@ This client measures both throughput directions, so `Throughput.IncomingPerSecon
 | `ReadAfterWrite.TotalScheduledReads` | Verification reads scheduled. |
 | `ReadAfterWrite.TotalExecutedReads` | Verification reads executed. |
 | `ReadAfterWrite.TotalCoalescedReads` | Scheduled reads replaced by a subsequent write. |
+| `ReadAfterWrite.TotalSkippedReads` | Verification reads whose answer was discarded because the property had already moved on to a value the read-back cannot rank above. The read succeeded and discarding its answer was the correct outcome. |
+| `ReadAfterWrite.TotalNotAppliedReads` | Verification reads the server answered whose value could not be converted or applied locally. Unlike a skip this is a failure, but one contained to a single node rather than failing the batch, so it never counts as `TotalFailedReads`. |
 | `ReadAfterWrite.TotalFailedReads` | Verification reads that failed. |
 
 The sub-block counters survive a reconnect. `PollingManager` and `ReadAfterWriteManager` are rebuilt on every connect attempt, including failed ones, but their counters are owned by the source, so they do not rebase to zero during the reconnect storm that is exactly when they matter.

@@ -398,6 +398,73 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task WhenAReadBackIsSkippedAsStale_ThenTheDiagnosticsReportIt()
+    {
+        // Arrange - a local write newer than the read-back's answer, so the answer is correctly discarded
+        var subject = new TestPerson(InterceptorSubjectContext.Create().WithFullPropertyTracking());
+        var registeredSubject = new RegisteredSubject(subject);
+        var staleTimestamp = DateTimeOffset.UtcNow.AddMinutes(-1);
+        using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
+        {
+            subject.FirstName = "newer";
+        }
+
+        var session = CreateSessionReturning(
+            CreateDataValue("stale", StatusCodes.Good, staleTimestamp.UtcDateTime));
+        var metrics = new ReadAfterWriteMetrics();
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(250)),
+            metrics,
+            reportError: static _ => { },
+            NullLogger.Instance);
+        var diagnostics = new ReadAfterWriteDiagnostics(manager, metrics);
+
+        RegisterAndSchedule(manager, new NodeId("FirstName", 2),
+            registeredSubject.TryGetProperty(nameof(TestPerson.FirstName))!);
+
+        // Act
+        await manager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert - a skip is a read that succeeded, so it is neither executed, not applied nor failed
+        Assert.Equal(1, diagnostics.TotalSkippedReads);
+        Assert.Equal(0, diagnostics.TotalExecutedReads);
+        Assert.Equal(0, diagnostics.TotalNotAppliedReads);
+        Assert.Equal(0, diagnostics.TotalFailedReads);
+    }
+
+    [Fact]
+    public async Task WhenAReadBackIsNotApplied_ThenTheDiagnosticsReportIt()
+    {
+        // Arrange - the server answers the read, but the value cannot be converted locally
+        var subject = new TestPerson(InterceptorSubjectContext.Create().WithFullPropertyTracking());
+        var session = CreateSessionReturning(
+            CreateDataValue("throw", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)));
+        var metrics = new ReadAfterWriteMetrics();
+        var conversionError = new InvalidOperationException("conversion failed");
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(250), new ThrowingValueConverter("throw", conversionError)),
+            metrics,
+            reportError: static _ => { },
+            NullLogger.Instance);
+        var diagnostics = new ReadAfterWriteDiagnostics(manager, metrics);
+
+        RegisterAndSchedule(manager, new NodeId("FirstName", 2), CreateTestProperty(subject));
+
+        // Act
+        await manager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert - unlike a skip this is a failure, but one contained to the node, not a failed read
+        Assert.Equal(1, diagnostics.TotalNotAppliedReads);
+        Assert.Equal(0, diagnostics.TotalExecutedReads);
+        Assert.Equal(0, diagnostics.TotalSkippedReads);
+        Assert.Equal(0, diagnostics.TotalFailedReads);
+    }
+
+    [Fact]
     public async Task WhenCompletionLoggingThrows_ThenTheReadOutcomeIsCountedOnce()
     {
         // Arrange
