@@ -50,11 +50,9 @@
 
 ## Diff composition
 
-<!-- Generate with: pwsh scripts/diff-composition.ps1
-     Add -PerProject to break production code down per project on a change that spans several. -->
-
-| Area | Files | Added | Removed | Net |
-|---|---:|---:|---:|---:|
+<!-- Paste the output of: pwsh scripts/diff-composition.ps1
+     It prints the whole table, header included. Add -PerProject to break production code down per
+     project on a change that spans several. -->
 
 ## Verification
 

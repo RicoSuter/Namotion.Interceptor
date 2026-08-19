@@ -17,9 +17,11 @@ Write the body of a GitHub release for one tag, in the format every release from
 GitHub's generated list is unreliable: it has silently omitted merged pull requests on several tags of this repository. Derive the list yourself.
 
 ```
-git log --oneline <PREVIOUS_TAG>..<TAG>            # squash merges carry "Title (#NNN)"
-gh pr list --state merged --limit 100 --json number,title,author   # titles and authors in one call
+git log --oneline <PREVIOUS_TAG>..<TAG>                       # squash merges carry "Title (#NNN)"
+gh pr view <NNN> --json number,title,author                   # title and author, per number found above
 ```
+
+Look each number up individually. `gh pr list --limit 100` reaches only the hundred most recently merged pull requests, which today stops at #225, so on an older tag it silently returns nothing for the entries you need.
 
 Every entry is `* <pull request title> by @<author> in https://github.com/RicoSuter/Namotion.Interceptor/pull/<NNN>`. A commit in the range with no pull request reference still belongs in the list; give it its subject and short SHA so nothing merged is invisible. Close with `**Full Changelog**: https://github.com/RicoSuter/Namotion.Interceptor/compare/<PREVIOUS_TAG>...<TAG>`, matching the tag prefix style the compare link already uses for that pair.
 
@@ -127,7 +129,7 @@ State the claim, state what the tree shows, and stop there. Whether a descriptio
 
 ## Style
 
-The repository rules in AGENTS.md apply: no em dashes, no AI attribution anywhere, markdown paragraphs on one line with no hard wrapping, and no abbreviations in prose. Use exact API names in backticks.
+AGENTS.md applies: no em dashes, no abbreviations in prose, and no AI attribution anywhere. Also keep markdown paragraphs on one line rather than wrapping at a column, and use exact API names in backticks.
 
 ## Apply and check
 
