@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-18
 
-**Status:** Revised through three independent written-spec review rounds; awaiting final approval
+**Status:** Approved after three independent written-spec review rounds
 
 **Stack position:** PR 2 on `feature/effective-ownership-route`
 
@@ -1094,7 +1094,8 @@ Exception types are part of the contract:
 - `InvalidOperationException` reports an invalid ownership state, including duplicate attach,
   missing or wrong-context detach, incompatible domains, coordinator conflicts, active-authority
   mutation, and provider protocol misuse;
-- public `SubjectOwnershipNestingException : InvalidOperationException` reports a recognized
+- public sealed `SubjectOwnershipNestingException : InvalidOperationException` with the single
+  public constructor `SubjectOwnershipNestingException(string message)` reports a recognized
   unsupported synchronous nesting scope. It is thrown deterministically before gate availability
   is inspected and tells the caller to defer the operation until the current callback or ownership
   operation returns;
@@ -1290,8 +1291,8 @@ Local benchmark timings are diagnostic only. Before
 the pull request is declared ready, the maintainer is asked to run the agreed comparisons on the
 stable benchmark machine against both:
 
-- exact stacked PR 1 base `169672c3ca496e8338f1a6be62d5e900c8e605ad`;
-- exact design-time `master` `4eb5fc132fef55d0277b13d585d8b611737b23db`.
+- exact stacked PR 1 base `a88b456ef681dc4505f1edce040b56fb83a6a034`;
+- exact rebased `master` `55df0a84ebc19489cc114297b1e5fb6b4aa0b4b9`.
 
 Existing unchanged registry, context-depth, construction, and structural-mutation rows compare PR 2
 with both exact bases. Focused unowned structural-initialization and contended structural-write rows
