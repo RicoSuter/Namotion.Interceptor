@@ -318,6 +318,7 @@ internal static class SubjectMetadataExtractor
                 properties.Add(new PropertyMetadata(
                     propertyName,
                     fullyQualifiedName,
+                    SubjectPropertySymbolClassifier.CanContainSubjects(typeInfo.Type),
                     accessModifier,
                     isPartial,
                     isVirtual,
@@ -664,6 +665,7 @@ internal static class SubjectMetadataExtractor
                 interfaceProperties.Add(new PropertyMetadata(
                     resolvedName,
                     fullyQualifiedTypeName,
+                    SubjectPropertySymbolClassifier.CanContainSubjects(property.Type),
                     accessModifier,
                     IsPartial: false,
                     IsVirtual: true,  // Interface default implementations are implicitly virtual

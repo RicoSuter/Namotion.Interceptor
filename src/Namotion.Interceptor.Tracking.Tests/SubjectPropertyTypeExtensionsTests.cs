@@ -179,6 +179,26 @@ public class SubjectPropertyTypeExtensionsTests
         Assert.False(nonSubjectType.CanContainSubjects<object>());
     }
 
+    [Theory]
+    [InlineData(typeof(int))]
+    [InlineData(typeof(Person))]
+    [InlineData(typeof(IReadOnlyList<Person>))]
+    [InlineData(typeof(IReadOnlyDictionary<string, Person>))]
+    public void WhenClassifyingThroughTrackingExtensions_ThenCoreClassificationIsReturned(Type type)
+    {
+        // Act
+        var canContainSubjects = type.CanContainSubjects();
+        var isReference = type.IsSubjectReferenceType();
+        var isCollection = type.IsSubjectCollectionType();
+        var isDictionary = type.IsSubjectDictionaryType();
+
+        // Assert
+        Assert.Equal(SubjectPropertyTypeClassifier.CanContainSubjects(type), canContainSubjects);
+        Assert.Equal(SubjectPropertyTypeClassifier.IsSubjectReferenceType(type), isReference);
+        Assert.Equal(SubjectPropertyTypeClassifier.IsSubjectCollectionType(type), isCollection);
+        Assert.Equal(SubjectPropertyTypeClassifier.IsSubjectDictionaryType(type), isDictionary);
+    }
+
     private sealed class NonSubjectPlainClass
     {
     }

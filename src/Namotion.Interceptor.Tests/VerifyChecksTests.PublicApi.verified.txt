@@ -160,6 +160,7 @@ namespace Namotion.Interceptor
         public SubjectPropertyMetadata(System.Reflection.PropertyInfo propertyInfo, System.Func<Namotion.Interceptor.IInterceptorSubject, object?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? setValue, bool isIntercepted, bool isDynamic) { }
         public SubjectPropertyMetadata(string name, System.Type type, System.Collections.Generic.IReadOnlyCollection<System.Attribute> attributes, System.Func<Namotion.Interceptor.IInterceptorSubject, object?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? setValue, bool isIntercepted, bool isDynamic) { }
         public System.Collections.Generic.IReadOnlyCollection<System.Attribute> Attributes { get; }
+        public bool CanContainSubjects { get; }
         public System.Func<Namotion.Interceptor.IInterceptorSubject, object?>? GetValue { get; }
         public bool IsDerived { get; }
         public bool IsDynamic { get; }
@@ -169,6 +170,13 @@ namespace Namotion.Interceptor
         public System.Reflection.PropertyInfo? PropertyInfo { get; }
         public System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? SetValue { get; }
         public System.Type Type { get; }
+    }
+    public static class SubjectPropertyTypeClassifier
+    {
+        public static bool CanContainSubjects(System.Type type) { }
+        public static bool IsSubjectCollectionType(System.Type type) { }
+        public static bool IsSubjectDictionaryType(System.Type type) { }
+        public static bool IsSubjectReferenceType(System.Type type) { }
     }
 }
 namespace Namotion.Interceptor.Interceptors

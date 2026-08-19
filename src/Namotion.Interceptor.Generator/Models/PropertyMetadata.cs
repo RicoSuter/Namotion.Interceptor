@@ -3,6 +3,7 @@ namespace Namotion.Interceptor.Generator.Models;
 internal sealed record PropertyMetadata(
     string Name,
     string FullTypeName,
+    bool CanContainSubjects,
     string AccessModifier,
     bool IsPartial,
     bool IsVirtual,

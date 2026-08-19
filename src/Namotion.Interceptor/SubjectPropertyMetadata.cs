@@ -14,6 +14,11 @@ public readonly record struct SubjectPropertyMetadata
     /// Gets the type of the property.
     /// </summary>
     public Type Type { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether the property type can contain interceptor subjects.
+    /// </summary>
+    public bool CanContainSubjects { get; }
     
     /// <summary>
     /// Gets the reflection attributes defined on the property.
@@ -106,6 +111,7 @@ public readonly record struct SubjectPropertyMetadata
     {
         Name = name;
         Type = type;
+        CanContainSubjects = SubjectPropertyTypeClassifier.CanContainSubjects(type);
         Attributes = attributes;
         GetValue = getValue;
         SetValue = setValue;
