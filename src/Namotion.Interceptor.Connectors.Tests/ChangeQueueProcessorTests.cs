@@ -1191,4 +1191,95 @@ public class ChangeQueueProcessorTests
             () => processor.GateIsFreeForTest,
             message: "the abandoned teardown flush should have been cancelled and released the flush gate");
     }
+
+    [Fact]
+    public async Task WhenTheInFlightTickIsCancelled_ThenItsBatchIsStillDelivered()
+    {
+        // Arrange: a buffer time short enough that a periodic tick takes the batch out of the queue and
+        // is still in the write handler when the stop arrives. Without a requeue the teardown drain
+        // finds an empty queue and the batch is gone.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var written = new ConcurrentQueue<string>();
+        var firstWriteReached = new ManualResetEventSlim(false);
+        var writeCalls = 0;
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: async (changes, token) =>
+            {
+                if (Interlocked.Increment(ref writeCalls) == 1)
+                {
+                    firstWriteReached.Set();
+                    await Task.Delay(Timeout.Infinite, token);
+                }
+
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue(change.GetNewValue<string>()!);
+                }
+            },
+            bufferTime: TimeSpan.FromMilliseconds(10),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "in-flight";
+        Assert.True(firstWriteReached.Wait(TimeSpan.FromSeconds(30)), "the tick should have reached the handler");
+
+        // Act
+        await cancellation.CancelAsync();
+        await processing.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.Equal(["in-flight"], written.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenTheWriteHandlerFailsWithoutCancelling_ThenTheBatchIsCounted()
+    {
+        // Arrange: a transport that has died on its own throws a transport exception rather than
+        // cancelling. Requeueing that would grow the queue without bound, so it must be counted.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var dropped = 0L;
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => throw new IOException("transport is gone"),
+            bufferTime: TimeSpan.FromMilliseconds(10),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            dropHandler: count => Interlocked.Add(ref dropped, count));
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "lost";
+
+        // Act
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Interlocked.Read(ref dropped) == 1,
+            message: "the failed batch should have been counted");
+        await cancellation.CancelAsync();
+        await processing.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.Equal(1, Interlocked.Read(ref dropped));
+        Assert.Equal(1, processor.DropCount);
+    }
 }

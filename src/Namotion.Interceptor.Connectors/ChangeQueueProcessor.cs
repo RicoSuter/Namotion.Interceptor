@@ -47,8 +47,8 @@ public class ChangeQueueProcessor : IDisposable
     internal ChangeDeliveryRule DeliveryRule => _deliveryRule;
 
     /// <summary>
-    /// Number of buffered changes dropped due to bounded-queue overflow.
-    /// Always zero when <c>maxQueueDepth</c> is null (unbounded).
+    /// Number of buffered changes that were never delivered, either dropped on bounded-queue overflow
+    /// or discarded because the write handler failed without cancelling.
     /// </summary>
     public long DropCount => Interlocked.Read(ref _dropCount);
 
@@ -98,9 +98,10 @@ public class ChangeQueueProcessor : IDisposable
     /// increments <see cref="DropCount"/>, so the newest change is retained. Read only on the buffered
     /// path, so a processor with a buffer time of zero never touches the queue this bounds.</param>
     /// <param name="logger">The logger.</param>
-    /// <param name="dropHandler">Optional handler invoked only when bounded-queue overflow drops
-    /// changes. Use this to report the count to queue diagnostics without adding work to successful
-    /// enqueue or dequeue operations.</param>
+    /// <param name="dropHandler">Optional handler invoked with the number of changes that were never
+    /// delivered, either dropped on bounded-queue overflow or discarded because the write handler failed
+    /// without cancelling. Use this to report the count to queue diagnostics without adding work to
+    /// successful enqueue or dequeue operations.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
     /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
     /// the first flush, where it would end delivery for this processor's lifetime. Also thrown when
@@ -490,11 +491,27 @@ public class ChangeQueueProcessor : IDisposable
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
+                    // Cancellation means the batch was never attempted or never confirmed, not that it
+                    // failed, and nothing else can recover it: it has already left the subscription.
+                    // Returning it to the queue is what gives the teardown drain something to hand over.
+                    // Order is safe because the merger resolves by commit revision rather than queue
+                    // position, and the dequeue loop has already exited by the time this runs at a stop.
+                    foreach (var change in _flushChanges)
+                    {
+                        _changes.Enqueue(change);
+                    }
+
                     throw;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to write changes.");
+                    // Counted rather than requeued. A transport that died on its own throws here rather
+                    // than cancelling, and requeueing against one that keeps failing would grow the
+                    // queue without bound.
+                    var undelivered = mergedChanges.Length;
+                    Interlocked.Add(ref _dropCount, undelivered);
+                    _dropHandler?.Invoke(undelivered);
+                    _logger.LogError(ex, "Failed to write {Count} changes, which are discarded.", undelivered);
                 }
             }
         }
