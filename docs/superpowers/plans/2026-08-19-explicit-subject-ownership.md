@@ -125,7 +125,7 @@ Only the approved composition-only fallback cutover changes that oracle. Other o
 
 #### Subphase A: Complete final RED set before implementation
 
-**Files:** Exact atomic 122-path Task 2 manifest in the internal map, including every Core/Tracking/Registry/Generator/Dynamic test, test double, all four changed Public API oracles, generated Verify snapshots, both changed callback oracles, Hosting and Connectors production/tests, the WebSocket SampleClient, every SyncRoot/inheritance consumer, and the OPC UA compile consumer.
+**Files:** Exact atomic 123-path Task 2 manifest in the internal map, including every Core/Tracking/Registry/Generator/Dynamic test, test double, all four changed Public API oracles, generated Verify snapshots, both changed callback oracles, Hosting and Connectors production/tests, the WebSocket SampleClient, every SyncRoot/inheritance consumer, and the OPC UA compile consumer.
 
 **Interfaces produced:**
 
@@ -247,14 +247,14 @@ dotnet test src/Namotion.Interceptor.Generator.Tests/Namotion.Interceptor.Genera
 
 Expected: each changed oracle or existing-surface behavior fails for its intended old callback/API/lock/route/generated-shape semantics. Record method execution and exact mismatch for each command. If a row unexpectedly names a final absent type, move it to the compilation-RED set below and record that it did not execute; do not add a production stub to recover a semantic RED.
 
-Then author every remaining structural, recursive-membership, metadata, Registry, callback-order, pinning, constructor, Dynamic, Hosting, Connectors, OPC UA, Public API, and Verify test listed in Subphases B/C and in the map's 122-path closed union. No production or test-support implementation starts yet. Source-review every final test method and oracle against that union, including the exact `SubjectPrivateLockTests`, `ContextOwnershipRouteTests`, `StructuralInterceptorPinningTests`, Core, Tracking, Registry, and Connectors `VerifyChecksTests.PublicApi`, Core callback oracle, Dynamic callback oracle, and Generator class filters. The callback schedule uses `factoryEntered`, `externalAttemptingEntry`, `allowFactory`, `nestedCompleted`, and `externalCallbackEntered`. The external task signals immediately before its public call and waits outside its context monitor. Assert predicate/factory counts are exactly one and the external callback has not entered before release.
+Then author every remaining structural, recursive-membership, metadata, Registry, callback-order, pinning, constructor, Dynamic, Hosting, Connectors, OPC UA, Public API, and Verify test listed in Subphases B/C and in the map's 123-path closed union. No production or test-support implementation starts yet. Source-review every final test method and oracle against that union, including the exact `SubjectPrivateLockTests`, `ContextOwnershipRouteTests`, `StructuralInterceptorPinningTests`, Core, Tracking, Registry, and Connectors `VerifyChecksTests.PublicApi`, Core callback oracle, Dynamic callback oracle, and Generator class filters. The callback schedule uses `factoryEntered`, `externalAttemptingEntry`, `allowFactory`, `nestedCompleted`, and `externalCallbackEntered`. The external task signals immediately before its public call and waits outside its context monitor. Assert predicate/factory counts are exactly one and the external callback has not entered before release.
 
 - [ ] **Step 2: Run the complete atomic RED gate**
 
 ```bash
 dotnet test src/Namotion.Interceptor.Tests/Namotion.Interceptor.Tests.csproj --filter "FullyQualifiedName~SubjectAttachmentTests|FullyQualifiedName~ContextAuthorityActivationTests|FullyQualifiedName~SubjectOwnershipProviderContractTests|FullyQualifiedName~SubjectOwnershipOperationTests|FullyQualifiedName~SubjectOwnershipStateTests|FullyQualifiedName~SubjectPrivateLockTests|FullyQualifiedName~ContextOwnershipRouteTests|FullyQualifiedName~ContextServiceWalkOrderTests|FullyQualifiedName~ContextDeepGraphTests|FullyQualifiedName~ContextConcurrencyFuzzTests|FullyQualifiedName~CommitRevisionTests" --no-restore
 dotnet test src/Namotion.Interceptor.Tests/Namotion.Interceptor.Tests.csproj --filter "FullyQualifiedName~StructuralOwnershipAdmissionTests|FullyQualifiedName~StructuralOwnershipConcurrencyTests|FullyQualifiedName~StructuralInterceptorPinningTests|FullyQualifiedName~StructuralContinuationTests|FullyQualifiedName~ContextFunctionCacheTests|FullyQualifiedName~InterceptorTests.WhenAddingAndRemovingContext_ThenInterceptorsAreCalledInTheRightOrder|FullyQualifiedName~VerifyChecksTests.PublicApi" --no-restore
-dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --filter "FullyQualifiedName~OwnershipMembershipTests|FullyQualifiedName~SubjectMetadataAdditionTests|FullyQualifiedName~OwnershipDiscoveryReaderTests|FullyQualifiedName~OwnershipProviderPoolTests|FullyQualifiedName~LifecycleCallbackOrderTests|FullyQualifiedName~LifecycleArrayPinningTests|FullyQualifiedName~FallbackCompositionLifecycleTests|FullyQualifiedName~ConcurrentWriteLifecycleTests|FullyQualifiedName~RecursiveAttachTests|FullyQualifiedName~LifecycleInterceptorTests|FullyQualifiedName~ContextInheritanceHandlerTests|FullyQualifiedName~PropertyReferenceSetTests" --no-restore
+dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --filter "FullyQualifiedName~OwnershipMembershipTests|FullyQualifiedName~SubjectMetadataAdditionTests|FullyQualifiedName~OwnershipDiscoveryReaderTests|FullyQualifiedName~OwnershipProviderPoolTests|FullyQualifiedName~LifecycleCallbackOrderTests|FullyQualifiedName~LifecycleArrayPinningTests|FullyQualifiedName~LifecycleEventsTests|FullyQualifiedName~FallbackCompositionLifecycleTests|FullyQualifiedName~ConcurrentWriteLifecycleTests|FullyQualifiedName~RecursiveAttachTests|FullyQualifiedName~LifecycleInterceptorTests|FullyQualifiedName~ContextInheritanceHandlerTests|FullyQualifiedName~PropertyReferenceSetTests" --no-restore
 dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --filter "FullyQualifiedName~DerivedPropertyChangeHandlerTests|FullyQualifiedName~DerivedPropertyCleanupTests|FullyQualifiedName~DerivedPropertyConcurrencyTests|FullyQualifiedName~FallbackContextInvalidationTests|FullyQualifiedName~PerPropertySubscriptionLifecycleTests|FullyQualifiedName~ParentAccessDuringLifecycleTests|FullyQualifiedName~SubjectTransactionTests|FullyQualifiedName~WriteTimestampTests|FullyQualifiedName~SubjectPropertyTypeExtensionsTests|FullyQualifiedName~VerifyChecksTests.PublicApi" --no-restore
 dotnet test src/Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj --filter "FullyQualifiedName~DynamicPropertyLifecycleTests|FullyQualifiedName~ConcurrentStructuralWriteLeakTests|FullyQualifiedName~RegistryHandlerOrderTests|FullyQualifiedName~VerifyChecksTests.PublicApi" --no-restore
 dotnet test src/Namotion.Interceptor.Generator.Tests/Namotion.Interceptor.Generator.Tests.csproj --filter "FullyQualifiedName~StructuralSetterShapeTests|FullyQualifiedName~BaseClassInterceptionBehaviorTests|FullyQualifiedName~GeneratedMemberTableTests|FullyQualifiedName~SubjectBaseDiagnosticsTests|FullyQualifiedName~SubjectBaseShapeTests|FullyQualifiedName~InterfaceDefaultPropertyTests|FullyQualifiedName~SourceGeneratorTests|FullyQualifiedName~VirtualPartialTests" --no-restore
@@ -466,7 +466,7 @@ Implement `SubjectMetadataCommitRegistration` with an internal exact token refer
 
 - [ ] **Step 19: Remove optional inheritance and migrate exact consumers**
 
-Make the exact single resolved `ILifecycleInterceptor` the recursive ownership coordinator; `WithLifecycle()` remains the standard built-in registration rather than a concrete-type gate. Remove `WithContextInheritance`, `ContextInheritanceHandler`, and `PropertyReferenceSet`. Update every compiled source and Public API snapshot path in the map's freshly generated inventory, including `PropertyReferenceSetTests.cs`, `DynamicSubjectTests.cs`, `DynamicSubjectTests.WhenInterceptingDynamicSubject_ThenTheyAreCalled.verified.txt`, Connectors production/tests, Hosting production/tests, the WebSocket SampleClient, and every SyncRoot/inheritance consumer. The approved Dynamic oracle removes fallback lifecycle attach/detach entries while retaining the complete read/write order. Preserve composition-only connector tests that resolve one exact coordinator. Functional user documentation and diagrams remain assigned to Task 7.
+Make the exact single resolved `ILifecycleInterceptor` the recursive ownership coordinator; `WithLifecycle()` remains the standard built-in registration rather than a concrete-type gate. Remove `WithContextInheritance`, `ContextInheritanceHandler`, and `PropertyReferenceSet`. Update every compiled source and Public API snapshot path in the map's freshly generated inventory, including `PropertyReferenceSetTests.cs`, `DynamicSubjectTests.cs`, `DynamicSubjectTests.WhenInterceptingDynamicSubject_ThenTheyAreCalled.verified.txt`, Connectors production/tests, Hosting production/tests, the WebSocket SampleClient, and every SyncRoot/inheritance consumer. Task 2 also migrates the existing `LifecycleEventsTests.SubjectAttached_FiresAfterHandler_And_SubjectDetaching_FiresBeforeHandler` detach action from `RemoveFallbackContext(context)` to strict `DetachFromContext(context)` because fallback removal is composition-only. The approved Dynamic oracle removes fallback lifecycle attach/detach entries while retaining the complete read/write order. Preserve composition-only connector tests that resolve one exact coordinator. Functional user documentation and diagrams remain assigned to Task 7.
 
 - [ ] **Step 20: Close Task 2 atomic group**
 
@@ -497,7 +497,7 @@ dotnet build src/Namotion.Interceptor.slnx --no-restore
 git diff --check
 ```
 
-Inspect all Verify outputs. Do not commit until the entire atomic Task 2 gate is green and independent review approves the atomic diff. Stage exactly the map's deduplicated 122-path manifest, not a broad `src` or project-prefix pathspec:
+Inspect all Verify outputs. Do not commit until the entire atomic Task 2 gate is green and independent review approves the atomic diff. Stage exactly the map's deduplicated 123-path manifest, not a broad `src` or project-prefix pathspec:
 
 ```bash
 git add -- \
@@ -576,6 +576,7 @@ git add -- \
   src/Namotion.Interceptor.Tracking.Tests/Lifecycle/FallbackCompositionLifecycleTests.cs \
   src/Namotion.Interceptor.Tracking.Tests/Lifecycle/LifecycleArrayPinningTests.cs \
   src/Namotion.Interceptor.Tracking.Tests/Lifecycle/LifecycleCallbackOrderTests.cs \
+  src/Namotion.Interceptor.Tracking.Tests/Lifecycle/LifecycleEventsTests.cs \
   src/Namotion.Interceptor.Tracking.Tests/Lifecycle/OwnershipDiscoveryReaderTests.cs \
   src/Namotion.Interceptor.Tracking.Tests/Lifecycle/OwnershipMembershipTests.cs \
   src/Namotion.Interceptor.Tracking.Tests/Lifecycle/OwnershipProviderPoolTests.cs \
@@ -625,7 +626,7 @@ git add -- \
   src/Namotion.Interceptor/SubjectPropertyMetadata.cs
 ```
 
-Immediately after staging, prove that the index is the exact 122-path union shown in the map and that no Task 2 manifest path is unstaged or untracked:
+Immediately after staging, prove that the index is the exact 123-path union shown in the map and that no Task 2 manifest path is unstaged or untracked:
 
 ```bash
 git diff --cached --name-only
@@ -633,7 +634,7 @@ git diff --exit-code -- src/Namotion.Interceptor src/Namotion.Interceptor.Tests 
 git ls-files --others --exclude-standard -- src/Namotion.Interceptor src/Namotion.Interceptor.Tests src/Namotion.Interceptor.Tracking src/Namotion.Interceptor.Tracking.Tests src/Namotion.Interceptor.Registry src/Namotion.Interceptor.Registry.Tests src/Namotion.Interceptor.Generator src/Namotion.Interceptor.Generator.Tests src/Namotion.Interceptor.Dynamic src/Namotion.Interceptor.Dynamic.Tests src/Namotion.Interceptor.Hosting src/Namotion.Interceptor.Hosting.Tests src/Namotion.Interceptor.Connectors src/Namotion.Interceptor.Connectors.Tests src/Namotion.Interceptor.WebSocket.SampleClient src/Namotion.Interceptor.OpcUa.Tests
 ```
 
-The first output must equal the map's sorted 122-path union exactly. The second command must exit zero with no output, and the third must produce no output. Any extra staged path or missing/unstaged/untracked manifest path blocks the commit. Then make the one Task 2 commit and prove that none of those project scopes can leak into Task 5:
+The first output must equal the map's sorted 123-path union exactly. The second command must exit zero with no output, and the third must produce no output. Any extra staged path or missing/unstaged/untracked manifest path blocks the commit. Then make the one Task 2 commit and prove that none of those project scopes can leak into Task 5:
 
 ```bash
 git commit -m "Implement atomic subject ownership"
@@ -723,6 +724,8 @@ src/Namotion.Interceptor.Registry.Tests/ConcurrentStructuralWriteLeakTests.cs
 **Consumes:** Tasks 2 and 3 complete semantics.
 
 **Produces:** additional deterministic admission evidence, quiescent model checks, and weak release proof. It is test-only and expected GREEN against completed Tasks 2 and 3.
+
+Task 2 already owns the existing `LifecycleEventsTests` fallback-detach-to-strict-detach migration required for its full gate. Task 4 may add the adversarial rows below to the same file, but it does not defer or repeat that migration.
 
 - [ ] **Step 1: Add bounded adversarial verification tests**
 
