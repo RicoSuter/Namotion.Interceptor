@@ -1028,4 +1028,65 @@ public class ChangeQueueProcessorTests
         // Assert
         Assert.Equal(["buffered"], writtenValues.ToArray());
     }
+
+    [Fact]
+    public async Task WhenTheTeardownWriteBlocksAndIgnoresCancellation_ThenStoppingStillCompletes()
+    {
+        // Arrange: a write handler that blocks synchronously and never reads its token, which is what the
+        // OPC UA server does while it holds the SDK's node manager lock. The token the drain writes under
+        // therefore bounds nothing, so a stop that only asked for cancellation would wait here as long as
+        // the handler cares to block.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) =>
+            {
+                writeEntered.TrySetResult();
+                releaseWrite.Task.GetAwaiter().GetResult();
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        // Lets the handler out even when nothing else does, so a regression of the bound fails this test
+        // instead of wedging the run on a permanently blocked thread.
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() => releaseWrite.TrySetResult());
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "buffered";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processor.QueueDepth == 1,
+            message: "The change should be buffered by the processor before it stops");
+
+        try
+        {
+            // Act
+            await cancellation.CancelAsync();
+            await writeEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await processing.WaitAsync(TimeSpan.FromSeconds(30));
+
+            // Assert: the stop completed while the handler was still inside the write, which nothing but
+            // an externally enforced deadline can do.
+            Assert.False(releaseWrite.Task.IsCompleted,
+                "The drain waited for the blocked write handler instead of abandoning it at the deadline.");
+        }
+        finally
+        {
+            releaseWrite.TrySetResult();
+        }
+    }
 }

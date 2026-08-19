@@ -1909,8 +1909,23 @@ public class SubjectSourceBaseTests
                 },
                 message: "The pump did not start buffering changes.");
 
-            // Act: nothing writes after this poll loop, so the depth can only grow by this change.
-            var bufferedBeforeWrite = source.Diagnostics.OutboundChanges.Depth;
+            // The probe written by the last predicate evaluation may not be dequeued yet, and one that
+            // lands after the depth is read would satisfy the wait below on its own: the wait would then
+            // return before FirstName is dequeued, and the stop strands it in the subscription. Wait for
+            // the depth to hold across two polls first, so only the FirstName write can still grow it.
+            var previousDepth = -1;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    var depth = source.Diagnostics.OutboundChanges.Depth;
+                    var isSettled = depth == previousDepth;
+                    previousDepth = depth;
+                    return isSettled;
+                },
+                message: "The buffered depth did not settle after the probe loop.");
+
+            // Act
+            var bufferedBeforeWrite = previousDepth;
             person.FirstName = "John";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.Diagnostics.OutboundChanges.Depth > bufferedBeforeWrite,

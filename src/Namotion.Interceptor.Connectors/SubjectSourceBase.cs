@@ -41,6 +41,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     private SourceStateSnapshot _stateSnapshot = new(SourceState.Synchronizing, DateTimeOffset.UtcNow, null);
     private int _started;
 
+    // The run's stopping token, so a write can still tell a shutdown from a genuine failure when it was
+    // handed a different token. Reference-sized, so it is written and read atomically.
+    private CancellationToken _stoppingToken;
+
     private ImmutableArray<SourceMonitor> _registeredMonitors = [];
 
     internal WriteRetryQueue? WriteRetryQueue { get; }
@@ -219,6 +223,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// <inheritdoc />
     protected sealed override async Task RunAsync(CancellationToken stoppingToken)
     {
+        _stoppingToken = stoppingToken;
+
         // Inside the try, so the finally below still publishes Stopped when startup fails. Outside it, a
         // configuration error leaves the source registered as Synchronizing for the process lifetime:
         // the DI path tears the host down, but on the graph-attach path the faulted task is swallowed and
@@ -411,9 +417,16 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// Its second consumer is the drop counting in <see cref="WriteChangesViaRetryQueueAsync"/>, which
     /// uses it to keep writes that only failed because the host was stopping out of the loss total.
     /// </para>
+    /// <para>
+    /// The run's own stopping token is consulted as well as the caller's, because a write is not always
+    /// handed that token: <see cref="ChangeQueueProcessor"/> drains what it still holds on its way out
+    /// under a fresh one, deliberately, since the stopping token is already cancelled there and writing
+    /// under it would fail every change. Judging that drain by its token alone would report a loss caused
+    /// solely by the host stopping as a counted drop, which is what this guard exists to prevent.
+    /// </para>
     /// </remarks>
-    private static bool IsExpectedShutdown(CancellationToken cancellationToken) =>
-        cancellationToken.IsCancellationRequested;
+    private bool IsExpectedShutdown(CancellationToken cancellationToken) =>
+        cancellationToken.IsCancellationRequested || _stoppingToken.IsCancellationRequested;
 
     /// <summary>
     /// Parks owned writes into the retry queue at intervals while the initial state loads, so a slow

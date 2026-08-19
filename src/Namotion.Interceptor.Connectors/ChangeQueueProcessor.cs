@@ -356,6 +356,23 @@ public class ChangeQueueProcessor : IDisposable
     /// takes the batch. When it does not, the timeout keeps teardown bounded and a write handler that
     /// parks its failures (<see cref="SubjectSourceBase"/> writes through its retry queue) still keeps
     /// the changes for the next attempt.
+    /// <para>
+    /// That token only bounds a handler that observes it, and one in this repository observes neither it
+    /// nor any other: the OPC UA server writes synchronously under the SDK's node manager lock, which is
+    /// also held while the SDK serves client reads, writes and browses. The deadline is therefore enforced
+    /// from the outside as well, by running the flush on the thread pool and abandoning it. The price is a
+    /// window this method introduces: on the deadline the drain returns while such a handler may still be
+    /// writing, so a change can reach the wire shortly after <see cref="ProcessAsync"/> returns and after
+    /// its caller has begun tearing the transport down. Every client in this repository rejects a write
+    /// once disposed, so it fails cleanly rather than resurrecting a connection.
+    /// </para>
+    /// <para>
+    /// The batch is one more write through the normal handler, not a privileged one. For a source that
+    /// handler flushes the entire write retry queue first, because the backlog holds older commits and
+    /// must keep its place in commit order, and only writes this batch once that succeeded. A deep backlog
+    /// on a slow transport can therefore consume the whole deadline on its own, in which case this batch
+    /// is parked in the retry queue rather than written.
+    /// </para>
     /// </remarks>
     private async Task FlushRemainingChangesAsync()
     {
@@ -369,13 +386,39 @@ public class ChangeQueueProcessor : IDisposable
         {
             // The gate is free: the dequeue loop has exited and the periodic flush task is awaited above,
             // so nothing else is flushing unless a concurrent Dispose is in progress.
-            await TryFlushAsync(teardownTokenSource.Token).ConfigureAwait(false);
+            //
+            // Off this thread, because a handler is free to block before the flush ever yields, and then
+            // awaiting it here would bound nothing at all: the token is a request, the deadline below is
+            // not. What is abandoned still finishes on its own and cleans up after itself, see the remarks.
+            await Task
+                .Run(() => TryFlushAsync(teardownTokenSource.Token).AsTask())
+                .WaitAsync(TeardownFlushTimeout)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+        {
+            // The deadline, reached either by abandoning the flush or by a handler that took the hint.
+            _logger.LogWarning(ex,
+                "Gave up waiting after {Timeout} for the remaining buffered changes to be written while " +
+                "stopping. A write handler that ignores cancellation may still complete it.",
+                TeardownFlushTimeout);
+            return;
         }
         catch (Exception ex)
         {
             // Never rethrown: this runs inside a finally, where a throw would replace the failure that
             // ended the processing loop with this one.
             _logger.LogError(ex, "Failed to write the remaining buffered changes while stopping.");
+        }
+
+        if (!_changes.IsEmpty)
+        {
+            // A concurrent Dispose held the flush gate, so the drain returned without taking the batch.
+            // Nothing else refills the queue once the dequeue loop has exited, and no later drain can
+            // recover these, so the one thing this must not do is lose them quietly.
+            _logger.LogWarning(
+                "{Count} buffered changes were not written while stopping because the flush gate was held " +
+                "by a concurrent dispose. They are discarded.", _changes.Count);
         }
     }
 
