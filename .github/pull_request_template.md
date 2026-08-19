@@ -6,6 +6,17 @@
 
 <!-- What changed and why it matters to a consumer. A few sentences or bullets. -->
 
+## Issues
+
+<!-- Optional; drop this heading when nothing applies. Three line types, because the first has a
+     mechanical effect on merge and the others do not:
+
+     Closes #123          closes the issue on merge. Only GitHub's keywords do this:
+                          close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved.
+     Related to #123      touched but not finished. Avoid the keywords above or it closes anyway,
+                          which is what "addresses" and "supersedes" are for.
+     Follow-up: #123      deliberately left for later, so a reviewer can see where the scope line is. -->
+
 ## Why
 
 <!-- The problem this solves, when the summary does not already make it obvious. Drop this heading if it does. -->
@@ -63,5 +74,5 @@
 - [ ] Unit tests
 - [ ] Integration tests
 - [ ] Benchmarks
-- [ ] Connector Tester load profile
-- [ ] Connector Tester chaos profile
+- [ ] Load tests
+- [ ] Choas tests
