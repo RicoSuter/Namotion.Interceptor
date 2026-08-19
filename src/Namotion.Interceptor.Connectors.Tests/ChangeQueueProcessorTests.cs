@@ -1134,4 +1134,61 @@ public class ChangeQueueProcessorTests
             releaseWrite.TrySetResult();
         }
     }
+
+    [Fact]
+    public async Task WhenTheTeardownDrainIsAbandoned_ThenTheFlushGateIsReleasedAndTheBufferReturned()
+    {
+        // Arrange: pins the contract that an abandoned teardown flush is still cancelled and still
+        // cleans up after itself. It does not discriminate against the old two-deadline shape, which
+        // was measured to leak only when disposal beat the cancel-after timer: at the five second bound
+        // that never happened in fifteen runs, and this test passes on the old code too. Kept because
+        // the contract is what matters and the old shape could only ever satisfy it by luck.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var writeReached = new ManualResetEventSlim(false);
+
+        var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: async (_, teardownToken) =>
+            {
+                // Observes its token and nothing else, so this handler completes only if the teardown
+                // token genuinely fires. That is the property under test: the drain used to dispose its
+                // token source on the abandoning thread, which killed the pending cancel-after timer and
+                // left the abandoned flush running under a token that could never cancel.
+                writeReached.Set();
+                await Task.Delay(Timeout.Infinite, teardownToken);
+            },
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "buffered";
+        await AsyncTestHelpers.WaitUntilAsync(() => processor.QueueDepth == 1);
+
+        // Act: stop, and never release the handler by any means other than its token. The drain gives
+        // up at the bound with the flush still running, which is the abandoned path under test.
+        await cancellation.CancelAsync();
+        Assert.True(writeReached.Wait(TimeSpan.FromSeconds(30)), "the drain should have reached the handler");
+
+        // Bounded deliberately. The drain has no deadline other than the teardown token, so a regression
+        // that stops that token firing would wedge the run here forever rather than failing.
+        await processing.WaitAsync(TimeSpan.FromSeconds(30));
+        processor.Dispose();
+
+        // Assert: the token fired, so the abandoned flush unwound and cleaned up after itself. Nothing
+        // else can release this handler, so the gate going free is the only in-process evidence that
+        // the flush's cleanup ran at all.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processor.GateIsFreeForTest,
+            message: "the abandoned teardown flush should have been cancelled and released the flush gate");
+    }
 }

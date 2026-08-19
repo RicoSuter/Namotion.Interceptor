@@ -58,6 +58,12 @@ public class ChangeQueueProcessor : IDisposable
     /// </summary>
     public int QueueDepth => _changes.Count;
 
+    // An abandoned teardown flush holds the gate until it unwinds, and Dispose is single-shot, so once
+    // Dispose has lost the gate nothing it does later can return the merger's buffer: the flush's own
+    // cleanup does that. The gate going free is therefore the only in-process evidence that an
+    // abandoned flush was cancelled and cleaned up rather than left running forever.
+    internal bool GateIsFreeForTest => Volatile.Read(ref _flushGate) == 0;
+
     // Scratch state used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
     private readonly ChangeMerger _changeMerger = new();
@@ -355,29 +361,45 @@ public class ChangeQueueProcessor : IDisposable
 
         // A fresh token, not the one ProcessAsync was given: that one is already cancelled here, so
         // writing under it would fail every change, which is the loss this exists to prevent.
-        using var teardownTokenSource = new CancellationTokenSource(TeardownFlushBound);
+        var teardownTokenSource = new CancellationTokenSource(TeardownFlushBound);
+
+        // Read once, before the task starts, because the delegate below disposes the source as soon as
+        // the flush returns. Reading Token at the wait instead would race that disposal, and Token
+        // throws ObjectDisposedException once the source is gone.
+        var teardownToken = teardownTokenSource.Token;
+
+        // Off this thread, because the token only bounds a handler that observes it and the OPC UA
+        // server writes synchronously under the SDK's node manager lock. Awaiting inline would bound
+        // nothing. The task owns the token source, so the cancel-after timer stays alive for as long as
+        // the work it bounds, rather than being killed by a using on the abandoning thread.
+        var flushTask = Task.Run(async () =>
+        {
+            try
+            {
+                await TryFlushAsync(teardownToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                teardownTokenSource.Dispose();
+            }
+        });
+
         try
         {
-            // The gate is free: the dequeue loop has exited and the periodic flush task is awaited above,
-            // so nothing else is flushing unless a concurrent Dispose is in progress.
-            //
-            // Off this thread, because the token only bounds a handler that observes it and the OPC UA
-            // server writes synchronously under the SDK's node manager lock. Awaiting inline would then
-            // bound nothing. What is abandoned still finishes on its own and cleans up after itself.
-            await Task
-                .Run(() => TryFlushAsync(teardownTokenSource.Token).AsTask())
-                .WaitAsync(TeardownFlushBound)
-                .ConfigureAwait(false);
+            // One deadline rather than two. Waiting on the same token the flush runs under removes the
+            // race in which an independent timeout disposed the source and killed its timer.
+            await flushTask.WaitAsync(teardownToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+        catch (OperationCanceledException)
         {
-            // The deadline, reached either by abandoning the flush or by a handler that took the hint.
             // An abandoned write can still reach the wire after the caller has begun tearing the
             // transport down; every client here rejects a write once disposed, so that fails cleanly.
-            _logger.LogWarning(ex,
-                "Gave up waiting after {Timeout} for the remaining buffered changes to be written while " +
+            _logger.LogWarning(
+                "Gave up waiting after {Bound} for the remaining buffered changes to be written while " +
                 "stopping. A write handler that ignores cancellation may still complete it.",
                 TeardownFlushBound);
+
+            ObserveAbandonedFlush(flushTask);
             return;
         }
         catch (Exception ex)
@@ -395,6 +417,19 @@ public class ChangeQueueProcessor : IDisposable
                 "{Count} buffered changes were not written while stopping because the flush gate was held " +
                 "by a concurrent dispose. They are discarded.", _changes.Count);
         }
+    }
+
+    // Once the wait is abandoned nothing observes the flush task: WaitAsync removes its own completion
+    // action when it cancels. The common ending is Canceled, which raises nothing and does not run this
+    // continuation either. What this exists for is the abandoned flush that then fails for some other
+    // reason, which does end Faulted and would otherwise surface as an UnobservedTaskException.
+    private static void ObserveAbandonedFlush(Task flushTask)
+    {
+        _ = flushTask.ContinueWith(
+            static task => _ = task.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     /// <summary>
