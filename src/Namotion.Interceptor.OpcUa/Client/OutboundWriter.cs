@@ -11,12 +11,20 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal sealed class OutboundWriter
 {
+    private const long RefusedWriteLogIntervalMilliseconds = 5000;
+
     private readonly Func<ISession?> _sessionProvider;
     private readonly ReadAfterWriteManager? _readAfterWriteManager;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly string _opcUaNodeIdKey;
     private readonly ThroughputCounter _outgoingThroughput;
     private readonly ILogger _logger;
+
+    // A refused write is a repeated condition, not an event: the retry queue re-sends a change the
+    // server refuses on every flush and nothing supersedes it, so an untimed warning is one line per
+    // buffer tick for as long as the refusal lasts. Same window and shape as WriteRetryQueue's own
+    // flush warning.
+    private long _lastRefusedWriteLogTimestamp;
 
     public OutboundWriter(
         Func<ISession?> sessionProvider,
@@ -172,9 +180,14 @@ internal sealed class OutboundWriter
         Exception error;
         if (refusedCount > 0)
         {
-            _logger.LogWarning(
-                "OPC UA write batch failure: {FailedCount} of {TotalCount} writes failed.",
-                refusedCount, results.Count);
+            var now = Environment.TickCount64;
+            if (now - _lastRefusedWriteLogTimestamp >= RefusedWriteLogIntervalMilliseconds)
+            {
+                _lastRefusedWriteLogTimestamp = now;
+                _logger.LogWarning(
+                    "OPC UA write batch failure: {FailedCount} of {TotalCount} writes failed.",
+                    refusedCount, results.Count);
+            }
 
             var writeError = new OpcUaWriteException(refusedCount, results.Count);
             error = request.ConversionErrors is null
