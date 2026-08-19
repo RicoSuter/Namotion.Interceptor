@@ -205,8 +205,11 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
                     catch (Exception e) when (e is not OperationCanceledException)
                     {
                         // The merger marked this change published before handing it over, so nothing
-                        // retries it and the node keeps its previous value until the property changes
-                        // again. That makes this log the only trace of the gap.
+                        // retries it. The setters above only assign fields and raise the change mask,
+                        // so the flush is the one thing left that can throw, and by then the node
+                        // already holds the new value: readers see it immediately, and the still-set
+                        // mask has the node's next flush deliver it to subscribers late. This log is
+                        // the only trace of that delay.
                         _logger.LogError(e,
                             "Failed to write property '{Property}' to its OPC UA node.", change.Property.Name);
                     }
