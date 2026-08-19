@@ -6,14 +6,14 @@
 
 <!-- What changed and why it matters to a consumer. A few sentences or bullets.
 
-     Where issues are involved, list them here, one per line. The first form has a mechanical effect
-     on merge and the others do not:
+     Where issues are involved, close the section with a list of them. The first form has a
+     mechanical effect on merge and the others do not:
 
-     Closes #123          closes the issue on merge. Only GitHub's keywords do this:
+     - Closes #123        closes the issue on merge. Only GitHub's keywords do this:
                           close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved.
-     Related to #123      touched but not finished. Avoid the keywords above or it closes anyway,
+     - Related to #123    touched but not finished. Avoid the keywords above or it closes anyway,
                           which is what "addresses" and "supersedes" are for.
-     Follow-up: #123      deliberately left for later, so a reviewer can see where the scope line is. -->
+     - Follow-up: #123    deliberately left for later, so a reviewer can see where the scope line is. -->
 
 ## Why
 
