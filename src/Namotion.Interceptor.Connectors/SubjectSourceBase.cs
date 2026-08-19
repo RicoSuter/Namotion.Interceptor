@@ -79,6 +79,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
+        // Validated here and not only in the processor, which a source builds after connecting: a bad
+        // value would otherwise throw inside the retry loop, be swallowed as an attempt failure and be
+        // retried every retry interval forever instead of failing at construction.
+        ChangeQueueProcessor.ValidateTeardownFlushTimeout(teardownFlushTimeout);
         _teardownFlushTimeout = teardownFlushTimeout;
 
         // The retry queue also carries writes captured while (re)connecting. With size 0 it is

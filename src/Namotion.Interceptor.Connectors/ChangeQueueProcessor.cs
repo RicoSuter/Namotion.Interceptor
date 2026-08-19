@@ -193,7 +193,7 @@ public class ChangeQueueProcessor : IDisposable
         }
     }
 
-    private static TimeSpan ValidateTeardownFlushTimeout(TimeSpan? teardownFlushTimeout)
+    internal static TimeSpan ValidateTeardownFlushTimeout(TimeSpan? teardownFlushTimeout)
     {
         var timeout = teardownFlushTimeout ?? DefaultTeardownFlushTimeout;
         if (timeout < TimeSpan.Zero)
@@ -369,8 +369,9 @@ public class ChangeQueueProcessor : IDisposable
     /// <remarks>
     /// Runs on its own timeout token, not the one <see cref="ProcessAsync"/> was given: that one is
     /// already cancelled here, so writing under it would fail every change, which is the loss this
-    /// prevents. The transport is still up, because every caller disposes the processor before the
-    /// connection it writes through. When the write fails anyway, a handler that parks its failures
+    /// prevents. Every caller disposes the processor before the connection it writes through, so a stop
+    /// still finds the transport up. When it is down, which is what ended the attempt in the first place
+    /// on a failure restart, a handler that parks its failures
     /// (<see cref="SubjectSourceBase"/> writes through its retry queue) still keeps the changes.
     /// The timeout bounds this method, not the write: a <see cref="ISubjectSource.WriteChangesAsync"/>
     /// that ignores its cancellation token still outruns it.
