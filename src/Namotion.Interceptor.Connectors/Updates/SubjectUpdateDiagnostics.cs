@@ -14,7 +14,12 @@ public static class SubjectUpdateDiagnostics
     /// <summary>Complete-state serializations of momentarily unregistered subjects (metadata fallback path).</summary>
     public static long MetadataFallbackSerializations => Volatile.Read(ref Internal.SubjectUpdateFactory.MetadataFallbackSerializationCount);
 
-    /// <summary>Inbound subject updates dropped because their subject stayed unresolvable.</summary>
+    /// <summary>
+    /// Inbound updates dropped because the subject they address stayed unresolvable. Counts both
+    /// subject updates whose subject was neither in the registry nor created during the apply, and
+    /// structural item references (object references, collection items, dictionary entries) that
+    /// could not be resolved or placed, leaving the applied structure one item short.
+    /// </summary>
     public static long DroppedInboundSubjectUpdates => Volatile.Read(ref Internal.SubjectUpdateApplier.DroppedInboundSubjectUpdateCount);
 
     /// <summary>Inbound properties skipped because the subject does not declare them.</summary>

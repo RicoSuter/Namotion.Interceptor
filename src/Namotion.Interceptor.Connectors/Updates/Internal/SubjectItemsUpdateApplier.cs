@@ -45,7 +45,7 @@ internal static class SubjectItemsUpdateApplier
             if (isNew)
             {
                 item.SetSubjectId(itemUpdate.Id);
-                ApplyPropertiesIfAvailable(item, itemUpdate.Id, context);
+                ApplyPropertiesIfAvailable(item, itemUpdate.Id, context, deferAttributes: true);
             }
 
             newItems.Add((item, itemUpdate.Id, isNew));
@@ -103,7 +103,12 @@ internal static class SubjectItemsUpdateApplier
         foreach (var itemUpdate in propertyUpdate.Items)
         {
             if (itemUpdate.Key is null)
+            {
+                // A dictionary entry without a key cannot be placed, so the entry is lost until the
+                // next update carrying complete state for this dictionary.
+                Interlocked.Increment(ref SubjectUpdateApplier.DroppedInboundSubjectUpdateCount);
                 continue;
+            }
 
             var key = DictionaryKeyConverter.Convert(itemUpdate.Key, targetKeyType);
             var (item, isNew) = ResolveOrCreateSubject(
@@ -115,7 +120,7 @@ internal static class SubjectItemsUpdateApplier
             if (isNew)
             {
                 item.SetSubjectId(itemUpdate.Id);
-                ApplyPropertiesIfAvailable(item, itemUpdate.Id, context);
+                ApplyPropertiesIfAvailable(item, itemUpdate.Id, context, deferAttributes: true);
             }
 
             newItems.Add((key, item, itemUpdate.Id, isNew));
@@ -142,10 +147,11 @@ internal static class SubjectItemsUpdateApplier
     }
 
     /// <summary>
-    /// Resolves an existing subject by ID, or creates a new one.
-    /// For newly created subjects, the ID is NOT set here: the caller must
-    /// first assign the item to the graph (via SetValue on the collection/dictionary),
-    /// then set IDs and apply properties.
+    /// Resolves an existing subject by ID, or creates a new one when the update carries its complete
+    /// state. Returns <c>null</c> when the ID is neither resolvable nor creatable; that reference is
+    /// dropped and counted. The created instance is bare: the caller sets its ID and applies its
+    /// properties before assigning the collection or dictionary to the graph, so the subgraph is
+    /// complete by the time it enters the graph.
     /// </summary>
     private static (IInterceptorSubject? Subject, bool IsNew) ResolveOrCreateSubject(
         IInterceptorSubject parent,
@@ -164,7 +170,9 @@ internal static class SubjectItemsUpdateApplier
         {
             // Reference to a subject that should exist but doesn't (concurrent structural
             // mutation removed it from the ID registry). Skip, it self-heals on the next update
-            // that includes complete state for this subject.
+            // that includes complete state for this subject. Until then the applied collection or
+            // dictionary is one item short, so count the drop.
+            Interlocked.Increment(ref SubjectUpdateApplier.DroppedInboundSubjectUpdateCount);
             return (null, false);
         }
 
@@ -174,14 +182,15 @@ internal static class SubjectItemsUpdateApplier
 
     /// <summary>
     /// Applies property updates to a subject if properties are available and not yet processed.
+    /// Set <paramref name="deferAttributes"/> for a subject that is not yet part of the graph.
     /// </summary>
     private static void ApplyPropertiesIfAvailable(
-        IInterceptorSubject subject, string subjectId, SubjectUpdateApplyContext context)
+        IInterceptorSubject subject, string subjectId, SubjectUpdateApplyContext context, bool deferAttributes = false)
     {
         if (context.Subjects.TryGetValue(subjectId, out var properties) &&
             context.TryMarkAsProcessed(subjectId))
         {
-            SubjectUpdateApplier.ApplyPropertyUpdates(subject, properties, context);
+            SubjectUpdateApplier.ApplyPropertyUpdates(subject, properties, context, deferAttributes);
         }
     }
 

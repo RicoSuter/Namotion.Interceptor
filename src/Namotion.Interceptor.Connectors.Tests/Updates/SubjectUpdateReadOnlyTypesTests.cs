@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Collections.ObjectModel;
 using System.Reactive.Concurrency;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Testing;
@@ -211,6 +212,59 @@ public class SubjectUpdateReadOnlyTypesTests
         Assert.True(target.ReadOnlyLookup.ContainsKey("key2"));
         Assert.Equal("Item1", target.ReadOnlyLookup["key1"].Name);
         Assert.Equal("Item2", target.ReadOnlyLookup["key2"].Name);
+    }
+
+    [Fact]
+    public void WhenCompleteImmutableArrayUpdateIsApplied_ThenTargetHoldsAnImmutableArrayWithAllItems()
+    {
+        // Arrange - the target's declared type is not assignable from the applier's working List<T>,
+        // so the collection has to be materialized into an ImmutableArray before it is written back.
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var sourceItem1 = new ReadOnlyTypesTestNode(context) { Name = "Item1" };
+        var sourceItem2 = new ReadOnlyTypesTestNode(context) { Name = "Item2" };
+        var source = new ReadOnlyTypesTestNode(context)
+        {
+            Name = "Root",
+            ImmutableItems = [sourceItem1, sourceItem2]
+        };
+        var target = new ReadOnlyTypesTestNode(context);
+
+        // Act
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.IsType<ImmutableArray<ReadOnlyTypesTestNode>>(target.ImmutableItems);
+        Assert.Equal(2, target.ImmutableItems.Length);
+        Assert.Equal("Item1", target.ImmutableItems[0].Name);
+        Assert.Equal("Item2", target.ImmutableItems[1].Name);
+    }
+
+    [Fact]
+    public void WhenCompleteReadOnlyCollectionUpdateIsApplied_ThenTargetHoldsAReadOnlyCollectionWithAllItems()
+    {
+        // Arrange - ReadOnlyCollection<T> has no AddRange, so it is built through its IList<T>
+        // constructor instead of the static-empty plus append path used for immutable collections.
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var sourceItem1 = new ReadOnlyTypesTestNode(context) { Name = "Item1" };
+        var sourceItem2 = new ReadOnlyTypesTestNode(context) { Name = "Item2" };
+        var source = new ReadOnlyTypesTestNode(context)
+        {
+            Name = "Root",
+            WrappedItems = new ReadOnlyCollection<ReadOnlyTypesTestNode>(
+                new List<ReadOnlyTypesTestNode> { sourceItem1, sourceItem2 })
+        };
+        var target = new ReadOnlyTypesTestNode(context);
+
+        // Act
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.IsType<ReadOnlyCollection<ReadOnlyTypesTestNode>>(target.WrappedItems);
+        Assert.Equal(2, target.WrappedItems.Count);
+        Assert.Equal("Item1", target.WrappedItems[0].Name);
+        Assert.Equal("Item2", target.WrappedItems[1].Name);
     }
 
     [Fact]

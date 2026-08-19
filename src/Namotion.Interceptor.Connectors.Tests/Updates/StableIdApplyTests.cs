@@ -7,11 +7,13 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Connectors.Tests.Updates;
 
+[Collection(SubjectUpdateDiagnosticsCollection.Name)]
 public class StableIdApplyTests
 {
     [Fact]
-    public void ApplyPartialUpdate_WithoutRoot_AppliesByStableIdLookup()
+    public void WhenPartialUpdateHasNoRoot_ThenSubjectsAreResolvedByStableId()
     {
+        // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var child = new CycleTestNode { Name = "OriginalName" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child] };
@@ -34,15 +36,18 @@ public class StableIdApplyTests
             }
         };
 
+        // Act
         SubjectUpdateApplier.ApplyUpdate(
             node, update, new DefaultSubjectFactory(), ChangeOrigin.Local);
 
+        // Assert
         Assert.Equal("UpdatedName", child.Name);
     }
 
     [Fact]
-    public void ApplyObjectUpdate_SameSubjectId_KeepsExistingInstance()
+    public void WhenObjectUpdateHasSameSubjectId_ThenExistingInstanceIsKept()
     {
+        // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var child = new CycleTestNode { Name = "OriginalName" };
         var node = new CycleTestNode(context) { Name = "Root", Child = child };
@@ -75,16 +80,19 @@ public class StableIdApplyTests
             }
         };
 
+        // Act
         SubjectUpdateApplier.ApplyUpdate(
             node, update, new DefaultSubjectFactory(), ChangeOrigin.Local);
 
+        // Assert
         Assert.Same(child, node.Child);
         Assert.Equal("UpdatedName", node.Child!.Name);
     }
 
     [Fact]
-    public void ApplyObjectUpdate_DifferentSubjectId_ReplacesWithNewInstance()
+    public void WhenObjectUpdateHasDifferentSubjectId_ThenInstanceIsReplaced()
     {
+        // Arrange
         var sourceContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var targetContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
 
@@ -124,16 +132,18 @@ public class StableIdApplyTests
             }
         };
 
+        // Act
         SubjectUpdateApplier.ApplyUpdate(
             node, update, new DefaultSubjectFactory(), ChangeOrigin.Local);
 
+        // Assert
         Assert.NotSame(originalChild, node.Child);
         Assert.Equal("ReplacementChild", node.Child!.Name);
         Assert.Equal(replacementChildId, node.Child.TryGetSubjectId());
     }
 
     [Fact]
-    public void ApplyUpdate_WhenStructuralChangeDetachesSubject_ThenStep2PropertyUpdatesStillApplied()
+    public void WhenStructuralChangeDetachesSubject_ThenPropertyUpdatesAreStillApplied()
     {
         // Arrange: root → child via object ref
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
@@ -181,8 +191,9 @@ public class StableIdApplyTests
     }
 
     [Fact]
-    public void ApplyPartialUpdate_RootScalarAndNonRootChange_BothApplied()
+    public void WhenUpdateHasRootScalarAndNonRootChange_ThenBothAreApplied()
     {
+        // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var child = new CycleTestNode { Name = "ChildOriginal" };
         var node = new CycleTestNode(context) { Name = "RootOriginal", Child = child };
@@ -215,15 +226,17 @@ public class StableIdApplyTests
             }
         };
 
+        // Act
         SubjectUpdateApplier.ApplyUpdate(
             node, update, new DefaultSubjectFactory(), ChangeOrigin.Local);
 
+        // Assert
         Assert.Equal("RootUpdated", node.Name);
         Assert.Equal("ChildUpdated", child.Name);
     }
 
     [Fact]
-    public void ApplyUpdate_NewDictItem_HasPropertiesAppliedBeforeGraphEntry()
+    public void WhenUpdateAddsNewDictionaryItem_ThenPropertiesAreAppliedBeforeGraphEntry()
     {
         // Arrange: root with empty dict
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
@@ -271,7 +284,7 @@ public class StableIdApplyTests
     }
 
     [Fact]
-    public void ApplyUpdate_NewCollectionItem_HasPropertiesAppliedBeforeGraphEntry()
+    public void WhenUpdateAddsNewCollectionItem_ThenPropertiesAreAppliedBeforeGraphEntry()
     {
         // Arrange: root with empty collection
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
@@ -316,7 +329,7 @@ public class StableIdApplyTests
     }
 
     [Fact]
-    public void ApplyUpdate_NewObjectRef_HasPropertiesAppliedBeforeGraphEntry()
+    public void WhenUpdateAddsNewObjectReference_ThenPropertiesAreAppliedBeforeGraphEntry()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
@@ -359,7 +372,7 @@ public class StableIdApplyTests
     }
 
     [Fact]
-    public void ApplyUpdate_SubjectMoveBetweenCollectionAndObjectRef_SubjectStaysRegistered()
+    public void WhenSubjectMovesBetweenCollectionAndObjectReference_ThenItStaysRegistered()
     {
         // Arrange: root with subject X in Items collection
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
@@ -419,7 +432,7 @@ public class StableIdApplyTests
     }
 
     [Fact]
-    public void ApplyUpdate_NewDictItemWithNestedObjectRef_FullSubgraphPopulated()
+    public void WhenNewDictionaryItemHasNestedObjectReference_ThenFullSubgraphIsPopulated()
     {
         // Arrange: verifies that nested structural properties on new subjects
         // are also populated before graph entry (recursive subgraph build).
@@ -483,7 +496,7 @@ public class StableIdApplyTests
     }
 
     [Fact]
-    public void ApplyUpdate_WhenValueForUnresolvableSubjectArrives_ThenUpdateIsDroppedAndCounted()
+    public void WhenValueForUnresolvableSubjectArrives_ThenUpdateIsDroppedAndCounted()
     {
         // Arrange - a value-only update for a subject that is not in the graph and is not creatable
         // (no structural parent, not marked complete). There is no pending-apply buffer: the update
@@ -540,5 +553,181 @@ public class StableIdApplyTests
         Assert.NotNull(root.Child);
         Assert.Equal(ghostId, root.Child!.TryGetSubjectId());
         Assert.Equal("Converged", root.Child.Name);
+    }
+
+    [Fact]
+    public void WhenRootIdDiffersFromTheLocalRootId_ThenNoDropIsCounted()
+    {
+        // Arrange - Root is a mapping hint, not an identity assignment, so the sender's root ID never
+        // resolves in the receiver's registry. The root's properties are applied through that hint,
+        // so the drop tripwire must stay flat: a counter that rises during healthy operation cannot
+        // signal a real convergence gap.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new CycleTestNode(context) { Name = "RootOriginal" };
+        var localRootId = root.GetOrAddSubjectId();
+        const string senderRootId = "sender-side-root-id";
+
+        Assert.NotEqual(senderRootId, localRootId);
+
+        var update = new SubjectUpdate
+        {
+            Root = senderRootId,
+            Subjects = new()
+            {
+                [senderRootId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "RootUpdated" }
+                }
+            }
+        };
+
+        var droppedBefore = SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates;
+
+        // Act
+        SubjectUpdateApplier.ApplyUpdate(root, update, new DefaultSubjectFactory(), ChangeOrigin.Local);
+
+        // Assert
+        Assert.Equal("RootUpdated", root.Name);
+        Assert.Equal(droppedBefore, SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates);
+    }
+
+    [Fact]
+    public void WhenDeferredSubjectIsCreatedByALaterStructuralEntry_ThenNoDropIsCounted()
+    {
+        // Arrange - the new grandchild is listed before the entry that creates it, so it is
+        // unresolvable at its own turn and lands in the deferred pass. By the time that pass runs it
+        // has been created and applied, so nothing was dropped and the tripwire must stay flat.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var child = new CycleTestNode { Name = "Child" };
+        var root = new CycleTestNode(context) { Name = "Root", Child = child };
+        var childId = child.GetOrAddSubjectId();
+        const string grandChildId = "grand-child-id";
+
+        var update = new SubjectUpdate
+        {
+            Root = null,
+            Subjects = new()
+            {
+                [grandChildId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "GrandChild" }
+                },
+                [childId] = new()
+                {
+                    ["Child"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = grandChildId }
+                }
+            },
+            CompleteSubjectIds = [grandChildId]
+        };
+
+        var droppedBefore = SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates;
+
+        // Act
+        SubjectUpdateApplier.ApplyUpdate(root, update, new DefaultSubjectFactory(), ChangeOrigin.Local);
+
+        // Assert
+        Assert.NotNull(child.Child);
+        Assert.Equal("GrandChild", child.Child!.Name);
+        Assert.Equal(droppedBefore, SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates);
+    }
+
+    [Fact]
+    public void WhenNewObjectReferenceCarriesAnAttribute_ThenTheAttributeIsApplied()
+    {
+        // Arrange - a new subject is populated before it enters the graph, where the registry cannot
+        // map an attribute name to its backing property yet. Its attributes must still land, because
+        // nothing re-applies them once it is rooted.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new CycleTestNode(context) { Name = "Root" };
+        var rootId = root.GetOrAddSubjectId();
+        const string newChildId = "new-child-with-attribute";
+
+        var update = new SubjectUpdate
+        {
+            Root = rootId,
+            Subjects = new()
+            {
+                [rootId] = new()
+                {
+                    ["Child"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = newChildId }
+                },
+                [newChildId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "NewChild",
+                        Attributes = new()
+                        {
+                            ["Status"] = new SubjectPropertyUpdate
+                            {
+                                Kind = SubjectPropertyUpdateKind.Value,
+                                Value = "inactive"
+                            }
+                        }
+                    }
+                }
+            },
+            CompleteSubjectIds = [newChildId]
+        };
+
+        // Act
+        SubjectUpdateApplier.ApplyUpdate(root, update, new DefaultSubjectFactory(), ChangeOrigin.Local);
+
+        // Assert
+        Assert.NotNull(root.Child);
+        Assert.Equal("NewChild", root.Child!.Name);
+        Assert.Equal("inactive", root.Child.Name_Status);
+    }
+
+    [Fact]
+    public void WhenNewCollectionItemCarriesAnAttribute_ThenTheAttributeIsApplied()
+    {
+        // Arrange - same hole as for object references, reached through the collection applier.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new CycleTestNode(context) { Name = "Root" };
+        var rootId = root.GetOrAddSubjectId();
+        const string newItemId = "new-item-with-attribute";
+
+        var update = new SubjectUpdate
+        {
+            Root = rootId,
+            Subjects = new()
+            {
+                [rootId] = new()
+                {
+                    ["Items"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Items = [new SubjectPropertyItemUpdate { Id = newItemId }]
+                    }
+                },
+                [newItemId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "NewItem",
+                        Attributes = new()
+                        {
+                            ["Status"] = new SubjectPropertyUpdate
+                            {
+                                Kind = SubjectPropertyUpdateKind.Value,
+                                Value = "inactive"
+                            }
+                        }
+                    }
+                }
+            },
+            CompleteSubjectIds = [newItemId]
+        };
+
+        // Act
+        SubjectUpdateApplier.ApplyUpdate(root, update, new DefaultSubjectFactory(), ChangeOrigin.Local);
+
+        // Assert
+        var item = Assert.Single(root.Items);
+        Assert.Equal("NewItem", item.Name);
+        Assert.Equal("inactive", item.Name_Status);
     }
 }

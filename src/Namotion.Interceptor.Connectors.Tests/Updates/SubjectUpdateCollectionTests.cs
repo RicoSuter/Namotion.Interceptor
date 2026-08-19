@@ -151,7 +151,7 @@ public class SubjectUpdateCollectionTests
     /// (No parent collection update is created because the collection structure did not change.)
     /// </summary>
     [Fact]
-    public void WhenManyCollectionItemsHavePropertyChanges_ThenAllAreReferencedInParentCollection()
+    public void WhenManyCollectionItemsHavePropertyChanges_ThenEachItemHasItsOwnSubjectEntry()
     {
         // Arrange - create a collection with many items (simulates the benchmark scenario)
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
@@ -174,9 +174,9 @@ public class SubjectUpdateCollectionTests
         // instead, each item is referenced directly by its stable ID in the Subjects dictionary.
         Assert.NotNull(update.Subjects);
 
-        // All 100 items should have subject entries (plus root)
-        // Root may or may not have properties, but it should be referenced
-        Assert.True(update.Subjects.Count >= 100); // at least 100 item entries
+        // Exactly the 100 changed items. The root has no entry of its own: none of its properties
+        // changed, and property changes on items no longer travel through a parent collection update.
+        Assert.Equal(100, update.Subjects.Count);
 
         // Collect all subject IDs that have a "Name" property update (i.e., the changed items)
         var itemSubjectIds = update.Subjects

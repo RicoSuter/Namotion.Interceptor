@@ -14,7 +14,10 @@ internal static class SubjectUpdateApplier
 {
     private static readonly ObjectPool<SubjectUpdateApplyContext> ContextPool = new(() => new SubjectUpdateApplyContext());
 
-    /// <summary>Tripwire: inbound subject updates dropped because their subject stayed unresolvable.</summary>
+    /// <summary>
+    /// Tripwire: inbound subject updates and structural item references dropped because their
+    /// subject stayed unresolvable.
+    /// </summary>
     internal static long DroppedInboundSubjectUpdateCount;
 
     /// <summary>Tripwire: inbound properties skipped because the subject does not declare them.</summary>
@@ -74,8 +77,16 @@ internal static class SubjectUpdateApplier
                 {
                     foreach (var (subjectId, properties) in deferred)
                     {
-                        if (context.SubjectIdRegistry.TryGetSubjectById(subjectId, out var targetSubject) &&
-                            context.TryMarkAsProcessed(subjectId))
+                        if (!context.TryMarkAsProcessed(subjectId))
+                        {
+                            // Already applied in this pass, so nothing was dropped and the tripwire must
+                            // not fire: either the root (whose sender-side ID is a mapping hint that never
+                            // resolves in the receiver's registry) or a subject that a later structural
+                            // entry created and populated.
+                            continue;
+                        }
+
+                        if (context.SubjectIdRegistry.TryGetSubjectById(subjectId, out var targetSubject))
                         {
                             ApplyPropertyUpdates(targetSubject, properties, context);
                         }
@@ -91,6 +102,8 @@ internal static class SubjectUpdateApplier
                         }
                     }
                 }
+
+                ApplyDeferredAttributeUpdates(context);
             }
         }
         finally
@@ -100,30 +113,78 @@ internal static class SubjectUpdateApplier
         }
     }
 
+    /// <summary>
+    /// Applies the property updates of <paramref name="properties"/> to <paramref name="subject"/>.
+    /// Set <paramref name="deferAttributes"/> for a subject that is still being populated before it
+    /// enters the graph: attribute names resolve through the registry, which does not know the subject
+    /// until it is rooted, so its attribute updates are queued and applied once the whole update is in.
+    /// </summary>
     internal static void ApplyPropertyUpdates(
         IInterceptorSubject subject,
         Dictionary<string, SubjectPropertyUpdate> properties,
-        SubjectUpdateApplyContext context)
+        SubjectUpdateApplyContext context,
+        bool deferAttributes = false)
     {
+        var hasDeferredAttributes = false;
         foreach (var (propertyName, propertyUpdate) in properties)
         {
             // Apply attributes first
             if (propertyUpdate.Attributes is not null)
             {
-                foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
+                if (deferAttributes)
                 {
-                    var registeredAttribute = subject
-                        .TryGetRegisteredSubject()?
-                        .TryGetPropertyAttribute(propertyName, attributeName);
-
-                    if (registeredAttribute is not null)
-                    {
-                        ApplyPropertyUpdate(subject, new PropertyReference(subject, registeredAttribute.Name), attributeUpdate, context);
-                    }
+                    hasDeferredAttributes = true;
+                }
+                else
+                {
+                    ApplyAttributeUpdates(subject, propertyName, propertyUpdate.Attributes, context);
                 }
             }
 
             ApplyPropertyUpdate(subject, new PropertyReference(subject, propertyName), propertyUpdate, context);
+        }
+
+        if (hasDeferredAttributes)
+        {
+            context.DeferAttributeUpdates(subject, properties);
+        }
+    }
+
+    private static void ApplyAttributeUpdates(
+        IInterceptorSubject subject,
+        string propertyName,
+        Dictionary<string, SubjectPropertyUpdate> attributes,
+        SubjectUpdateApplyContext context)
+    {
+        foreach (var (attributeName, attributeUpdate) in attributes)
+        {
+            var registeredAttribute = subject
+                .TryGetRegisteredSubject()?
+                .TryGetPropertyAttribute(propertyName, attributeName);
+
+            if (registeredAttribute is not null)
+            {
+                ApplyPropertyUpdate(subject, new PropertyReference(subject, registeredAttribute.Name), attributeUpdate, context);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Applies the attribute updates queued for subjects that were created and populated before they
+    /// entered the graph. By this point every structural write of the update has landed, so the
+    /// registry can map attribute names to their backing properties.
+    /// </summary>
+    private static void ApplyDeferredAttributeUpdates(SubjectUpdateApplyContext context)
+    {
+        foreach (var (subject, properties) in context.DeferredAttributeUpdates)
+        {
+            foreach (var (propertyName, propertyUpdate) in properties)
+            {
+                if (propertyUpdate.Attributes is not null)
+                {
+                    ApplyAttributeUpdates(subject, propertyName, propertyUpdate.Attributes, context);
+                }
+            }
         }
     }
 
@@ -235,6 +296,8 @@ internal static class SubjectUpdateApplier
         {
             // A reference to a subject that should exist but doesn't (a concurrent structural
             // mutation removed it). Skip: the next update carrying its complete state heals it.
+            // The reference is lost until then, so count it as a drop.
+            Interlocked.Increment(ref DroppedInboundSubjectUpdateCount);
             return;
         }
 
@@ -251,7 +314,7 @@ internal static class SubjectUpdateApplier
             if (context.Subjects.TryGetValue(propertyUpdate.Id, out var newItemProperties) &&
                 context.TryMarkAsProcessed(propertyUpdate.Id))
             {
-                ApplyPropertyUpdates(targetItem, newItemProperties, context);
+                ApplyPropertyUpdates(targetItem, newItemProperties, context, deferAttributes: true);
             }
         }
 

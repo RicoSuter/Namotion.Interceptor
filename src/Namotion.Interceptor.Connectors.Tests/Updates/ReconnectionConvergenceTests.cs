@@ -27,8 +27,9 @@ public class ReconnectionConvergenceTests
     /// 6. Expected: client = [A, Y, X, B]
     /// </summary>
     [Fact]
-    public void StaleSwap_TwoItemsSwapped_ClientConvergesWithServer()
+    public void WhenTwoItemsAreSwappedAfterWelcome_ThenClientConvergesWithServer()
     {
+        // Arrange
         var serverContext = InterceptorSubjectContext.Create()
             .WithPropertyChangeSubscriptions()
             .WithRegistry();
@@ -42,52 +43,35 @@ public class ReconnectionConvergenceTests
             Items = [childA, childX, childY, childB]
         };
 
-        var idX = childX.GetOrAddSubjectId();
-        var idY = childY.GetOrAddSubjectId();
-        var idA = childA.GetOrAddSubjectId();
-        var rootId = server.GetOrAddSubjectId();
+        childX.GetOrAddSubjectId();
+        childY.GetOrAddSubjectId();
+        childA.GetOrAddSubjectId();
+        server.GetOrAddSubjectId();
 
         // Build Welcome
         var welcome = SubjectUpdate.CreateCompleteUpdate(server, []);
 
         // Capture changes
         var changes = new List<SubjectPropertyChange>();
-        serverContext.GetPropertyChangeObservable(ImmediateScheduler.Instance)
+        using var subscription = serverContext.GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(c => changes.Add(c));
 
-        // Swap X and Y by reassigning the collection
+        // Act - swap X and Y on the server, then replay Welcome plus the resulting diff on a client
         server.Items = [childA, childY, childX, childB];
-
-        // Server is now [A, Y, X, B]
-        Assert.Equal("A", server.Items[0].Name);
-        Assert.Equal("Y", server.Items[1].Name);
-        Assert.Equal("X", server.Items[2].Name);
-        Assert.Equal("B", server.Items[3].Name);
-
-        // Generate diff
         var diff = SubjectUpdate.CreatePartialUpdateFromChanges(server, changes.ToArray(), []);
 
-        // Client applies Welcome, then diff
         var clientContext = InterceptorSubjectContext.Create().WithRegistry();
         var client = new CycleTestNode(clientContext);
 
         client.ApplySubjectUpdate(welcome, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+        var clientAfterWelcome = client.Items.Select(item => item.Name).ToArray();
 
-        // Verify Welcome state
-        Assert.Equal("A", client.Items[0].Name);
-        Assert.Equal("X", client.Items[1].Name);
-        Assert.Equal("Y", client.Items[2].Name);
-        Assert.Equal("B", client.Items[3].Name);
-
-        // Apply diff
         client.ApplySubjectUpdate(diff, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
-        // Assert convergence
-        Assert.Equal(server.Items.Count, client.Items.Count);
-        for (var i = 0; i < server.Items.Count; i++)
-        {
-            Assert.Equal(server.Items[i].Name, client.Items[i].Name);
-        }
+        // Assert - Welcome is the pre-swap baseline and the diff converges the client on the server
+        Assert.Equal(new[] { "A", "X", "Y", "B" }, clientAfterWelcome);
+        Assert.Equal(new[] { "A", "Y", "X", "B" }, server.Items.Select(item => item.Name).ToArray());
+        AssertSameOrdering(server, client, "after diff");
     }
 
     /// <summary>
@@ -103,8 +87,9 @@ public class ReconnectionConvergenceTests
     /// 7. Expected: client = [C, A, D, B]
     /// </summary>
     [Fact]
-    public void BatchedChanges_MoveAndInsert_ClientConvergesWithServer()
+    public void WhenBatchedMoveAndInsertFollowWelcome_ThenClientConvergesWithServer()
     {
+        // Arrange
         var serverContext = InterceptorSubjectContext.Create()
             .WithPropertyChangeSubscriptions()
             .WithRegistry();
@@ -117,7 +102,7 @@ public class ReconnectionConvergenceTests
             Items = [childA, childB, childC]
         };
 
-        var rootId = server.GetOrAddSubjectId();
+        server.GetOrAddSubjectId();
         childA.GetOrAddSubjectId();
         childB.GetOrAddSubjectId();
         childC.GetOrAddSubjectId();
@@ -127,47 +112,31 @@ public class ReconnectionConvergenceTests
 
         // Capture ALL changes (simulates what the ChangeQueueProcessor collects)
         var allChanges = new List<SubjectPropertyChange>();
-        serverContext.GetPropertyChangeObservable(ImmediateScheduler.Instance)
+        using var subscription = serverContext.GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(c => allChanges.Add(c));
 
-        // Change 1: Move C to head
+        // Act - change 1: move C to head, change 2: insert D after A, both in the same batch window
         server.Items = [childC, childA, childB];
-
-        // Change 2: Insert D after A
         var childD = new CycleTestNode { Name = "D" };
         server.Items = [childC, childA, childD, childB];
 
-        // Server is now [C, A, D, B]
-        Assert.Equal("C", server.Items[0].Name);
-        Assert.Equal("A", server.Items[1].Name);
-        Assert.Equal("D", server.Items[2].Name);
-        Assert.Equal("B", server.Items[3].Name);
-
         // Simulate ChangeQueueProcessor deduplication:
-        // Two changes to same Items property → merge oldest old + newest new
+        // Two changes to same Items property, merged as oldest old plus newest new
         var deduped = DeduplicateChanges(allChanges);
         var diff = SubjectUpdate.CreatePartialUpdateFromChanges(server, deduped, []);
 
-        // Client applies Welcome, then diff
         var clientContext = InterceptorSubjectContext.Create().WithRegistry();
         var client = new CycleTestNode(clientContext);
 
         client.ApplySubjectUpdate(welcome, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+        var clientAfterWelcome = client.Items.Select(item => item.Name).ToArray();
 
-        // Verify Welcome state [A, B, C]
-        Assert.Equal("A", client.Items[0].Name);
-        Assert.Equal("B", client.Items[1].Name);
-        Assert.Equal("C", client.Items[2].Name);
-
-        // Apply diff
         client.ApplySubjectUpdate(diff, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
-        // Assert convergence
-        Assert.Equal(server.Items.Count, client.Items.Count);
-        for (var i = 0; i < server.Items.Count; i++)
-        {
-            Assert.Equal(server.Items[i].Name, client.Items[i].Name);
-        }
+        // Assert - Welcome is the pre-change baseline and the merged diff converges the client
+        Assert.Equal(new[] { "A", "B", "C" }, clientAfterWelcome);
+        Assert.Equal(new[] { "C", "A", "D", "B" }, server.Items.Select(item => item.Name).ToArray());
+        AssertSameOrdering(server, client, "after merged diff");
     }
 
     /// <summary>

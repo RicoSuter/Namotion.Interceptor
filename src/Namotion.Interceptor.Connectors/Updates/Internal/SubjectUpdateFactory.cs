@@ -85,7 +85,7 @@ internal static class SubjectUpdateFactory
         if (registeredSubject is null)
         {
             // Subject is in the graph (reachable via structural properties) but momentarily
-            // unregistered — a concurrent structural mutation wrote it to the backing store
+            // unregistered: a concurrent structural mutation wrote it to the backing store
             // but the lifecycle interceptor hasn't processed/registered it yet.
             // Use the subject's own property metadata to create a complete snapshot.
             // This avoids producing an empty entry that causes permanent divergence
@@ -384,6 +384,15 @@ internal static class SubjectUpdateFactory
     /// to create property updates. Skips processor filtering and attribute processing
     /// since those require registry information.
     /// </summary>
+    /// <remarks>
+    /// Two consequences follow from the missing registry information, both inherent to this path
+    /// rather than oversights. First, <see cref="ISubjectUpdateProcessor"/> filtering cannot run
+    /// because processors filter on <see cref="RegisteredSubjectProperty"/> and the subject is by
+    /// definition unregistered here, so a property a processor normally hides is serialized through
+    /// this fallback. Consumers that use processors for visibility rather than for shaping must not
+    /// treat them as a confidentiality boundary. Second, the emitted property updates carry no
+    /// timestamp, unlike the ones built by CreatePropertyUpdate.
+    /// </remarks>
     private static void ProcessSubjectFromMetadata(
         IInterceptorSubject subject,
         string subjectId,

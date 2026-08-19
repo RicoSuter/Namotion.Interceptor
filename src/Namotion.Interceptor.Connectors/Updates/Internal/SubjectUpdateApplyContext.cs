@@ -12,6 +12,7 @@ internal sealed class SubjectUpdateApplyContext
 {
     private readonly HashSet<string> _processedSubjectIds = [];
     private readonly Dictionary<string, IInterceptorSubject> _preResolvedSubjects = [];
+    private readonly List<(IInterceptorSubject Subject, Dictionary<string, SubjectPropertyUpdate> Properties)> _deferredAttributeUpdates = [];
 
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = null!;
     public ISubjectFactory SubjectFactory { get; private set; } = null!;
@@ -119,12 +120,28 @@ internal sealed class SubjectUpdateApplyContext
         => _processedSubjectIds.Add(subjectId);
 
     /// <summary>
+    /// The attribute updates queued for subjects populated before they entered the graph, in the
+    /// order they were queued. Attribute names resolve through the registry, which only knows a
+    /// subject once it is rooted, so these are applied after all structural writes have landed.
+    /// </summary>
+    public IReadOnlyList<(IInterceptorSubject Subject, Dictionary<string, SubjectPropertyUpdate> Properties)> DeferredAttributeUpdates
+        => _deferredAttributeUpdates;
+
+    /// <summary>
+    /// Queues the attribute updates contained in <paramref name="properties"/> for
+    /// <paramref name="subject"/>, to be applied once the subject is rooted.
+    /// </summary>
+    public void DeferAttributeUpdates(IInterceptorSubject subject, Dictionary<string, SubjectPropertyUpdate> properties)
+        => _deferredAttributeUpdates.Add((subject, properties));
+
+    /// <summary>
     /// Clears the context for reuse. Call before returning to pool.
     /// </summary>
     public void Clear()
     {
         _processedSubjectIds.Clear();
         _preResolvedSubjects.Clear();
+        _deferredAttributeUpdates.Clear();
         _completeSubjectIds = null;
         Subjects = null!;
         SubjectFactory = null!;

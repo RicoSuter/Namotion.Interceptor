@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Connectors.Tests.Models;
@@ -76,6 +77,30 @@ public class DefaultSubjectFactoryTests
         // Assert
         Assert.NotNull(myClassCollection);
         Assert.Equal(2, myClassCollection.Count());
+    }
+
+    [Fact]
+    public void WhenCollectionTypeCannotBeBuiltFromItems_ThenCreatingItThrows()
+    {
+        // Arrange - a collection type that is neither assignable from List<T> nor buildable from a
+        // sequence: no static empty instance to append to and no constructor taking the items.
+        var subjectFactory = new DefaultSubjectFactory();
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => subjectFactory.CreateSubjectCollection(typeof(UnbuildableCollection<MyClass>), new MyClass(1)));
+
+        Assert.Contains(nameof(UnbuildableCollection<MyClass>), exception.Message);
+    }
+
+    /// <summary>
+    /// A subject collection type that offers no way to materialize it from the applier's working list.
+    /// </summary>
+    private sealed class UnbuildableCollection<T> : IEnumerable<T>
+    {
+        public IEnumerator<T> GetEnumerator() => Enumerable.Empty<T>().GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     [Fact]
