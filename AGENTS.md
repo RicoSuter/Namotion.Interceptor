@@ -53,15 +53,16 @@ Always read [Benchmarking](docs/benchmarking.md) before running or interpreting 
 
 ### Project Structure
 ```
-src/
-├── Namotion.Interceptor/           # Core library with base interfaces
-├── Namotion.Interceptor.Generator/ # Source generator for [InterceptorSubject]
-├── Namotion.Interceptor.{Feature}/ # Extension libraries (Tracking, Registry, etc.)
-├── Extensions/                     # Integration packages (AspNetCore, Blazor, etc.)
-├── Samples/                        # Example applications
-└── Tests/                          # Unit test projects
-docs/                               # Feature and connector documentation
-├── design/                         # Internal design documents
+src/                                  # Projects are flat here, grouped by name rather than by folder
+├── Namotion.Interceptor/             # Core library with base interfaces
+├── Namotion.Interceptor.Generator/   # Source generator for [InterceptorSubject]
+├── Namotion.Interceptor.{Feature}/   # Libraries: Tracking, Registry, Connectors, OpcUa, AspNetCore, ...
+├── Namotion.Interceptor.{X}.Tests/   # Test project per library
+├── Namotion.Interceptor.{X}Sample*/  # Example applications
+├── Namotion.Interceptor.Benchmark/   # BenchmarkDotNet project
+└── HomeBlaze/                        # HomeBlaze application and its device libraries
+docs/                                 # Feature and connector documentation
+└── design/                           # Internal design documents
 ```
 
 ## Language Requirements
@@ -130,10 +131,17 @@ The library has specialized support for:
 
 - **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `attribute` not `attr`).
 - **No em dashes** in docs, READMEs, or PR descriptions. Restructure into plain sentences instead.
+- **No hard wrapping** in markdown. Keep a paragraph on one line instead of breaking at a column.
 
 ## Git Rules
 
 - Never include AI attribution in commit messages, PR descriptions, or GitHub comments. This covers agent names ("Claude", "Codex", "Copilot"), `Co-Authored-By` trailers, and "Generated with" footers.
+
+## Pull Requests
+
+- Fill in [the pull request template](.github/pull_request_template.md). `gh pr create --body-file` bypasses it, so open the file rather than waiting to be shown it.
+- Prefix the title with `fix:`, `feat:`, `perf:`, `docs:`, `refactor:`, `test:` or `chore:`.
+- Apply an `area:` and a `type:` label at creation with `gh pr create --label`, choosing from `gh label list`.
 
 ## Test Conventions
 
