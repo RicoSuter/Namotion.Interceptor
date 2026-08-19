@@ -41,11 +41,10 @@ function Get-Area {
     if ($Path -match '\.(csproj|slnx|props|targets|yml|yaml)$') { return "Project and CI files" }
 
     if ($PerProject -and $Path -like 'src/*') {
-        # The project is the first segment under src/, except under a grouping folder,
-        # where src/Extensions/Namotion.Interceptor.AspNetCore/... is one project down.
+        # Projects sit directly under src/, except beneath src/HomeBlaze/, where
+        # src/HomeBlaze/HomeBlaze.OpcUa/... is one level further down.
         $segments = $Path -split '/'
-        $grouping = @("Extensions", "Samples", "Tests", "HomeBlaze")
-        $project = if ($segments.Length -gt 3 -and $grouping -contains $segments[1]) { $segments[2] } else { $segments[1] }
+        $project = if ($segments.Length -gt 3 -and $segments[1] -eq "HomeBlaze") { $segments[2] } else { $segments[1] }
         if ($project) { return $project }
     }
 

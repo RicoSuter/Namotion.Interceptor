@@ -53,15 +53,16 @@ Always read [Benchmarking](docs/benchmarking.md) before running or interpreting 
 
 ### Project Structure
 ```
-src/
-├── Namotion.Interceptor/           # Core library with base interfaces
-├── Namotion.Interceptor.Generator/ # Source generator for [InterceptorSubject]
-├── Namotion.Interceptor.{Feature}/ # Extension libraries (Tracking, Registry, etc.)
-├── Extensions/                     # Integration packages (AspNetCore, Blazor, etc.)
-├── Samples/                        # Example applications
-└── Tests/                          # Unit test projects
-docs/                               # Feature and connector documentation
-├── design/                         # Internal design documents
+src/                                  # Projects are flat here, grouped by name rather than by folder
+├── Namotion.Interceptor/             # Core library with base interfaces
+├── Namotion.Interceptor.Generator/   # Source generator for [InterceptorSubject]
+├── Namotion.Interceptor.{Feature}/   # Libraries: Tracking, Registry, Connectors, OpcUa, AspNetCore, ...
+├── Namotion.Interceptor.{X}.Tests/   # Test project per library
+├── Namotion.Interceptor.{X}Sample*/  # Example applications
+├── Namotion.Interceptor.Benchmark/   # BenchmarkDotNet project
+└── HomeBlaze/                        # HomeBlaze application and its device libraries
+docs/                                 # Feature and connector documentation
+└── design/                           # Internal design documents
 ```
 
 ## Language Requirements
