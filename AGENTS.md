@@ -130,6 +130,7 @@ The library has specialized support for:
 
 - **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `attribute` not `attr`).
 - **No em dashes** in docs, READMEs, or PR descriptions. Restructure into plain sentences instead.
+- **No hard wrapping** in markdown. Keep a paragraph on one line instead of breaking at a column.
 
 ## Git Rules
 
