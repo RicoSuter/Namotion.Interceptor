@@ -75,7 +75,9 @@ internal sealed class WriteRetryQueue : IDisposable
     // Metrics is required rather than optional, so no construction site can drop writes uncounted.
     public WriteRetryQueue(int maxQueueSize, ILogger logger, QueueMetrics metrics)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(maxQueueSize);
+        // Zero means buffering is disabled, which callers express by constructing no queue at all
+        // (see SubjectSourceBase), so a queue that exists always has capacity to serve.
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxQueueSize);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(metrics);
 
@@ -90,13 +92,6 @@ internal sealed class WriteRetryQueue : IDisposable
     /// </summary>
     public void Enqueue(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
-        if (_maxQueueSize is 0)
-        {
-            _metrics.AddDropped(changes.Length);
-            _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes.", changes.Length);
-            return;
-        }
-
         int droppedCount;
         lock (_lock)
         {
@@ -149,14 +144,6 @@ internal sealed class WriteRetryQueue : IDisposable
         var failedChanges = result.FailedChanges;
         if (failedChanges.IsDefaultOrEmpty)
         {
-            return true;
-        }
-
-        if (_maxQueueSize is 0)
-        {
-            // Buffering off: report and drop, which holding writes back instead would silently undo.
-            _metrics.AddDropped(failedChanges.Length);
-            _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes.", failedChanges.Length);
             return true;
         }
 

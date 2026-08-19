@@ -194,23 +194,6 @@ public class WriteRetryQueueTests
     }
 
     [Fact]
-    public void WhenMaxQueueSizeIsZero_ThenWritesAreDropped()
-    {
-        // Arrange
-        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
-        var queue = new WriteRetryQueue(0, NullLogger.Instance, metrics);
-        var diagnostics = new QueueDiagnostics(metrics);
-
-        // Act
-        queue.Enqueue(CreateChanges(5));
-
-        // Assert
-        Assert.True(queue.IsEmpty);
-        Assert.Equal(0, queue.PendingWriteCount);
-        Assert.Equal(5, diagnostics.TotalDropped);
-    }
-
-    [Fact]
     public async Task WhenManyItems_ThenFlushProcessesInBatches()
     {
         // Arrange
