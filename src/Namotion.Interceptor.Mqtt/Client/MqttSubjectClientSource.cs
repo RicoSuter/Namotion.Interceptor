@@ -413,6 +413,8 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 : null;
 
             var messageCount = 0;
+            List<SubjectPropertyChange>? serializationFailures = null;
+            List<Exception>? serializationErrors = null;
             try
             {
                 try
@@ -441,6 +443,13 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                         }
                         catch (Exception ex)
                         {
+                            // The value converter is a user extension point and runs before anything is
+                            // published, so this is this change being refused, not a call that failed.
+                            // Enumerated rather than dropped: an unlisted change counts as written, which
+                            // would lose the write for good with no retry and no error report, and let a
+                            // transaction treat it as written and skip its rollback.
+                            (serializationFailures ??= []).Add(change);
+                            (serializationErrors ??= []).Add(ex);
                             _logger.LogError(ex, "Failed to serialize value for property {PropertyName}.", property.Name);
                             continue;
                         }
@@ -478,7 +487,11 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 }
 
                 if (messageCount <= 0)
-                    return WriteResult.Success;
+                {
+                    return serializationFailures is null
+                        ? WriteResult.Success
+                        : WriteResult.Failure(serializationFailures.ToArray(), CombineErrors(serializationErrors!));
+                }
 
                 Exception? publishException = null;
                 var failedStartIndex = messageCount; // Index where failures start (in message space)
@@ -513,17 +526,29 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
                 if (publishException is not null)
                 {
-                    // Build failed changes array from the failed message indices
-                    var failedCount = messageCount - failedStartIndex;
+                    // Build failed changes array from the failed message indices, plus the changes the
+                    // serializer refused, which never made it into a message but are just as unwritten.
+                    var serializationFailureCount = serializationFailures?.Count ?? 0;
+                    var failedCount = messageCount - failedStartIndex + serializationFailureCount;
                     var failedChanges = new SubjectPropertyChange[failedCount];
-                    for (var i = 0; i < failedCount; i++)
+                    var failedIndex = 0;
+                    for (var i = failedStartIndex; i < messageCount; i++)
                     {
-                        failedChanges[i] = changes.Span[changeIndices[failedStartIndex + i]];
+                        failedChanges[failedIndex++] = changes.Span[changeIndices[i]];
                     }
-                    return WriteResult.Failure(failedChanges, publishException);
+                    serializationFailures?.CopyTo(failedChanges, failedIndex);
+
+                    // Both failures are reported: the refusals name their cause and the publish throw
+                    // carries the connection fault, and dropping either would misdirect the retry log.
+                    var error = serializationErrors is null
+                        ? publishException
+                        : new AggregateException([.. serializationErrors, publishException]);
+                    return WriteResult.Failure(failedChanges, error);
                 }
 
-                return WriteResult.Success;
+                return serializationFailures is null
+                    ? WriteResult.Success
+                    : WriteResult.Failure(serializationFailures.ToArray(), CombineErrors(serializationErrors!));
             }
             finally
             {
@@ -546,10 +571,16 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         catch (Exception ex)
         {
             // Everything that answers about a named change enumerates its own failures: the publishing
-            // loop names the messages it did not get out, and the message-building step names the whole
-            // batch. What is left here is the connection itself, so no change got an answer.
+            // loop names the messages it did not get out, the serializer's refusals are contained per
+            // change, and the message-building step names the whole batch. What is left here is the
+            // connection itself, so no change got an answer.
             return WriteResult.CallFailed(ex);
         }
+    }
+
+    private static Exception CombineErrors(List<Exception> errors)
+    {
+        return errors.Count == 1 ? errors[0] : new AggregateException(errors);
     }
 
     private async Task SubscribeToPropertiesAsync(CancellationToken cancellationToken)

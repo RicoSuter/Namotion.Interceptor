@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -35,10 +36,33 @@ public partial class OutboundWriteDispositionTests
         [Path("mqtt", "Name")]
         public partial string Name { get; set; }
 
+        [Path("mqtt", "Description")]
+        public partial string Description { get; set; }
+
         public TestRoot()
         {
             Name = "";
+            Description = "";
         }
+    }
+
+    /// <summary>Throws from serialization when the value equals a sentinel, standing in for a user
+    /// value converter that persistently refuses one value.</summary>
+    private sealed class ThrowOnSerializeSentinelConverter(object sentinel) : IMqttValueConverter
+    {
+        private readonly JsonMqttValueConverter _inner = new();
+
+        public byte[] Serialize(object? value, Type type)
+        {
+            if (Equals(value, sentinel))
+            {
+                throw new InvalidOperationException($"Refusing to serialize '{value}'.");
+            }
+
+            return _inner.Serialize(value, type);
+        }
+
+        public object? Deserialize(ReadOnlySequence<byte> payload, Type type) => _inner.Deserialize(payload, type);
     }
 
     /// <summary>
@@ -137,6 +161,89 @@ public partial class OutboundWriteDispositionTests
             // Assert
             Assert.NotNull(result.Error);
             Assert.Equal(change.Property, Assert.Single(result.FailedChanges).Property);
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+            await server.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenSerializationRefusesOneChangeOfTwo_ThenTheOtherIsStillPublishedAndOnlyTheRefusedOneIsEnumerated()
+    {
+        // Arrange: a per-change serialize throw used to be logged and skipped, leaving the change
+        // unlisted in the result. Unlisted counts as written, so the write was lost for good: no
+        // retry, no error report, and a transaction treated it as written and skipped its rollback.
+        var brokerPort = GetFreeTcpPort();
+        var mapper = new MqttCompositeMapper(
+            new MqttPathProviderMapper(new AttributeBasedPathProvider("mqtt", '/')),
+            new MqttAttributeMapper("mqtt"));
+
+        var serverContext = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle();
+        var serverRoot = new TestRoot(serverContext) { Name = "Initial", Description = "Initial" };
+
+        await using var server = new MqttSubjectServer(
+            serverRoot,
+            new MqttServerConfiguration
+            {
+                BrokerPort = brokerPort,
+                Mapper = mapper
+            },
+            NullLogger<MqttSubjectServer>.Instance);
+
+        var clientContext = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithSourceTransactions()
+            .WithSourceMonitoring();
+        var clientRoot = new TestRoot(clientContext);
+
+        await using var source = new MqttSubjectClientSource(
+            clientRoot,
+            new MqttClientConfiguration
+            {
+                BrokerHost = "localhost",
+                BrokerPort = brokerPort,
+                Mapper = mapper,
+                ValueConverter = new ThrowOnSerializeSentinelConverter("poison")
+            },
+            NullLogger<MqttSubjectClientSource>.Instance);
+
+        try
+        {
+            await server.StartAsync(CancellationToken.None);
+            await source.StartAsync(CancellationToken.None);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.State == SourceState.Synchronized,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial subscription should complete");
+
+            var writableChange = SubjectPropertyChange.Create(
+                new PropertyReference(clientRoot, nameof(TestRoot.Name)),
+                ChangeOrigin.Local, DateTimeOffset.UtcNow, null, "", "written");
+            var refusedChange = SubjectPropertyChange.Create(
+                new PropertyReference(clientRoot, nameof(TestRoot.Description)),
+                ChangeOrigin.Local, DateTimeOffset.UtcNow, null, "", "poison");
+
+            // Act
+            var result = await source.WriteChangesAsync(new[] { writableChange, refusedChange }, CancellationToken.None);
+
+            // Assert: the serializable change was published and lands on the server, and the refused
+            // one is enumerated so it is retried like any other failure instead of vanishing.
+            Assert.NotNull(result.Error);
+            Assert.Equal(refusedChange.Property, Assert.Single(result.FailedChanges).Property);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => serverRoot.Name == "written",
+                timeout: TimeSpan.FromSeconds(30),
+                message: "The serializable change should still reach the broker");
         }
         finally
         {
