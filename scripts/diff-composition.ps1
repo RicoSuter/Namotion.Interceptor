@@ -35,6 +35,7 @@ if ($LASTEXITCODE -ne 0) { throw "git diff failed for range '$Range'." }
 function Get-Area {
     param([string] $Path)
 
+    if ($Path -like 'scripts/*' -or $Path -like '.github/*') { return "Scripts and CI" }
     if ($Path -match '\.md$' -or $Path -like 'docs/*') { return "Documentation" }
     if ($Path -match 'Tests|Testing|Benchmark') { return "Tests and benchmarks" }
     if ($Path -match '\.(csproj|slnx|props|targets|yml|yaml)$') { return "Project and CI files" }
@@ -73,7 +74,7 @@ if ($areas.Count -eq 0) {
     return
 }
 
-$order = @("Production code", "Tests and benchmarks", "Documentation", "Project and CI files")
+$order = @("Production code", "Tests and benchmarks", "Documentation", "Scripts and CI", "Project and CI files")
 $sorted = @($areas.Keys | Sort-Object {
     $index = $order.IndexOf($_)
     if ($index -ge 0) { "1-{0:d3}" -f $index } else { "0-$_" }
