@@ -68,7 +68,8 @@ internal sealed class WriteRetryQueue : IDisposable
 
     /// <summary>
     /// Gets the generation identifying the connection writes are currently being issued over. Read it
-    /// before issuing a write and hand it back to <see cref="EnqueueFailures"/> with that write's answer.
+    /// before issuing a write and hand it back to <see cref="EnqueueFailures"/> and
+    /// <see cref="DiscardHeldWritesFor"/> with that write's answer.
     /// </summary>
     public int ConnectionGeneration => Volatile.Read(ref _connectionGeneration);
 
@@ -230,7 +231,8 @@ internal sealed class WriteRetryQueue : IDisposable
 
     /// <summary>
     /// Drops a held write for any property this attempt wrote successfully. Call it with the batch that
-    /// was attempted and the changes that failed, whatever the outcome.
+    /// was attempted, the changes that failed and the <see cref="ConnectionGeneration"/> read before the
+    /// write was issued, whatever the outcome.
     /// </summary>
     /// <remarks>
     /// A held write is owed to the source only until something newer reaches it. Holding it out of the
@@ -240,9 +242,16 @@ internal sealed class WriteRetryQueue : IDisposable
     /// access levels are the server's to change mid-session. Left held, the older value goes out on the
     /// next connection and puts the source back, and the source then reports that value, so the model
     /// follows it down and the newer write is lost at both ends.
+    /// <para>
+    /// The generation is what keeps that promise across a connection replacement. A replacement while the
+    /// write is in flight releases what is held into the pending queue, so an answer arriving afterwards
+    /// finds nothing held for its property and the superseded value would go out as an ordinary pending
+    /// write. When the generation moved, the discard therefore ranks by revision instead, in the pending
+    /// queue and the held set both, and drops only what the successful write provably superseded.
+    /// </para>
     /// </remarks>
     public void DiscardHeldWritesFor(
-        ReadOnlySpan<SubjectPropertyChange> attempted, ImmutableArray<SubjectPropertyChange> failed)
+        ReadOnlySpan<SubjectPropertyChange> attempted, ImmutableArray<SubjectPropertyChange> failed, int connectionGeneration)
     {
         if (attempted.IsEmpty)
         {
@@ -251,6 +260,12 @@ internal sealed class WriteRetryQueue : IDisposable
 
         lock (_lock)
         {
+            if (connectionGeneration != _connectionGeneration)
+            {
+                DiscardSupersededAfterReplacementLocked(attempted, failed);
+                return;
+            }
+
             // Checked inside the lock and before anything is allocated: nothing is held on the ordinary
             // path, and this runs after every write.
             if (_refusedWrites.Count == 0)
@@ -258,15 +273,7 @@ internal sealed class WriteRetryQueue : IDisposable
                 return;
             }
 
-            HashSet<PropertyReference>? failedProperties = null;
-            if (!failed.IsDefaultOrEmpty)
-            {
-                failedProperties = new HashSet<PropertyReference>(failed.Length, PropertyReference.Comparer);
-                foreach (var change in failed)
-                {
-                    failedProperties.Add(change.Property);
-                }
-            }
+            var failedProperties = CollectFailedProperties(failed);
 
             var discardedAny = false;
             foreach (var change in attempted)
@@ -284,6 +291,96 @@ internal sealed class WriteRetryQueue : IDisposable
                 Volatile.Write(ref _refusedCount, _refusedWrites.Count);
             }
         }
+    }
+
+    /// <summary>
+    /// The discard for an answer that arrived after the connection was replaced. The release that came
+    /// with the replacement moved what was held into the pending queue, so removing from the held set by
+    /// property would find nothing, and a released write flushed and refused again since is held for the
+    /// new connection rather than the one this answer came over. Both places are therefore ranked by
+    /// revision, the same rule every collapse uses: only an entry the successful write provably
+    /// superseded is dropped. A change that cannot be ranked stays, since a redundant write costs one
+    /// message and a wrong drop is permanent. Caller holds <see cref="_lock"/>.
+    /// </summary>
+    private void DiscardSupersededAfterReplacementLocked(
+        ReadOnlySpan<SubjectPropertyChange> attempted, ImmutableArray<SubjectPropertyChange> failed)
+    {
+        if (_pendingWrites.Count == 0 && _refusedWrites.Count == 0)
+        {
+            return;
+        }
+
+        var failedProperties = CollectFailedProperties(failed);
+
+        // The highest revision that reached the source, per property. A change carrying no revision
+        // orders against nothing and can prove nothing stale, so it establishes no entry.
+        Dictionary<PropertyReference, long>? succeededRevisions = null;
+        foreach (var change in attempted)
+        {
+            if (change.Revision == 0 || failedProperties?.Contains(change.Property) is true)
+            {
+                continue;
+            }
+
+            succeededRevisions ??= new Dictionary<PropertyReference, long>(PropertyReference.Comparer);
+            ref var revision = ref CollectionsMarshal.GetValueRefOrAddDefault(succeededRevisions, change.Property, out _);
+            if (change.Revision > revision)
+            {
+                revision = change.Revision;
+            }
+        }
+
+        if (succeededRevisions is null)
+        {
+            return;
+        }
+
+        var removedCount = _pendingWrites.RemoveAll(pending =>
+            pending.Revision != 0
+            && succeededRevisions.TryGetValue(pending.Property, out var writtenRevision)
+            && pending.Revision < writtenRevision);
+        if (removedCount > 0)
+        {
+            Volatile.Write(ref _count, _pendingWrites.Count);
+        }
+
+        if (_refusedWrites.Count == 0)
+        {
+            return;
+        }
+
+        var discardedAny = false;
+        foreach (var (property, writtenRevision) in succeededRevisions)
+        {
+            if (_refusedWrites.TryGetValue(property, out var held)
+                && held.Revision != 0
+                && held.Revision < writtenRevision)
+            {
+                _refusedWrites.Remove(property);
+                discardedAny = true;
+            }
+        }
+
+        if (discardedAny)
+        {
+            Volatile.Write(ref _refusedCount, _refusedWrites.Count);
+        }
+    }
+
+    private static HashSet<PropertyReference>? CollectFailedProperties(ImmutableArray<SubjectPropertyChange> failed)
+    {
+        if (failed.IsDefaultOrEmpty)
+        {
+            return null;
+        }
+
+        var failedProperties = new HashSet<PropertyReference>(failed.Length, PropertyReference.Comparer);
+        foreach (var change in failed)
+        {
+            failedProperties.Add(change.Property);
+        }
+
+        return failedProperties;
     }
 
     /// <summary>
@@ -400,7 +497,7 @@ internal sealed class WriteRetryQueue : IDisposable
 
                 // Before the failures are queued, so a property that failed here keeps whatever is held
                 // for it, and one that went through does not.
-                DiscardHeldWritesFor(memory.Span, result.FailedChanges);
+                DiscardHeldWritesFor(memory.Span, result.FailedChanges, connectionGeneration);
 
                 if (result.Error is not null)
                 {

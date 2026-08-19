@@ -408,7 +408,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             // This is the path a write to a held property takes, because holding it keeps the queue empty
             // and the flush above therefore short-circuits. A property that goes through here has to stop
             // being held, or the older value is delivered on the next connection and replaces it.
-            WriteRetryQueue.DiscardHeldWritesFor(changes.Span, result.FailedChanges);
+            WriteRetryQueue.DiscardHeldWritesFor(changes.Span, result.FailedChanges, connectionGeneration);
 
             if (!result.IsFullySuccessful)
             {

@@ -998,6 +998,69 @@ public class WriteRetryQueueTests
         Assert.DoesNotContain(1, valuesSentAfterTheAcceptedWrite);
     }
 
+    [Fact]
+    public async Task WhenTheConnectionIsReplacedWhileANewerWriteToAHeldPropertyIsInFlight_ThenTheReleasedHeldWriteIsNotSent()
+    {
+        // Arrange - the replacement's release and a success answered afterwards cross: the release moves
+        // the held write into the pending queue while the newer write's answer is still in flight, so the
+        // answer's discard finds nothing held and the superseded value survives as an ordinary pending
+        // write, bound for the next connection.
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var property = CreateProperty("Flipping");
+        var writes = new List<SubjectPropertyChange[]>();
+        var refusing = true;
+        var replaceConnectionBeforeAnswering = false;
+
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                var batch = changes.ToArray();
+                writes.Add(batch);
+
+                if (refusing)
+                {
+                    return new ValueTask<WriteResult>(WriteResult
+                        .Failure(batch, new InvalidOperationException("Refused"))
+                        .WithRefusedUntilReconnect(batch.ToImmutableArray()));
+                }
+
+                if (replaceConnectionBeforeAnswering)
+                {
+                    // The server has taken the write; the replacement lands before its answer does
+                    replaceConnectionBeforeAnswering = false;
+                    queue.RetryRefusedWrites();
+                }
+
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        queue.Enqueue(new[] { CreateChange(property, 1, revision: 1) });
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        Assert.Equal(1, queue.RefusedWriteCount);
+
+        // Act - the server lifts the refusal mid-session and takes the newer write, and the connection
+        // is replaced while that answer is in flight
+        refusing = false;
+        replaceConnectionBeforeAnswering = true;
+        queue.Enqueue(new[] { CreateChange(property, 2, revision: 2) });
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - the released value is superseded by the one the server already took, so nothing may
+        // carry it to the source and nothing may keep it queued for the next connection either
+        Assert.Equal(0, queue.RefusedWriteCount);
+        Assert.Equal(0, queue.PendingWriteCount);
+
+        var valuesSentAfterTheAcceptedWrite = writes
+            .Skip(2)
+            .SelectMany(batch => batch)
+            .Select(change => change.GetNewValue<int>())
+            .ToArray();
+
+        Assert.DoesNotContain(1, valuesSentAfterTheAcceptedWrite);
+    }
+
     private static PropertyReference CreateProperty(string name)
     {
         return new PropertyReference(new Mock<IInterceptorSubject>().Object, name);
