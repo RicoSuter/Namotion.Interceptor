@@ -73,6 +73,12 @@ internal static class SubjectUpdateApplier
                     }
                 }
 
+                // Applied before the retry pass below, because a subject-valued attribute can be what
+                // creates and populates the subject a deferred entry addresses. The retry pass is the
+                // last chance for such an entry, and it consumes the ID whether it applies or drops it,
+                // so anything still able to create subjects has to have run first.
+                var appliedAttributeUpdates = ApplyDeferredAttributeUpdates(context, 0);
+
                 if (deferred is not null)
                 {
                     foreach (var (subjectId, properties) in deferred)
@@ -96,14 +102,12 @@ internal static class SubjectUpdateApplier
                             // registry: drop the update. The next update carrying the subject's
                             // complete state converges it. The counter is the production tripwire.
                             Interlocked.Increment(ref DroppedInboundSubjectUpdateCount);
-                            System.Diagnostics.Trace.TraceInformation(
-                                $"SubjectUpdateApplier: Dropped update for unresolvable subject {subjectId} " +
-                                $"({properties.Count} properties: {string.Join(", ", properties.Keys)}).");
                         }
                     }
                 }
 
-                ApplyDeferredAttributeUpdates(context);
+                // The retry pass can root further subjects, which queue attribute updates of their own.
+                ApplyDeferredAttributeUpdates(context, appliedAttributeUpdates);
             }
         }
         finally
@@ -171,13 +175,20 @@ internal static class SubjectUpdateApplier
 
     /// <summary>
     /// Applies the attribute updates queued for subjects that were created and populated before they
-    /// entered the graph. By this point every structural write of the update has landed, so the
-    /// registry can map attribute names to their backing properties.
+    /// entered the graph, starting at <paramref name="startIndex"/>. The subjects those entries belong
+    /// to are rooted by the time an entry is queued, so the registry can map attribute names to their
+    /// backing properties. Returns the number of entries applied so far, to pass as the next start
+    /// index, so a second call picks up only what was queued after the first one returned.
     /// </summary>
-    private static void ApplyDeferredAttributeUpdates(SubjectUpdateApplyContext context)
+    private static int ApplyDeferredAttributeUpdates(SubjectUpdateApplyContext context, int startIndex)
     {
-        foreach (var (subject, properties) in context.DeferredAttributeUpdates)
+        // Indexed on purpose: applying a subject-valued attribute whose target is newly created can
+        // queue that target's own attribute updates, appending to this list while it is walked. The
+        // index loop processes the appended entries instead of throwing on a modified collection.
+        var deferredUpdates = context.DeferredAttributeUpdates;
+        for (var index = startIndex; index < deferredUpdates.Count; index++)
         {
+            var (subject, properties) = deferredUpdates[index];
             foreach (var (propertyName, propertyUpdate) in properties)
             {
                 if (propertyUpdate.Attributes is not null)
@@ -186,6 +197,8 @@ internal static class SubjectUpdateApplier
                 }
             }
         }
+
+        return deferredUpdates.Count;
     }
 
     /// <summary>
@@ -213,15 +226,15 @@ internal static class SubjectUpdateApplier
                 break;
 
             case SubjectPropertyUpdateKind.Object:
-                ApplyObjectUpdate(subject, property, propertyUpdate, context);
+                ApplyObjectUpdate(property, propertyUpdate, context);
                 break;
 
             case SubjectPropertyUpdateKind.Collection:
-                SubjectItemsUpdateApplier.ApplyCollectionUpdate(subject, property, propertyUpdate, context);
+                SubjectItemsUpdateApplier.ApplyCollectionUpdate(property, propertyUpdate, context);
                 break;
 
             case SubjectPropertyUpdateKind.Dictionary:
-                SubjectItemsUpdateApplier.ApplyDictionaryUpdate(subject, property, propertyUpdate, context);
+                SubjectItemsUpdateApplier.ApplyDictionaryUpdate(property, propertyUpdate, context);
                 break;
         }
     }
@@ -263,7 +276,6 @@ internal static class SubjectUpdateApplier
     }
 
     private static void ApplyObjectUpdate(
-        IInterceptorSubject parent,
         PropertyReference property,
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
@@ -288,8 +300,7 @@ internal static class SubjectUpdateApplier
         else if (context.IsSubjectComplete(propertyUpdate.Id))
         {
             // The subject has complete state in this update, so creating it is safe.
-            var serviceProvider = parent.Context.TryGetService<IServiceProvider>();
-            targetItem = context.SubjectFactory.CreateSubject(property.Metadata.Type, serviceProvider);
+            targetItem = context.SubjectFactory.CreateSubject(property.Metadata.Type, context.ServiceProvider);
             isNew = true;
         }
         else

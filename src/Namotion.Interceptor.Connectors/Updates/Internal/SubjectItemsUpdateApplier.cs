@@ -12,7 +12,6 @@ internal static class SubjectItemsUpdateApplier
     /// Applies a collection update to a property using complete-state items.
     /// </summary>
     internal static void ApplyCollectionUpdate(
-        IInterceptorSubject parent,
         PropertyReference property,
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
@@ -37,7 +36,7 @@ internal static class SubjectItemsUpdateApplier
         foreach (var itemUpdate in propertyUpdate.Items)
         {
             var (item, isNew) = ResolveOrCreateSubject(
-                parent, property, newItems.Count, itemUpdate.Id, idRegistry, context);
+                property, newItems.Count, itemUpdate.Id, idRegistry, context);
 
             if (item is null)
                 continue; // Subject not found and not complete, skip and self-heal on the next update
@@ -75,7 +74,6 @@ internal static class SubjectItemsUpdateApplier
     /// Applies a dictionary update to a property using complete-state items.
     /// </summary>
     internal static void ApplyDictionaryUpdate(
-        IInterceptorSubject parent,
         PropertyReference property,
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
@@ -112,7 +110,7 @@ internal static class SubjectItemsUpdateApplier
 
             var key = DictionaryKeyConverter.Convert(itemUpdate.Key, targetKeyType);
             var (item, isNew) = ResolveOrCreateSubject(
-                parent, property, key, itemUpdate.Id, idRegistry, context);
+                property, key, itemUpdate.Id, idRegistry, context);
 
             if (item is null)
                 continue; // Subject not found and not complete, skip and self-heal on the next update
@@ -154,7 +152,6 @@ internal static class SubjectItemsUpdateApplier
     /// complete by the time it enters the graph.
     /// </summary>
     private static (IInterceptorSubject? Subject, bool IsNew) ResolveOrCreateSubject(
-        IInterceptorSubject parent,
         PropertyReference property,
         object indexOrKey,
         string subjectId,
@@ -176,7 +173,7 @@ internal static class SubjectItemsUpdateApplier
             return (null, false);
         }
 
-        var newItem = CreateSubjectItem(parent, property, indexOrKey, context);
+        var newItem = CreateSubjectItem(property, indexOrKey, context);
         return (newItem, true);
     }
 
@@ -200,12 +197,10 @@ internal static class SubjectItemsUpdateApplier
     /// enters the graph via SetValue. The caller must assign the item to the graph first.
     /// </summary>
     private static IInterceptorSubject CreateSubjectItem(
-        IInterceptorSubject parent,
         PropertyReference property,
         object indexOrKey,
         SubjectUpdateApplyContext context)
     {
-        var serviceProvider = parent.Context.TryGetService<IServiceProvider>();
-        return context.SubjectFactory.CreateCollectionSubject(property.Metadata.Type, indexOrKey, serviceProvider);
+        return context.SubjectFactory.CreateCollectionSubject(property.Metadata.Type, indexOrKey, context.ServiceProvider);
     }
 }

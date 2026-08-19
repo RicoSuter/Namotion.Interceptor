@@ -26,13 +26,16 @@ public class SubjectUpdate
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; init; } = new();
 
     /// <summary>
-    /// Set of subject IDs that contain complete state in this update.
-    /// <c>null</c> means ALL subjects are complete (e.g., a full initial-state update).
-    /// Non-null means only the listed IDs have complete state; others are references
-    /// to subjects that should already exist on the receiver. The applier must not
-    /// create new subject instances for IDs not in this set, because doing so would produce
-    /// subjects with default values that corrupt state.
+    /// Set of subject IDs that contain complete state in this update. The applier must not create a
+    /// subject for an ID outside this set, because that would produce a default-valued instance the
+    /// sender never resends complete state for, so it can never converge.
     /// </summary>
+    /// <remarks>
+    /// <c>null</c> means ALL subjects in the update are complete, and only a complete update may say
+    /// so. A partial update always carries the set, empty included: a partial update whose only
+    /// structural change is a reorder or a removal introduces no new subject and marks nothing
+    /// complete, and it has to state that explicitly rather than fall back on the null shorthand.
+    /// </remarks>
     [JsonPropertyName("completeSubjectIds")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public HashSet<string>? CompleteSubjectIds { get; init; }

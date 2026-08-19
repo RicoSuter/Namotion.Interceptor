@@ -18,7 +18,7 @@ Subject updates use a **flat dictionary structure** where all subjects are store
 SubjectUpdate {
   root: string?                  // sender's root subject ID (mapping hint)
   subjects: Map<string, Map<string, PropertyUpdate>>  // subjectId → propertyName → update
-  completeSubjectIds: string[]?  // subject IDs with complete state (null = all complete)
+  completeSubjectIds: string[]?  // subject IDs with complete state (null = all complete, complete updates only)
 }
 
 PropertyUpdate {
@@ -40,7 +40,10 @@ ItemRef {
 
 - `root`: The sender's subject ID for the root subject. This is a **mapping hint** that tells the receiver which entry in `subjects` corresponds to the local root subject. The root's ID may differ between sender and receiver because each side generates its own IDs independently. Null when the root subject is not part of this update.
 - `subjects`: All subjects in the update, keyed by the sender's subject IDs. Each subject contains property name to property update mappings.
-- `completeSubjectIds`: Set of subject IDs whose entries in `subjects` contain **complete state** (all properties, from `ProcessSubjectComplete`). `null` means all subjects are complete (used in complete/initial-state updates for backward compatibility). Non-null means only the listed IDs are complete; other entries contain partial state (only changed properties). The applier uses this to decide whether to create new subject instances: subjects marked as complete can be safely created; others are references to subjects that should already exist locally and must not be fabricated with default values.
+- `completeSubjectIds`: Set of subject IDs whose entries in `subjects` contain **complete state** (all properties, from `ProcessSubjectComplete`). The applier uses this to decide whether to create new subject instances: subjects marked as complete can be safely created; others are references to subjects that should already exist locally and must not be fabricated with default values.
+  - A **complete update** omits the field. `null` therefore means "every subject in this update is complete", which is exactly true for an initial-state update.
+  - A **partial update** always carries the field, including as an empty array. A partial update whose only structural change is a reorder or a removal introduces no new subject and so marks nothing complete; it must still say so explicitly, because omitting the field would licence the receiver to create a default-valued subject for every id the update merely references, and such a subject never converges (the sender will not resend its complete state while it stays in the sender's own collection).
+  - Senders that are not this library must follow the same rule: omit the field only when every referenced subject really is complete.
 
 ### Subject IDs
 
@@ -179,25 +182,11 @@ Key-based dictionary of subjects. Works like Collection but each item also has a
 }
 ```
 
-### Null Collections and Dictionaries
-
-When a collection or dictionary property is `null`, it keeps its declared `kind` but omits `items`:
-
-```json
-{ "kind": "Collection" }
-```
-
-```json
-{ "kind": "Dictionary" }
-```
-
-An empty (non-null) collection or dictionary uses an empty `items` array (`[]`).
-
 ### Complete-State Collection and Dictionary Updates
 
 Both complete and partial updates use the same complete-state model: the `items` array always carries the full new ordering (collections) or the full set of key entries (dictionaries). There are no per-element insert, remove, move, or reorder operations on the wire, and there is no `index` or `count` field. Ordering for collections is the array order itself; dictionary entries are identified by `id` plus `key`.
 
-A structural change is therefore expressed by sending the new `items` array. Items that already exist on the receiver are referenced by `id` only (collections) or `id` plus `key` (dictionaries); newly introduced items additionally have their properties in the `subjects` dictionary (and are listed in `completeSubjectIds`, unless `completeSubjectIds` is null, which marks all subjects in the update complete).
+A structural change is therefore expressed by sending the new `items` array. Items that already exist on the receiver are referenced by `id` only (collections) or `id` plus `key` (dictionaries); newly introduced items additionally have their properties in the `subjects` dictionary and are listed in `completeSubjectIds`. A reorder or a removal introduces no new item, so its `completeSubjectIds` is present but empty.
 
 For example, inserting a new item into `[A, B]` to produce `[A, NewItem, B]` sends the full new ordering:
 
@@ -308,7 +297,7 @@ Set the local property to the `value` from the update.
 1. If `id` is null/omitted, set the local property to null.
 2. If the existing local object already has the same subject ID as `id`, keep it (no replacement needed).
 3. Otherwise, look up `id` in the local ID-to-object map. If found, reuse that object.
-4. If not found, check `completeSubjectIds`: if `id` is in the set (or `completeSubjectIds` is null), create a new object and register it with `id`. If `id` is NOT in the set, **skip** and count it in `SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates`: the sender assumed the receiver already has this subject. Creating a new instance with default values would corrupt state. The gap is temporary and self-heals on the next update that includes complete state for this subject.
+4. If not found, check `completeSubjectIds`: if the field is absent (a complete update, so everything is complete) or `id` is in the set, create a new object and register it with `id`. If the field is present and `id` is NOT in it, **skip** and count it in `SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates`: the sender assumed the receiver already has this subject. Creating a new instance with default values would corrupt state. The gap is temporary and self-heals on the next update that includes complete state for this subject.
 5. If the subject's properties are present in `subjects[id]`, apply them.
 6. Set the local property to the resolved object.
 
@@ -316,7 +305,7 @@ Set the local property to the `value` from the update.
 
 1. If `items` is null/omitted, the collection is null. Set the local property to null.
 2. If `items` is present, it defines the **full ordered state**:
-   - For each item, look up `item.id` in the ID-to-object map. If found, reuse it. If not found, check `completeSubjectIds`: if `item.id` is complete (or `completeSubjectIds` is null), create a new object and register it with `item.id`. If not complete, **skip** the item.
+   - For each item, look up `item.id` in the ID-to-object map. If found, reuse it. If not found, check `completeSubjectIds`: if the field is absent (a complete update) or `item.id` is in it, create a new object and register it with `item.id`. If the field is present and `item.id` is not in it, **skip** the item and count it in `SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates`.
    - Apply the item's properties from `subjects[item.id]` if present.
    - Replace the local collection with the new ordered list.
 3. An empty `items` array (`[]`) clears the collection.
@@ -325,7 +314,7 @@ Set the local property to the `value` from the update.
 
 1. If `items` is null/omitted, the dictionary is null. Set the local property to null.
 2. If `items` is present, it defines the **full state**:
-   - For each item, look up `item.id` in the ID-to-object map. If found, reuse it. If not found, check `completeSubjectIds`: if `item.id` is complete (or `completeSubjectIds` is null), create a new object and register it with `item.id`. If not complete, **skip** the item.
+   - For each item, look up `item.id` in the ID-to-object map. If found, reuse it. If not found, check `completeSubjectIds`: if the field is absent (a complete update) or `item.id` is in it, create a new object and register it with `item.id`. If the field is present and `item.id` is not in it, **skip** the item and count it in `SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates`.
    - Apply the item's properties from `subjects[item.id]` if present.
    - Set the object at `dictionary[item.key]`.
    - Remove any dictionary entries whose keys are not in the `items` array.
@@ -334,6 +323,20 @@ Set the local property to the `value` from the update.
 ### Subject Creation
 
 Each participant is expected to know the type of each subject statically based on its position in the object hierarchy (e.g., "the `Child` property is of type `ChildSubject`"). The applier uses this knowledge to create the correct concrete type when a new subject ID is encountered. If dynamic type resolution is needed, it must be implemented on top of this protocol (e.g., via a special type discriminator property).
+
+The subject is constructed through the `ISubjectFactory` using the service provider of the **root** subject's context, not of its future parent. A subject created during an apply has no context of its own yet, so asking the parent would return no provider as soon as the parent is itself new, and dependency-injected constructors would fail for subjects introduced more than one level deep in a single update.
+
+### Initial Values on Created Subjects
+
+A subject the update creates is populated **before** it is assigned into the graph, so the whole subgraph is complete by the time a concurrent reader can observe it. A subject inherits the graph's interceptor context only on assignment, so those initial writes run against an empty interceptor chain. For the created subject's own initial values this means:
+
+- no validation runs,
+- no equality check runs, so the write is never skipped as a no-op,
+- no derived property is recalculated,
+- no change event is raised, and
+- `transformValueBeforeApply` is not invoked, because the registered property it needs cannot be resolved for an unrooted subject.
+
+This is deliberate, not an oversight, and it is confined to the initial values of subjects this update creates. Values written to subjects that already exist locally take the normal intercepted path. Lifecycle correctness is preserved: attaching the subject seeds change tracking from the backing store, so the first later write to one of these properties is compared against the applied value rather than against the type default. Suppressing change events for a subject that is not yet in the graph is consistent with the rest of the lifecycle: subscribers observe the subject when it is attached, complete.
 
 ## Drop Policy and Diagnostics
 
@@ -344,9 +347,9 @@ Because a drop happens silently by design (an apply or serialize call must not t
 | Counter | Meaning |
 |---------|---------|
 | `DroppedOutboundChanges` | A property change reached the update factory for a subject that was momentarily unregistered (a concurrent structural mutation had not yet attached it). The change was dropped instead of serialized. |
-| `MetadataFallbackSerializations` | A structural reference (`Object`, `Collection`, or `Dictionary` item) reached a subject that was momentarily unregistered. Its complete state was serialized from the subject's own property metadata (`ProcessSubjectFromMetadata`) instead of emitting a bare ID reference with no properties entry, which a receiver would otherwise materialize as a default-valued subject that can never converge. |
-| `DroppedInboundSubjectUpdates` | An inbound `subjects` entry could not be resolved to a local object during apply (its ID was neither already known locally nor created by this update's own structural apply, or the sender excluded it from `completeSubjectIds`). The entry was skipped. |
-| `UnknownInboundProperties` | An inbound property update named a property the receiver's local subject type does not have. The property update was skipped. |
+| `MetadataFallbackSerializations` | A subject's complete state was serialized from its own property metadata (`ProcessSubjectFromMetadata`) instead of from its registry entry, because it had none. Under structural churn this means the subject was momentarily unregistered, and the fallback is what stops a bare ID reference with no properties entry from reaching the receiver, which would materialize a default-valued subject that can never converge. A context configured without a registry has no entry for any subject, so every subject of every update takes this path: a count that tracks update volume from the first update onward is a configuration signal, not a churn signal. The fallback skips processor filtering and emits no timestamps. |
+| `DroppedInboundSubjectUpdates` | An inbound reference could not be resolved to a local object during apply and was skipped. Incremented at four independent sites: a `subjects` entry whose ID was neither already known locally nor created by this update's own structural apply; an unresolvable `Object` reference; an unresolvable collection item or dictionary entry, which leaves the applied structure one item short; and a dictionary entry carrying no `key`, which cannot be placed. Because the sites are independent, one logically unresolvable subject can increment the counter more than once in a single apply, typically twice: once where it is referenced as a collection item or dictionary entry and once for its own `subjects` entry. Read it as a rate that should settle, not as a count of distinct lost subjects. |
+| `UnknownInboundProperties` | An inbound property update named a property the receiver's local subject type does not have. The property update was skipped. Counted per property update, so a single drifted property that changes often increments it on every update that carries it; this is the model-drift signal between sender and receiver. |
 
 These counters should be scraped and alerted on. A sustained non-zero rate is expected background noise under concurrent structural mutations, the exact condition this drop policy is designed to tolerate; a rate that keeps climbing without settling points at an actual bug in ID assignment, processor filtering, or model drift between sender and receiver. Because there is no divergence detector, these counters are the only production signal that drops are happening at all.
 
@@ -478,7 +481,8 @@ Only the changed property on the root subject is included.
     "rootId": {
       "Name": { "kind": "Value", "value": "UpdatedRoot" }
     }
-  }
+  },
+  "completeSubjectIds": []
 }
 ```
 
@@ -493,7 +497,8 @@ When only a non-root subject changes, `root` is null because the root has no cha
     "child1Id": {
       "Name": { "kind": "Value", "value": "UpdatedAlice" }
     }
-  }
+  },
+  "completeSubjectIds": []
 }
 ```
 
@@ -518,11 +523,12 @@ Before: `[A, B]` → After: `[A, NewItem, B]`
     "newItemId": {
       "Name": { "kind": "Value", "value": "Charlie" }
     }
-  }
+  },
+  "completeSubjectIds": ["newItemId"]
 }
 ```
 
-Note: Only the new item (`newItemId`) has its properties in `subjects`. Existing items (`childAId`, `childBId`) are referenced by ID only since their properties haven't changed.
+Note: Only the new item (`newItemId`) has its properties in `subjects`, and only it is listed in `completeSubjectIds`. Existing items (`childAId`, `childBId`) are referenced by ID only since their properties haven't changed.
 
 ### Partial Update: Item Removed
 
@@ -541,9 +547,12 @@ Before: `[A, B, C]` → After: `[A, C]`
         ]
       }
     }
-  }
+  },
+  "completeSubjectIds": []
 }
 ```
+
+The removal introduces no subject, so `completeSubjectIds` is present and empty. Omitting it would tell the receiver that `childAId` and `childCId` are complete, and a receiver that happens not to know one of those IDs would then create a default-valued item for it.
 
 ### Partial Update: Items Reordered
 
@@ -563,7 +572,8 @@ Before: `[A, B, C]` → After: `[C, A, B]`
         ]
       }
     }
-  }
+  },
+  "completeSubjectIds": []
 }
 ```
 

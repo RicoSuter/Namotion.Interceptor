@@ -95,7 +95,8 @@ public class SubjectUpdateCollectionTests
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
 
-        // Assert - Move should have NO Item data, just FromIndex and Index
+        // Assert - a reorder resends the full items array in the new order, referencing every item by
+        // id only, and marks nothing complete because no item is new to the receiver
         await Verify(update);
     }
 

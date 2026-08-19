@@ -11,17 +11,35 @@ public static class SubjectUpdateDiagnostics
     /// <summary>Outbound changes dropped because their subject was momentarily unregistered.</summary>
     public static long DroppedOutboundChanges => Volatile.Read(ref Internal.SubjectUpdateFactory.DroppedUnregisteredChangeCount);
 
-    /// <summary>Complete-state serializations of momentarily unregistered subjects (metadata fallback path).</summary>
+    /// <summary>
+    /// Complete-state serializations produced from a subject's own property metadata instead of its
+    /// registry entry. Under structural churn this counts subjects that were momentarily unregistered.
+    /// A context configured without a registry has no registry entry for any subject, so every subject
+    /// of every update takes this path: a steady count proportional to update volume is a configuration
+    /// signal, not a churn signal. The fallback path skips processor filtering and emits no timestamps.
+    /// </summary>
     public static long MetadataFallbackSerializations => Volatile.Read(ref Internal.SubjectUpdateFactory.MetadataFallbackSerializationCount);
 
     /// <summary>
-    /// Inbound updates dropped because the subject they address stayed unresolvable. Counts both
-    /// subject updates whose subject was neither in the registry nor created during the apply, and
-    /// structural item references (object references, collection items, dictionary entries) that
-    /// could not be resolved or placed, leaving the applied structure one item short.
+    /// Inbound updates dropped because the subject they address stayed unresolvable.
     /// </summary>
+    /// <remarks>
+    /// Incremented at four structurally different sites: a <c>subjects</c> entry whose subject was
+    /// neither in the registry nor created by this update's own structural apply; an unresolvable
+    /// <c>Object</c> reference; an unresolvable collection item or dictionary entry, which leaves the
+    /// applied structure one item short; and a dictionary entry that carries no key and therefore
+    /// cannot be placed. The sites are independent, so one logically unresolvable subject can bump the
+    /// counter more than once in a single apply, typically twice: once where it is referenced as a
+    /// collection item or dictionary entry and once for its own <c>subjects</c> entry. Read the counter
+    /// as a rate that should settle, not as a count of distinct lost subjects.
+    /// </remarks>
     public static long DroppedInboundSubjectUpdates => Volatile.Read(ref Internal.SubjectUpdateApplier.DroppedInboundSubjectUpdateCount);
 
-    /// <summary>Inbound properties skipped because the subject does not declare them.</summary>
+    /// <summary>
+    /// Inbound property updates skipped because the receiver's subject type does not declare the named
+    /// property. Counted per property update, so one model-drift mismatch on a frequently changing
+    /// property increments on every update that carries it. This is the model-drift signal between
+    /// sender and receiver.
+    /// </summary>
     public static long UnknownInboundProperties => Volatile.Read(ref Internal.SubjectUpdateApplier.UnknownInboundPropertyCount);
 }

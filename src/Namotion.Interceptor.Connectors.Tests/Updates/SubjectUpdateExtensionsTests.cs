@@ -1434,6 +1434,87 @@ public partial class SubjectUpdateExtensionsTests
         Assert.Null(update.CompleteSubjectIds);
     }
 
+    [Fact]
+    public void WhenPartialUpdateOnlyReordersACollection_ThenCompleteSubjectIdsIsPresentAndEmpty()
+    {
+        // Arrange: a reorder references existing items only, so nothing is marked complete. Leaving the
+        // set null would mean "all complete" on the wire, which licences the receiver to create a
+        // default-valued subject for any referenced id it does not know.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var childA = new Person { FirstName = "A" };
+        var childB = new Person { FirstName = "B" };
+        var root = new Person(context) { FirstName = "Root", Children = [childA, childB] };
+
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            root.Children = [childB, childA];
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes.ToArray(), []);
+
+        // Assert
+        Assert.NotNull(update.CompleteSubjectIds);
+        Assert.Empty(update.CompleteSubjectIds!);
+    }
+
+    [Fact]
+    public void WhenPartialUpdateOnlyRemovesACollectionItem_ThenCompleteSubjectIdsIsPresentAndEmpty()
+    {
+        // Arrange: a removal leaves only pre-existing items behind, so nothing is marked complete.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var childA = new Person { FirstName = "A" };
+        var childB = new Person { FirstName = "B" };
+        var root = new Person(context) { FirstName = "Root", Children = [childA, childB] };
+
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            root.Children = [childA];
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes.ToArray(), []);
+
+        // Assert
+        Assert.NotNull(update.CompleteSubjectIds);
+        Assert.Empty(update.CompleteSubjectIds!);
+    }
+
+    [Fact]
+    public void WhenPartialUpdateMarksNothingComplete_ThenTheFieldIsStillSerialized()
+    {
+        // Arrange: the field is JsonIgnore(WhenWritingNull), so a null set disappears from the wire and
+        // the receiver cannot tell "nothing is complete" apart from "everything is complete".
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var childA = new Person { FirstName = "A" };
+        var childB = new Person { FirstName = "B" };
+        var root = new Person(context) { FirstName = "Root", Children = [childA, childB] };
+
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            root.Children = [childB, childA];
+        }
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes.ToArray(), []);
+
+        // Act
+        var json = JsonSerializer.Serialize(update);
+
+        // Assert
+        Assert.Contains("\"completeSubjectIds\":[]", json);
+
+        var roundTripped = JsonSerializer.Deserialize<SubjectUpdate>(json);
+        Assert.NotNull(roundTripped);
+        Assert.NotNull(roundTripped!.CompleteSubjectIds);
+        Assert.Empty(roundTripped.CompleteSubjectIds!);
+    }
+
     /// <summary>
     /// Reproduces the "no-parents" registry leak during concurrent ApplySubjectUpdate
     /// (simulating WebSocket Welcome apply) and direct property writes (simulating

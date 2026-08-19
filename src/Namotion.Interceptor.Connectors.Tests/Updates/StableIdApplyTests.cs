@@ -1,9 +1,11 @@
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Connectors.Updates.Internal;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests.Updates;
 
@@ -729,5 +731,237 @@ public class StableIdApplyTests
         var item = Assert.Single(root.Items);
         Assert.Equal("NewItem", item.Name);
         Assert.Equal("inactive", item.Name_Status);
+    }
+
+    [Fact]
+    public void WhenReorderOnlyUpdateReferencesAnUnknownItem_ThenNoSubjectIsFabricatedAndTheDropIsCounted()
+    {
+        // Arrange - a reorder introduces no new subject, so the sender marks nothing complete. The
+        // receiver knows two of the three referenced ids. The partial update must still carry
+        // CompleteSubjectIds, because an absent set reads as "every referenced subject is complete"
+        // and would licence the receiver to fabricate a default-valued item for the third id, which
+        // the sender never resends complete state for and which therefore never converges.
+        var senderContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var itemA = new CycleTestNode { Name = "A" };
+        var itemB = new CycleTestNode { Name = "B" };
+        var itemC = new CycleTestNode { Name = "C" };
+        var senderRoot = new CycleTestNode(senderContext) { Name = "Root", Items = [itemA, itemB, itemC] };
+
+        var idA = ((IInterceptorSubject)itemA).GetOrAddSubjectId();
+        var idB = ((IInterceptorSubject)itemB).GetOrAddSubjectId();
+        var idC = ((IInterceptorSubject)itemC).GetOrAddSubjectId();
+
+        var changes = new List<SubjectPropertyChange>();
+        using (senderContext
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(change => changes.Add(change)))
+        {
+            senderRoot.Items = [itemC, itemA, itemB];
+        }
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(senderRoot, changes.ToArray(), []);
+
+        var receiverContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var receivedA = new CycleTestNode { Name = "A" };
+        var receivedB = new CycleTestNode { Name = "B" };
+        var receiverRoot = new CycleTestNode(receiverContext) { Name = "Root", Items = [receivedA, receivedB] };
+        ((IInterceptorSubject)receivedA).SetSubjectId(idA);
+        ((IInterceptorSubject)receivedB).SetSubjectId(idB);
+
+        var droppedBefore = SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates;
+
+        // Act
+        SubjectUpdateApplier.ApplyUpdate(receiverRoot, update, new DefaultSubjectFactory(), ChangeOrigin.Local);
+
+        // Assert - the update states that nothing is complete, so the unknown item is dropped instead
+        // of being materialized, and the two known items keep their instances in the sent order.
+        Assert.NotNull(update.CompleteSubjectIds);
+        Assert.Empty(update.CompleteSubjectIds!);
+
+        Assert.Equal(2, receiverRoot.Items.Count);
+        Assert.Same(receivedA, receiverRoot.Items[0]);
+        Assert.Same(receivedB, receiverRoot.Items[1]);
+
+        Assert.False(receiverContext.GetService<ISubjectIdRegistry>().TryGetSubjectById(idC, out _));
+        Assert.True(
+            SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates >= droppedBefore + 1,
+            "The dropped item must be counted. These counters are process-wide, so other tests running "
+            + "in parallel can also increment them; assert the floor, not an exact delta.");
+    }
+
+    [Fact]
+    public void WhenRemoveOnlyUpdateReferencesAnUnknownItem_ThenNoSubjectIsFabricatedAndTheDropIsCounted()
+    {
+        // Arrange - the same rule reached through a removal instead of a reorder: every remaining item
+        // already existed on the sender side, so nothing is marked complete and an id the receiver
+        // does not know must be dropped rather than created.
+        var senderContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var itemA = new CycleTestNode { Name = "A" };
+        var itemB = new CycleTestNode { Name = "B" };
+        var itemC = new CycleTestNode { Name = "C" };
+        var senderRoot = new CycleTestNode(senderContext) { Name = "Root", Items = [itemA, itemB, itemC] };
+
+        var idA = ((IInterceptorSubject)itemA).GetOrAddSubjectId();
+        ((IInterceptorSubject)itemB).GetOrAddSubjectId();
+        var idC = ((IInterceptorSubject)itemC).GetOrAddSubjectId();
+
+        var changes = new List<SubjectPropertyChange>();
+        using (senderContext
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(change => changes.Add(change)))
+        {
+            senderRoot.Items = [itemA, itemC];
+        }
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(senderRoot, changes.ToArray(), []);
+
+        var receiverContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var receivedA = new CycleTestNode { Name = "A" };
+        var receiverRoot = new CycleTestNode(receiverContext) { Name = "Root", Items = [receivedA] };
+        ((IInterceptorSubject)receivedA).SetSubjectId(idA);
+
+        var droppedBefore = SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates;
+
+        // Act
+        SubjectUpdateApplier.ApplyUpdate(receiverRoot, update, new DefaultSubjectFactory(), ChangeOrigin.Local);
+
+        // Assert
+        Assert.NotNull(update.CompleteSubjectIds);
+        Assert.Empty(update.CompleteSubjectIds!);
+
+        var remaining = Assert.Single(receiverRoot.Items);
+        Assert.Same(receivedA, remaining);
+
+        Assert.False(receiverContext.GetService<ISubjectIdRegistry>().TryGetSubjectById(idC, out _));
+        Assert.True(
+            SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates >= droppedBefore + 1,
+            "The dropped item must be counted. These counters are process-wide, so other tests running "
+            + "in parallel can also increment them; assert the floor, not an exact delta.");
+    }
+
+    [Fact]
+    public void WhenCreatedSubjectsNestTwoLevelsDeep_ThenBothAreBuiltFromTheRootServiceProvider()
+    {
+        // Arrange - a subject created during an apply has no context of its own yet, so its service
+        // provider has to come from the root subject's context. InjectedNode declares no parameterless
+        // constructor, so a level-two subject built from the empty context of its brand new level-one
+        // parent would fall back to Activator.CreateInstance and throw.
+        var services = new ServiceCollection();
+        services.AddSingleton(new InjectedNodeDependency());
+
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        context.AddService(services.BuildServiceProvider());
+
+        var root = new InjectedNodeHost(context);
+        var rootId = ((IInterceptorSubject)root).GetOrAddSubjectId();
+
+        const string levelOneId = "level-one-id";
+        const string levelTwoId = "level-two-id";
+
+        var update = new SubjectUpdate
+        {
+            Root = rootId,
+            Subjects = new()
+            {
+                [rootId] = new()
+                {
+                    ["Items"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Items = [new SubjectPropertyItemUpdate { Id = levelOneId }]
+                    }
+                },
+                [levelOneId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "LevelOne" },
+                    ["Child"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = levelTwoId }
+                },
+                [levelTwoId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "LevelTwo" }
+                }
+            },
+            CompleteSubjectIds = [levelOneId, levelTwoId]
+        };
+
+        // Act
+        SubjectUpdateApplier.ApplyUpdate(root, update, new DefaultSubjectFactory(), ChangeOrigin.Local);
+
+        // Assert - both levels exist and both received the injected dependency
+        var levelOne = Assert.Single(root.Items);
+        Assert.Equal("LevelOne", levelOne.Name);
+        Assert.Equal("injected", levelOne.Tag);
+
+        Assert.NotNull(levelOne.Child);
+        Assert.Equal("LevelTwo", levelOne.Child!.Name);
+        Assert.Equal("injected", levelOne.Child.Tag);
+    }
+
+    [Fact]
+    public void WhenADeferredAttributeCreatesASubjectWithItsOwnAttributes_ThenTheQueuedEntryIsAlsoApplied()
+    {
+        // Arrange - the new child is populated before it is rooted, so its attribute updates are
+        // queued. Applying that queue creates the subject-valued attribute's target, which is itself
+        // populated before rooting and queues a second entry while the queue is being walked.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new AttributeReferenceNode(context) { Name = "Root" };
+        var rootId = ((IInterceptorSubject)root).GetOrAddSubjectId();
+
+        const string childId = "deferred-child-id";
+        const string targetId = "deferred-target-id";
+
+        var update = new SubjectUpdate
+        {
+            Root = rootId,
+            Subjects = new()
+            {
+                [rootId] = new()
+                {
+                    ["Child"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = childId }
+                },
+                [childId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Child",
+                        Attributes = new()
+                        {
+                            ["Ref"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = targetId }
+                        }
+                    }
+                },
+                [targetId] = new()
+                {
+                    ["Label"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Target",
+                        Attributes = new()
+                        {
+                            ["Unit"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "meter" }
+                        }
+                    }
+                }
+            },
+            CompleteSubjectIds = [childId, targetId]
+        };
+
+        var droppedBefore = SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates;
+
+        // Act
+        SubjectUpdateApplier.ApplyUpdate(root, update, new DefaultSubjectFactory(), ChangeOrigin.Local);
+
+        // Assert - the entry queued during the pass is applied rather than throwing or being skipped
+        Assert.NotNull(root.Child);
+        Assert.Equal("Child", root.Child!.Name);
+
+        Assert.NotNull(root.Child.Name_Ref);
+        Assert.Equal("Target", root.Child.Name_Ref!.Label);
+        Assert.Equal("meter", root.Child.Name_Ref.Label_Unit);
+
+        // Assert - everything in the update converged, so the drop tripwire must stay flat. A counter
+        // that rises during a healthy apply cannot signal a real convergence gap.
+        Assert.Equal(droppedBefore, SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates);
     }
 }

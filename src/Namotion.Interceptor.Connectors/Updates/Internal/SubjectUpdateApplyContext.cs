@@ -26,6 +26,15 @@ internal sealed class SubjectUpdateApplyContext
     /// </summary>
     public ISubjectIdRegistry SubjectIdRegistry { get; private set; } = null!;
 
+    /// <summary>
+    /// The service provider of the root subject's context, used to construct subjects created by
+    /// this update. Resolved once from the root because a subject created during the apply has no
+    /// fallback context yet, so asking its own context would yield null and downgrade construction
+    /// to a parameterless activation, which fails for subject types with a dependency-injected
+    /// constructor nested more than one level deep in a single update.
+    /// </summary>
+    public IServiceProvider? ServiceProvider { get; private set; }
+
     private HashSet<string>? _completeSubjectIds;
 
     /// <summary>
@@ -49,6 +58,7 @@ internal sealed class SubjectUpdateApplyContext
         Origin = origin;
         TransformValueBeforeApply = transformValueBeforeApply;
         SubjectIdRegistry = rootContext.GetService<ISubjectIdRegistry>();
+        ServiceProvider = rootContext.TryGetService<IServiceProvider>();
     }
 
     /// <summary>
@@ -148,5 +158,6 @@ internal sealed class SubjectUpdateApplyContext
         Origin = default;
         TransformValueBeforeApply = null;
         SubjectIdRegistry = null!;
+        ServiceProvider = null;
     }
 }

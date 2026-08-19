@@ -35,6 +35,13 @@ internal sealed class SubjectUpdateBuilder
     {
         Processors = processors;
         _isPartialUpdate = isPartialUpdate;
+        if (isPartialUpdate)
+        {
+            // A partial update always carries the set, even when it stays empty. An absent set means
+            // "every referenced subject is complete", which would licence the receiver to fabricate
+            // default-valued subjects for ids a reorder or a removal only references.
+            _completeSubjectIds = [];
+        }
         GetOrCreateId(rootSubject);
     }
 
