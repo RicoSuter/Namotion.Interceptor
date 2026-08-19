@@ -239,42 +239,35 @@ public class SubjectSourceRetryQueueTests
     }
 
     [Fact]
-    public async Task WhenTheReconcileRestoresManyPropertiesWhileALiveProcessorIsRunning_ThenEveryRestoredValueReachesTheSourceOnce()
+    public async Task WhenTheReconcilesOwnRestoreIsReParkedWhileTheGateIsStillHeld_ThenTheSecondPassRescuesIt()
     {
-        // Arrange: many owned properties, each parked under the gate and then moved off that value
-        // with a source-tagged commit the way an initial-state load does, so the reconcile has to
-        // restore every one of them. A real recovery runs the full interceptor chain per restore
-        // (registry updates, tracking, any hooks), which is real wall-clock cost the bare property
-        // model here has none of; the per-commit interceptor below stands in for that cost so the
-        // reconcile reliably spans a flush tick instead of finishing inside a single one, which is
-        // what stranded restores before this fix and what a real, slower model hits on its own.
+        // Arrange: one property parked under the gate, then moved off that parked value by a
+        // source-tagged write, the way an initial-state load does, so the reconcile has to restore it.
+        // A write interceptor lets the restore commit for real (next(ref context) runs first, so it
+        // reaches the live processor's subscription), then blocks before returning, so the gate is
+        // still provably held when the depth check below observes the processor parking the restore
+        // right back into the retry queue. That is the exact strand the second reconcile pass exists
+        // to rescue: without it, the restore is the only change, so no later flush tick calls the
+        // write handler again and the value never arrives.
         //
-        // The cost is load-bearing and was measured, not assumed. With the fix removed and the
-        // interceptor taken out, this passes in under half a second every time, because a bare
-        // in-memory model finishes 50 restores inside one flush tick no matter how short that tick
-        // is; shrinking the buffer time instead was tried across property counts from 200 to 50,000
-        // and never reproduced the bug once. With the interceptor in place it detects a removed fix
-        // about 17 times in 20, and passes 20 times in 20 with the fix present. That asymmetry is the
-        // point: the race is real rather than scheduled, so detection is probabilistic, while a false
-        // red is not. Treat an isolated failure here as a genuine regression, not as flake.
-        const int propertyCount = 50;
+        // Registered before WithFullPropertyTracking() so it sits outside PropertyChangeInterceptor in
+        // the write chain: that interceptor enqueues to subscriptions on its own unwind, after its own
+        // call to next() returns, so a gate positioned inside it would hold up the very publish this
+        // test needs to observe while still blocked.
+        var context = InterceptorSubjectContext.Create();
 
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry()
-            .WithFullPropertyTracking();
-        context.AddService<IWriteInterceptor>(new PerCommitLatencyInterceptor());
+        var restoreGate = new BlockNextCommitInterceptor();
+        context.AddService<IWriteInterceptor>(restoreGate);
 
-        var people = Enumerable.Range(0, propertyCount)
-            .Select(i => new Person(context) { FirstName = $"Original{i}" })
-            .ToList();
+        context.WithRegistry().WithFullPropertyTracking();
+
+        var person = new Person(context);
 
         var gate = new object();
         var receivedWrites = new List<string>();
 
-        var source = new TestSubjectSource(people[0], context, NullLogger.Instance,
-            bufferTime: TimeSpan.FromMilliseconds(1),
-            writeRetryQueueSize: propertyCount * 2)
+        var source = new TestSubjectSource(person, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(8))
         {
             WriteChangesOverride = (changes, _) =>
             {
@@ -290,14 +283,8 @@ public class SubjectSourceRetryQueueTests
             },
         };
 
-        foreach (var person in people)
-        {
-            new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
-        }
-
-        // Also owned, only so the probe below has a property whose flush is observable independently
-        // of the hundred FirstName properties the test parks.
-        new PropertyReference(people[0], nameof(Person.LastName)).SetSource(source);
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source);
 
         await source.StartAsync(CancellationToken.None);
         try
@@ -305,69 +292,74 @@ public class SubjectSourceRetryQueueTests
             var probeValue = 0;
             await AsyncTestHelpers.WaitUntilAsync(() =>
             {
-                people[0].LastName = "Probe" + probeValue++;
+                person.LastName = "Probe" + probeValue++;
                 lock (gate)
                 {
                     return receivedWrites.Any(w => w.StartsWith("LastName=", StringComparison.Ordinal));
                 }
             }, message: "Pump did not start processing changes.");
 
-            // Act: park a write on every property, then move each one off the parked value with a
-            // source-tagged commit, so every one hits the reconcile's restore branch.
+            // The probe loop above can write a value the pump has not flushed yet by the time it exits
+            // (it only waits for the first one to land, not for its own last write). Draining here
+            // keeps that leftover from later masking the fix under test: an unrelated LastName flush
+            // after the gate clears would flush the backed-up retry queue as a side effect, rescuing
+            // the restore even without the second pass.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundChanges.Depth == 0,
+                message: "The processor's buffer did not drain after the warmup probe.");
+
+            // Act: park the write, move the model off it with a source-tagged commit so the reconcile
+            // takes the restore branch, then arm the interceptor and start the resume without awaiting
+            // it so the test can observe the park while the reconcile is still blocked inside it.
             var resumeEpoch = source.BeginResumeForTest();
-            var expectedWrites = new List<string>();
-            for (var i = 0; i < propertyCount; i++)
-            {
-                var parkedValue = $"Parked{i}";
-                expectedWrites.Add($"FirstName={parkedValue}");
-                people[i].FirstName = parkedValue;
-            }
+            person.FirstName = "Parked";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundRetries.Depth > 0,
+                message: "The write was not parked while the resume gate was set.");
+
+            new PropertyReference(person, nameof(Person.FirstName))
+                .SetValueFromSource(source, null, null, "ServerChanged");
+
+            // Task.Run so the interceptor's synchronous block runs on a pool thread: the restore
+            // commit reaches the interceptor before any real await, so calling this inline would block
+            // the test's own thread there, and it is that same thread the awaits below need to reach
+            // restoreGate.Release().
+            restoreGate.Arm();
+            var completeTask = Task.Run(() => source.CompleteResumeForTestAsync(resumeEpoch, CancellationToken.None));
+            await restoreGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
 
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.OutboundRetries.Depth >= propertyCount,
-                message: "Not every write was parked while the resume gate was set.");
+                () => source.Diagnostics.OutboundRetries.Depth > 0,
+                message: "The processor should have parked the restore back into the retry queue while the reconcile was still blocked inside it.");
 
-            foreach (var person in people)
-            {
-                new PropertyReference(person, nameof(Person.FirstName))
-                    .SetValueFromSource(source, null, null, "ServerChanged");
-            }
+            restoreGate.Release();
+            await completeTask;
 
-            await source.CompleteResumeForTestAsync(resumeEpoch, CancellationToken.None);
-
-            // Assert: every restored value reaches the source, and none of them arrives more than
-            // once, which is what a write left stuck in the retry queue after being re-parked
-            // mid-reconcile would miss.
+            // Assert: the second pass rescues the re-parked restore.
             await AsyncTestHelpers.WaitUntilAsync(() =>
             {
                 lock (gate)
                 {
-                    return expectedWrites.All(receivedWrites.Contains);
+                    return receivedWrites.Contains("FirstName=Parked");
                 }
-            }, timeout: TimeSpan.FromSeconds(15),
-                message: "Not every value restored by the reconcile reached the source.");
-
-            lock (gate)
-            {
-                foreach (var expected in expectedWrites)
-                {
-                    Assert.Equal(1, receivedWrites.Count(w => w == expected));
-                }
-            }
+            }, message: "The restored value should have reached the source through the second reconcile pass.");
         }
         finally
         {
+            restoreGate.Release();
             await source.StopAsync(CancellationToken.None);
         }
     }
 
     [Fact]
-    public async Task WhenTheGateIsHeldWhileStopping_ThenTheTeardownFlushStillAttemptsTheWrite()
+    public async Task WhenTheGateIsHeldWhileStopping_ThenThePendingWriteIsDiscardedAndCountedRatherThanParked()
     {
         // Arrange: a buffer time long enough that the periodic flush cannot fire during this test, so
-        // the pending write can only reach the source through the teardown drain that runs when the
-        // source stops, the way a connector's own reconnect can leave the gate set if a drop lands
-        // right before the host shuts down.
+        // the pending write can only be handled by the teardown flush that runs when the source stops,
+        // the way a connector's own reconnect can leave the gate set if a drop lands right before the
+        // host shuts down. Nothing comes back for a write parked at that point: the queue is disposed
+        // with the source, and the connection it was captured against is being replaced, so the write
+        // must be discarded and counted rather than silently parked or attempted.
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry()
@@ -376,8 +368,9 @@ public class SubjectSourceRetryQueueTests
         var person = new Person(context);
         var gate = new object();
         var receivedWrites = new List<string>();
+        var recordingLogger = new RecordingLogger();
 
-        var source = new TestSubjectSource(person, context, NullLogger.Instance,
+        var source = new TestSubjectSource(person, context, recordingLogger,
             bufferTime: TimeSpan.FromSeconds(30),
             teardownFlushTimeout: TimeSpan.FromSeconds(10))
         {
@@ -411,8 +404,8 @@ public class SubjectSourceRetryQueueTests
         }, message: "The processor did not start buffering changes.");
         var depthBeforeRealWrite = source.Diagnostics.OutboundChanges.Depth;
 
-        // Act: the gate is still up when the stop begins, so the pending write has to reach the
-        // source through the teardown drain rather than being silently swallowed by it.
+        // Act: the gate is still up when the stop begins, so the teardown flush hits the gate branch
+        // while stopping.
         source.BeginResumeForTest();
         person.FirstName = "StuckDuringShutdown";
         await AsyncTestHelpers.WaitUntilAsync(
@@ -420,11 +413,80 @@ public class SubjectSourceRetryQueueTests
             message: "The write did not reach the processor's own buffer.");
         await source.StopAsync(CancellationToken.None);
 
-        // Assert
+        // Assert: never attempted, not parked, counted as a drop, and logged.
         lock (gate)
         {
-            Assert.Contains("FirstName=StuckDuringShutdown", receivedWrites);
+            Assert.DoesNotContain("FirstName=StuckDuringShutdown", receivedWrites);
         }
+        Assert.Equal(0, source.Diagnostics.OutboundRetries.Depth);
+        Assert.True(source.Diagnostics.OutboundRetries.TotalDropped > 0);
+        Assert.Contains(recordingLogger.Errors, message => message.Contains("Discarded", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WhenTheGateIsHeldWhileStoppingAndTheWriteWouldFail_ThenThePendingWriteIsStillDiscardedAndCountedRatherThanAttempted()
+    {
+        // Arrange: identical to the sibling test above, except WriteChangesOverride fails instead of
+        // succeeding. The fix must never reach the write at all while stopping under the gate, so the
+        // outcome, and whether WriteChangesOverride is invoked, must be the same either way.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        var recordingLogger = new RecordingLogger();
+        var firstNameWriteAttempted = false;
+
+        var source = new TestSubjectSource(person, context, recordingLogger,
+            bufferTime: TimeSpan.FromSeconds(30),
+            teardownFlushTimeout: TimeSpan.FromSeconds(10))
+        {
+            // Only FirstName fails: the connect-window reconcile can independently send a LastName
+            // warmup probe before the test's own gate is even set (its send branch bypasses the gate
+            // by design, see BeginResume's remarks), and that write must not pollute this test's
+            // narrower claim about FirstName specifically.
+            WriteChangesOverride = (changes, _) =>
+            {
+                var batch = changes.ToArray();
+                if (batch.Any(change => change.Property.Name == nameof(Person.FirstName)))
+                {
+                    Volatile.Write(ref firstNameWriteAttempted, true);
+                    return ValueTask.FromResult(WriteResult.Failure(
+                        ReadOnlyMemory<SubjectPropertyChange>.Empty,
+                        new InvalidOperationException("Simulated dead socket")));
+                }
+
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source);
+
+        await source.StartAsync(CancellationToken.None);
+
+        var probeValue = 0;
+        await AsyncTestHelpers.WaitUntilAsync(() =>
+        {
+            person.LastName = "Warmup" + probeValue++;
+            return source.Diagnostics.OutboundChanges.Depth > 0;
+        }, message: "The processor did not start buffering changes.");
+        var depthBeforeRealWrite = source.Diagnostics.OutboundChanges.Depth;
+
+        // Act
+        source.BeginResumeForTest();
+        person.FirstName = "StuckDuringShutdown";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => source.Diagnostics.OutboundChanges.Depth > depthBeforeRealWrite,
+            message: "The write did not reach the processor's own buffer.");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert: discarded before any attempt, so a failing transport never even gets asked.
+        Assert.False(Volatile.Read(ref firstNameWriteAttempted));
+        Assert.Equal(0, source.Diagnostics.OutboundRetries.Depth);
+        Assert.True(source.Diagnostics.OutboundRetries.TotalDropped > 0);
+        Assert.Contains(recordingLogger.Errors, message => message.Contains("Discarded", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -485,17 +547,37 @@ public class SubjectSourceRetryQueueTests
     }
 
     /// <summary>
-    /// Adds a small, real cost to every commit. Not a synchronization wait: nothing here waits for a
-    /// condition. It stands in for the per-commit cost a real connected model has (registry updates,
-    /// tracking, hooks) so a tight loop of bare property writes cannot finish faster than production
-    /// code would, which is what makes the flush-tick race in the test above reachable at all.
+    /// Once armed, blocks the next commit it sees after that commit has already run: <c>next</c> is
+    /// called first, so the commit reaches the subject and the change subscription, and only then does
+    /// the call sit until <see cref="Release"/>. Lets a test observe state that exists only while a
+    /// commit has landed but the caller that made it has not yet returned.
     /// </summary>
-    private sealed class PerCommitLatencyInterceptor : IWriteInterceptor
+    private sealed class BlockNextCommitInterceptor : IWriteInterceptor
     {
+        private int _armed;
+        private readonly TaskCompletionSource _entered =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Completes once the armed commit has run and the block has started.</summary>
+        public Task Entered => _entered.Task;
+
+        public void Arm() => Volatile.Write(ref _armed, 1);
+
+        public void Release() => _release.TrySetResult();
+
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
         {
+            if (Interlocked.CompareExchange(ref _armed, 0, 1) == 1)
+            {
+                next(ref context);
+                _entered.TrySetResult();
+                _release.Task.GetAwaiter().GetResult();
+                return;
+            }
+
             next(ref context);
-            Thread.Sleep(1);
         }
     }
 }

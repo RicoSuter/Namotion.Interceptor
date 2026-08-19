@@ -398,16 +398,32 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             return;
         }
 
-        if (Volatile.Read(ref _resumeInProgress) == 1 && !_stoppingToken.IsCancellationRequested)
+        if (Volatile.Read(ref _resumeInProgress) == 1)
         {
-            // Parked rather than dropped: CompleteResumeAsync judges it against the loaded state. Falls
-            // through when stopping: there is no new connection left to protect at that point, and
-            // parking here would make the teardown drain "succeed" by moving the batch into a retry
-            // queue that is disposed with the source, silently losing changes the drain exists to report.
-            //
-            // Collapsed per property before parking, the same as the connect-window drain: a burst on
-            // one property must not evict other properties' parked writes from the bounded ring.
-            WriteRetryQueue.Enqueue(CollapsePerProperty(changes.ToArray()).ToArray());
+            if (_stoppingToken.IsCancellationRequested)
+            {
+                // Nothing comes back for these: the queue is disposed with the source, and the
+                // connection they were captured against is being replaced, so writing them now would
+                // put pre-load values on a socket whose peer has moved on. Counted and reported rather
+                // than parked, so a stop cannot hide the loss.
+                Metrics.OutboundRetries.AddDropped(changes.Length);
+                _logger.LogError(
+                    "Discarded {Count} change(s) while stopping: a connection replacement was in progress.",
+                    changes.Length);
+                return;
+            }
+
+            // Parked rather than dropped: CompleteResumeAsync judges it against the loaded state.
+            WriteRetryQueue.Enqueue(changes);
+
+            if (Volatile.Read(ref _resumeInProgress) == 0)
+            {
+                // The gate cleared while this batch was being parked, so no completing resume will come
+                // back for it, and an empty later batch means the write handler is not called again.
+                // Judge it here rather than leaving it stranded.
+                await ReconcileRetryQueueAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             return;
         }
 
@@ -606,12 +622,21 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// Re-opens outbound delivery if <paramref name="resumeEpoch"/> is still the newest one, so that a
     /// completing resume cannot clear a gate a later resume has taken over.
     /// </summary>
-    protected void AbortResume(int resumeEpoch)
+    /// <returns>
+    /// <c>true</c> if this call actually cleared the gate, <c>false</c> if a later resume already owns
+    /// it. Callers that only act when they were the ones who cleared it (rather than merely observing
+    /// the gate as clear, which a later resume's own clearing can also produce) should gate on this
+    /// rather than re-reading the flag.
+    /// </returns>
+    protected bool AbortResume(int resumeEpoch)
     {
         if (Volatile.Read(ref _resumeEpoch) == resumeEpoch)
         {
             Volatile.Write(ref _resumeInProgress, 0);
+            return true;
         }
+
+        return false;
     }
 
     /// <summary>
@@ -621,6 +646,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// </summary>
     protected async Task CompleteResumeAsync(int resumeEpoch, CancellationToken cancellationToken)
     {
+        bool clearedByThisResume;
         try
         {
             await ReconcileRetryQueueAsync(cancellationToken).ConfigureAwait(false);
@@ -629,7 +655,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         {
             // Cleared even when the reconcile throws: a stuck gate parks every later write for the
             // life of the source, which is a worse failure than an unreconciled flush.
-            AbortResume(resumeEpoch);
+            clearedByThisResume = AbortResume(resumeEpoch);
         }
 
         // The reconcile's own restores are local commits, so a live processor consuming the same
@@ -638,7 +664,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         // drain that fed the reconcile above, so nothing has judged them yet: a second pass judges them
         // rather than leaving them stuck, now that the gate is clear so their own send reaches the source
         // through the normal connected path instead of being parked again.
-        if (Volatile.Read(ref _resumeInProgress) == 0 && WriteRetryQueue is { IsEmpty: false })
+        //
+        // Gated on this call having actually cleared the gate, not merely on the gate reading clear: a
+        // newer resume can have taken the gate over and already cleared it itself, and running a second
+        // pass here on top of that one's would race it rather than complete this one's own.
+        if (clearedByThisResume && WriteRetryQueue is { IsEmpty: false })
         {
             await ReconcileRetryQueueAsync(cancellationToken).ConfigureAwait(false);
         }

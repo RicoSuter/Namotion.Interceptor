@@ -798,21 +798,29 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            // ConnectAsync or the load can have already succeeded, with the socket open and the receive
+            // loop running, before this cancellation was observed. Cleared here too, not only in the
+            // catch below, so a cancellation that lands on this arm cannot leave the gate held for the
+            // life of that connection the way an unguarded rethrow would.
+            AbortResume(resumeEpoch);
             throw;
         }
         catch (Exception ex)
         {
+            // ConnectAsync can have already succeeded, with the socket open and the receive loop running,
+            // when the load that follows it throws. Nothing else clears this gate for that connection: the
+            // attempt loop does not iterate on a transport reconnect, so leaving it set would park every
+            // write for the life of the connection. The cost is that whatever this epoch had parked is
+            // never reconciled against a loaded state: an unreconciled flush on a later successful write
+            // beats a gate stuck for good. Cleared ahead of the rethrow below, which cancellation
+            // surfacing as a transport exception would otherwise skip past.
+            AbortResume(resumeEpoch);
+
             // Cancellation may surface as a transport exception rather than an OperationCanceledException.
             cancellationToken.ThrowIfCancellationRequested();
             Metrics.ReportError(ex);
 
             _logger.LogError(ex, "Failed to reconnect to WebSocket server");
-
-            // ConnectAsync can have already succeeded, with the socket open and the receive loop running,
-            // when the load that follows it throws. Nothing else clears this gate for that connection: the
-            // attempt loop does not iterate on a transport reconnect, so leaving it set would park every
-            // write for the life of the connection.
-            AbortResume(resumeEpoch);
 
             if (_circuitBreaker is not null && _circuitBreaker.RecordFailure())
             {

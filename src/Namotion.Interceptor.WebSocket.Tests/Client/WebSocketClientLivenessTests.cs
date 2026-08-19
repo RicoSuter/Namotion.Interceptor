@@ -582,6 +582,56 @@ public class WebSocketClientLivenessTests
     }
 
     [Fact]
+    public async Task WhenAWriteHappensAfterAForceKilledReconnectButBeforeLoad_ThenItParksUntilTheLoadAndReconcileComplete()
+    {
+        // Arrange - design document case D4, through the other of the two BeginResume() call sites: the
+        // WasForceKilled catch arm rather than drop detection. Both routes lead into
+        // ReconnectAndResumeAsync and through the same BeforeReconnectInitialStateLoad seam, so a fix
+        // that only guards the drop-detection route would leave this one open.
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = await StartServerAsync(portLease.Port);
+        await using var source = CreateClientSource(portLease.Port, reconnectDelay: TimeSpan.FromMilliseconds(50));
+        await source.StartAsync(CancellationToken.None);
+
+        var clientRoot = (TestRoot)source.RootSubject;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+
+        var loadGate = new ReconnectLoadGate();
+        source.BeforeReconnectInitialStateLoad = loadGate.Wait;
+
+        try
+        {
+            // Act - a force-kill reaches the seam through the WasForceKilled catch arm's own
+            // BeginResume() and the forceReconnect branch's call to ReconnectAndResumeAsync.
+            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
+            await loadGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+
+            clientRoot.Name = "WrittenBeforeLoad";
+
+            // Assert - the write parks rather than reaching the socket, the same as the drop-detection
+            // route.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundRetries.Depth > 0,
+                message: "The write should have parked while the force-killed reconnect had not yet loaded and reconciled.");
+            Assert.Equal("Initial", server.Root!.Name);
+
+            loadGate.Release();
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Root!.Name == "WrittenBeforeLoad",
+                timeout: TimeSpan.FromSeconds(10),
+                message: "The write should reach the server once the load and reconcile complete.");
+        }
+        finally
+        {
+            loadGate.Release();
+            source.BeforeReconnectInitialStateLoad = null;
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task WhenReconnectConnectsButLoadingFails_ThenTheGateIsClearedRatherThanStuck()
     {
         // Arrange - the reconnect connects for real (fresh socket, fresh Welcome) but its own load
