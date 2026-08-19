@@ -260,7 +260,12 @@ internal class SubscriptionManager : IAsyncDisposable
                 catch (Exception e)
                 {
                     // Contained per item: one property whose conversion fails must not discard the other
-                    // values in the same notification. The value stays out of the log, it is process data.
+                    // values in the same notification. Reported rather than rethrown, because the SDK does
+                    // nothing with a callback exception beyond ending the callback, which would discard
+                    // exactly those other values. During shutdown the report is suppressed, so a teardown
+                    // artifact cannot overwrite a genuine sticky error in the source diagnostics.
+                    // The value stays out of the log, it is process data.
+                    ReportErrorIfRunning(e);
                     _logger.LogError(e, "Failed to convert an inbound value of type {ValueType} for '{PropertyName}' (ClientHandle: {ClientHandle}).",
                         item.Value.Value?.GetType(), property.Name, item.ClientHandle);
                     continue;

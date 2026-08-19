@@ -63,27 +63,28 @@ public class SubscriptionManagerDiagnosticsTests
     }
 
     [Fact]
-    public async Task WhenConversionThrows_ThenSourceReportsExactFailureOnceAndSdkCallbackStillThrows()
+    public async Task WhenConversionThrows_ThenTheFailureIsReportedOnceAndTheRestOfTheNotificationStillApplies()
     {
         // Arrange
         var error = new InvalidOperationException("conversion failed");
         var configuration = CreateConfiguration();
-        configuration.ValueConverter = new ThrowingConverter(error);
+        configuration.ValueConverter = new ThrowingValueConverter("throw", error);
         await using var source = CreateClientSource(configuration: configuration);
         var reportedErrors = new ConcurrentQueue<Exception>();
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
         await using var manager = CreateManager(source, propertyWriter, configuration, reportedErrors);
-        var clientHandle = TrackNameProperty(manager, source);
-        var notification = CreateNotification(clientHandle, "value");
+        var failingHandle = TrackProperty(manager, source, nameof(TestRoot.Name));
+        var survivingHandle = TrackProperty(manager, source, nameof(TestRoot.Connected));
 
-        // Act & Assert
-        var thrown = Assert.Throws<InvalidOperationException>(() =>
-            manager.OnFastDataChange(
-                new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions()),
-                notification,
-                []));
+        // Act - the failing item comes first, so an uncontained throw would discard the second one
+        manager.OnFastDataChange(
+            new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions()),
+            CreateNotification((failingHandle, "throw"), (survivingHandle, true)),
+            []);
+        await propertyWriter.LoadInitialStateAndResumeAsync(CancellationToken.None);
 
-        Assert.Same(error, thrown);
+        // Assert
+        Assert.True(((TestRoot)source.RootSubject).Connected);
         var reported = Assert.Single(reportedErrors);
         Assert.Same(error, reported);
         Assert.Same(error, source.Diagnostics.LastError);
@@ -102,11 +103,11 @@ public class SubscriptionManagerDiagnosticsTests
         var reportedErrors = new ConcurrentQueue<Exception>();
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
         await using var manager = CreateManager(source, propertyWriter, configuration, reportedErrors);
-        var clientHandle = TrackNameProperty(manager, source);
+        var clientHandle = TrackProperty(manager, source, nameof(TestRoot.Name));
 
         manager.OnFastDataChange(
             new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions()),
-            CreateNotification(clientHandle, "value"),
+            CreateNotification((clientHandle, "value")),
             []);
 
         // Act
@@ -122,7 +123,7 @@ public class SubscriptionManagerDiagnosticsTests
     }
 
     [Fact]
-    public async Task WhenDisposalWinsDuringConversion_ThenFailureIsRethrownWithoutReporting()
+    public async Task WhenDisposalWinsDuringConversion_ThenTheFailureIsContainedWithoutReporting()
     {
         // Arrange
         using var converter = new GatedThrowingConverter();
@@ -132,21 +133,20 @@ public class SubscriptionManagerDiagnosticsTests
         var reportedErrors = new ConcurrentQueue<Exception>();
         var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
         await using var manager = CreateManager(source, propertyWriter, configuration, reportedErrors);
-        var clientHandle = TrackNameProperty(manager, source);
+        var clientHandle = TrackProperty(manager, source, nameof(TestRoot.Name));
 
         var callback = Task.Run(() => manager.OnFastDataChange(
             new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions()),
-            CreateNotification(clientHandle, "value"),
+            CreateNotification((clientHandle, "value")),
             []));
         await converter.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         // Act
         await manager.DisposeAsync();
         converter.Release();
+        await callback;
 
-        // Assert
-        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => callback);
-        Assert.Same(converter.Error, thrown);
+        // Assert - a teardown artifact must not overwrite a genuine sticky error in the diagnostics
         Assert.Empty(reportedErrors);
         Assert.Null(source.Diagnostics.LastError);
     }
@@ -411,13 +411,13 @@ public class SubscriptionManagerDiagnosticsTests
         return monitoredItem;
     }
 
-    private static uint TrackNameProperty(SubscriptionManager manager, OpcUaSubjectClientSource source)
+    private static uint TrackProperty(SubscriptionManager manager, OpcUaSubjectClientSource source, string propertyName)
     {
         var property = new RegisteredSubject((TestRoot)source.RootSubject)
-            .TryGetProperty(nameof(TestRoot.Name))!;
+            .TryGetProperty(propertyName)!;
         var monitoredItem = new MonitoredItem(NullTelemetryContext.Instance)
         {
-            StartNodeId = new NodeId("Name", 2),
+            StartNodeId = new NodeId(propertyName, 2),
             AttributeId = Opc.Ua.Attributes.Value,
             Handle = property
         };
@@ -427,29 +427,36 @@ public class SubscriptionManagerDiagnosticsTests
         return monitoredItem.ClientHandle;
     }
 
-    private static DataChangeNotification CreateNotification(uint clientHandle, object value) =>
+    private static DataChangeNotification CreateNotification(params (uint ClientHandle, object Value)[] items) =>
         new()
         {
             MonitoredItems =
             [
-                new MonitoredItemNotification
+                .. items.Select(item => new MonitoredItemNotification
                 {
-                    ClientHandle = clientHandle,
+                    ClientHandle = item.ClientHandle,
                     Value = new DataValue
                     {
-                        Value = value,
+                        Value = item.Value,
                         SourceTimestamp = DateTime.UtcNow,
                         StatusCode = StatusCodes.Good
                     }
-                }
+                })
             ],
             DiagnosticInfos = []
         };
 
-    private sealed class ThrowingConverter(Exception error) : OpcUaValueConverter
+    private sealed class ThrowingValueConverter(object valueToThrow, Exception error) : OpcUaValueConverter
     {
-        public override object? ConvertToPropertyValue(object? nodeValue, RegisteredSubjectProperty property) =>
-            throw error;
+        public override object? ConvertToPropertyValue(object? nodeValue, RegisteredSubjectProperty property)
+        {
+            if (Equals(nodeValue, valueToThrow))
+            {
+                throw error;
+            }
+
+            return base.ConvertToPropertyValue(nodeValue, property);
+        }
     }
 
     private sealed class WrongTypeConverter : OpcUaValueConverter
