@@ -15,9 +15,10 @@ public static class SubjectSourceExtensions
     /// Writes changes to the source in batches, respecting the source's maximum batch size.
     /// Returns a <see cref="WriteResult"/> containing which changes failed. A batch that names the changes
     /// it refused does not stop the ones behind it: they are attempted too and the failures are reported
-    /// together with the first error. A batch that fails without naming any change stops the flush, and it
-    /// and the remainder are reported failed. Never throws for write failures, errors are reported in the
-    /// result.
+    /// together, with every failing batch's error carried and aggregated when more than one batch fails,
+    /// so a later failure cannot be masked by an earlier one. A batch that fails without naming any change
+    /// stops the flush, and it and the remainder are reported failed. Never throws for write failures,
+    /// errors are reported in the result.
     /// <para>
     /// Batches are only independent of each other because <paramref name="changes"/> carries at most one
     /// change per property. With two, a failure of the batch holding the older one while the batch holding
@@ -76,7 +77,7 @@ public static class SubjectSourceExtensions
     {
         // Allocated only once a batch has actually failed, so an all-success flush allocates nothing.
         List<SubjectPropertyChange>? failedChanges = null;
-        Exception? firstError = null;
+        List<Exception>? errors = null;
         var batchStart = 0;
         try
         {
@@ -105,7 +106,10 @@ public static class SubjectSourceExtensions
                     continue;
                 }
 
-                firstError ??= batchResult.Error;
+                // Every failing batch's error is kept: batches fail independently, and reporting only
+                // the first would let a node refusal in an early batch mask the disconnect a later
+                // batch died of, which is the one error an operator can act on.
+                (errors ??= []).Add(batchResult.Error);
                 failedChanges ??= [];
 
                 if (batchResult.FailedChanges.IsEmpty)
@@ -132,9 +136,9 @@ public static class SubjectSourceExtensions
                 }
             }
 
-            return firstError is null
+            return errors is null
                 ? WriteResult.Success
-                : CreateFailure(failedChanges!, firstError);
+                : CreateFailure(failedChanges!, CombineErrors(errors));
         }
         catch (Exception ex)
         {
@@ -147,11 +151,19 @@ public static class SubjectSourceExtensions
                 return WriteResult.Failure(unconfirmed, ex);
             }
 
-            // Consumers log only the reported error, so reporting the first one alone would drop the throw
-            // with its stack. firstError is set together with failedChanges, so it is non-null.
+            // Consumers log only the reported error, so reporting the recorded ones alone would drop the
+            // throw with its stack. errors is set together with failedChanges, so it is non-null.
             failedChanges.AddRange(unconfirmed.Span);
-            return CreateFailure(failedChanges, new AggregateException(firstError!, ex));
+            errors!.Add(ex);
+            return CreateFailure(failedChanges, CombineErrors(errors));
         }
+    }
+
+    private static Exception CombineErrors(List<Exception> errors)
+    {
+        // An AggregateException renders every inner exception with its stack, so nothing is lost when
+        // batches fail differently; a lone error is reported as itself to keep the common case readable.
+        return errors.Count == 1 ? errors[0] : new AggregateException(errors);
     }
 
     private static WriteResult CreateFailure(List<SubjectPropertyChange> failedChanges, Exception error)

@@ -626,6 +626,48 @@ public class SubjectSourceExtensionsTests
     }
 
     [Fact]
+    public async Task WhenALaterBatchFailsDifferentlyFromAnEarlierRefusal_ThenBothErrorsAreReported()
+    {
+        // Arrange: 6 changes, batch size 2. The first batch answers an enumerated refusal for one
+        // node, the second is written, the third dies unenumerated the way a dropped session does.
+        // Reporting only the first error would blame a node refusal for the condemned tail and hide
+        // the disconnect, which is the error an operator can act on.
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(2);
+
+        var changes = CreateChanges(6);
+        var refusedChange = changes.Span[0];
+
+        var callCount = 0;
+        sourceMock
+            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+            {
+                callCount++;
+                return new ValueTask<WriteResult>(callCount switch
+                {
+                    1 => WriteResult.Failure(new[] { refusedChange }, new InvalidOperationException("Item 0 refused")),
+                    3 => WriteResult.CallFailed(new InvalidOperationException("Session died")),
+                    _ => WriteResult.Success
+                });
+            });
+
+        // Act
+        var result = await sourceMock.Object.WriteChangesInBatchesAsync(changes, CancellationToken.None);
+
+        // Assert: both errors are carried, in batch order, and the failed changes are the recorded
+        // refusal plus the unanswered batch and the unattempted remainder, not the written ones.
+        Assert.Equal(3, callCount);
+        var aggregate = Assert.IsType<AggregateException>(result.Error);
+        Assert.Equal(
+            new[] { "Item 0 refused", "Session died" },
+            aggregate.InnerExceptions.Select(inner => inner.Message));
+        Assert.Equal(
+            new[] { "Property0", "Property4", "Property5" },
+            result.FailedChanges.Select(change => change.Property.Name));
+    }
+
+    [Fact]
     public async Task WhenABatchFailsWhileCancelled_ThenTheRemainingBatchesAreNotAttempted()
     {
         // Arrange: 6 changes, batch size 2, and a source that ignores the token, so only the loop can
