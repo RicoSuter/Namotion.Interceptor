@@ -5,9 +5,9 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// <summary>
 /// Classifies OPC UA <see cref="StatusCode"/>s for the two questions callers act on: the
 /// subscription side (setup and the health monitor) asks whether a code is transient, and the write
-/// path asks whether a Write is refused for the rest of the session. Every callsite reads the list
-/// for the question it is asking, so a code is classified the same way wherever the same question
-/// is asked.
+/// path asks whether re-sending an identical Write on this session is pointless. Every callsite
+/// reads the list for the question it is asking, so a code is classified the same way wherever the
+/// same question is asked.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -80,8 +80,10 @@ internal static class OpcUaStatusCodeClassifier
     }
 
     /// <summary>
-    /// True iff a Write answered <paramref name="statusCode"/> is refused for the rest of this session,
-    /// so the change is worth holding back rather than re-sending until the client reconnects.
+    /// True iff re-sending a Write answered <paramref name="statusCode"/> unchanged cannot succeed, so
+    /// the change is worth holding back until the client reconnects. Not a promise the refusal lasts
+    /// the session: the access-scoped codes are the server's to flip mid-session, and a grant is
+    /// observed through the next write to the property, which succeeds and supersedes the held one.
     /// </summary>
     public static bool IsRefusedUntilReconnect(StatusCode statusCode)
     {

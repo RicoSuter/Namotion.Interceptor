@@ -199,8 +199,11 @@ internal sealed class OutboundWriter
                 failedChanges.Add(change);
 
                 // A separate question from the subscription path's transient classification, and not
-                // its complement: a code that path calls transient because a server can flip it
-                // mid-session is still one a Write is answered the same way for the whole session.
+                // its complement: that path asks whether a code can heal in-session, this one asks
+                // whether re-sending the identical Write can help. It cannot, but the access-scoped
+                // codes are still the server's to flip mid-session; the next write to the property
+                // observes a grant, succeeds and discards what is held, which is what keeps the hold
+                // from outliving it.
                 if (OpcUaStatusCodeClassifier.IsRefusedUntilReconnect(status))
                 {
                     (refusedChanges ??= []).Add(change);

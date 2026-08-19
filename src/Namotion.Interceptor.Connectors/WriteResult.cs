@@ -36,8 +36,10 @@ public readonly struct WriteResult
     /// <para>
     /// Re-sending these on the current connection cannot succeed and stalls everything behind them, so
     /// the retry queue holds them back and returns to them once the connection is replaced. Naming a
-    /// change here that the source would in fact have taken costs one flush window after the next
-    /// reconnect, so name one only when the refusal is bound to the connection rather than to the value.
+    /// change here that the source would in fact have taken withholds it until the next reconnect,
+    /// which nothing schedules and which can be days away; only a newer successful write to the same
+    /// property ends the hold earlier, by superseding it. Name one only when the refusal is bound to
+    /// the connection rather than to the value.
     /// </para>
     /// </summary>
     public ImmutableArray<SubjectPropertyChange> RefusedUntilReconnect { get; }
