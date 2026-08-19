@@ -111,9 +111,10 @@ internal sealed class OutboundWriter
         try
         {
             var result = ProcessWriteResults(writeResponse.Results, changes);
-            if (result.IsFullySuccessful || result.IsPartialFailure)
+            var successCount = writeValues.Count - result.FailedChanges.Length;
+            if (successCount > 0)
             {
-                _outgoingThroughput.Add(writeValues.Count - (result.FailedChanges.IsDefault ? 0 : result.FailedChanges.Length));
+                _outgoingThroughput.Add(successCount);
                 NotifyPropertiesWritten(changes, writeResponse.Results);
             }
 
@@ -180,9 +181,7 @@ internal sealed class OutboundWriter
             successCount, transientCount, permanentCount, results.Count);
 
         var error = new OpcUaWriteException(transientCount, permanentCount, results.Count);
-        return successCount > 0
-            ? WriteResult.PartialFailure(failedChanges.ToArray(), error)
-            : WriteResult.Failure(failedChanges.ToArray(), error);
+        return WriteResult.Failure(failedChanges.ToArray(), error);
     }
 
     private bool TryGetWritableNodeId(SubjectPropertyChange change, out NodeId nodeId, out RegisteredSubjectProperty registeredProperty)

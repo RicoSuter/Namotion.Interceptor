@@ -210,7 +210,7 @@ public abstract class TransactionTestBase
                     return new ValueTask<WriteResult>(WriteResult.Success);
                 }
                 return new ValueTask<WriteResult>(
-                    WriteResult.PartialFailure(failed.AsMemory(), new InvalidOperationException("Partial failure")));
+                    WriteResult.Failure(failed.AsMemory(), new InvalidOperationException("Partial failure")));
             });
         return mock;
     }

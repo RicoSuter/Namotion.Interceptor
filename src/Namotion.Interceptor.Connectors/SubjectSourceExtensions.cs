@@ -134,7 +134,7 @@ public static class SubjectSourceExtensions
 
             return firstError is null
                 ? WriteResult.Success
-                : CreatePartialFailure(failedChanges!, firstError);
+                : CreateFailure(failedChanges!, firstError);
         }
         catch (Exception ex)
         {
@@ -144,22 +144,20 @@ public static class SubjectSourceExtensions
             var unconfirmed = changes.Slice(batchStart);
             if (failedChanges is null)
             {
-                return batchStart == 0
-                    ? WriteResult.Failure(changes, ex)
-                    : WriteResult.PartialFailure(unconfirmed, ex);
+                return WriteResult.Failure(unconfirmed, ex);
             }
 
             // Consumers log only the reported error, so reporting the first one alone would drop the throw
             // with its stack. firstError is set together with failedChanges, so it is non-null.
             failedChanges.AddRange(unconfirmed.Span);
-            return CreatePartialFailure(failedChanges, new AggregateException(firstError!, ex));
+            return CreateFailure(failedChanges, new AggregateException(firstError!, ex));
         }
     }
 
-    private static WriteResult CreatePartialFailure(List<SubjectPropertyChange> failedChanges, Exception error)
+    private static WriteResult CreateFailure(List<SubjectPropertyChange> failedChanges, Exception error)
     {
         // The array never escapes, so the ImmutableArray takes ownership without a second copy.
-        return WriteResult.PartialFailure(
+        return WriteResult.Failure(
             ImmutableCollectionsMarshal.AsImmutableArray(failedChanges.ToArray()), error);
     }
 

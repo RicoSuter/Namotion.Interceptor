@@ -189,7 +189,7 @@ public class SubjectSourceExtensionsTests
             .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
             {
                 // First batch returns partial failure (1 item failed)
-                return new ValueTask<WriteResult>(WriteResult.PartialFailure(
+                return new ValueTask<WriteResult>(WriteResult.Failure(
                     new[] { failedChange },
                     new Exception("Partial failure")));
             });
@@ -352,7 +352,7 @@ public class SubjectSourceExtensionsTests
         // (outcome unknown) plus the unprocessed remainder.
         Assert.NotNull(result.Error);
         Assert.Equal("Batch 2 boom", result.Error!.Message);
-        Assert.True(result.IsPartialFailure);
+        Assert.False(result.IsFullySuccessful);
         Assert.Equal(3, result.FailedChanges.Length);
         var failedNames = result.FailedChanges.Select(change => change.Property.Name).ToArray();
         Assert.DoesNotContain("Property0", failedNames);
@@ -380,7 +380,7 @@ public class SubjectSourceExtensionsTests
             {
                 callCount++;
                 return new ValueTask<WriteResult>(callCount == 1
-                    ? WriteResult.PartialFailure(new[] { failedChange }, new InvalidOperationException("Item 0 failed"))
+                    ? WriteResult.Failure(new[] { failedChange }, new InvalidOperationException("Item 0 failed"))
                     : WriteResult.Success);
             });
 
@@ -593,7 +593,7 @@ public class SubjectSourceExtensionsTests
                 callCount++;
                 if (callCount == 1)
                 {
-                    return new ValueTask<WriteResult>(WriteResult.PartialFailure(
+                    return new ValueTask<WriteResult>(WriteResult.Failure(
                         new[] { refusedChange }, new InvalidOperationException("Item 0 refused")));
                 }
 

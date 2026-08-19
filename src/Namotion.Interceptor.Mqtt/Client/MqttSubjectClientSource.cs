@@ -520,9 +520,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                     {
                         failedChanges[i] = changes.Span[changeIndices[failedStartIndex + i]];
                     }
-                    return failedStartIndex > 0
-                        ? WriteResult.PartialFailure(failedChanges, publishException)
-                        : WriteResult.Failure(failedChanges, publishException);
+                    return WriteResult.Failure(failedChanges, publishException);
                 }
 
                 return WriteResult.Success;
