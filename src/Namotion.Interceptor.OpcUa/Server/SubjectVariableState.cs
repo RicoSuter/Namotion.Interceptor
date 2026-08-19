@@ -193,9 +193,12 @@ internal sealed class SubjectVariableState : BaseDataVariableState
 
     /// <summary>
     /// Copies an array the index range merge is about to write into: the outer array, plus the inner
-    /// arrays of a byte string array, because the nested byte string merge rewrites those in place.
-    /// <c>Opc.Ua.Utils.Clone</c> covers both but recurses through <c>Array.GetValue</c>/<c>SetValue</c>,
-    /// boxing every element on the way.
+    /// arrays of a byte string array, because the nested byte string merge rewrites those in place, and
+    /// it does so at any rank of the outer array, not just the one-dimensional shape.
+    /// <c>Opc.Ua.Utils.Clone</c> covers all of this but recurses through
+    /// <c>Array.GetValue</c>/<c>SetValue</c>, boxing every element on the way, so the common
+    /// one-dimensional shape keeps a typed path and only a multi-dimensional one pays for the
+    /// generic walk.
     /// </summary>
     private static Array CopyForMerge(Array original)
     {
@@ -211,7 +214,38 @@ internal sealed class SubjectVariableState : BaseDataVariableState
                 }
             }
         }
+        else if (copy.GetType().GetElementType() == typeof(byte[]))
+        {
+            CloneInnerByteStrings(copy);
+        }
 
         return copy;
+    }
+
+    /// <summary>
+    /// Clones every inner byte string of a multi-dimensional byte string array in place, walking the
+    /// dimensions the way <c>Array.Clone</c> laid them out. Zero-based indices are enough: neither a
+    /// C# array literal nor the SDK's own <c>Matrix.ToArray</c> produces a lower bound.
+    /// </summary>
+    private static void CloneInnerByteStrings(Array copy)
+    {
+        var indices = new int[copy.Rank];
+        for (var remaining = copy.Length; remaining > 0; remaining--)
+        {
+            if (copy.GetValue(indices) is byte[] byteString)
+            {
+                copy.SetValue(byteString.Clone(), indices);
+            }
+
+            for (var dimension = copy.Rank - 1; dimension >= 0; dimension--)
+            {
+                if (++indices[dimension] < copy.GetLength(dimension))
+                {
+                    break;
+                }
+
+                indices[dimension] = 0;
+            }
+        }
     }
 }
