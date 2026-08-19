@@ -445,7 +445,7 @@ public class WriteRetryQueueTests
     }
 
     [Fact]
-    public async Task WhenChangeCarriesNoRevision_ThenItIsNotCollapsedAway()
+    public async Task WhenTwoChangesForOnePropertyAreQueued_ThenOneWriteCarriesTheHigherRevisionValue()
     {
         // Arrange
         var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
@@ -457,90 +457,17 @@ public class WriteRetryQueueTests
         // Act
         queue.Enqueue(new[]
         {
-            CreateChange(property, 1, revision: 0),
+            CreateChange(property, 1, revision: 3),
             CreateChange(property, 2, revision: 7)
         });
         await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
 
-        // Assert - a change without a revision orders against nothing, so neither may be merged away, and
-        // the pair that is left travels in two rounds
-        Assert.Equal(2, writes.Count);
-
-        var older = Assert.Single(writes[0]);
-        Assert.Equal(0, older.Revision);
-        Assert.Equal(1, older.GetNewValue<int>());
-
-        var newer = Assert.Single(writes[1]);
-        Assert.Equal(7, newer.Revision);
-        Assert.Equal(2, newer.GetNewValue<int>());
-        Assert.True(queue.IsEmpty);
-    }
-
-    [Fact]
-    public async Task WhenTwoChangesForOnePropertyCannotBeMerged_ThenTheyNeverTravelInOneWrite()
-    {
-        // Arrange - a write handed to the source may be split into batches that fail independently, so a
-        // pair for one property in one write could have the older requeued alone while the newer is
-        // written, leaving the source on the older value for good
-        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
-        var writes = new List<SubjectPropertyChange[]>();
-        var sourceMock = CreateRecordingSource(writes);
-
-        var property = CreateProperty("Value");
-        var other = CreateProperty("Other");
-
-        // Act
-        queue.Enqueue(new[]
-        {
-            CreateChange(property, 1, revision: 0),
-            CreateChange(other, 10, revision: 1),
-            CreateChange(property, 2, revision: 2)
-        });
-        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
-
-        // Assert - no write carries a property twice, and the cut costs only a second round
-        Assert.All(writes, write => Assert.Equal(
-            write.Length,
-            write.Select(change => change.Property.Name).Distinct().Count()));
-
-        Assert.Equal(2, writes.Count);
-        Assert.Equal(new[] { "Value", "Other" }, writes[0].Select(change => change.Property.Name));
-        Assert.Equal(1, writes[0][0].GetNewValue<int>());
-        Assert.Equal(2, Assert.Single(writes[1]).GetNewValue<int>());
-        Assert.True(queue.IsEmpty);
-    }
-
-    [Fact]
-    public async Task WhenPropertyIsSeenAgainAfterAnUnmergeablePair_ThenItRanksAgainstTheLatestSurvivor()
-    {
-        // Arrange
-        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
-        var writes = new List<SubjectPropertyChange[]>();
-        var sourceMock = CreateRecordingSource(writes);
-
-        var property = CreateProperty("Value");
-
-        // Act - the first change cannot merge with the second, the second and third can
-        queue.Enqueue(new[]
-        {
-            CreateChange(property, 1, revision: 0),
-            CreateChange(property, 2, revision: 7),
-            CreateChange(property, 3, revision: 9)
-        });
-        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
-
-        // Assert - the third ranks against the second rather than against the change neither could merge
-        // with, so it costs one extra round and not one round per change
-        Assert.Equal(2, writes.Count);
-
-        var unmergeable = Assert.Single(writes[0]);
-        Assert.Equal(0, unmergeable.Revision);
-        Assert.Equal(1, unmergeable.GetNewValue<int>());
-
-        var survivor = Assert.Single(writes[1]);
-        Assert.Equal(9, survivor.Revision);
-        Assert.Equal(1, survivor.GetOldValue<int>()); // old value of the older merged commit
-        Assert.Equal(3, survivor.GetNewValue<int>());
+        // Assert - the pair collapses to one write spanning both commits, ranked by revision
+        var write = Assert.Single(writes);
+        var survivor = Assert.Single(write);
+        Assert.Equal(7, survivor.Revision);
+        Assert.Equal(0, survivor.GetOldValue<int>()); // old value of the older commit
+        Assert.Equal(2, survivor.GetNewValue<int>());
         Assert.True(queue.IsEmpty);
     }
 

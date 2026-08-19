@@ -158,7 +158,6 @@ internal sealed class WriteRetryQueue : IDisposable
                     }
                     _pendingWrites.RemoveRange(0, dequeuedCount);
 
-                    // The collapse can push a tail back onto the queue, so the count is published after it.
                     count = CollapsePerProperty(dequeuedCount);
                     Volatile.Write(ref _count, _pendingWrites.Count);
                 }
@@ -224,20 +223,17 @@ internal sealed class WriteRetryQueue : IDisposable
 
     /// <summary>
     /// Compacts the dequeued batch in <see cref="_scratchBuffer"/> to one change per property, in place,
-    /// and returns the compacted length. Each survivor stays at its first occurrence's position. Where two
-    /// changes for one property cannot be merged, the batch is cut before the second one and the rest is
-    /// pushed back to the head of the queue, so the flush loop ships the pair in separate rounds.
+    /// and returns the compacted length. Each survivor stays at its first occurrence's position.
     /// </summary>
     /// <remarks>
     /// Collapsing at dequeue rather than on the requeued span is what bounds the queue: a failed flush
     /// requeues its batch and the caller then appends the same tick's changes, so only the dequeue sees both.
     /// <para>
-    /// Two changes merge only when both carry a revision. A change built outside a terminal write carries
-    /// none, orders against nothing, and passes the delivery filter's supersession check unconditionally,
-    /// so merging one away could let a later reconcile restore an older parked write over a newer local
-    /// one. This collapse therefore never merges such a pair, it splits the batch instead. The parking
-    /// collapse in <c>SubjectSourceBase</c> answers the same problem the other way, by dropping the
-    /// revision from the merged survivor, so revisionless changes do reach this queue.
+    /// Two changes for one property always merge, ranked by revision. A change carrying no revision cannot
+    /// reach this queue: every change published to a source comes from a write terminal, which stamps one.
+    /// The collapses that manufacture a revisionless survivor do so only from a revisionless input, so none
+    /// can produce one here either. A revisionless change arriving anyway means a write interceptor or a
+    /// source is not honouring its contract, which the queue reports on entry rather than defending against.
     /// </para>
     /// </remarks>
     private int CollapsePerProperty(int count)
@@ -260,23 +256,10 @@ internal sealed class WriteRetryQueue : IDisposable
             if (propertyAlreadySeen)
             {
                 ref var survivor = ref _scratchBuffer[survivorIndex];
-                if (survivor.Revision == 0 || change.Revision == 0)
-                {
-                    // Unmergeable, and one write must never carry a property twice: split across two of
-                    // the source's batches, a failure of the batch holding the older change requeues it
-                    // alone and settles the source on it for good. The queue's lock is the caller's, and
-                    // seeing this property again means an earlier change was kept, so the next round
-                    // still ships something.
-                    _pendingWrites.InsertRange(0, _scratchBuffer.AsSpan(i, count - i));
-                    break;
-                }
 
-                // Queue order is chronological, but changes are enqueued after their commit and
-                // outside the subject lock, so the revision decides which new value is the current
-                // state. Both changes are writes to one property and therefore comparable.
-                survivor = change.Revision > survivor.Revision
-                    ? survivor.MergeWithNewer(change)
-                    : change.MergeWithNewer(survivor);
+                // Queue order is chronological, but changes are enqueued after their commit and outside
+                // the subject lock, so the revision decides which new value is the current state.
+                survivor = survivor.MergeByRevision(change);
                 continue;
             }
 
@@ -295,7 +278,7 @@ internal sealed class WriteRetryQueue : IDisposable
 
         if (kept < count)
         {
-            // The slots past the compacted prefix still reference the merged and pushed-back changes'
+            // The slots past the compacted prefix still reference the merged-away changes'
             // subjects and boxed values, and the flush only clears the prefix it hands to the source.
             Array.Clear(_scratchBuffer, kept, count - kept);
         }
