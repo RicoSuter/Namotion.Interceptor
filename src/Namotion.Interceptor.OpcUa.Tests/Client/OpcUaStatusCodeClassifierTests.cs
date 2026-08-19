@@ -104,13 +104,18 @@ public class OpcUaStatusCodeClassifierTests
     [InlineData(StatusCodes.BadAttributeIdInvalid)]
     [InlineData(StatusCodes.BadTypeMismatch)]
     [InlineData(StatusCodes.BadWriteNotSupported)]
-    // State-dependent codes: what decides them is fixed for the session, and a reconnect can bring a
-    // different address space, different role permissions and a different AccessLevel.
+    // State-dependent codes: decided by address-space membership, role permissions and AccessLevel,
+    // which a server keeps for a session but can also change mid-session; a reconnect re-attempts
+    // everything either way.
     [InlineData(StatusCodes.BadNodeIdUnknown)]
     [InlineData(StatusCodes.BadUserAccessDenied)]
     [InlineData(StatusCodes.BadNotWritable)]
+    // Request-decided codes: re-sending the identical change cannot change the answer.
     [InlineData(StatusCodes.BadNodeIdInvalid)]
     [InlineData(StatusCodes.BadIndexRangeInvalid)]
+    // Channel-bound: answered per node from AccessRestrictions against the channel's security mode,
+    // which cannot change without the reconnect that ends the hold.
+    [InlineData(StatusCodes.BadSecurityModeInsufficient)]
     public void WhenAWriteIsRefusedForTheSession_ThenIsRefusedUntilReconnectReturnsTrue(uint statusCode)
     {
         // Arrange

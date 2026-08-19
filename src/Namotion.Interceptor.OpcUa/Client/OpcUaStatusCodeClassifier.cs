@@ -46,11 +46,14 @@ internal static class OpcUaStatusCodeClassifier
         StatusCodes.BadWriteNotSupported
     ];
 
-    // Three groups. Schema and type codes, permanent within a session by spec. Three state-dependent ones
-    // a server decides once per session: address-space membership, role permissions and AccessLevel. And
-    // two the request itself decides, BadNodeIdInvalid and BadIndexRangeInvalid, where re-sending the
-    // identical change cannot change the answer. Every code here is a legal per-node Write result; a code
-    // a server can only raise for the request as a whole never reaches this classification.
+    // Four groups. Schema and type codes, permanent within a session by spec. Three state-dependent ones
+    // a server decides by state it keeps for a session: address-space membership, role permissions and
+    // AccessLevel. Two the request itself decides, BadNodeIdInvalid and BadIndexRangeInvalid, where
+    // re-sending the identical change cannot change the answer. And one bound to the SecureChannel,
+    // BadSecurityModeInsufficient, which the reference stack answers per node on a Write, from the
+    // node's AccessRestrictions checked against the channel's MessageSecurityMode; the security mode
+    // cannot change without the reconnect that ends the hold anyway. Every code here is a legal
+    // per-node Write result.
     private static readonly HashSet<uint> WriteRefusalCodes =
     [
         StatusCodes.BadAttributeIdInvalid,
@@ -60,7 +63,8 @@ internal static class OpcUaStatusCodeClassifier
         StatusCodes.BadUserAccessDenied,
         StatusCodes.BadNotWritable,
         StatusCodes.BadNodeIdInvalid,
-        StatusCodes.BadIndexRangeInvalid
+        StatusCodes.BadIndexRangeInvalid,
+        StatusCodes.BadSecurityModeInsufficient
     ];
 
     /// <summary>
