@@ -28,6 +28,10 @@ public sealed class TestSubjectSource : SubjectSourceBase
     /// <summary>Exposes the protected ReportConnectionLost seam for tests.</summary>
     public void SimulateConnectionLost() => ReportConnectionLost();
 
+    public void BeginResumeForTest() => BeginResume();
+
+    public Task CompleteResumeForTestAsync(CancellationToken cancellationToken) => CompleteResumeAsync(cancellationToken);
+
     public int WriteBatchSizeOverride { get; init; }
 
     public override int WriteBatchSize => WriteBatchSizeOverride;

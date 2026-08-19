@@ -94,6 +94,107 @@ public class SubjectSourceRetryQueueTests
         }
     }
 
+    [Fact]
+    public async Task WhenResumeIsInProgress_ThenOutboundWritesAreParkedInsteadOfSent()
+    {
+        // Arrange: a live pump whose writes all succeed, so anything not sent was parked by the gate.
+        var (source, gate, receivedWrites) = await StartPumpWithParkedFirstNameWriteAsync();
+        try
+        {
+            // Assert
+            lock (gate)
+            {
+                Assert.DoesNotContain("FirstName=Parked", receivedWrites);
+            }
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenResumeCompletes_ThenTheParkedWriteReachesTheSource()
+    {
+        // Arrange: same as above, up to and including the parked FirstName write.
+        var (source, gate, receivedWrites) = await StartPumpWithParkedFirstNameWriteAsync();
+        try
+        {
+            // Act
+            await source.CompleteResumeForTestAsync(CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                lock (gate)
+                {
+                    return receivedWrites.Contains("FirstName=Parked");
+                }
+            }, message: "The parked write was not sent after the resume completed.");
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Starts a live pump, waits until it is processing changes, then puts it into a resume and
+    /// captures a FirstName write while the gate is set, so the write is parked rather than sent.
+    /// </summary>
+    private static async Task<(TestSubjectSource Source, object Gate, List<string> ReceivedWrites)>
+        StartPumpWithParkedFirstNameWriteAsync()
+    {
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+
+        var gate = new object();
+        var receivedWrites = new List<string>();
+
+        var source = new TestSubjectSource(person, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(8))
+        {
+            WriteChangesOverride = (changes, _) =>
+            {
+                lock (gate)
+                {
+                    foreach (var change in changes.ToArray())
+                    {
+                        receivedWrites.Add($"{change.Property.Name}={change.GetNewValue<object?>()}");
+                    }
+                }
+
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source);
+
+        await source.StartAsync(CancellationToken.None);
+
+        var probeValue = 0;
+        await AsyncTestHelpers.WaitUntilAsync(() =>
+        {
+            person.LastName = "Probe" + probeValue++;
+            return CountWrites(gate, receivedWrites, nameof(Person.LastName)) >= 1;
+        }, message: "Pump did not start processing changes.");
+
+        // Act
+        source.BeginResumeForTest();
+        person.FirstName = "Parked";
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => source.Diagnostics.OutboundRetries.Depth > 0,
+            message: "The write was not parked while the resume gate was set.");
+
+        return (source, gate, receivedWrites);
+    }
+
     private static int CountWrites(object gate, List<string> writes, string propertyName)
     {
         lock (gate)

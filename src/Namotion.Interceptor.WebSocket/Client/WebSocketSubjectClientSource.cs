@@ -708,6 +708,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
                     _logger.LogWarning("WebSocket connection lost. Attempting reconnection in {Delay}...", reconnectDelay);
 
+                    BeginResume();
                     _propertyWriter?.StartBuffering();
 
                     // Circuit breaker: pause reconnection if too many consecutive failures
@@ -737,6 +738,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                 {
                     _logger.LogWarning("WebSocket client force-killed. Restarting...");
                     _webSocket?.Abort();
+                    BeginResume();
                     _propertyWriter?.StartBuffering();
                     forceReconnect = true;
                 }
@@ -777,6 +779,10 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                 await _propertyWriter.LoadInitialStateAndResumeAsync(cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
             }
+
+            // After the load, never before: the parked writes are judged against the state the server
+            // just sent, so a write the server never received is re-sent and one it has moved past is not.
+            await CompleteResumeAsync(cancellationToken).ConfigureAwait(false);
 
             return _configuration.ReconnectDelay;
         }

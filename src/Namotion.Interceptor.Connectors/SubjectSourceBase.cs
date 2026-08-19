@@ -48,6 +48,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     private ImmutableArray<SourceMonitor> _registeredMonitors = [];
 
+    // Set while a (re)connect is replacing the peer's view of the model. The retry queue must not be
+    // flushed in that window: the peer's state has not landed yet, so a parked write would be sent
+    // against a view the reconcile has not judged it against, and an older value can win over a newer one.
+    private int _resumeInProgress;
+
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
     protected SubjectSourceBase(
@@ -269,6 +274,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     // This also caps memory across repeated failed attempts.
                     DrainOwnedWritesToRetryQueue(subscription);
 
+                    // Also clears a gate left set by a reconnect that failed before completing.
+                    BeginResume();
                     _propertyWriter.StartBuffering();
                     await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
 
@@ -298,7 +305,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
                     // Single reconcile point: send (model already holds it), restore (the load moved the
                     // model off it), drop (a later local write supersedes it).
-                    await ReconcileRetryQueueAsync(stoppingToken).ConfigureAwait(false);
+                    await CompleteResumeAsync(stoppingToken).ConfigureAwait(false);
 
                     // Connected phase reuses the source-lifetime subscription and does not own it.
                     using var processor = new ChangeQueueProcessor(
@@ -381,6 +388,13 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                 Metrics.OutboundRetries.AddDropped(changes.Length);
                 _logger.LogError(e, "Failed to write changes to source.");
             }
+            return;
+        }
+
+        if (Volatile.Read(ref _resumeInProgress) == 1)
+        {
+            // Parked rather than dropped: CompleteResumeAsync judges it against the loaded state.
+            WriteRetryQueue.Enqueue(changes);
             return;
         }
 
@@ -550,6 +564,40 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
 
         return collapsed;
+    }
+
+    /// <summary>
+    /// Suspends outbound delivery until <see cref="CompleteResumeAsync"/> runs, so that writes captured
+    /// while the connection is being replaced are parked rather than sent.
+    /// </summary>
+    /// <remarks>
+    /// Call before the new connection can accept a write, and pair every call with
+    /// <see cref="CompleteResumeAsync"/>. A connector whose reconnect happens inside its own monitor
+    /// loop needs this: the attempt loop that normally drains and reconciles does not iterate on a
+    /// transport reconnect, so without the pair the parked writes are replayed against the peer's new
+    /// state without ever being judged against it.
+    /// </remarks>
+    protected void BeginResume()
+    {
+        Volatile.Write(ref _resumeInProgress, 1);
+    }
+
+    /// <summary>
+    /// Reconciles the parked writes against the state that was just loaded, then re-opens outbound
+    /// delivery. Runs after the initial-state load, never before it.
+    /// </summary>
+    protected async Task CompleteResumeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ReconcileRetryQueueAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Cleared even when the reconcile throws: a stuck gate parks every later write for the
+            // life of the source, which is a worse failure than an unreconciled flush.
+            Volatile.Write(ref _resumeInProgress, 0);
+        }
     }
 
     internal async Task ReconcileRetryQueueAsync(CancellationToken cancellationToken)

@@ -235,6 +235,40 @@ public class WebSocketServerClientTests
     }
 
     [Fact]
+    public async Task WhenAWriteIsParkedWhileTheServerIsDown_ThenTheReconnectDeliversIt()
+    {
+        // Arrange
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketTestServer<TestRoot>(_output);
+        await using var client = new WebSocketTestClient<TestRoot>(_output);
+
+        await server.StartAsync(
+            context => new TestRoot(context),
+            (_, root) => root.Name = "Initial",
+            port: portLease.Port);
+        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Name == "Initial",
+            message: "Initial sync should complete");
+
+        // Act: the client writes while the server is down, so the write parks. The server does not write,
+        // so its value has not moved on and there is exactly one writer for this property.
+        await server.StopAsync();
+        client.Root!.Name = "WrittenWhileDown";
+        await server.RestartAsync();
+
+        // Assert: the reconcile restores the parked write over the value the load delivered and the
+        // connected phase sends it, so the write survives on both sides. The client half matters as much
+        // as the server half: the server suppresses the echo of a write it received from this connection,
+        // so without the local restore the client would sit on the loaded value forever.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Name == "WrittenWhileDown" && server.Root!.Name == "WrittenWhileDown",
+            timeout: TimeSpan.FromSeconds(30),
+            message: "The write parked during the outage should survive the reconnect on both sides");
+    }
+
+    [Fact]
     public async Task ServerRestart_WithCollectionItems_AllPropertiesResync()
     {
         // Arrange
