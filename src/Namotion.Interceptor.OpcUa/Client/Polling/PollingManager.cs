@@ -409,6 +409,10 @@ internal sealed class PollingManager : IAsyncDisposable
             }
             catch (Exception e)
             {
+                // Reported like every other contained inbound failure, so the recurring conversion
+                // failure stays visible on the source diagnostics instead of only in the log.
+                ReportErrorIfRunning(e);
+
                 // The cache stays behind on purpose: advancing it would make the next poll see no change
                 // and lose this value permanently, so a converter that starts working could not recover
                 // it. That is also why the same value is retried at the polling rate, which is why only
