@@ -315,6 +315,40 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task WhenTheSessionIsDownWhenReadsFallDue_ThenTheDrainedReadsAreCountedAsFailed()
+    {
+        // Arrange
+        var session = new Mock<ISession>();
+        session.SetupGet(value => value.Connected).Returns(false);
+        var metrics = new ReadAfterWriteMetrics();
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(250)),
+            metrics,
+            reportError: static _ => { },
+            NullLogger.Instance);
+
+        RegisterAndSchedule(manager, new NodeId("FirstName", 2), CreateTestProperty(_testSubject));
+        RegisterAndSchedule(manager, new NodeId("LastName", 2), CreateTestProperty(_testSubject));
+
+        // Act
+        await manager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert
+        Assert.Equal(2, metrics.Failed);
+        Assert.Equal(0, metrics.Executed);
+        Assert.Equal(0, manager.PendingReadCount);
+        Assert.False(GetCircuitBreaker(manager).IsOpen);
+        session.Verify(value => value.ReadAsync(
+            It.IsAny<RequestHeader>(),
+            It.IsAny<double>(),
+            It.IsAny<TimestampsToReturn>(),
+            It.IsAny<ReadValueIdCollection>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task WhenOneConversionThrows_ThenTheOtherReadBacksStillApplyAndTheFailureIsReportedOnce()
     {
         // Arrange - the throwing value sits in the middle, so an uncontained throw would also

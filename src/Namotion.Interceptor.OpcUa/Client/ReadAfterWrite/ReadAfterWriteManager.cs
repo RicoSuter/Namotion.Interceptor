@@ -317,7 +317,13 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         var session = _sessionProvider();
         if (session is null || !session.Connected)
         {
-            _logger.LogDebug("Skipping read-after-writes - session not connected.");
+            // Counted failed: the batch was already drained above, so nothing re-arms these reads and
+            // no later pass sees them. Their verification reads were never performed, which is a
+            // failure to the write they were meant to verify. The circuit breaker stays untouched,
+            // because it tracks how the server answers reads and a session that is down is the
+            // reconnect machinery's concern.
+            _metrics.RecordFailed(dueCount);
+            _logger.LogDebug("Session not connected. {FailedCount} due read-after-writes could not be performed.", dueCount);
             return;
         }
 
@@ -350,6 +356,8 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             }
             catch (Exception) when (_cts.IsCancellationRequested)
             {
+                // Deliberately uncounted: disposal is discarding the manager, and counting its own
+                // teardown as read failures would misreport server health in the final metrics log.
                 return;
             }
 
@@ -483,8 +491,9 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
         // Logging provider failures are not read failures. Let them propagate to the timer callback's
         // unexpected-error guard without replaying metrics or changing the circuit state.
-        // The four counts partition the due reads exactly, so a read that went missing is counted
-        // as failed rather than being silently absent from the ratio.
+        // On every exit but the deliberate disposal drop above, the four counts partition the due
+        // reads exactly, so a read that went missing is counted as failed rather than being silently
+        // absent from the ratio.
         _logger.LogDebug(
             "Completed {SuccessCount}/{TotalCount} read-after-writes ({SkippedCount} skipped as stale, " +
             "{NotAppliedCount} not applied, {FailedCount} failed).",
