@@ -781,7 +781,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             }
 
             // After the load, never before: the parked writes are judged against the state the server
-            // just sent, so a write the server never received is re-sent and one it has moved past is not.
+            // just sent rather than replayed over it, and a write a later local commit supersedes is
+            // dropped instead of being sent after the newer one.
             await CompleteResumeAsync(cancellationToken).ConfigureAwait(false);
 
             return _configuration.ReconnectDelay;
