@@ -17,6 +17,7 @@ public class SourceDiagnostics : ConnectorDiagnostics
 
         OutboundRetries = new QueueDiagnostics(metrics.OutboundRetries);
         InboundBuffer = new QueueDiagnostics(metrics.InboundBuffer);
+        HeldWrites = new QueueDiagnostics(metrics.HeldWrites);
     }
 
     /// <summary>
@@ -48,4 +49,19 @@ public class SourceDiagnostics : ConnectorDiagnostics
     /// than data loss, and a rising total signals reconnect thrash.
     /// </remarks>
     public QueueDiagnostics InboundBuffer { get; }
+
+    /// <summary>
+    /// Gets the set of writes held back because the source refused them for its current connection.
+    /// Unlike <see cref="OutboundRetries"/> a held write is not queued for retry: it is still owed to
+    /// the source and is released back to the retry queue when the connection is replaced, so this is
+    /// not a loss count. A depth that stays above zero across reconnections is a property the source
+    /// will not take.
+    /// </summary>
+    /// <remarks>
+    /// The capacity is <c>null</c> because the held set sits outside any configured queue size; what
+    /// bounds it instead is described in the Writes Refused Until Reconnect section of
+    /// docs/connectors.md. When the source is configured without a retry queue there is nothing to
+    /// hold writes back, and this block reports a capacity of 0 and a depth of 0.
+    /// </remarks>
+    public QueueDiagnostics HeldWrites { get; }
 }

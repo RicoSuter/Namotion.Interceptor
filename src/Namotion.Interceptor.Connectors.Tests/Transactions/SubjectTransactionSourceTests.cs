@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Moq;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Connectors.Tests.Models;
@@ -629,6 +630,63 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         Assert.Null(person.LastName);
         Assert.Contains("Rollback was attempted", ex.Message);
         Assert.Equal(2, writeCallCount); // Initial write + revert
+    }
+
+    [Fact]
+    public async Task WhenSourceRefusesAChangeUntilReconnect_ThenTheTransactionStillRollsItBack()
+    {
+        // Arrange - naming a change as refused until the source reconnects is additive: FailedChanges
+        // stays the complete answer about what did not reach the source. Removing it from there instead
+        // would count it written, so the rollback would revert everything but it and leave the
+        // transaction half-applied at the source.
+        var context = CreateContext();
+        var person = new Person(context);
+
+        var writes = new List<(string Property, string? Value)>();
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
+        sourceMock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                var span = changes.Span;
+                for (var i = 0; i < span.Length; i++)
+                {
+                    writes.Add((span[i].Property.Metadata.Name!, span[i].GetNewValue<string?>()));
+                }
+
+                for (var i = 0; i < span.Length; i++)
+                {
+                    if (span[i].Property.Metadata.Name == nameof(Person.FirstName))
+                    {
+                        var refused = ImmutableArray.Create(span[i]);
+                        return new ValueTask<WriteResult>(WriteResult
+                            .Failure(refused.AsSpan().ToArray(), new InvalidOperationException("Refused"))
+                            .WithRefusedUntilReconnect(refused));
+                    }
+                }
+
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(sourceMock.Object);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(sourceMock.Object);
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        person.FirstName = "John";
+        person.LastName = "Doe";
+
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert - the refused change counts as unwritten, so nothing is applied locally and the change
+        // that did reach the source is reverted there
+        Assert.Contains("Rollback was attempted", exception.Message);
+        Assert.Contains(exception.FailedChanges, change => change.Property.Metadata.Name == nameof(Person.FirstName));
+        Assert.Null(person.FirstName);
+        Assert.Null(person.LastName);
+        Assert.Contains((nameof(Person.LastName), (string?)null), writes);
+        Assert.DoesNotContain((nameof(Person.FirstName), (string?)null), writes);
     }
 
     [Fact]

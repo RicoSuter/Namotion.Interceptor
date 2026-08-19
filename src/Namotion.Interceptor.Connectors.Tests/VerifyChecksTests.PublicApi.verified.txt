@@ -149,6 +149,7 @@ namespace Namotion.Interceptor.Connectors
         public override void Dispose() { }
         public abstract System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
         protected void ReportConnectionLost() { }
+        protected void RetryRefusedWrites() { }
         protected override sealed System.Threading.Tasks.Task RunAsync(System.Threading.CancellationToken stoppingToken) { }
         public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
         protected abstract System.Threading.Tasks.Task<System.IAsyncDisposable?> StartListeningAsync(Namotion.Interceptor.Connectors.SubjectPropertyWriter propertyWriter, System.Threading.CancellationToken cancellationToken);
@@ -170,7 +171,9 @@ namespace Namotion.Interceptor.Connectors
         public System.Exception? Error { get; }
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> FailedChanges { get; }
         public bool IsFullySuccessful { get; }
+        public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> RefusedUntilReconnect { get; }
         public static Namotion.Interceptor.Connectors.WriteResult Success { get; }
+        public Namotion.Interceptor.Connectors.WriteResult WithRefusedUntilReconnect(System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> refusedUntilReconnect) { }
         public static Namotion.Interceptor.Connectors.WriteResult CallFailed(System.Exception error) { }
         public static Namotion.Interceptor.Connectors.WriteResult Failure(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> failedChanges, System.Exception error) { }
     }
@@ -221,12 +224,14 @@ namespace Namotion.Interceptor.Connectors.Diagnostics
     {
         public SourceDiagnostics(Namotion.Interceptor.Connectors.Diagnostics.SourceMetrics metrics) { }
         public int ClaimedPropertyCount { get; }
+        public Namotion.Interceptor.Connectors.Diagnostics.QueueDiagnostics HeldWrites { get; }
         public Namotion.Interceptor.Connectors.Diagnostics.QueueDiagnostics InboundBuffer { get; }
         public Namotion.Interceptor.Connectors.Diagnostics.QueueDiagnostics OutboundRetries { get; }
     }
     public class SourceMetrics : Namotion.Interceptor.Connectors.Diagnostics.ConnectorMetrics
     {
         public SourceMetrics(Namotion.Interceptor.Connectors.ThroughputCounter? incoming = null, Namotion.Interceptor.Connectors.ThroughputCounter? outgoing = null) { }
+        public Namotion.Interceptor.Connectors.Diagnostics.QueueMetrics HeldWrites { get; }
         public Namotion.Interceptor.Connectors.Diagnostics.QueueMetrics InboundBuffer { get; }
         public Namotion.Interceptor.Connectors.Diagnostics.QueueMetrics OutboundRetries { get; }
         public void RegisterClaimedProperties(System.Func<int> count) { }

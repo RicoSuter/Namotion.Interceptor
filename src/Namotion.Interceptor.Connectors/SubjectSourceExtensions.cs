@@ -77,6 +77,7 @@ public static class SubjectSourceExtensions
     {
         // Allocated only once a batch has actually failed, so an all-success flush allocates nothing.
         List<SubjectPropertyChange>? failedChanges = null;
+        List<SubjectPropertyChange>? refusedChanges = null;
         List<Exception>? errors = null;
         var batchStart = 0;
         try
@@ -128,6 +129,11 @@ public static class SubjectSourceExtensions
                 // queued behind it, condemned unattempted on every retry for as long as it fails.
                 failedChanges.AddRange(batchResult.FailedChanges.AsSpan());
 
+                if (!batchResult.RefusedUntilReconnect.IsDefaultOrEmpty)
+                {
+                    (refusedChanges ??= []).AddRange(batchResult.RefusedUntilReconnect.AsSpan());
+                }
+
                 if (cancellationToken.IsCancellationRequested)
                 {
                     // An unattempted batch is unconfirmed, and a source that is going away will not take it.
@@ -138,7 +144,7 @@ public static class SubjectSourceExtensions
 
             return errors is null
                 ? WriteResult.Success
-                : CreateFailure(failedChanges!, CombineErrors(errors));
+                : CreateFailure(failedChanges!, CombineErrors(errors), refusedChanges);
         }
         catch (Exception ex)
         {
@@ -155,7 +161,7 @@ public static class SubjectSourceExtensions
             // throw with its stack. errors is set together with failedChanges, so it is non-null.
             failedChanges.AddRange(unconfirmed.Span);
             errors!.Add(ex);
-            return CreateFailure(failedChanges, CombineErrors(errors));
+            return CreateFailure(failedChanges, CombineErrors(errors), refusedChanges);
         }
     }
 
@@ -166,11 +172,17 @@ public static class SubjectSourceExtensions
         return errors.Count == 1 ? errors[0] : new AggregateException(errors);
     }
 
-    private static WriteResult CreateFailure(List<SubjectPropertyChange> failedChanges, Exception error)
+    private static WriteResult CreateFailure(
+        List<SubjectPropertyChange> failedChanges, Exception error, List<SubjectPropertyChange>? refusedChanges)
     {
-        // The array never escapes, so the ImmutableArray takes ownership without a second copy.
-        return WriteResult.Failure(
+        // The arrays never escape, so the ImmutableArrays take ownership without a second copy.
+        var result = WriteResult.Failure(
             ImmutableCollectionsMarshal.AsImmutableArray(failedChanges.ToArray()), error);
+
+        return refusedChanges is null
+            ? result
+            : result.WithRefusedUntilReconnect(
+                ImmutableCollectionsMarshal.AsImmutableArray(refusedChanges.ToArray()));
     }
 
     /// <summary>

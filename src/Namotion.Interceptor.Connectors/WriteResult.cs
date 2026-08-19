@@ -26,6 +26,25 @@ public readonly struct WriteResult
     public ImmutableArray<SubjectPropertyChange> FailedChanges { get; }
 
     /// <summary>
+    /// Gets the subset of <see cref="FailedChanges"/> the source refused and will keep refusing until
+    /// its connection is re-established; empty unless the source says otherwise.
+    /// <para>
+    /// Additive, never subtractive: every change named here is also in <see cref="FailedChanges"/>,
+    /// which stays the complete answer about what did not reach the source. Omitting them from there
+    /// instead would tell <c>SourceTransactionWriter</c> they were written and skip their rollback.
+    /// </para>
+    /// <para>
+    /// Re-sending these on the current connection cannot succeed and stalls everything behind them, so
+    /// the retry queue holds them back and returns to them once the connection is replaced. Naming a
+    /// change here that the source would in fact have taken withholds it until the next reconnect,
+    /// which nothing schedules and which can be days away; only a newer successful write to the same
+    /// property ends the hold earlier, by superseding it. Name one only when the refusal is bound to
+    /// the connection rather than to the value.
+    /// </para>
+    /// </summary>
+    public ImmutableArray<SubjectPropertyChange> RefusedUntilReconnect { get; }
+
+    /// <summary>
     /// Gets the error that occurred during the write operation, or null if all changes succeeded.
     /// </summary>
     public Exception? Error { get; }
@@ -35,10 +54,25 @@ public readonly struct WriteResult
     /// </summary>
     public bool IsFullySuccessful => Error is null;
 
-    private WriteResult(ImmutableArray<SubjectPropertyChange> failedChanges, Exception? error)
+    private WriteResult(
+        ImmutableArray<SubjectPropertyChange> failedChanges,
+        Exception? error,
+        ImmutableArray<SubjectPropertyChange> refusedUntilReconnect = default)
     {
         FailedChanges = failedChanges;
         Error = error;
+        RefusedUntilReconnect = refusedUntilReconnect.IsDefault ? [] : refusedUntilReconnect;
+    }
+
+    /// <summary>
+    /// Returns a copy naming the subset of <see cref="FailedChanges"/> the source will keep refusing
+    /// until its connection is re-established. The changes must be a subset: see
+    /// <see cref="RefusedUntilReconnect"/> for what naming one that is not costs.
+    /// </summary>
+    /// <param name="refusedUntilReconnect">The refused subset of <see cref="FailedChanges"/>.</param>
+    public WriteResult WithRefusedUntilReconnect(ImmutableArray<SubjectPropertyChange> refusedUntilReconnect)
+    {
+        return new(FailedChanges, Error, refusedUntilReconnect);
     }
 
     /// <summary>

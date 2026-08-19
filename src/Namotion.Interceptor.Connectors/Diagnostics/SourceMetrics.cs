@@ -26,6 +26,12 @@ public class SourceMetrics : ConnectorMetrics
     public QueueMetrics InboundBuffer { get; } = new(nameof(InboundBuffer));
 
     /// <summary>
+    /// Gets the metrics of the set holding writes the source refused for its current connection.
+    /// The reader-facing semantics live on <see cref="SourceDiagnostics.HeldWrites"/>.
+    /// </summary>
+    public QueueMetrics HeldWrites { get; } = new(nameof(HeldWrites));
+
+    /// <summary>
     /// Points the claimed-property gauge at the source's ownership manager. A source that registers
     /// nothing reports 0.
     /// </summary>
@@ -67,5 +73,6 @@ public class SourceMetrics : ConnectorMetrics
         base.ResetTotals();
         OutboundRetries.Reset();
         InboundBuffer.Reset();
+        HeldWrites.Reset();
     }
 }
