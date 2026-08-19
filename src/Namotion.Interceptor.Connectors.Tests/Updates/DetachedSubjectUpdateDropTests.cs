@@ -60,7 +60,10 @@ public class DetachedSubjectUpdateDropTests
         Assert.False(
             update.Subjects.ContainsKey(childId),
             "A change for an unregistered subject must be dropped, not serialized.");
-        Assert.Equal(droppedBefore + 2, SubjectUpdateDiagnostics.DroppedOutboundChanges);
+        Assert.True(
+            SubjectUpdateDiagnostics.DroppedOutboundChanges >= droppedBefore + 2,
+            "The drop must be counted. These counters are process-wide, so other tests running in "
+            + "parallel can also increment them; assert the floor, not an exact delta.");
     }
 
     [Fact]
@@ -98,7 +101,10 @@ public class DetachedSubjectUpdateDropTests
         // Assert: the flush dropped the change, and the re-attach carries the child's complete state
         Assert.Equal("Updated", child.FirstName);
         Assert.False(updateDuringDetach.Subjects.ContainsKey(childId));
-        Assert.Equal(droppedBefore + 1, SubjectUpdateDiagnostics.DroppedOutboundChanges);
+        Assert.True(
+            SubjectUpdateDiagnostics.DroppedOutboundChanges >= droppedBefore + 1,
+            "The drop must be counted. These counters are process-wide, so other tests running in "
+            + "parallel can also increment them; assert the floor, not an exact delta.");
 
         var reattachChange = SubjectPropertyChange.Create(
             new PropertyReference(root, nameof(Person.Mother)),
@@ -150,7 +156,10 @@ public class DetachedSubjectUpdateDropTests
             update.Subjects,
             entry => entry.Value.TryGetValue(nameof(Person.FirstName), out var propertyUpdate) &&
                      Equals(propertyUpdate.Value, "Updated"));
-        Assert.Equal(droppedBefore + 1, SubjectUpdateDiagnostics.DroppedOutboundChanges);
+        Assert.True(
+            SubjectUpdateDiagnostics.DroppedOutboundChanges >= droppedBefore + 1,
+            "The drop must be counted. These counters are process-wide, so other tests running in "
+            + "parallel can also increment them; assert the floor, not an exact delta.");
     }
 
     [Fact]

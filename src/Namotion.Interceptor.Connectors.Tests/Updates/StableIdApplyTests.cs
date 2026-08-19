@@ -512,7 +512,10 @@ public class StableIdApplyTests
 
         // Assert - nothing was created and the drop is counted
         Assert.Null(root.Child);
-        Assert.Equal(droppedBefore + 1, SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates);
+        Assert.True(
+            SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates >= droppedBefore + 1,
+            "The drop must be counted. These counters are process-wide, so other tests running in "
+            + "parallel can also increment them; assert the floor, not an exact delta.");
 
         // Act - a later complete-state update for the same ID converges the receiver
         var completeUpdate = new SubjectUpdate
