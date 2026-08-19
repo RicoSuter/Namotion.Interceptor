@@ -58,16 +58,19 @@
 
 ## Verification
 
-<!-- Tick what you ran, and give the count where a suite reports one. Strike an entry through with
+<!-- Tick what you did, and give the count where a suite reports one. Strike an entry through with
      ~~two tildes~~ and a short reason when it does not apply, so an unticked box always means
      "not done yet" rather than "not relevant". Say plainly what you did not run and why.
 
+     Documentation:     the docs/ pages describing the behavior or API this changes. A stale sample
+                        outlives a rename by months, and the release notes link these pages.
      Unit tests:        dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"
      Integration tests: per project, for connector or HomeBlaze UI changes
      Benchmarks:        docs/benchmarking.md, every benchmark the change can reach plus a noise reference
      Connector Tester:  docs/connector-tester.md, load and chaos profiles for risky connector work,
                         agreed while planning because they take hours -->
 
+- [ ] Documentation updated
 - [ ] Unit tests
 - [ ] Integration tests
 - [ ] Benchmarks
