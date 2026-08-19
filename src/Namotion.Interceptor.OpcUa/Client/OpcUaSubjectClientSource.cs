@@ -51,6 +51,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     internal ReadAfterWriteMetrics ReadAfterWriteMetrics { get; } = new();
 
+    internal SubscriptionMetrics SubscriptionMetrics { get; } = new();
+
     internal ThroughputCounter IncomingThroughput => Metrics.Incoming!;
     internal ThroughputCounter OutgoingThroughput => Metrics.Outgoing!;
 
@@ -153,6 +155,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         Metrics.RegisterResettable(ReconnectionMetrics);
         Metrics.RegisterResettable(PollingMetrics);
         Metrics.RegisterResettable(ReadAfterWriteMetrics);
+        Metrics.RegisterResettable(SubscriptionMetrics);
 
         Diagnostics = new OpcUaClientDiagnostics(this, Metrics);
     }
@@ -177,7 +180,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
 
         var sessionManager = new SessionManager(
-            this, propertyWriter, _configuration, PollingMetrics, ReadAfterWriteMetrics, _logger);
+            this, propertyWriter, _configuration, PollingMetrics, ReadAfterWriteMetrics, SubscriptionMetrics, _logger);
         _sessionManager = sessionManager;
         _writer = new OutboundWriter(
             () => sessionManager.CurrentSession,

@@ -192,6 +192,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         OpcUaClientConfiguration configuration,
         PollingMetrics pollingMetrics,
         ReadAfterWriteMetrics readAfterWriteMetrics,
+        SubscriptionMetrics subscriptionMetrics,
         ILogger logger)
     {
         _source = source;
@@ -235,6 +236,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             PollingManager,
             ReadAfterWriteManager,
             configuration,
+            subscriptionMetrics,
             source.ReportBackgroundError,
             logger);
     }

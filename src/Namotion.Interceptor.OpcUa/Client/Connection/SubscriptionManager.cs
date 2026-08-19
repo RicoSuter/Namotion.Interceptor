@@ -38,6 +38,7 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly PollingManager? _pollingManager;
     private readonly ReadAfterWriteManager? _readAfterWriteManager;
     private readonly OpcUaClientConfiguration _configuration;
+    private readonly SubscriptionMetrics _metrics;
     private readonly Action<Exception> _reportError;
     private readonly ILogger _logger;
     private readonly Func<Subscription, CancellationToken, Task> _applyChangesAsync;
@@ -60,13 +61,6 @@ internal class SubscriptionManager : IAsyncDisposable
     private const double MaxRevisedSamplingIntervalMilliseconds = 48d * 24 * 60 * 60 * 1000;
 
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
-
-    private long _skippedBadValues;
-
-    /// <summary>
-    /// Gets the number of notified values skipped because the server marked them Bad.
-    /// </summary>
-    public long SkippedBadValues => Interlocked.Read(ref _skippedBadValues);
 
     /// <summary>
     /// Gets the current list of subscriptions (thread-safe collection).
@@ -114,6 +108,7 @@ internal class SubscriptionManager : IAsyncDisposable
         PollingManager? pollingManager,
         ReadAfterWriteManager? readAfterWriteManager,
         OpcUaClientConfiguration configuration,
+        SubscriptionMetrics metrics,
         Action<Exception> reportError,
         ILogger logger,
         Func<Subscription, CancellationToken, Task>? applyChangesAsync = null)
@@ -123,6 +118,7 @@ internal class SubscriptionManager : IAsyncDisposable
         _pollingManager = pollingManager;
         _readAfterWriteManager = readAfterWriteManager;
         _configuration = configuration;
+        _metrics = metrics;
         _reportError = reportError;
         _logger = logger;
         _applyChangesAsync = applyChangesAsync ??
@@ -237,7 +233,7 @@ internal class SubscriptionManager : IAsyncDisposable
                     // which would leave a permanently faulted sensor invisible: the property simply
                     // stops changing while the source stays Synchronized. The polling path skips a Bad
                     // value under the same rule and counts it as a failed read.
-                    Interlocked.Increment(ref _skippedBadValues);
+                    _metrics.RecordSkippedBadValue();
 
                     // Debug, not Warning: a Bad status is sticky, so a permanently faulted sensor would
                     // repeat this at whatever rate its path delivers at. Guarded because that same

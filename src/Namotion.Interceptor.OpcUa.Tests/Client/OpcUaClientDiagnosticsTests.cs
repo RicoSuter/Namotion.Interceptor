@@ -64,6 +64,7 @@ public class OpcUaClientDiagnosticsTests
             CreateConfiguration(),
             source.PollingMetrics,
             source.ReadAfterWriteMetrics,
+            source.SubscriptionMetrics,
             NullLogger.Instance);
         await AsyncTestHelpers.WaitUntilAsync(
             () => sessionManager.PollingManager!.IsRunning,
@@ -144,6 +145,7 @@ public class OpcUaClientDiagnosticsTests
             CreateConfiguration(),
             source.PollingMetrics,
             source.ReadAfterWriteMetrics,
+            source.SubscriptionMetrics,
             NullLogger.Instance);
         await AsyncTestHelpers.WaitUntilAsync(
             () => sessionManager.PollingManager!.IsRunning,

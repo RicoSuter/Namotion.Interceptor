@@ -62,9 +62,11 @@ public sealed class OpcUaClientDiagnostics : SourceDiagnostics
     /// Gets the number of values delivered by a subscription that were skipped because the server marked them Bad.
     /// The property keeps its last value, so a rising count is what tells a faulted node from a quiet one.
     /// The polled equivalent is <see cref="PollingDiagnostics.TotalFailedReads"/>, and like it this counts
-    /// from the moment the source started listening, surviving a reconnection but not a restart.
+    /// from the moment the source started listening, surviving a reconnection but not a restart. The
+    /// total is owned by the source rather than by the session, so a listen attempt rebuilding the
+    /// subscription machinery does not rebase it.
     /// </summary>
-    public long SkippedBadSubscriptionValues => ActiveSessionManager?.SubscriptionManager.SkippedBadValues ?? 0;
+    public long SkippedBadSubscriptionValues => _source.SubscriptionMetrics.SkippedBadValues;
 
     /// <summary>
     /// Gets the reconnection history.

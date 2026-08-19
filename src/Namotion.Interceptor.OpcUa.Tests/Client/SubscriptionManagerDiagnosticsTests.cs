@@ -388,6 +388,7 @@ public class SubscriptionManagerDiagnosticsTests
             pollingManager,
             readAfterWriteManager: null,
             configuration,
+            source.SubscriptionMetrics,
             error =>
             {
                 reportedErrors.Enqueue(error);
