@@ -1939,21 +1939,4 @@ public class SubjectSourceBaseTests
         // Assert
         Assert.Contains("FirstName=John", receivedWrites);
     }
-
-    [Fact]
-    public void WhenTeardownFlushTimeoutIsNegative_ThenConstructionThrows()
-    {
-        // Arrange: the source builds its processor only after connecting, so a guard left to the
-        // processor would surface as an attempt failure the retry loop repeats forever.
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry()
-            .WithFullPropertyTracking();
-
-        var person = new Person(context);
-
-        // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => new TestSubjectSource(
-            person, context, NullLogger.Instance, teardownFlushTimeout: TimeSpan.FromMilliseconds(-1)));
-    }
 }
