@@ -135,6 +135,13 @@ The library has specialized support for:
 
 - Never include AI attribution in commit messages, PR descriptions, or GitHub comments. This covers agent names ("Claude", "Codex", "Copilot"), `Co-Authored-By` trailers, and "Generated with" footers.
 
+## Pull Requests
+
+- Fill in [the pull request template](.github/pull_request_template.md). `gh pr create --body-file` bypasses it, so open the file rather than waiting to be shown it.
+- Prefix the title with `fix:`, `feat:`, `perf:`, `docs:`, `refactor:`, `test:` or `chore:`.
+- Apply an `area:` and a `type:` label at creation with `gh pr create --label`, choosing from `gh label list`.
+- Link documentation instead of restating it: the docs describe the behavior, the pull request describes the change.
+
 ## Test Conventions
 
 - **Naming**: `When<Condition>_Then<ExpectedBehavior>` (e.g., `WhenDepthIsZero_ThenReturnsNoChildren`)
