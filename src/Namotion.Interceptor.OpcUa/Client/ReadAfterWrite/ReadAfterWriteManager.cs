@@ -325,7 +325,6 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         var failedCount = 0;
         var skippedCount = 0;
         var notAppliedCount = 0;
-        var answeredCount = 0;
 
         try
         {
@@ -355,16 +354,17 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             }
 
             var receivedTimestamp = DateTimeOffset.UtcNow;
-            answeredCount = Math.Min(response.Results.Count, dueCount);
+            var answeredCount = Math.Min(response.Results.Count, dueCount);
 
             for (var i = 0; i < answeredCount; i++)
             {
                 var result = response.Results[i];
 
-                // Uncertain is a reading the server doubts, not a missing one. Bad may carry no value at all.
+                // Uncertain is a reading the server doubts, not a missing one. Bad may carry no value
+                // at all: that read failed, and leaving it unclaimed here is what lets the failed
+                // remainder below count it.
                 if (!StatusCode.IsNotBad(result.StatusCode))
                 {
-                    notAppliedCount++;
                     continue;
                 }
 
@@ -439,8 +439,11 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 catch (Exception e)
                 {
                     // Contained per item: applying is local, so its failure says nothing about how the
-                    // server answers reads and must not count against the circuit breaker that tracks that.
+                    // server answers reads and must not count against the circuit breaker or the failed
+                    // count that track that. Still reported, so the failure reaches the source
+                    // diagnostics instead of surviving only in this log entry.
                     notAppliedCount++;
+                    ReportErrorIfRunning(e);
                     _logger.LogError(e, "Failed to apply a read-after-write value for '{PropertyName}' ({NodeId}).",
                         property.Name, nodeId);
                 }
@@ -448,10 +451,13 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            // Every due read that did not succeed or get skipped failed, including those a
-            // thrown batch never processed.
-            failedCount = dueCount - successCount - skippedCount;
+            // Every due read not already claimed per item failed, including those a thrown batch
+            // never processed. A not-applied item stays excluded: its read was answered, only the
+            // local apply failed, and that was contained and reported above.
+            failedCount = dueCount - successCount - skippedCount - notAppliedCount;
             _metrics.RecordExecuted(successCount);
+            _metrics.RecordSkipped(skippedCount);
+            _metrics.RecordNotApplied(notAppliedCount);
             _metrics.RecordFailed(failedCount);
             ReportErrorIfRunning(ex);
             if (_circuitBreaker.RecordFailure())
@@ -466,21 +472,23 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             return;
         }
 
-        // A response can carry fewer results than requested; the unanswered remainder failed.
-        failedCount = dueCount - successCount - skippedCount;
+        // The remainder no per-item outcome claimed failed: Bad answers and results the response
+        // omitted. A not-applied item stays excluded, because its read was answered.
+        failedCount = dueCount - successCount - skippedCount - notAppliedCount;
         _metrics.RecordExecuted(successCount);
         _metrics.RecordSkipped(skippedCount);
+        _metrics.RecordNotApplied(notAppliedCount);
         _metrics.RecordFailed(failedCount);
         _circuitBreaker.RecordSuccess();
 
         // Logging provider failures are not read failures. Let them propagate to the timer callback's
         // unexpected-error guard without replaying metrics or changing the circuit state.
-        // The four counts partition the due reads, so a read that went missing shows up as a gap
-        // rather than being silently absent from the ratio.
+        // The four counts partition the due reads exactly, so a read that went missing is counted
+        // as failed rather than being silently absent from the ratio.
         _logger.LogDebug(
             "Completed {SuccessCount}/{TotalCount} read-after-writes ({SkippedCount} skipped as stale, " +
-            "{NotAppliedCount} not applied, {UnansweredCount} unanswered).",
-            successCount, dueCount, skippedCount, notAppliedCount, dueCount - answeredCount);
+            "{NotAppliedCount} not applied, {FailedCount} failed).",
+            successCount, dueCount, skippedCount, notAppliedCount, failedCount);
     }
 
     private void ReportErrorIfRunning(Exception error)

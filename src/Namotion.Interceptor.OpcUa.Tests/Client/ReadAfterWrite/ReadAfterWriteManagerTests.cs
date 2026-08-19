@@ -315,9 +315,10 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task WhenConversionThrowsAfterASuccess_ThenTheSuccessIsKeptAndUnfinishedReadsFail()
+    public async Task WhenOneConversionThrows_ThenTheOtherReadBacksStillApplyAndTheFailureIsReportedOnce()
     {
-        // Arrange
+        // Arrange - the throwing value sits in the middle, so an uncontained throw would also
+        // discard the read-back behind it
         var subjects = Enumerable.Range(0, 3)
             .Select(_ => new TestPerson(InterceptorSubjectContext.Create().WithFullPropertyTracking()))
             .ToArray();
@@ -325,7 +326,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         var session = CreateSessionReturning(
             CreateDataValue("first", StatusCodes.Good, timestamp),
             CreateDataValue("throw", StatusCodes.Good, timestamp),
-            CreateDataValue("unreached", StatusCodes.Good, timestamp));
+            CreateDataValue("third", StatusCodes.Good, timestamp));
         var metrics = new ReadAfterWriteMetrics();
         var conversionError = new InvalidOperationException("conversion failed");
         var reportedErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
@@ -347,11 +348,13 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         // Act
         await manager.ProcessDueReadsAsync(DateTime.MaxValue);
 
-        // Assert
-        Assert.Equal(1, metrics.Executed);
-        Assert.Equal(2, metrics.Failed);
+        // Assert - the contained failure counts as not applied, not as a read failure
+        Assert.Equal(2, metrics.Executed);
+        Assert.Equal(1, metrics.NotApplied);
+        Assert.Equal(0, metrics.Failed);
         Assert.Equal(1, subjects.Count(subject => subject.FirstName == "first"));
-        Assert.Equal(2, subjects.Count(subject => subject.FirstName == string.Empty));
+        Assert.Equal(1, subjects.Count(subject => subject.FirstName == "third"));
+        Assert.Equal(1, subjects.Count(subject => subject.FirstName == string.Empty));
         Assert.Collection(reportedErrors, error => Assert.Same(conversionError, error));
     }
 
