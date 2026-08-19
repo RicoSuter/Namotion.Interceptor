@@ -60,6 +60,60 @@ public class BatchScopeTests
     }
 
     [Fact]
+    public void WhenSubjectMovesBetweenParentsInsideBatchScope_ThenItInheritsTheSameContextsAsWithoutTheScope()
+    {
+        // Arrange: two identical graphs whose parents each carry their own context
+        var scoped = CreateCrossParentGraph();
+        var unscoped = CreateCrossParentGraph();
+        var lifecycle = scoped.RootContext.TryGetLifecycleInterceptor()!;
+
+        // Act: move the child across parents, once inside a batch scope and once without
+        using (lifecycle.CreateBatchScope(scoped.RootContext))
+        {
+            scoped.FirstParent.Mother = null;
+            scoped.SecondParent.Mother = scoped.Child;
+        }
+
+        unscoped.FirstParent.Mother = null;
+        unscoped.SecondParent.Mother = unscoped.Child;
+
+        // Assert: the child inherits from the new parent in both, not from the parent it left
+        Assert.Equal(["SecondParent"], GetInheritedContextRoles(unscoped, unscoped.Child));
+        Assert.Equal(
+            GetInheritedContextRoles(unscoped, unscoped.Child),
+            GetInheritedContextRoles(scoped, scoped.Child));
+    }
+
+    [Fact]
+    public void WhenOldParentIsRemovedAfterABatchScopeMove_ThenTheMovedSubjectStillResolvesServices()
+    {
+        // Arrange
+        var graph = CreateCrossParentGraph();
+        var lifecycle = graph.RootContext.TryGetLifecycleInterceptor()!;
+        var idRegistry = graph.RootContext.GetService<ISubjectIdRegistry>();
+
+        using (lifecycle.CreateBatchScope(graph.RootContext))
+        {
+            graph.FirstParent.Mother = null;
+            graph.SecondParent.Mother = graph.Child;
+        }
+
+        // Act: the parent the child left drops out of the graph, so its context resolves nothing
+        graph.Root.Mother = null;
+
+        // Assert: the child is still under the new parent and its context still reaches the graph services
+        Assert.Same(graph.Child, graph.SecondParent.Mother);
+        Assert.NotNull(((IInterceptorSubject)graph.Child).Context.TryGetService<ISubjectIdRegistry>());
+        Assert.NotNull(graph.Child.TryGetRegisteredSubject());
+
+        // Assert: a write to the child still runs the full interceptor chain
+        graph.Child.SetSubjectId("childId");
+        Assert.True(idRegistry.TryGetSubjectById("childId", out var found));
+        Assert.Same(graph.Child, found);
+        AssertNoBatchScopeStateOnCurrentThread();
+    }
+
+    [Fact]
     public void WhenSubjectIsRemovedInsideBatchScope_ThenItIsCleanedUpOnDispose()
     {
         // Arrange
@@ -390,6 +444,86 @@ public class BatchScopeTests
         // Assert: disposing on the owning thread still works
         Assert.False(idRegistry.TryGetSubjectById("childId", out _));
         AssertNoBatchScopeStateOnCurrentThread();
+    }
+
+    /// <summary>
+    /// A root graph with two parents which each carry their own context, as a connector receiver graph does,
+    /// so that moving the child from one to the other actually changes the context it inherits.
+    /// </summary>
+    private static CrossParentGraph CreateCrossParentGraph()
+    {
+        var rootContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new Person(rootContext) { FirstName = "Roo" };
+        var firstParent = new Person { FirstName = "Pa1" };
+        var secondParent = new Person { FirstName = "Pa2" };
+        var child = new Person { FirstName = "Chi" };
+
+        root.Mother = firstParent;
+        root.Father = secondParent;
+        firstParent.Mother = child;
+
+        return new CrossParentGraph
+        {
+            RootContext = rootContext,
+            Root = root,
+            FirstParent = firstParent,
+            SecondParent = secondParent,
+            Child = child
+        };
+    }
+
+    /// <summary>
+    /// The subject's fallback contexts, named by the graph position each one belongs to, so that the chains
+    /// of two structurally identical graphs can be compared directly.
+    /// </summary>
+    private static string[] GetInheritedContextRoles(CrossParentGraph graph, IInterceptorSubject subject)
+    {
+        var stateField = typeof(InterceptorSubjectContext)
+            .GetField("_state", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(stateField);
+
+        var state = stateField.GetValue(subject.Context);
+        Assert.NotNull(state);
+
+        var fallbackContextsField = state.GetType()
+            .GetField("FallbackContexts", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance);
+        Assert.NotNull(fallbackContextsField);
+
+        var fallbackContexts = (IEnumerable)fallbackContextsField.GetValue(state)!;
+        return fallbackContexts.Cast<object>().Select(graph.GetRole).ToArray();
+    }
+
+    private sealed class CrossParentGraph
+    {
+        public required IInterceptorSubjectContext RootContext { get; init; }
+
+        public required Person Root { get; init; }
+
+        public required Person FirstParent { get; init; }
+
+        public required Person SecondParent { get; init; }
+
+        public required Person Child { get; init; }
+
+        public string GetRole(object context)
+        {
+            if (ReferenceEquals(context, RootContext))
+                return "RootContext";
+
+            if (ReferenceEquals(context, ((IInterceptorSubject)Root).Context))
+                return "Root";
+
+            if (ReferenceEquals(context, ((IInterceptorSubject)FirstParent).Context))
+                return "FirstParent";
+
+            if (ReferenceEquals(context, ((IInterceptorSubject)SecondParent).Context))
+                return "SecondParent";
+
+            if (ReferenceEquals(context, ((IInterceptorSubject)Child).Context))
+                return "Child";
+
+            return "Unknown";
+        }
     }
 
     private static void AssertNoBatchScopeStateOnCurrentThread()

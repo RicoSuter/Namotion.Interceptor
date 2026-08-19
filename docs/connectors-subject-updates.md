@@ -16,7 +16,7 @@ Subject updates use a **flat dictionary structure** where all subjects are store
 
 ```
 SubjectUpdate {
-  root: string?                  // sender's root subject ID (mapping hint)
+  root: string?                  // sender's root subject ID (mapping hint, always sent)
   subjects: Map<string, Map<string, PropertyUpdate>>  // subjectId → propertyName → update
   completeSubjectIds: string[]?  // subject IDs with complete state (null = all complete, complete updates only)
 }
@@ -38,7 +38,7 @@ ItemRef {
 
 ### Fields
 
-- `root`: The sender's subject ID for the root subject. This is a **mapping hint** that tells the receiver which entry in `subjects` corresponds to the local root subject. The root's ID may differ between sender and receiver because each side generates its own IDs independently. Null when the root subject is not part of this update.
+- `root`: The sender's subject ID for the root subject. This is a **mapping hint** that tells the receiver which entry in `subjects` corresponds to the local root subject. The root's ID may differ between sender and receiver because each side generates its own IDs independently. Every update this library builds carries it, complete and partial alike, including when the root has no entry in `subjects` of its own: the mapping is also what lets a reference to the sender's root ID, such as a parent pointer, resolve to the local root. The field stays nullable so that an update from another implementation can omit it; a reference to the sender's root ID in such an update is then unresolvable and is dropped.
 - `subjects`: All subjects in the update, keyed by the sender's subject IDs. Each subject contains property name to property update mappings.
 - `completeSubjectIds`: Set of subject IDs whose entries in `subjects` contain **complete state** (all properties, from `ProcessSubjectComplete`). The applier uses this to decide whether to create new subject instances: subjects marked as complete can be safely created; others are references to subjects that should already exist locally and must not be fabricated with default values.
   - A **complete update** omits the field. `null` therefore means "every subject in this update is complete", which is exactly true for an initial-state update.
@@ -102,13 +102,13 @@ propertyFilter: propertyReference =>
 The difference is in **scope**:
 
 - **Complete update**: Contains all properties of all reachable subjects. Used for initial sync. Every subject in the graph appears in `subjects` with all its properties. `root` is always set.
-- **Partial update**: Contains only changed properties. Unchanged subjects and properties are omitted entirely. `root` is set when the root subject has changes in this update, null otherwise. For structural changes (insert, remove, reorder), the `items` array lists the full new ordering but only new items have their properties included in `subjects`. Existing items whose properties haven't changed are referenced by ID only.
+- **Partial update**: Contains only changed properties. Unchanged subjects and properties are omitted entirely. `root` is set as well, also when the root subject itself has no changed properties and therefore no entry in `subjects`. For structural changes (insert, remove, reorder), the `items` array lists the full new ordering but only new items have their properties included in `subjects`. Existing items whose properties haven't changed are referenced by ID only.
 
 ### Creating Updates
 
 To create a **complete update**, traverse the entire object graph starting from the root subject. For each subject, generate a stable subject ID (if one doesn't exist yet), and include all of its properties in the `subjects` dictionary. Set `root` to the root subject's ID.
 
-To create a **partial update**, collect the set of property changes since the last update. For each changed property, include its subject (by ID) and the changed property in the `subjects` dictionary. For structural changes (collection/dictionary), include the full `items` array with the new state. Include full properties for any newly created subjects. Set `root` to the root subject's ID if the root has changes, otherwise set it to null.
+To create a **partial update**, collect the set of property changes since the last update. For each changed property, include its subject (by ID) and the changed property in the `subjects` dictionary. For structural changes (collection/dictionary), include the full `items` array with the new state. Include full properties for any newly created subjects. Set `root` to the root subject's ID, also when the root has no changes of its own, so that the receiver can resolve a reference back to the root.
 
 **Outbound churn under concurrent structural mutations:** a property change can reach the update factory for a subject that is momentarily unregistered, because a concurrent structural mutation wrote it into the backing store but the lifecycle interceptor has not attached it yet. Such a change is dropped rather than serialized, and the drop is counted in `SubjectUpdateDiagnostics.DroppedOutboundChanges`. Separately, when a structural reference (an `Object`, `Collection`, or `Dictionary` item) reaches a subject that is momentarily unregistered, the factory does not emit a bare ID reference with no properties entry, because a receiver would materialize that as a default-valued subject that can never converge. Instead it serializes the subject's complete state from the subject's own property metadata (`ProcessSubjectFromMetadata`), bypassing registry-backed processor filtering since that requires registry information. Each use of this fallback path is counted in `SubjectUpdateDiagnostics.MetadataFallbackSerializations`. See [Drop Policy and Diagnostics](#drop-policy-and-diagnostics) below.
 
@@ -278,9 +278,9 @@ This section describes the algorithm for applying a received `SubjectUpdate` to 
 
 ### Step 1: Root Mapping
 
-If `root` is set and present in `subjects`, apply those properties to the local root subject. The `root` field is a mapping hint that identifies which entry in `subjects` corresponds to the applier's root, without assigning or changing the root's local subject ID.
+If `root` is set, map it to the local root subject for the duration of this apply, before anything else is applied. The `root` field is a mapping hint that identifies which entry in `subjects` corresponds to the applier's root, without assigning or changing the root's local subject ID. The mapping serves two purposes: any entry in `subjects` under that ID applies to the local root, and any reference to that ID elsewhere in the update resolves to the local root. Without the second one, a reference back to the root resolves against nothing in the receiver's ID map and either fabricates a default-valued phantom root, which then takes over the sender's root ID in that map, or is dropped.
 
-If `root` is null, skip this step because the root subject has no changes in this update.
+`root` may name an ID that has no entry in `subjects`; the mapping still applies, there is simply nothing to write to the local root. If `root` is null, skip this step, and treat any reference to the sender's root ID in that update as unresolvable.
 
 ### Step 2: Remaining Subjects
 
@@ -296,17 +296,20 @@ Set the local property to the `value` from the update.
 
 1. If `id` is null/omitted, set the local property to null.
 2. If the existing local object already has the same subject ID as `id`, keep it (no replacement needed).
-3. Otherwise, look up `id` in the local ID-to-object map. If found, reuse that object.
-4. If not found, check `completeSubjectIds`: if the field is absent (a complete update, so everything is complete) or `id` is in the set, create a new object and register it with `id`. If the field is present and `id` is NOT in it, **skip** and count it in `SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates`: the sender assumed the receiver already has this subject. Creating a new instance with default values would corrupt state. The gap is temporary and self-heals on the next update that includes complete state for this subject.
+3. Otherwise, look up `id` in the local ID-to-object map, which must already contain the subjects this same apply created (see below) and the root mapping from Step 1. If found, reuse that object.
+4. If not found, check `completeSubjectIds`: if the field is absent (a complete update, so everything is complete) or `id` is in the set, create a new object and register it with `id` **before** applying its properties. If the field is present and `id` is NOT in it, **skip** and count it in `SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates`: the sender assumed the receiver already has this subject. Creating a new instance with default values would corrupt state. The gap is temporary and self-heals on the next update that includes complete state for this subject.
 5. If the subject's properties are present in `subjects[id]`, apply them.
 6. Set the local property to the resolved object.
+
+Registering a created subject under its ID at creation time, before its own properties are applied, is what makes a shared reference, a self reference and a cycle among subjects the same update introduces resolve to one instance. An implementation that only registers a subject once it is attached to the graph resolves the second reference to the same ID against an empty map and creates a duplicate. That duplicate never receives the ID's properties, because the first instance consumed them, and it stays default-valued and unreachable for every later update.
 
 ### Applying Collection Properties
 
 1. If `items` is null/omitted, the collection is null. Set the local property to null.
 2. If `items` is present, it defines the **full ordered state**:
-   - For each item, look up `item.id` in the ID-to-object map. If found, reuse it. If not found, check `completeSubjectIds`: if the field is absent (a complete update) or `item.id` is in it, create a new object and register it with `item.id`. If the field is present and `item.id` is not in it, **skip** the item and count it in `SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates`.
+   - For each item, look up `item.id` in the ID-to-object map, including the subjects this apply already created. If found, reuse it. If not found, check `completeSubjectIds`: if the field is absent (a complete update) or `item.id` is in it, create a new object and register it with `item.id` before applying its properties. If the field is present and `item.id` is not in it, **skip** the item and count it in `SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates`.
    - Apply the item's properties from `subjects[item.id]` if present.
+   - The same ID twice in one `items` array is the same subject twice in the collection, not two subjects.
    - Replace the local collection with the new ordered list.
 3. An empty `items` array (`[]`) clears the collection.
 
@@ -314,7 +317,7 @@ Set the local property to the `value` from the update.
 
 1. If `items` is null/omitted, the dictionary is null. Set the local property to null.
 2. If `items` is present, it defines the **full state**:
-   - For each item, look up `item.id` in the ID-to-object map. If found, reuse it. If not found, check `completeSubjectIds`: if the field is absent (a complete update) or `item.id` is in it, create a new object and register it with `item.id`. If the field is present and `item.id` is not in it, **skip** the item and count it in `SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates`.
+   - For each item, look up `item.id` in the ID-to-object map, including the subjects this apply already created. If found, reuse it. If not found, check `completeSubjectIds`: if the field is absent (a complete update) or `item.id` is in it, create a new object and register it with `item.id` before applying its properties. If the field is present and `item.id` is not in it, **skip** the item and count it in `SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates`.
    - Apply the item's properties from `subjects[item.id]` if present.
    - Set the object at `dictionary[item.key]`.
    - Remove any dictionary entries whose keys are not in the `items` array.
@@ -488,11 +491,11 @@ Only the changed property on the root subject is included.
 
 ### Partial Update: Non-Root Scalar Change
 
-When only a non-root subject changes, `root` is null because the root has no changes. The changed subject appears in `subjects` by its ID.
+When only a non-root subject changes, the root has no entry in `subjects` and the changed subject appears there by its ID. `root` is still sent, so a reference to the sender's root ID stays resolvable.
 
 ```json
 {
-  "root": null,
+  "root": "rootId",
   "subjects": {
     "child1Id": {
       "Name": { "kind": "Value", "value": "UpdatedAlice" }
@@ -579,7 +582,7 @@ Before: `[A, B, C]` → After: `[C, A, B]`
 
 ## Changes from the Index-Based Protocol
 
-This protocol replaces an earlier index-based one. For readers familiar with the previous shape, the changes are: `SubjectCollectionOperation` and `SubjectCollectionOperationType` are deleted, along with `SubjectPropertyUpdate.Operations`; structural changes (insert, remove, move, reorder) no longer have their own operation types and instead fold into `items` as the complete new state, as described in [Complete-State Collection and Dictionary Updates](#complete-state-collection-and-dictionary-updates). `SubjectPropertyItemUpdate.Index` (an `object`, since collection items used a numeric index and dictionary items used a key of varying type) is replaced by `Id` (a `string`, the item's stable subject ID); the old `Id` field (the dictionary key) is renamed to `Key`. `SubjectPropertyUpdate.Count` is removed; it existed to bounds-check index-based operations, and that role is obsolete once every structural update carries the complete `items` state. `SubjectUpdate.Root` becomes nullable (`string?`) because a partial update need not touch the root subject at all. `SubjectUpdate.CompleteSubjectIds` (`HashSet<string>?`) is new; it tells the applier which subject entries in an update carry complete state versus which are references it must not fabricate.
+This protocol replaces an earlier index-based one. For readers familiar with the previous shape, the changes are: `SubjectCollectionOperation` and `SubjectCollectionOperationType` are deleted, along with `SubjectPropertyUpdate.Operations`; structural changes (insert, remove, move, reorder) no longer have their own operation types and instead fold into `items` as the complete new state, as described in [Complete-State Collection and Dictionary Updates](#complete-state-collection-and-dictionary-updates). `SubjectPropertyItemUpdate.Index` (an `object`, since collection items used a numeric index and dictionary items used a key of varying type) is replaced by `Id` (a `string`, the item's stable subject ID); the old `Id` field (the dictionary key) is renamed to `Key`. `SubjectPropertyUpdate.Count` is removed; it existed to bounds-check index-based operations, and that role is obsolete once every structural update carries the complete `items` state. `SubjectUpdate.Root` becomes nullable (`string?`) so that an update from another implementation can omit it; updates this library builds always set it, including partial ones whose root has no entry in `subjects`. `SubjectUpdate.CompleteSubjectIds` (`HashSet<string>?`) is new; it tells the applier which subject entries in an update carry complete state versus which are references it must not fabricate.
 
 ## Transport
 

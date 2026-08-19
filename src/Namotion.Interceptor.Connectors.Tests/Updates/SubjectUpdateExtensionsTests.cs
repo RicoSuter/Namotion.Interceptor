@@ -386,8 +386,13 @@ public partial class SubjectUpdateExtensionsTests
         Assert.Equal("Parent", target.Name);
         Assert.NotNull(target.Child);
         Assert.Equal("Child", target.Child.Name);
-        // Note: The circular reference back to parent won't be restored since
-        // we create new instances. This is expected behavior.
+
+        // The reference back to the parent resolves to the local root subject. The update's Root
+        // field maps the sender's root ID onto it for the duration of the apply, so the cycle is
+        // restored as a cycle. Creating a second instance for that ID instead would fabricate a
+        // default-valued node, and rooting it would hand the sender's root ID to the phantom in the
+        // receiver's reverse index, where no later update could reach the real root again.
+        Assert.Same(target, target.Child.Parent);
     }
 
     [Fact]
@@ -408,7 +413,10 @@ public partial class SubjectUpdateExtensionsTests
 
         // Assert
         Assert.Equal("SelfRef", target.Name);
-        // Self-reference won't be restored to point to target itself
+
+        // Same reasoning as the circular reference above: the self reference names the update's
+        // root ID, which maps onto the local root subject, so it resolves to the target itself.
+        Assert.Same(target, target.Self);
     }
 
     [Fact]

@@ -335,9 +335,24 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         ref var set = ref CollectionsMarshal.GetValueRefOrAddDefault(_attachedSubjects, subject, out var existed);
         var isFirstAttach = !existed;
+        var wasEmpty = set.IsEmpty;
         if (!set.Add(property))
         {
             return;
+        }
+
+        // An entry which exists but is empty belongs either to a subject attached directly to a context
+        // or to a last detach this interceptor's batch scope deferred. Only the latter is a move, and only
+        // there is IsContextAttach false for a subject which is re-entering the graph, so report the
+        // property it left for handlers which mirror the current parent.
+        PropertyReference? movedFromProperty = null;
+        if (existed && wasEmpty && s_batchScopeCount > 0 && ReferenceEquals(s_batchScopeOwner, this))
+        {
+            var deferred = s_deferredLastDetaches;
+            if (deferred is not null && deferred.TryGetValue(subject, out var deferredDetach))
+            {
+                movedFromProperty = deferredDetach.Property;
+            }
         }
 
         var count = subject.IncrementReferenceCount();
@@ -348,7 +363,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             Index = index,
             ReferenceCount = count,
             IsContextAttach = isFirstAttach,
-            IsPropertyReferenceAdded = true
+            IsPropertyReferenceAdded = true,
+            MovedFromProperty = movedFromProperty
         };
 
         var properties = subject.Properties.Keys;

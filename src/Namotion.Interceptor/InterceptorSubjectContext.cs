@@ -183,6 +183,63 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         return true;
     }
 
+    /// <summary>
+    /// Swaps one fallback context for another in a single published state.
+    /// Removing and adding separately would report the subject as leaving and re-entering the graph,
+    /// which takes the subject and its children out of it (see
+    /// <c>InterceptorExecutor.RemoveFallbackContext</c>). This is for a subject that stays in the graph
+    /// and only changes which parent it inherits from, so it reports nothing.
+    /// Returns false when <paramref name="oldContext"/> is not a fallback context of this context.
+    /// </summary>
+    internal bool ReplaceFallbackContext(IInterceptorSubjectContext oldContext, IInterceptorSubjectContext newContext)
+    {
+        var oldContextImpl = (InterceptorSubjectContext)oldContext;
+        var newContextImpl = (InterceptorSubjectContext)newContext;
+
+        lock (_mutationLock)
+        {
+            var state = Volatile.Read(ref _state);
+            var fallbackContexts = state.FallbackContexts;
+            var index = fallbackContexts.IndexOf(oldContextImpl);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            // The new context can already be a fallback, in which case the swap is just the removal.
+            var isNewContextPresent = fallbackContexts.Contains(newContextImpl);
+            if (!isNewContextPresent)
+            {
+                // R4: register into the new fallback BEFORE publishing and unregister from the old one
+                // only after, so both using sets stay a superset of the true using set for the whole
+                // transition (see AddFallbackContext).
+                var newUsedByContexts = newContextImpl.GetOrCreateUsedByContexts();
+                lock (newUsedByContexts)
+                {
+                    newUsedByContexts.Add(this);
+                }
+            }
+
+            PublishState(new ContextState(
+                state.Services,
+                isNewContextPresent
+                    ? fallbackContexts.RemoveAt(index)
+                    : fallbackContexts.SetItem(index, newContextImpl)));
+
+            var oldUsedByContexts = Volatile.Read(ref oldContextImpl._usedByContexts);
+            if (oldUsedByContexts is not null)
+            {
+                lock (oldUsedByContexts)
+                {
+                    oldUsedByContexts.Remove(this);
+                }
+            }
+        }
+
+        InvalidateUsingContexts();
+        return true;
+    }
+
     public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
     {
         lock (_mutationLock)

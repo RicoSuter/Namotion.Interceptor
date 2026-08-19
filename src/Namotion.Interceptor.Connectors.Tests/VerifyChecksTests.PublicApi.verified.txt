@@ -453,6 +453,7 @@ namespace Namotion.Interceptor.Connectors.Updates
     public class SubjectUpdate
     {
         public SubjectUpdate() { }
+        protected SubjectUpdate(Namotion.Interceptor.Connectors.Updates.SubjectUpdate source) { }
         [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         [System.Text.Json.Serialization.JsonPropertyName("completeSubjectIds")]
         public System.Collections.Generic.HashSet<string>? CompleteSubjectIds { get; init; }

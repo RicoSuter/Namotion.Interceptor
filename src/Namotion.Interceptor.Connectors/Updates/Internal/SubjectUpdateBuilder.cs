@@ -119,10 +119,12 @@ internal sealed class SubjectUpdateBuilder
             }
         }
 
-        // Only include root when the root subject has properties in this update.
+        // Root is always included, also when the root subject has no property entries of its own: it
+        // is what lets the receiver map the sender's root ID onto its own root subject, and a subject
+        // that references the root (a parent pointer, for example) is otherwise unresolvable there.
         var update = new SubjectUpdate
         {
-            Root = _subjects.ContainsKey(rootId) ? rootId : null,
+            Root = rootId,
             Subjects = orderedSubjects,
             CompleteSubjectIds = _completeSubjectIds
         };

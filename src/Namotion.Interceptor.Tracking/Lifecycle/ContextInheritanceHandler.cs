@@ -20,6 +20,21 @@ public class ContextInheritanceHandler : ILifecycleHandler
             {
                 change.Subject.Context.AddFallbackContext(change.Property.Value.Subject.Context);
             }
+            // A batch scope defers the last detach, so a subject moved between structural properties within
+            // one update re-attaches without IsContextAttach and its deferred detach is never processed:
+            // neither predicate below sees the move. Follow it here instead, with a swap rather than a
+            // remove and an add, because removing a fallback context detaches the subject and its children
+            // and the subject is attached again at this point. A move within one parent needs no change.
+            else if (change.MovedFromProperty is { } movedFromProperty &&
+                     change.Subject.Context is InterceptorSubjectContext subjectContext)
+            {
+                var currentParentContext = change.Property.Value.Subject.Context;
+                var previousParentContext = movedFromProperty.Subject.Context;
+                if (!ReferenceEquals(currentParentContext, previousParentContext))
+                {
+                    subjectContext.ReplaceFallbackContext(previousParentContext, currentParentContext);
+                }
+            }
             // Keyed off IsContextDetach, not ReferenceCount: under a batch scope the count can be
             // transiently 0 while last-detach processing is deferred, and the scope stamps
             // IsContextDetach only once the detach actually lands. That keeps the inherited context

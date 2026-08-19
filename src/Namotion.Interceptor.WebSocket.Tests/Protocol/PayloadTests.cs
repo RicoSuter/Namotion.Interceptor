@@ -1,4 +1,7 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Xunit;
@@ -103,5 +106,68 @@ public class PayloadTests
 
         // Assert
         Assert.Null(payload.Sequence);
+    }
+
+    /// <summary>
+    /// Guards the copy the server uses to stamp a sequence number onto an update. A field of
+    /// <see cref="SubjectUpdate"/> that the copy misses is absent from every update the server sends,
+    /// with no error anywhere, so this fails as soon as a new field is not carried over.
+    /// </summary>
+    [Fact]
+    public void WhenUpdatePayloadIsBuiltFromAnUpdate_ThenEveryFieldOfTheUpdateIsCarriedOver()
+    {
+        // Arrange
+        var updateProperties = typeof(SubjectUpdate)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(property => property.CanWrite)
+            .ToArray();
+
+        Assert.NotEmpty(updateProperties);
+
+        var source = new SubjectUpdate();
+        foreach (var property in updateProperties)
+        {
+            property.SetValue(source, CreateDistinctValue(property.PropertyType));
+        }
+
+        // Act
+        var payload = new UpdatePayload(source);
+
+        // Assert
+        foreach (var property in updateProperties)
+        {
+            Assert.Equal(property.GetValue(source), property.GetValue(payload));
+        }
+    }
+
+    private static object CreateDistinctValue(Type type)
+    {
+        if (type == typeof(string))
+        {
+            return "copy-guard";
+        }
+
+        if (type == typeof(HashSet<string>))
+        {
+            return new HashSet<string> { "copy-guard" };
+        }
+
+        if (type == typeof(Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>))
+        {
+            return new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["copy-guard"] = new() { ["Value"] = new SubjectPropertyUpdate() }
+            };
+        }
+
+        if (!type.IsValueType && type.GetConstructor(Type.EmptyTypes) is { } constructor)
+        {
+            return constructor.Invoke(null);
+        }
+
+        Assert.Fail(
+            $"SubjectUpdate gained a property of type {type}. Copy it in the SubjectUpdate copy " +
+            "constructor and teach this method how to build a distinguishable value for it.");
+        return null!;
     }
 }

@@ -145,11 +145,11 @@ internal static class SubjectItemsUpdateApplier
     }
 
     /// <summary>
-    /// Resolves an existing subject by ID, or creates a new one when the update carries its complete
-    /// state. Returns <c>null</c> when the ID is neither resolvable nor creatable; that reference is
-    /// dropped and counted. The created instance is bare: the caller sets its ID and applies its
-    /// properties before assigning the collection or dictionary to the graph, so the subgraph is
-    /// complete by the time it enters the graph.
+    /// Resolves a subject already bound by this apply or an existing subject by ID, or creates a new
+    /// one when the update carries its complete state. Returns <c>null</c> when the ID is neither
+    /// resolvable nor creatable; that reference is dropped and counted. The created instance is bare:
+    /// the caller sets its ID and applies its properties before assigning the collection or dictionary
+    /// to the graph, so the subgraph is complete by the time it enters the graph.
     /// </summary>
     private static (IInterceptorSubject? Subject, bool IsNew) ResolveOrCreateSubject(
         PropertyReference property,
@@ -158,6 +158,15 @@ internal static class SubjectItemsUpdateApplier
         ISubjectIdRegistry idRegistry,
         SubjectUpdateApplyContext context)
     {
+        if (context.TryGetBoundSubject(subjectId, out var bound))
+        {
+            // A subject this apply already bound to the ID: one it created earlier, which the
+            // registry cannot resolve until its subtree is rooted, or the local root mapped from the
+            // update's root hint. The same ID twice in one items array, or shared between two items,
+            // therefore yields the same instance instead of a second, never populated one.
+            return (bound, false);
+        }
+
         if (idRegistry.TryGetSubjectById(subjectId, out var existing))
         {
             return (existing, false);
@@ -174,6 +183,12 @@ internal static class SubjectItemsUpdateApplier
         }
 
         var newItem = CreateSubjectItem(property, indexOrKey, context);
+
+        // Bind before the caller populates the item: a property inside its subtree can reference the
+        // same ID again (a self reference, a cycle, or a second parent), and every such reference has
+        // to resolve to this instance.
+        context.BindSubject(subjectId, newItem);
+
         return (newItem, true);
     }
 

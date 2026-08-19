@@ -12,6 +12,7 @@ internal sealed class SubjectUpdateApplyContext
 {
     private readonly HashSet<string> _processedSubjectIds = [];
     private readonly Dictionary<string, IInterceptorSubject> _preResolvedSubjects = [];
+    private readonly Dictionary<string, IInterceptorSubject> _boundSubjects = [];
     private readonly List<(IInterceptorSubject Subject, Dictionary<string, SubjectPropertyUpdate> Properties)> _deferredAttributeUpdates = [];
 
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = null!;
@@ -78,12 +79,42 @@ internal sealed class SubjectUpdateApplyContext
     }
 
     /// <summary>
-    /// Tries to resolve a subject by ID. Checks the pre-resolved cache first (captured before
-    /// structural changes), then falls back to the live registry (for subjects created during
-    /// the apply, e.g., by structural processing).
+    /// Binds <paramref name="subjectId"/> to <paramref name="subject"/> for the rest of this apply.
+    /// </summary>
+    /// <remarks>
+    /// Two kinds of subject are bound: the ones this apply creates, and the local root subject, bound
+    /// to the update's <see cref="SubjectUpdate.Root"/> mapping hint. Neither is reachable through the
+    /// ID registry under the update's ID. A created subject is not registered until its subtree is
+    /// rooted, which happens after it is populated, and the sender's root ID is not the receiver's.
+    /// Without this binding a second reference to the same ID inside one apply misses the registry and
+    /// fabricates a duplicate instance that is never populated, because the ID's properties were
+    /// already consumed by the first instance. Both instances get rooted, the registry keeps the first
+    /// one in its reverse index, and the duplicate becomes an invisible, permanently default-valued
+    /// node that no later update can reach.
+    /// </remarks>
+    public void BindSubject(string subjectId, IInterceptorSubject subject)
+        => _boundSubjects[subjectId] = subject;
+
+    /// <summary>
+    /// Tries to resolve a subject bound by this apply, see <see cref="BindSubject"/>. Callers must
+    /// consult this before deciding that an ID is unknown and a subject has to be created for it.
+    /// </summary>
+    public bool TryGetBoundSubject(string subjectId, out IInterceptorSubject subject)
+        => _boundSubjects.TryGetValue(subjectId, out subject!);
+
+    /// <summary>
+    /// Tries to resolve a subject by ID. Checks the subjects bound by this apply first (created here
+    /// or mapped from the update's root hint, neither of which the registry can resolve), then the
+    /// pre-resolved cache (captured before structural changes), then the live registry (for subjects
+    /// this apply has already rooted).
     /// </summary>
     public bool TryResolveSubject(string subjectId, out IInterceptorSubject subject)
     {
+        if (_boundSubjects.TryGetValue(subjectId, out subject!))
+        {
+            return true;
+        }
+
         if (_preResolvedSubjects.TryGetValue(subjectId, out subject!))
         {
             return true;
@@ -151,6 +182,7 @@ internal sealed class SubjectUpdateApplyContext
     {
         _processedSubjectIds.Clear();
         _preResolvedSubjects.Clear();
+        _boundSubjects.Clear();
         _deferredAttributeUpdates.Clear();
         _completeSubjectIds = null;
         Subjects = null!;

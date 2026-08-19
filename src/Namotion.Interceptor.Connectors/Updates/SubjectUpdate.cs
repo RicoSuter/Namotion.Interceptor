@@ -12,8 +12,17 @@ namespace Namotion.Interceptor.Connectors.Updates;
 public class SubjectUpdate
 {
     /// <summary>
-    /// The ID of the root subject in the <see cref="Subjects"/> dictionary.
+    /// The ID the sender gave the root subject of this update.
     /// </summary>
+    /// <remarks>
+    /// Set on every update this library builds, complete and partial alike, and it is a mapping hint
+    /// rather than an identity assignment: the receiver resolves it to its own root subject for the
+    /// duration of one apply, and the local root keeps its own ID. A partial update whose root has no
+    /// changed properties of its own still carries it, and then names an ID that is absent from
+    /// <see cref="Subjects"/>: without it a subject that references the sender's root, such as a
+    /// parent pointer, resolves against nothing in the receiver's registry and the reference is lost
+    /// for good, because the sender considers the state delivered and never resends it.
+    /// </remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("root")]
     public string? Root { get; init; }
@@ -39,6 +48,35 @@ public class SubjectUpdate
     [JsonPropertyName("completeSubjectIds")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public HashSet<string>? CompleteSubjectIds { get; init; }
+
+    /// <summary>
+    /// Creates an empty update.
+    /// </summary>
+    public SubjectUpdate()
+    {
+    }
+
+    /// <summary>
+    /// Copies every field of <paramref name="source"/>, so that a derived type carrying additional
+    /// transport fields, such as the WebSocket update payload, can be built from an update without
+    /// restating its fields at the call site.
+    /// </summary>
+    /// <remarks>
+    /// Every field declared above must be copied here. A field left out disappears from every message
+    /// a derived type sends, on the primary data path and without any error, so add new fields to this
+    /// constructor in the same edit that declares them. The dictionaries and sets are shared with
+    /// <paramref name="source"/> rather than cloned: an update is built, sent and discarded, and no
+    /// receiver of a copy mutates them.
+    /// </remarks>
+    /// <param name="source">The update to copy.</param>
+    protected SubjectUpdate(SubjectUpdate source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        Root = source.Root;
+        Subjects = source.Subjects;
+        CompleteSubjectIds = source.CompleteSubjectIds;
+    }
 
     /// <summary>
     /// Creates a complete update with all objects and properties for the given subject as root.

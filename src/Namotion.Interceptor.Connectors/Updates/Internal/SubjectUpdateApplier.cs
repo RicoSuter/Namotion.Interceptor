@@ -36,6 +36,17 @@ internal static class SubjectUpdateApplier
             context.Initialize(subject.Context, update.Subjects, update.CompleteSubjectIds, subjectFactory, origin, transformValueBeforeApply);
             context.PreResolveSubjects(update.Subjects.Keys);
 
+            if (update.Root is not null)
+            {
+                // Bind the sender's root ID to the local root subject, so that a reference back to
+                // the root resolves to it. Without the binding the ID misses the receiver's registry
+                // (the root's ID differs between sender and receiver) and either fabricates a
+                // default-valued phantom root whose registration then hijacks the ID in the reverse
+                // index, or, on a partial update that marks nothing complete, drops the reference and
+                // diverges permanently because the sender considers the state delivered.
+                context.BindSubject(update.Root, subject);
+            }
+
             // Batch scope: defer last-detach processing so subjects moving between structural
             // properties within this update stay attached and registered throughout.
             // PreResolveSubjects above handles the concurrent-mutation race (different thread);
@@ -288,22 +299,42 @@ internal static class SubjectUpdateApplier
             return;
         }
 
-        // Resolve the target subject from the ID registry; do NOT read the backing store, to
-        // avoid racing a concurrent structural mutation whose write landed before its
-        // lifecycle processing.
+        // Resolve the target subject from the subjects this apply has bound and then from the ID
+        // registry; do NOT read the backing store, to avoid racing a concurrent structural
+        // mutation whose write landed before its lifecycle processing.
         IInterceptorSubject targetItem;
         bool isNew;
 
-        if (context.SubjectIdRegistry.TryGetSubjectById(propertyUpdate.Id, out var existing))
+        if (context.TryGetBoundSubject(propertyUpdate.Id, out var bound))
+        {
+            // A subject this apply already bound to the ID: one it created earlier, which the
+            // registry cannot resolve until its subtree is rooted, or the local root mapped from
+            // the update's root hint. Its ID is already assigned, and the local root's own ID is a
+            // different one that must not be reassigned.
+            targetItem = bound;
+            isNew = false;
+        }
+        else if (context.SubjectIdRegistry.TryGetSubjectById(propertyUpdate.Id, out var existing))
         {
             targetItem = existing;
             isNew = false;
+
+            if (targetItem.TryGetSubjectId() != propertyUpdate.Id)
+            {
+                targetItem.SetSubjectId(propertyUpdate.Id);
+            }
         }
         else if (context.IsSubjectComplete(propertyUpdate.Id))
         {
             // The subject has complete state in this update, so creating it is safe.
             targetItem = context.SubjectFactory.CreateSubject(property.Metadata.Type, context.ServiceProvider);
             isNew = true;
+            targetItem.SetSubjectId(propertyUpdate.Id);
+
+            // Bind before populating: a property inside this subtree can reference the same ID
+            // again (a self reference, a cycle, or a second parent), and every such reference has
+            // to resolve to this instance.
+            context.BindSubject(propertyUpdate.Id, targetItem);
         }
         else
         {
@@ -312,11 +343,6 @@ internal static class SubjectUpdateApplier
             // The reference is lost until then, so count it as a drop.
             Interlocked.Increment(ref DroppedInboundSubjectUpdateCount);
             return;
-        }
-
-        if (isNew || targetItem.TryGetSubjectId() != propertyUpdate.Id)
-        {
-            targetItem.SetSubjectId(propertyUpdate.Id);
         }
 
         // For NEW subjects (no context, no interceptors yet): populate properties before the

@@ -335,6 +335,56 @@ public class WebSocketServerClientTests
     }
 
     [Fact]
+    public async Task WhenServerReordersAndExtendsCollection_ThenClientSyncsWithoutFabricatingSubjects()
+    {
+        // Arrange
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketTestServer<TestRoot>(_output);
+        await using var client = new WebSocketTestClient<TestRoot>(_output);
+
+        await server.StartAsync(
+            context => new TestRoot(context),
+            (context, root) =>
+            {
+                root.Name = "WithItems";
+                root.Items =
+                [
+                    new TestItem(context) { Label = "Item1", Value = 10 },
+                    new TestItem(context) { Label = "Item2", Value = 20 }
+                ];
+            },
+            port: portLease.Port);
+
+        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Items.Length == 2,
+            message: "Client should receive the initial collection");
+
+        // Act - a structural change on the live connection: reorder the known items and add a new one
+        server.Root!.Items =
+        [
+            server.Root.Items[1],
+            server.Root.Items[0],
+            new TestItem(((IInterceptorSubject)server.Root).Context) { Label = "Item3", Value = 30 }
+        ];
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Items.Length == 3 &&
+                  client.Root.Items[0].Label == "Item2" &&
+                  client.Root.Items[1].Label == "Item1" &&
+                  client.Root.Items[2].Label == "Item3",
+            message: "Client should receive the reordered collection including the new item");
+
+        // A subject the client fabricates for an ID it cannot resolve is default-valued and
+        // unreachable by ID afterwards, so the subject count is where it becomes visible.
+        var serverRegistry = ((IInterceptorSubject)server.Root).Context.GetService<ISubjectRegistry>();
+        var clientRegistry = ((IInterceptorSubject)client.Root!).Context.GetService<ISubjectRegistry>();
+        Assert.Equal(serverRegistry.KnownSubjects.Count, clientRegistry.KnownSubjects.Count);
+    }
+
+    [Fact]
     public async Task Server_MaxConnectionsReached_ShouldRejectNewClient()
     {
         // Arrange
