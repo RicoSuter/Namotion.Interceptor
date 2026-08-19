@@ -96,7 +96,11 @@ public class SubjectUpdateCollectionTests
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
 
         // Assert - a reorder resends the full items array in the new order, referencing every item by
-        // id only, and marks nothing complete because no item is new to the receiver
+        // id only, and marks nothing complete because no item is new to the receiver. The snapshot below
+        // shows no completeSubjectIds because Verify omits empty collections, NOT because the field is
+        // absent on the wire: a partial update always carries it, empty if nothing is complete, so the
+        // receiver never reads a missing field as permission to create. That is pinned by
+        // WhenPartialUpdateMarksNothingComplete_ThenTheFieldIsStillSerialized.
         await Verify(update);
     }
 

@@ -175,8 +175,10 @@ internal static class SubjectUpdateApplier
 
     /// <summary>
     /// Applies the attribute updates queued for subjects that were created and populated before they
-    /// entered the graph, starting at <paramref name="startIndex"/>. The subjects those entries belong
-    /// to are rooted by the time an entry is queued, so the registry can map attribute names to their
+    /// entered the graph, starting at <paramref name="startIndex"/>. An entry is queued before its
+    /// subject is rooted, which is why it is deferred at all; the structural call that queues it roots
+    /// the subject before returning, and this loop only advances after that call returns, so a subject
+    /// is rooted by the time its entry is processed and the registry can map attribute names to their
     /// backing properties. Returns the number of entries applied so far, to pass as the next start
     /// index, so a second call picks up only what was queued after the first one returned.
     /// </summary>
