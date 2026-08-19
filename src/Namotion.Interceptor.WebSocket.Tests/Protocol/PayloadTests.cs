@@ -14,7 +14,7 @@ public class PayloadTests
         var payload = new HelloPayload();
 
         // Assert
-        Assert.Equal(1, payload.Version);
+        Assert.Equal(WebSocketProtocol.Version, payload.Version);
         Assert.Equal(WebSocketFormat.Json, payload.Format);
     }
 
@@ -25,7 +25,7 @@ public class PayloadTests
         var payload = new WelcomePayload();
 
         // Assert
-        Assert.Equal(1, payload.Version);
+        Assert.Equal(WebSocketProtocol.Version, payload.Version);
         Assert.Equal(WebSocketFormat.Json, payload.Format);
         Assert.Null(payload.State);
     }

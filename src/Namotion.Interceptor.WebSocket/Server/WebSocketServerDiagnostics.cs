@@ -29,4 +29,14 @@ public sealed class WebSocketServerDiagnostics : ConnectorDiagnostics
     /// in the message stream rather than a count of events.
     /// </summary>
     public long CurrentSequence => _server.CurrentSequence;
+
+    /// <summary>
+    /// Gets process-wide subject-update pipeline drop counters. Nonzero values that keep rising
+    /// under structural churn indicate serialization or apply drops; see
+    /// <see cref="Namotion.Interceptor.Connectors.Updates.SubjectUpdateDiagnostics"/>.
+    /// </summary>
+    public long DroppedOutboundChanges => Namotion.Interceptor.Connectors.Updates.SubjectUpdateDiagnostics.DroppedOutboundChanges;
+
+    /// <inheritdoc cref="Namotion.Interceptor.Connectors.Updates.SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates" />
+    public long DroppedInboundSubjectUpdates => Namotion.Interceptor.Connectors.Updates.SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates;
 }

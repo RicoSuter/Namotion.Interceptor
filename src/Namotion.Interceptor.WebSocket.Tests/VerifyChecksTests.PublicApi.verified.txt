@@ -93,7 +93,7 @@ namespace Namotion.Interceptor.WebSocket.Protocol
     }
     public static class WebSocketProtocol
     {
-        public const int Version = 1;
+        public const int Version = 2;
     }
     public class WelcomePayload
     {
@@ -162,6 +162,8 @@ namespace Namotion.Interceptor.WebSocket.Server
     {
         public int ConnectionCount { get; }
         public long CurrentSequence { get; }
+        public long DroppedInboundSubjectUpdates { get; }
+        public long DroppedOutboundChanges { get; }
     }
     public sealed class WebSocketSubjectChangeProcessor : Microsoft.Extensions.Hosting.BackgroundService
     {
