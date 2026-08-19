@@ -58,10 +58,10 @@ public class SourceDiagnostics : ConnectorDiagnostics
     /// will not take.
     /// </summary>
     /// <remarks>
-    /// The capacity is <c>null</c> because the held set is bounded by the model's property count (one
-    /// entry per property) rather than by a configured size. When the source is configured without a
-    /// retry queue there is nothing to hold writes back, and this block reports a capacity of 0 and a
-    /// depth of 0.
+    /// The capacity is <c>null</c> because the held set sits outside any configured queue size; what
+    /// bounds it instead is described in the Writes Refused Until Reconnect section of
+    /// docs/connectors.md. When the source is configured without a retry queue there is nothing to
+    /// hold writes back, and this block reports a capacity of 0 and a depth of 0.
     /// </remarks>
     public QueueDiagnostics HeldWrites { get; }
 }

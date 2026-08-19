@@ -30,9 +30,12 @@ internal sealed class WriteRetryQueue : IDisposable
     // repeatedly while refused costs one slot rather than one per write. Only used under _lock.
     //
     // Deliberately not trimmed to _maxQueueSize: dropping a held write loses one a reconnect would have
-    // delivered, since the refusal is only permanent for this connection. One entry per property is what
-    // bounds it instead, by the model's property count rather than by the write rate. Released writes
-    // rejoin _pendingWrites and are subject to its bound again from there.
+    // delivered, since the refusal is only permanent for this connection. What bounds it instead is one
+    // entry per distinct property refused on the current connection, which is not the model's property
+    // count: nothing evicts an entry when its subject detaches, so a model that churns subjects whose
+    // writes are refused accumulates one entry per churned property, each keeping its detached subject
+    // graph reachable, until the next connection replacement releases the set. Released writes rejoin
+    // _pendingWrites and are subject to its bound again from there.
     private readonly Dictionary<PropertyReference, SubjectPropertyChange> _refusedWrites = new(PropertyReference.Comparer);
     private int _refusedCount;
 
@@ -218,12 +221,11 @@ internal sealed class WriteRetryQueue : IDisposable
                 return;
             }
 
-            // Deliberately not trimmed here, unlike every other path that grows the queue. Released
-            // writes go in at the head, which is the end a trim takes from, so trimming would discard
-            // precisely the writes this call exists to deliver, on the reconnect that would have taken
-            // them. It is not needed for the bound either: ReleaseRefusedWrites empties the held set in
-            // the same breath, so the overshoot is a one-shot transfer of what was held rather than
-            // growth, and the next enqueue or flush brings the queue back inside the bound.
+            // Not trimmed here, unlike every other path that grows the queue: released writes go in at
+            // the head, which is the end a trim takes from, so trimming would discard precisely the
+            // writes this call exists to deliver. The overshoot is a one-shot transfer of what was held
+            // (see the _refusedWrites field comment), and the next enqueue or flush brings the queue
+            // back inside the bound.
             ReleaseRefusedWrites();
             Volatile.Write(ref _count, _pendingWrites.Count);
         }

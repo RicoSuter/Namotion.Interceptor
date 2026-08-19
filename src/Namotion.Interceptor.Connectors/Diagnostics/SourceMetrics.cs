@@ -27,9 +27,7 @@ public class SourceMetrics : ConnectorMetrics
 
     /// <summary>
     /// Gets the metrics of the set holding writes the source refused for its current connection.
-    /// Unlike <see cref="OutboundRetries"/> these are not queued for retry: a held write is owed to
-    /// the source, held back because the source refused it for the current connection and will keep
-    /// refusing it until it reconnects.
+    /// The reader-facing semantics live on <see cref="SourceDiagnostics.HeldWrites"/>.
     /// </summary>
     public QueueMetrics HeldWrites { get; } = new(nameof(HeldWrites));
 

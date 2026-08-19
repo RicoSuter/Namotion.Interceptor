@@ -101,8 +101,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             _ = metrics.OutboundRetries.Register(
                 () => writeRetryQueue.PendingWriteCount, capacity: writeRetryQueueSize);
 
-            // Capacity null deliberately: the held set is bounded by the model's property count, not
-            // by writeRetryQueueSize, which the queue does not apply to writes it holds back.
+            // Capacity null deliberately: the held set sits outside writeRetryQueueSize. The field
+            // comment on WriteRetryQueue._refusedWrites is canonical for what bounds it instead.
             _ = metrics.HeldWrites.Register(
                 () => writeRetryQueue.RefusedWriteCount, capacity: null);
         }
