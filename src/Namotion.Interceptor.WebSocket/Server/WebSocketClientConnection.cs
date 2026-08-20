@@ -35,11 +35,40 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     private int _disposed;
     private int _consecutiveSendFailures;
 
+    private long _receivedUpdateCount;
+    private long _appliedThrough;
+    private bool _applyStalled;
+
     public string ConnectionId { get; } = Guid.NewGuid().ToString("N")[..8];
-    
+
     public bool IsConnected => _webSocket.State == WebSocketState.Open;
 
     public bool HasRepeatedSendFailures => Volatile.Read(ref _consecutiveSendFailures) >= 3;
+
+    /// <summary>
+    /// The number of updates received on this connection that were applied, counted only while every
+    /// update so far has applied. A failure stops it for the life of the connection, so the client
+    /// keeps re-asserting from that point and the next reconnect repairs it.
+    /// </summary>
+    public long AppliedThrough => Volatile.Read(ref _appliedThrough);
+
+    /// <summary>Assigns the next ordinal to an inbound update, before it is applied.</summary>
+    public long OnUpdateReceived() => Interlocked.Increment(ref _receivedUpdateCount);
+
+    /// <summary>Advances <see cref="AppliedThrough"/> to <paramref name="ordinal"/>, unless a prior update on this connection failed to apply.</summary>
+    public void OnUpdateApplied(long ordinal)
+    {
+        if (!Volatile.Read(ref _applyStalled))
+        {
+            Volatile.Write(ref _appliedThrough, ordinal);
+        }
+    }
+
+    /// <summary>Stops <see cref="AppliedThrough"/> from advancing for the rest of this connection's life.</summary>
+    public void OnApplyFailed()
+    {
+        Volatile.Write(ref _applyStalled, true);
+    }
 
     public WebSocketClientConnection(
         System.Net.WebSockets.WebSocket webSocket,

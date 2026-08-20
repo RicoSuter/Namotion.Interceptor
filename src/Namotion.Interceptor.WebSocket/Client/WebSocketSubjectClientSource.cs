@@ -685,6 +685,13 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                                         heartbeat.Sequence, sequenceTracker.ExpectedNextSequence);
                                     return; // Exit receive loop -> triggers reconnection
                                 }
+
+                                if (heartbeat.AppliedThrough is { } appliedThrough)
+                                {
+                                    // The loop's own socket, not the field: a suspended zombie loop must
+                                    // not retire against the connection that replaced it.
+                                    RetireInFlightThrough(appliedThrough, webSocket);
+                                }
                                 break;
 
                             case MessageType.Error:

@@ -56,6 +56,7 @@ namespace Namotion.Interceptor.WebSocket.Protocol
     public class HeartbeatPayload
     {
         public HeartbeatPayload() { }
+        public long? AppliedThrough { get; set; }
         public long Sequence { get; set; }
     }
     public class HelloPayload

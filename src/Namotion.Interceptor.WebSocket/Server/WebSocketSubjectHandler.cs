@@ -208,6 +208,8 @@ public sealed class WebSocketSubjectHandler
                 break;
             }
 
+            var ordinal = connection.OnUpdateReceived();
+
             try
             {
                 var factory = _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance;
@@ -216,9 +218,12 @@ public sealed class WebSocketSubjectHandler
                 {
                     _subject.ApplySubjectUpdate(update, factory, ChangeOrigin.FromSource(connection));
                 }
+
+                connection.OnUpdateApplied(ordinal);
             }
             catch (Exception ex)
             {
+                connection.OnApplyFailed();
                 _logger.LogError(ex, "Error applying update from client {ConnectionId}", connection.ConnectionId);
                 await connection.SendErrorAsync(new ErrorPayload
                 {
@@ -349,15 +354,21 @@ public sealed class WebSocketSubjectHandler
     {
         if (_connections.IsEmpty) return;
 
-        var heartbeat = new HeartbeatPayload
-        {
-            Sequence = Volatile.Read(ref _sequence)
-        };
+        var sequence = Volatile.Read(ref _sequence);
 
-        var serializedMessage = _serializer.SerializeMessage(MessageType.Heartbeat, heartbeat);
-
+        // Serialized per connection, because the applied-through value is per connection. The cost is
+        // one small payload per connection per heartbeat interval, bounded by MaxConnections.
         await BroadcastToAllAsync(
-            connection => connection.SendHeartbeatAsync(serializedMessage, cancellationToken),
+            connection =>
+            {
+                var heartbeat = new HeartbeatPayload
+                {
+                    Sequence = sequence,
+                    AppliedThrough = connection.AppliedThrough
+                };
+
+                return connection.SendHeartbeatAsync(_serializer.SerializeMessage(MessageType.Heartbeat, heartbeat), cancellationToken);
+            },
             cancellationToken).ConfigureAwait(false);
     }
 
