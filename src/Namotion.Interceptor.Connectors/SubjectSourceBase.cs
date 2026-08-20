@@ -77,6 +77,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
 
+        ArgumentOutOfRangeException.ThrowIfNegative(writeRetryQueueSize);
+
         // Always constructed, so the queue's size-0 branch is the single definition of a disabled queue:
         // count and discard, including the connect/reconnect-window writes it would otherwise reconcile.
         var writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger, metrics.OutboundRetries);

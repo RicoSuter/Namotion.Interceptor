@@ -123,6 +123,7 @@ internal sealed class WriteRetryQueue : IDisposable
     /// another attempt to flush. The latch is what keeps a write that settles afterwards, such as an
     /// abandoned teardown flush, from parking into a queue nobody will read. No producer adds past it,
     /// so the pending list stays empty and <see cref="DrainForLocalReapply"/> returns nothing.
+    /// One-way: a retired queue never parks again and cannot serve a second run.
     /// </remarks>
     public void Retire()
     {

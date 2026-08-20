@@ -1428,4 +1428,54 @@ public class ChangeQueueProcessorTests
         Assert.Equal(1, processor.DropCount);
         Assert.Equal(0, processor.QueueDepth);
     }
+
+    [Fact]
+    public async Task WhenACollapsedBatchIsCancelledAtTheBound_ThenOnlyTheSurvivorIsCounted()
+    {
+        // Arrange: five writes to one property, which the merger collapses to one deliverable change.
+        // Requeueing the pre-merge list instead would report the four collapsed duplicates as losses,
+        // and the failing-write path beside it counts one for the same batch.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var dropped = 0L;
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: async (_, teardownToken) => await Task.Delay(Timeout.Infinite, teardownToken),
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            dropHandler: count => Interlocked.Add(ref dropped, count));
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        for (var i = 0; i < 5; i++)
+        {
+            subject.FirstName = "v" + i;
+        }
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processor.QueueDepth == 5,
+            message: "All five changes should be buffered by the processor before it stops");
+
+        // Act
+        await cancellation.CancelAsync();
+        await processing.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Interlocked.Read(ref dropped) > 0,
+            message: "the requeued batch should have been counted once the drain settled");
+
+        Assert.Equal(1, Interlocked.Read(ref dropped));
+        Assert.Equal(1, processor.DropCount);
+        Assert.Equal(0, processor.QueueDepth);
+    }
 }

@@ -206,6 +206,8 @@ For a source the batch goes through the normal write handler, which flushes the 
 
 Whatever the drain cannot deliver is counted rather than discarded silently: still buffered when the drain ends raises `Diagnostics.OutboundChanges.TotalDropped`, still parked when a source's run ends raises `Diagnostics.OutboundRetries.TotalDropped`. See [Connector Diagnostics](#connector-diagnostics).
 
+A buffered batch cancelled part-way through by the stop is re-written whole by the drain, so delivery at teardown is at least once rather than exactly once: a client that already received a value can receive it again.
+
 ### Monitoring Synchronization State
 
 Every source reports whether it is connecting, synchronized, or stopped, through a per-tree registry, a typed event stream, and an awaitable wait. Add `WithSourceMonitoring()` to the context recipe to enable it:

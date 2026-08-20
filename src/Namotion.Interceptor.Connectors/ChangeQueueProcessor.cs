@@ -352,7 +352,8 @@ public class ChangeQueueProcessor : IDisposable
         // writing under it would fail every change, which is the loss this exists to prevent.
         var teardownTokenSource = new CancellationTokenSource(TeardownFlushBound);
 
-        // Read once: Token throws ObjectDisposedException once the task below disposes the token source.
+        // Read once: Token throws once the task below disposes the source. Keep that disposal last: a
+        // registration taken on a disposed source is dropped silently, leaving the wait below unbounded.
         var teardownToken = teardownTokenSource.Token;
 
         // Off this thread: the OPC UA server writes synchronously under the SDK's node manager lock and
@@ -369,8 +370,14 @@ public class ChangeQueueProcessor : IDisposable
                 {
                     // Inside the task, so the count runs after the requeue a cancelled flush performs on
                     // its unwind, and the token source outlives a waiter that gave up at the deadline.
-                    CountRemainingAfterDrain();
-                    teardownTokenSource.Dispose();
+                    try
+                    {
+                        CountRemainingAfterDrain();
+                    }
+                    finally
+                    {
+                        teardownTokenSource.Dispose();
+                    }
                 }
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -481,9 +488,9 @@ public class ChangeQueueProcessor : IDisposable
                 {
                     // Cancelled means never confirmed, not failed, and nothing else recovers a batch that
                     // left the subscription. The merger resolves by commit revision, not queue position.
-                    // Requeue the pre-merge list: the finally below returns the merger's pooled buffer,
-                    // so mergedChanges dangles the moment this unwinds.
-                    foreach (var change in _flushChanges)
+                    // The drain counts raw queue entries, so requeueing the pre-merge list would report
+                    // every collapsed duplicate as a loss. Copied here: the finally releases the buffer.
+                    foreach (var change in mergedChanges.Span)
                     {
                         _changes.Enqueue(change);
                     }
