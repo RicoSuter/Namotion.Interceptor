@@ -138,6 +138,7 @@ namespace Namotion.Interceptor.Connectors
     public abstract class SubjectSourceBase : Namotion.Interceptor.Connectors.SubjectConnectorBase, Namotion.Interceptor.Connectors.ISubjectConnector, Namotion.Interceptor.Connectors.ISubjectSource
     {
         protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000, System.TimeSpan? teardownFlushTimeout = default, Namotion.Interceptor.Connectors.ThroughputCounter? incomingThroughput = null, Namotion.Interceptor.Connectors.ThroughputCounter? outgoingThroughput = null) { }
+        protected int CurrentResumeEpoch { get; }
         [get: System.Runtime.CompilerServices.PreserveBaseOverrides]
         public new virtual Namotion.Interceptor.Connectors.Diagnostics.SourceDiagnostics Diagnostics { get; }
         public System.DateTimeOffset? LastSynchronizedAt { get; }
@@ -151,7 +152,7 @@ namespace Namotion.Interceptor.Connectors
         protected System.Threading.Tasks.Task CompleteResumeAsync(int resumeEpoch, System.Threading.CancellationToken cancellationToken) { }
         public override void Dispose() { }
         public abstract System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
-        protected void ParkChangesForRetry(System.ReadOnlySpan<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes) { }
+        protected void ParkChangesForRetry(System.ReadOnlySpan<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, bool insertAtFront = false) { }
         protected void ReportConnectionLost() { }
         protected override sealed System.Threading.Tasks.Task RunAsync(System.Threading.CancellationToken stoppingToken) { }
         public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }

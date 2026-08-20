@@ -95,6 +95,35 @@ internal sealed class WriteRetryQueue : IDisposable
     }
 
     /// <summary>
+    /// Inserts changes at the front of the queue, for entries older than anything already queued, and
+    /// reports any that the ring buffer then drops. Thread-safe via the same lock as <see cref="Enqueue"/>.
+    /// </summary>
+    /// <remarks>
+    /// Mirrors <see cref="RequeueChanges"/>: eviction always removes from the front, so inserting
+    /// older entries there is what makes the ring buffer drop them first when it is over capacity,
+    /// ahead of the newer entries already further back in the queue.
+    /// </remarks>
+    public void EnqueueAtFront(ReadOnlyMemory<SubjectPropertyChange> changes)
+    {
+        if (_maxQueueSize is 0)
+        {
+            _metrics.AddDropped(changes.Length);
+            _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes.", changes.Length);
+            return;
+        }
+
+        var droppedCount = RequeueChanges(changes.Span);
+        if (droppedCount > 0)
+        {
+            _metrics.AddDropped(droppedCount);
+            _logger.LogWarning(
+                "Write queue at capacity, dropped {Count} oldest writes (queue size: {QueueSize}).",
+                droppedCount,
+                _maxQueueSize);
+        }
+    }
+
+    /// <summary>
     /// Flushes pending writes from the queue to the source.
     /// Returns true if flush succeeded (or queue was empty), false if flush failed.
     /// </summary>

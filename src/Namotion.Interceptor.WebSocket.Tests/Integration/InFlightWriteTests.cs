@@ -47,6 +47,11 @@ public class InFlightWriteTests
             () => server.Root!.Name == "SentButNotApplied",
             timeout: TimeSpan.FromSeconds(30),
             message: "The re-parked in-flight write should reach the restarted server");
+
+        // The client must not have been left on the server's stale reloaded value either: the same
+        // reconcile that re-sends the write also restores it locally, and that restore happens before
+        // the resend, so it has already landed by the time the server's value above is observed.
+        Assert.Equal("SentButNotApplied", client.Root!.Name);
     }
 
     // Fails against an in-flight set placed in WriteChangesViaRetryQueueAsync: a transactional commit
@@ -73,9 +78,12 @@ public class InFlightWriteTests
             await transaction.CommitAsync(CancellationToken.None);
         }
 
-        // Assert
+        // Assert - SendOrdinal rather than InFlightCount: the property was never previously published
+        // to a source, so InFlightCount > 0 would also pass if the arrangement above grew a preceding
+        // non-transactional write. Asserting the ordinal pins that exactly one send happened and it
+        // was this transactional one.
         await AsyncTestHelpers.WaitUntilAsync(
-            () => client.Source!.InFlightCount > 0,
-            message: "A transactional write must be recorded in the in-flight set");
+            () => client.Source!.SendOrdinal == 1,
+            message: "A transactional write must be the one and only send recorded in the in-flight set");
     }
 }

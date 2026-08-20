@@ -613,19 +613,33 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// Parks changes in the write retry queue, collapsed to one entry per property, so that the next
     /// reconcile decides whether each is sent, restored or dropped.
     /// </summary>
+    /// <param name="changes">The changes to park.</param>
+    /// <param name="insertAtFront">
+    /// <c>true</c> for changes older than anything already queued, such as a re-park after a
+    /// reconnect: appending them at the back would rank them as the newest entries, and the ring
+    /// buffer would then evict the genuinely newer ones ahead of them once it is over capacity.
+    /// </param>
     /// <remarks>
     /// For a connector that has to re-assert writes it sent but cannot prove were applied. Collapsing
     /// first is what keeps the occupancy proportional to the number of properties written rather than
     /// to the number of writes. Does nothing when the retry queue is disabled.
     /// </remarks>
-    protected void ParkChangesForRetry(ReadOnlySpan<SubjectPropertyChange> changes)
+    protected void ParkChangesForRetry(ReadOnlySpan<SubjectPropertyChange> changes, bool insertAtFront = false)
     {
         if (WriteRetryQueue is null || changes.Length == 0)
         {
             return;
         }
 
-        WriteRetryQueue.Enqueue(CollapsePerProperty(changes.ToArray()).ToArray());
+        var collapsed = CollapsePerProperty(changes.ToArray()).ToArray();
+        if (insertAtFront)
+        {
+            WriteRetryQueue.EnqueueAtFront(collapsed);
+        }
+        else
+        {
+            WriteRetryQueue.Enqueue(collapsed);
+        }
     }
 
     /// <summary>
@@ -710,6 +724,17 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         Volatile.Write(ref _resumeInProgress, 1);
         return epoch;
     }
+
+    /// <summary>
+    /// The epoch a resume last opened, whether or not one is currently in progress.
+    /// </summary>
+    /// <remarks>
+    /// A caller that captured this alongside other connection state before waiting on a lock can tell,
+    /// once it resumes, whether a resume started in between: the epoch only advances inside
+    /// <see cref="BeginResume"/>, so a value that is still unchanged means nothing captured before it
+    /// predates a connection replacement, even if the connection itself has already been replaced.
+    /// </remarks>
+    protected int CurrentResumeEpoch => Volatile.Read(ref _resumeEpoch);
 
     /// <summary>
     /// Re-opens outbound delivery if <paramref name="resumeEpoch"/> is still the newest one, so that a

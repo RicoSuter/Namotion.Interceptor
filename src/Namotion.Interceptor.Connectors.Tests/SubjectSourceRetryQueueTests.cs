@@ -632,6 +632,68 @@ public class SubjectSourceRetryQueueTests
         Assert.Contains(recordingLogger.Errors, message => message.Contains("Discarded", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void WhenBeginResumeIsCalledRepeatedly_ThenCurrentResumeEpochTracksTheLatestOne()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry().WithFullPropertyTracking();
+        var person = new Person(context);
+        var source = new TestSubjectSource(person, context, NullLogger.Instance);
+
+        // Act & Assert - no resume has opened the gate yet.
+        Assert.Equal(0, source.CurrentResumeEpochForTest);
+
+        var firstEpoch = source.BeginResumeForTest();
+        Assert.Equal(firstEpoch, source.CurrentResumeEpochForTest);
+
+        var secondEpoch = source.BeginResumeForTest();
+        Assert.Equal(secondEpoch, source.CurrentResumeEpochForTest);
+        Assert.True(secondEpoch > firstEpoch, "A later BeginResume must open a newer epoch.");
+
+        // Clearing the gate must not roll the epoch back: it is a caller of CurrentResumeEpoch's job
+        // to tell a value captured before this resume apart from one captured during it, and that only
+        // works if the epoch keeps climbing rather than resetting once the resume completes.
+        source.AbortResumeForTest(secondEpoch);
+        Assert.Equal(secondEpoch, source.CurrentResumeEpochForTest);
+    }
+
+    [Fact]
+    public async Task WhenParkingWithInsertAtFront_ThenTheParkedEntriesPrecedeAnyAlreadyQueued()
+    {
+        // Arrange - stands in for the re-park after a reconnect: the in-flight entries being re-parked
+        // predate everything the gate already parked during the outage, so they must land ahead of it.
+        var context = InterceptorSubjectContext.Create().WithRegistry().WithFullPropertyTracking();
+        var person = new Person(context);
+        var source = new TestSubjectSource(person, context, NullLogger.Instance);
+
+        EnqueueRetryChange(source, person, nameof(Person.LastName), "OldLast", "QueuedDuringOutage");
+
+        // Act
+        source.ParkChangesForRetryForTest(
+            [CreateChange(person, nameof(Person.FirstName), "OldFirst", "InFlightBeforeOutage")],
+            insertAtFront: true);
+
+        // Assert
+        var drained = await source.WriteRetryQueue!.DrainForLocalReapplyAsync(CancellationToken.None);
+        Assert.Equal(2, drained.Length);
+        Assert.Equal(nameof(Person.FirstName), drained[0].Property.Name);
+        Assert.Equal(nameof(Person.LastName), drained[1].Property.Name);
+    }
+
+    private static void EnqueueRetryChange(TestSubjectSource source,
+        IInterceptorSubject subject, string propertyName, string? oldValue, string? newValue) =>
+        source.WriteRetryQueue!.Enqueue(new[] { CreateChange(subject, propertyName, oldValue, newValue) });
+
+    private static SubjectPropertyChange CreateChange(
+        IInterceptorSubject subject, string propertyName, string? oldValue, string? newValue) =>
+        SubjectPropertyChange.Create(
+            new PropertyReference(subject, propertyName),
+            ChangeOrigin.Local,
+            DateTimeOffset.UtcNow,
+            null,
+            oldValue,
+            newValue);
+
     /// <summary>
     /// Starts a live pump with FirstName and LastName owned by the source, and waits until it is
     /// processing outbound changes. Pure arrangement: callers drive the resume gate themselves.

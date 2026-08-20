@@ -149,6 +149,24 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         await RetireReceiveLoopCommitsAsync().ConfigureAwait(false);
 
         var receiveCts = _receiveCts;
+        var webSocket = _webSocket;
+
+        // Gated on there being anything left to tear down here, not merely on the in-flight count: the
+        // belt-and-braces call from DisposeAsync finds both fields already null and would otherwise
+        // repeat this log for the same writes a prior call already reported.
+        if (receiveCts is not null || webSocket is not null)
+        {
+            var outstanding = InFlightCount;
+            if (outstanding > 0)
+            {
+                // Not counted as a drop: these reached the socket and may already have been applied, so
+                // treating them as lost here would inflate the drop metric on every clean shutdown.
+                _logger.LogWarning(
+                    "Stopping with {Count} write(s) that reached the socket but were never confirmed applied.",
+                    outstanding);
+            }
+        }
+
         if (receiveCts is not null)
         {
             try { await receiveCts.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
@@ -163,7 +181,6 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             _receiveCts = null;
         }
 
-        var webSocket = _webSocket;
         if (webSocket is not null)
         {
             try { webSocket.Abort(); } catch { /* ignore */ }
@@ -368,28 +385,45 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
         _logger.LogInformation(
             "Re-asserting {Count} write(s) that reached the socket but were never acknowledged.", outstanding.Length);
-        ParkChangesForRetry(outstanding);
+
+        // Inserted at the front: these predate everything the gate has already parked during this
+        // outage, so appending them at the back would rank them as the newest entries and let the
+        // ring buffer evict the genuinely newer outage writes ahead of them.
+        //
+        // outstanding is already one entry per property, collapsed above by construction from a
+        // Dictionary keyed on the property. ParkChangesForRetry collapses it again, which is provably
+        // a no-op here, but the batch is small enough that paying it once more is cheaper than a
+        // second protected entry point across the assembly boundary just to skip it.
+        ParkChangesForRetry(outstanding, insertAtFront: true);
     }
 
     /// <summary>
     /// Retires in-flight entries the server has reported as applied on <paramref name="connection"/>.
     /// </summary>
     /// <remarks>
-    /// The connection is checked rather than assumed. `ConnectCoreAsync` waits only a bounded time for
-    /// the previous receive loop to exit, so a loop suspended between its heartbeat check and this call
-    /// could otherwise retire entries against the previous connection's count, discarding writes the
-    /// new server connection never saw.
+    /// The connection identity is checked inside <see cref="_inFlightLock"/>, not before it.
+    /// <see cref="ConnectCoreAsync"/> waits only a bounded time for the previous receive loop to
+    /// exit, so a loop suspended between reading the connection and taking the lock could otherwise
+    /// pass the check against the old connection, then, once resumed, remove an entry the new
+    /// connection already recorded. Checking under the lock is sufficient rather than merely
+    /// narrower: <see cref="RecordInFlight"/> and <see cref="ReParkInFlightChanges"/> both run under
+    /// <c>_connectionLock</c>, which <see cref="ConnectCoreAsync"/> holds continuously from the map
+    /// clear through the new socket's assignment, so while <see cref="_inFlightLock"/> is held, a
+    /// connection field matching <paramref name="connection"/> implies every remaining entry belongs
+    /// to it. Socket instances are never reused, so there is no ABA problem.
     /// </remarks>
     internal void RetireInFlightThrough(long appliedThrough, System.Net.WebSockets.WebSocket connection)
     {
-        if (appliedThrough <= 0 || !ReferenceEquals(_webSocket, connection))
+        if (appliedThrough <= 0)
         {
             return;
         }
 
+        BeforeRetireInFlightLock?.Invoke();
+
         lock (_inFlightLock)
         {
-            if (_inFlight.Count == 0)
+            if (!ReferenceEquals(_webSocket, connection) || _inFlight.Count == 0)
             {
                 return;
             }
@@ -469,10 +503,13 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
 
         // Captured before the wait: a batch queued on the lock across a reconnect would otherwise be
-        // sent over the new connection carrying pre-outage values that nothing has reconciled.
+        // sent over the new connection carrying pre-outage values that nothing has reconciled. The
+        // resume epoch is captured alongside it so the guard below can tell that case apart from a
+        // fresh commit that also waits across the same reconnect.
         var socketAtEntry = _webSocket;
+        var resumeEpochAtEntry = CurrentResumeEpoch;
 
-        BeforeConnectionLockWaitForTest?.Invoke();
+        BeforeConnectionLockWait?.Invoke();
 
         try
         {
@@ -490,13 +527,24 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                 return WriteResult.Failure(changes, new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
             }
 
-            if (!ReferenceEquals(_webSocket, socketAtEntry))
+            // Rejects a batch that predates the connection replacement. The socket differing is not
+            // enough on its own: a fresh commit issued during the reconnect window also captures the
+            // pre-reconnect socket while it waits on the lock above, and that write is not stale. The
+            // resume epoch tells the two apart, since it only advances across an actual BeginResume.
+            // Rejecting here is what parks a stale batch on the retry-queue path, where the reconcile
+            // judges it; a transactional commit reaches this method directly with no such path, so a
+            // rejection surfaces there as a commit failure instead, which is why the guard is narrowed
+            // to batches that genuinely predate the reconnect rather than firing on every replacement.
+            if (!ReferenceEquals(_webSocket, socketAtEntry) && CurrentResumeEpoch != resumeEpochAtEntry)
             {
-                AfterConnectionReplacedGuardFiredForTest?.Invoke();
+                AfterConnectionReplacedGuardFired?.Invoke();
                 return WriteResult.Failure(changes, new InvalidOperationException(
                     "The connection was replaced while this write waited for the connection lock."));
             }
 
+            // Read again rather than reusing socketAtEntry: the epoch half of the guard above can let
+            // this point through with the socket already replaced, in which case the send has to go
+            // out on the connection that replaced it, not on the one captured before the wait.
             var webSocket = _webSocket;
             if (webSocket?.State != WebSocketState.Open)
             {
@@ -1004,7 +1052,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     /// waiting on <see cref="_connectionLock"/>, so a test can hold a write there while a reconnect
     /// replaces the connection underneath it.
     /// </summary>
-    internal Action? BeforeConnectionLockWaitForTest { get; set; }
+    internal Action? BeforeConnectionLockWait { get; set; }
 
     /// <summary>
     /// Fires right after <see cref="WriteChangesAsync"/> has detected that the connection was replaced
@@ -1012,7 +1060,13 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     /// park that follows is drained by the connected-phase retry flush almost immediately, so a test
     /// needs this rather than polling the retry queue's depth for a window that may never be sampled.
     /// </summary>
-    internal Action? AfterConnectionReplacedGuardFiredForTest { get; set; }
+    internal Action? AfterConnectionReplacedGuardFired { get; set; }
+
+    /// <summary>
+    /// Fires in <see cref="RetireInFlightThrough"/> right before it takes <see cref="_inFlightLock"/>,
+    /// so a test can hold a retire call there while a reconnect replaces the connection underneath it.
+    /// </summary>
+    internal Action? BeforeRetireInFlightLock { get; set; }
 
     /// <summary>Number of writes that reached the socket on the current connection but are not yet retired.</summary>
     internal int InFlightCount
@@ -1027,5 +1081,14 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     }
 
     /// <summary>The ordinal assigned to the most recent send, for tests that assert retirement order.</summary>
-    internal long SendOrdinal => Interlocked.Read(ref _sendOrdinal);
+    internal long SendOrdinal
+    {
+        get
+        {
+            lock (_inFlightLock)
+            {
+                return _sendOrdinal;
+            }
+        }
+    }
 }
