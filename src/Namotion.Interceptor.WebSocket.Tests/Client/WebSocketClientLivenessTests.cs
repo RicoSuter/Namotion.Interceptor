@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Interceptors;
@@ -785,12 +787,17 @@ public class WebSocketClientLivenessTests
         source.BeforeConnectionLockWait = connectionLockGate.Wait;
 
         var guardFired = false;
-        source.AfterConnectionReplacedGuardFired = () => guardFired = true;
+        source.AfterConnectionReplacedGuardFired = () => Volatile.Write(ref guardFired, true);
 
         try
         {
-            // Act - the drop is detected and the gate goes up before the commit is even started, so
-            // the commit captures the epoch the reconnect is already using rather than a stale one.
+            // Act - waits only for the source to stop reporting operational, which the receive loop
+            // sets before it signals completion, and BeginResume only runs once the monitor loop wakes
+            // up in response to that signal. So this does not itself guarantee BeginResume has already
+            // run by the time the commit below captures its epoch: if that race is lost, the commit
+            // captures the pre-resume epoch, the guard then sees the epoch advance under it exactly as
+            // it would for a genuinely stale batch, and the assertion below fails rather than passing
+            // on coverage it did not actually exercise.
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
             await AsyncTestHelpers.WaitUntilAsync(() => !source.Diagnostics.IsOperational);
 
@@ -814,7 +821,9 @@ public class WebSocketClientLivenessTests
 
             // Assert - the guard did not treat this as a stale pre-outage batch, and the commit reached
             // the server over the replaced connection rather than being parked.
-            Assert.False(guardFired, "A commit issued after the gate was already up must not hit the guard.");
+            Assert.False(
+                Volatile.Read(ref guardFired),
+                "A commit issued after the gate was already up must not hit the guard.");
             await AsyncTestHelpers.WaitUntilAsync(
                 () => server.Root!.Name == "DuringReconnect",
                 timeout: TimeSpan.FromSeconds(15),
@@ -891,7 +900,8 @@ public class WebSocketClientLivenessTests
         // over a connection that stays healthy remains in flight until the source itself is stopped.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = await StartServerAsync(portLease.Port);
-        await using var source = CreateClientSource(portLease.Port);
+        var recordingLogger = new RecordingLogger();
+        await using var source = CreateClientSource(portLease.Port, logger: recordingLogger);
         await source.StartAsync(CancellationToken.None);
 
         var clientRoot = (TestRoot)source.RootSubject;
@@ -905,8 +915,12 @@ public class WebSocketClientLivenessTests
 
         // Assert - not counted as a drop: the write reached the socket and may already have been
         // applied, so counting it would inflate the metric on every clean shutdown that catches a write
-        // mid-flight.
+        // mid-flight. Also assert the teardown log itself, which is this scenario's actual deliverable:
+        // the drop total alone would still read zero even if that log line were deleted.
         Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
+        Assert.Contains(
+            recordingLogger.Warnings,
+            message => message.Contains("reached the socket but were never confirmed applied", StringComparison.Ordinal));
     }
 
     private async Task<WebSocketTestServer<TestRoot>> StartServerAsync(int port)
@@ -924,7 +938,8 @@ public class WebSocketClientLivenessTests
         TimeSpan? reconnectDelay = null,
         IWriteInterceptor? writeInterceptor = null,
         int? circuitBreakerFailureThreshold = null,
-        Action<IInterceptorSubjectContext>? configureContext = null)
+        Action<IInterceptorSubjectContext>? configureContext = null,
+        ILogger<WebSocketSubjectClientSource>? logger = null)
     {
         var context = InterceptorSubjectContext
             .Create()
@@ -954,7 +969,7 @@ public class WebSocketClientLivenessTests
         return new WebSocketSubjectClientSource(
             new TestRoot(context),
             configuration,
-            NullLogger<WebSocketSubjectClientSource>.Instance);
+            logger ?? NullLogger<WebSocketSubjectClientSource>.Instance);
     }
 
     /// <summary>
@@ -1184,6 +1199,29 @@ public class WebSocketClientLivenessTests
                 await _application.DisposeAsync();
             }
             _stopping.Dispose();
+        }
+    }
+
+    /// <summary>Captures warning messages logged through it, to assert on the teardown diagnostics.</summary>
+    private sealed class RecordingLogger : ILogger<WebSocketSubjectClientSource>
+    {
+        public List<string> Warnings { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning)
+            {
+                lock (Warnings)
+                {
+                    Warnings.Add(formatter(state, exception));
+                }
+            }
         }
     }
 

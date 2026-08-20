@@ -733,6 +733,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// once it resumes, whether a resume started in between: the epoch only advances inside
     /// <see cref="BeginResume"/>, so a value that is still unchanged means nothing captured before it
     /// predates a connection replacement, even if the connection itself has already been replaced.
+    /// That guarantee depends on every connection replacement being preceded by a call to
+    /// <see cref="BeginResume"/>; this base class has no way to enforce that on a derived connector, so
+    /// a caller building a guard on this member is trusting its own connector's discipline, not
+    /// anything this class checks.
     /// </remarks>
     protected int CurrentResumeEpoch => Volatile.Read(ref _resumeEpoch);
 

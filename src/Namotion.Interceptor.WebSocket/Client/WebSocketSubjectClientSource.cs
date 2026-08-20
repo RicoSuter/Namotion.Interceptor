@@ -154,18 +154,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         // Gated on there being anything left to tear down here, not merely on the in-flight count: the
         // belt-and-braces call from DisposeAsync finds both fields already null and would otherwise
         // repeat this log for the same writes a prior call already reported.
-        if (receiveCts is not null || webSocket is not null)
-        {
-            var outstanding = InFlightCount;
-            if (outstanding > 0)
-            {
-                // Not counted as a drop: these reached the socket and may already have been applied, so
-                // treating them as lost here would inflate the drop metric on every clean shutdown.
-                _logger.LogWarning(
-                    "Stopping with {Count} write(s) that reached the socket but were never confirmed applied.",
-                    outstanding);
-            }
-        }
+        var hadTeardownWork = receiveCts is not null || webSocket is not null;
 
         if (receiveCts is not null)
         {
@@ -179,6 +168,22 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
             try { receiveCts.Dispose(); } catch { /* ignore */ }
             _receiveCts = null;
+        }
+
+        if (hadTeardownWork)
+        {
+            // Read after the receive loop has exited, not before: a retire that lands on the loop's
+            // own thread during the wait above must be reflected here, or this overstates what
+            // genuinely survived teardown.
+            var outstanding = InFlightCount;
+            if (outstanding > 0)
+            {
+                // Not counted as a drop: these reached the socket and may already have been applied, so
+                // treating them as lost here would inflate the drop metric on every clean shutdown.
+                _logger.LogWarning(
+                    "Stopping with {Count} write(s) that reached the socket but were never confirmed applied.",
+                    outstanding);
+            }
         }
 
         if (webSocket is not null)
@@ -590,10 +595,9 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     /// </remarks>
     private void RecordInFlight(ReadOnlySpan<SubjectPropertyChange> changes)
     {
-        var ordinal = ++_sendOrdinal;
-
         lock (_inFlightLock)
         {
+            var ordinal = ++_sendOrdinal;
             foreach (var change in changes)
             {
                 _inFlight[change.Property] = (ordinal, change);
