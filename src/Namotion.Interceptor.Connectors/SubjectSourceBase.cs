@@ -316,9 +316,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     // Inside the attempt's try on purpose. The listen lifetime declared above is
                     // disposed when this block exits, and that disposal tears the transport down in
                     // every source that owns one, so the same call moved into the finally below would
-                    // always write to a dead connection. The processor's own drain runs inside ProcessAsync and
-                    // hands its buffered batch to the write handler, which parks whatever fails, so
-                    // this runs afterwards to get that parked batch out.
+                    // always write to a dead connection.
                     await FlushRetryQueueBeforeStoppingAsync().ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

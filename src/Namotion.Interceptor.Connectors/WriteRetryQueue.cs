@@ -82,21 +82,13 @@ internal sealed class WriteRetryQueue : IDisposable
             }
             else
             {
-                // Add all new items
                 var span = changes.Span;
                 for (var i = 0; i < span.Length; i++)
                 {
                     _pendingWrites.Add(span[i]);
                 }
 
-                // Ring buffer: Drop the oldest if over capacity
-                droppedCount = _pendingWrites.Count - _maxQueueSize;
-                if (droppedCount > 0)
-                {
-                    _pendingWrites.RemoveRange(0, droppedCount);
-                }
-
-                Volatile.Write(ref _count, _pendingWrites.Count);
+                droppedCount = TrimToCapacity();
             }
         }
 
@@ -295,15 +287,21 @@ internal sealed class WriteRetryQueue : IDisposable
 
             // The failed in-flight changes are older than anything enqueued while the write was in
             // progress. Ring semantics therefore evict from the front after restoring the batch.
-            var droppedCount = _pendingWrites.Count - _maxQueueSize;
-            if (droppedCount > 0)
-            {
-                _pendingWrites.RemoveRange(0, droppedCount);
-            }
-
-            Volatile.Write(ref _count, _pendingWrites.Count);
-            return droppedCount;
+            return TrimToCapacity();
         }
+    }
+
+    // Ring semantics: evict from the front once over capacity. Callers must hold the lock.
+    private int TrimToCapacity()
+    {
+        var droppedCount = _pendingWrites.Count - _maxQueueSize;
+        if (droppedCount > 0)
+        {
+            _pendingWrites.RemoveRange(0, droppedCount);
+        }
+
+        Volatile.Write(ref _count, _pendingWrites.Count);
+        return droppedCount;
     }
 
     /// <summary>

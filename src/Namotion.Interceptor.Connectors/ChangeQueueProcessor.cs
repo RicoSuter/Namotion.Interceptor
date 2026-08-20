@@ -59,12 +59,6 @@ public class ChangeQueueProcessor : IDisposable
     /// </summary>
     public int QueueDepth => _changes.Count;
 
-    // An abandoned teardown flush holds the gate until it unwinds, and Dispose is single-shot, so once
-    // Dispose has lost the gate nothing it does later can return the merger's buffer: the flush's own
-    // cleanup does that. The gate going free is therefore the only in-process evidence that an
-    // abandoned flush was cancelled and cleaned up rather than left running forever.
-    internal bool GateIsFreeForTest => Volatile.Read(ref _flushGate) == 0;
-
     // Scratch state used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
     private readonly ChangeMerger _changeMerger = new();
@@ -100,10 +94,8 @@ public class ChangeQueueProcessor : IDisposable
     /// path, so a processor with a buffer time of zero never touches the queue this bounds.</param>
     /// <param name="logger">The logger.</param>
     /// <param name="dropHandler">Optional handler invoked with the number of changes that were accepted
-    /// but never delivered: dropped on bounded-queue overflow, discarded because the write handler failed,
-    /// discarded because it was cancelled on a path that buffers nothing, or still buffered when the
-    /// teardown drain ended. Use this to report the count to queue diagnostics without adding work to
-    /// successful enqueue or dequeue operations.</param>
+    /// but never delivered; see <see cref="DropCount"/> for what counts as one. Use this to report the
+    /// count to queue diagnostics without adding work to successful enqueue or dequeue operations.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
     /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
     /// the first flush, where it would end delivery for this processor's lifetime. Also thrown when
@@ -383,14 +375,24 @@ public class ChangeQueueProcessor : IDisposable
         {
             try
             {
-                await TryFlushAsync(teardownToken).ConfigureAwait(false);
+                try
+                {
+                    await TryFlushAsync(teardownToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    // Inside the task, so it runs after any requeue this flush performed on its unwind,
+                    // even when the waiter gave up at the deadline long before.
+                    CountRemainingAfterDrain();
+                    teardownTokenSource.Dispose();
+                }
             }
-            finally
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                // Inside the task, so it runs after any requeue this flush performed on its unwind, even
-                // when the waiter gave up at the deadline long before.
-                CountRemainingAfterDrain();
-                teardownTokenSource.Dispose();
+                // Logged here rather than at the waiter, which may have given up long before this ends.
+                // Catching everything is also what keeps an abandoned task from surfacing as an
+                // UnobservedTaskException.
+                _logger.LogError(exception, "Failed to write the remaining buffered changes while stopping.");
             }
         });
 
@@ -408,14 +410,6 @@ public class ChangeQueueProcessor : IDisposable
                 "Gave up waiting after {Bound} for the remaining buffered changes to be written while " +
                 "stopping. A write handler that ignores cancellation may still complete it.",
                 TeardownFlushBound);
-
-            ObserveAbandonedFlush(flushTask);
-            return;
-        }
-        catch (Exception ex)
-        {
-            // Never rethrown: a throw here would replace the failure that ended the processing loop.
-            _logger.LogError(ex, "Failed to write the remaining buffered changes while stopping.");
         }
     }
 
@@ -438,19 +432,6 @@ public class ChangeQueueProcessor : IDisposable
         }
     }
 
-    // Once the wait is abandoned nothing observes the flush task: WaitAsync removes its own completion
-    // action when it cancels. The common ending is Canceled, which raises nothing and does not run this
-    // continuation either. What this exists for is the abandoned flush that then fails for some other
-    // reason, which does end Faulted and would otherwise surface as an UnobservedTaskException.
-    private static void ObserveAbandonedFlush(Task flushTask)
-    {
-        _ = flushTask.ContinueWith(
-            static task => _ = task.Exception,
-            CancellationToken.None,
-            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-    }
-
     /// <summary>
     /// Drops the oldest buffered changes until the queue is back within <paramref name="maxQueueDepth"/>,
     /// incrementing <see cref="DropCount"/> for each. Best-effort: a concurrent flush may drain the queue
@@ -461,14 +442,10 @@ public class ChangeQueueProcessor : IDisposable
         var droppedCount = 0L;
         while (_changes.Count > maxQueueDepth && _changes.TryDequeue(out _))
         {
-            Interlocked.Increment(ref _dropCount);
             droppedCount++;
         }
 
-        if (droppedCount > 0)
-        {
-            _dropHandler?.Invoke(droppedCount);
-        }
+        CountUndelivered(droppedCount);
     }
 
     // One place for every "accepted by this processor and not delivered" count, so DropCount and the

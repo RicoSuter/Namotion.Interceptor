@@ -1191,11 +1191,12 @@ public class ChangeQueueProcessorTests
         processor.Dispose();
 
         // Assert: the token fired, so the abandoned flush unwound and cleaned up after itself. Nothing
-        // else can release this handler, so the gate going free is the only in-process evidence that
-        // the flush's cleanup ran at all.
+        // else can release this handler, and the drain that counts the requeued change runs only after
+        // the flush has released the gate and returned the merger buffer, so the count is the evidence
+        // that the flush's cleanup ran at all.
         await AsyncTestHelpers.WaitUntilAsync(
-            () => processor.GateIsFreeForTest,
-            message: "the abandoned teardown flush should have been cancelled and released the flush gate");
+            () => processor.DropCount == 1,
+            message: "the abandoned teardown flush should have been cancelled and counted its buffered change");
     }
 
     [Fact]
