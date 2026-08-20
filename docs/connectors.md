@@ -200,9 +200,11 @@ If a transaction repair write fails, the source keeps the older value and the su
 
 When a connector stops, the change processor writes whatever it had buffered but not yet flushed, instead of discarding it. A source writes it through the retry queue above, so a live transport takes the batch and a dead one parks it; a server broadcasts it to the clients still connected. Without this the batch is unrecoverable rather than merely late, because it has already left the change subscription that the retry queue is fed from.
 
-The cost is that a stop can block on an unreachable endpoint, so the wait is bounded by `TeardownFlushTimeout`, which each connector exposes on its own configuration (for example `OpcUaClientConfiguration.TeardownFlushTimeout`) and which defaults to `ChangeQueueProcessor.DefaultTeardownFlushTimeout`, 5 seconds. That bound is per connector and the connectors stop one after another, under the host's shared `HostOptions.ShutdownTimeout` of 30 seconds by default, so a host running several connectors that can hang wants a shorter bound than one running a single local connector. Set it to zero to skip the flush and discard the batch, which is the fastest stop and the only one that loses data. When implementing a custom source, pass `teardownFlushTimeout` to the `SubjectSourceBase` constructor, which rejects a negative value there rather than when the source next connects.
+The drain always runs and cannot be switched off. Its cost is that a stop can block on an unreachable endpoint, so it is bounded internally at 5 seconds, per connector rather than per host. Connectors stop one after another, so on a hosted connector the total wait is bounded again by the host's shared `HostOptions.ShutdownTimeout`, 30 seconds by default, and that is the knob to reach for when a host runs several connectors that can hang. A connector torn down while the host keeps running, such as a source on a subject detached from the graph, has no outer deadline at all, and the internal bound is the only thing that ends the wait.
 
-The batch is one more write through the normal handler, not a privileged one, so for a source the handler flushes the write retry queue first: that backlog holds older commits and must keep its place in commit order. A deep backlog on a slow transport can consume the whole bound on its own, in which case the batch is parked for the next attempt rather than written.
+The batch is one more write through the normal handler, not a privileged one, so for a source the handler flushes the write retry queue first: that backlog holds older commits and must keep its place in commit order. A deep backlog on a slow transport can consume the whole bound on its own, in which case the batch is parked rather than written, and the source flushes the queue once more under a bound of its own, while the transport is still up. Those two legs are what a stop costs in the worst case, up to twice the bound and around 10 seconds.
+
+A change the drain cannot deliver is counted rather than discarded silently. What is still buffered when the drain ends raises `Diagnostics.OutboundChanges.TotalDropped`, and for a source what is still parked in the retry queue when its run ends raises `Diagnostics.OutboundRetries.TotalDropped`. See [Connector Diagnostics](#connector-diagnostics) for reading those counters.
 
 ### Monitoring Synchronization State
 
@@ -257,7 +259,8 @@ RunAsync
       ├── drain owned writes → retry queue ← park connect-window writes
       ├── ReconcileRetryQueueAsync()       ← restore / send / drop queued writes vs current state
       ├── new ChangeQueueProcessor()       ← connected phase; reuses the source-lifetime subscription
-      └── ProcessAsync()                   ← drains changes, calls your WriteChangesAsync
+      ├── ProcessAsync()                   ← drains changes, calls your WriteChangesAsync
+      └── flush retry queue                ← last hand-over while the transport is still up
 ```
 
 "Owned writes" are changes to properties bound to this source whose origin source is not this source; a change stamped with a different source is parked like any other. The source's own applies are skipped at drain and in the connected phase, so inbound values are not echoed back, except for a transaction confirmation on a property a connector has written out (see [Change notification source semantics](#change-notification-source-semantics)).
@@ -676,6 +679,8 @@ The three buffers answer three different questions, and reading which one is gro
 - `OutboundChanges` growing means changes are produced faster than they flush.
 - `OutboundRetries` growing means the far end is rejecting writes.
 - `InboundBuffer` growing means an initial load is still in progress.
+
+`OutboundChanges.TotalDropped` counts every change the connector accepted and then never delivered: a bounded buffer overflowing, a write that failed, and whatever a stop's drain could not hand over (see [Flushing On Stop](#flushing-on-stop)). A `null` capacity therefore does not imply a zero total.
 
 `InboundBuffer.TotalDropped` is the one drop count that is not data loss: it counts buffered updates discarded when a connect attempt was abandoned before its load completed, and applying a superseded snapshot would have been wrong. It is still worth watching, because it is the only signal of how often initial loads are being superseded, which is reconnect thrash.
 

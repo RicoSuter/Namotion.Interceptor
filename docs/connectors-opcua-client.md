@@ -398,7 +398,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 machine.Speed = 100; // Queued if disconnected, written immediately if connected
 ```
 
-`Diagnostics.OutboundRetries` reports this queue: `Depth` is what is parked right now, `Capacity` echoes `WriteRetryQueueSize`, and `TotalDropped` counts what the queue threw away since `StartTime`. With `WriteRetryQueueSize = 0` read `TotalDropped` as a floor rather than the whole loss: it still counts writes discarded because there is no queue to park them in, but not the connect-window drain, which has no ownership filter and so cannot attribute its discards to one source. See [Known Limitations](connectors.md#known-limitations).
+`Diagnostics.OutboundRetries` reports this queue: `Depth` is what is parked right now, `Capacity` echoes `WriteRetryQueueSize`, and `TotalDropped` counts what the queue threw away since `StartTime`. With `WriteRetryQueueSize = 0` read `TotalDropped` as a floor rather than the whole loss: it counts every write discarded because there is no queue to park it in, including the ones captured while connecting, but not a write to a property this client has not claimed yet, which the connect-window drain cannot attribute to it. See [Known Limitations](connectors.md#known-limitations).
 
 ### Polling Fallback for Unsupported Nodes
 
@@ -524,7 +524,6 @@ For 24/7 production use, the default configuration provides robust resilience:
 | `SubscriptionHealthCheckInterval` | 5s | Interval for health checks and post-reconnection state sync |
 | `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
 | `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
-| `TeardownFlushTimeout` | 5s | Max wait for the buffered outbound batch on stop, 0 to discard it (see [Flushing On Stop](connectors.md#flushing-on-stop)) |
 | `SubscriptionSequentialPublishing` | false | Process subscription messages in order (see Thread Safety) |
 
 ## Extensibility
