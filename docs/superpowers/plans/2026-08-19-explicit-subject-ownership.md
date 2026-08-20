@@ -76,6 +76,11 @@ src/Namotion.Interceptor.Tests/InterceptorTests.WhenAddingAndRemovingContext_The
 src/Namotion.Interceptor.Tracking.Tests/Lifecycle/PropertyReferenceSetTests.cs
 src/Namotion.Interceptor.Dynamic.Tests/DynamicSubjectTests.cs
 src/Namotion.Interceptor.Dynamic.Tests/DynamicSubjectTests.WhenInterceptingDynamicSubject_ThenTheyAreCalled.verified.txt
+src/Namotion.Interceptor.Registry.Tests/GraphBehavior/CycleTests.cs
+src/Namotion.Interceptor.Registry.Tests/GraphBehavior/CycleTests.WhenBreakingCycle_ThenBothDetach.verified.txt
+src/Namotion.Interceptor.Registry.Tests/GraphBehavior/CycleTests.WhenBreakingCycleBetweenExplicitRoots_ThenBothStayAttached.verified.txt
+src/Namotion.Interceptor.Registry.Tests/GraphBehavior/CycleTests.WhenInternalCycleOrphaned_ThenCycleStaysAttached_Limitation.verified.txt
+src/Namotion.Interceptor.Registry.Tests/GraphBehavior/CycleTests.WhenInternalCycleOrphaned_ThenWholeComponentDetaches.verified.txt
 ```
 
 The exact complete phase manifest is binding in `.superpowers/sdd/2026-08-19-explicit-subject-ownership/task-2-internal-map.md`.
@@ -123,9 +128,24 @@ b: Detached
 
 Only the approved composition-only fallback cutover changes that oracle. Other order/visibility facts remain stable.
 
-#### Subphase A: Complete final RED set before implementation
+#### Carried-forward metadata semantic-oracle debt correction before Task 2 closure
 
-**Files:** Exact atomic 123-path Task 2 manifest in the internal map, including every Core/Tracking/Registry/Generator/Dynamic test, test double, all four changed Public API oracles, generated Verify snapshots, both changed callback oracles, Hosting and Connectors production/tests, the WebSocket SampleClient, every SyncRoot/inheritance consumer, and the OPC UA compile consumer.
+The full Core gate exposed a Task 1 semantic snapshot omission at `src/Namotion.Interceptor.Tests/InterceptorTests.WhenReadingMetadata_ThenItShouldBeCorrect.verified.txt`. Before the Task 2 atomic commit, inspect the received difference and accept only the five `CanContainSubjects: false` lines produced by Task 1's `SubjectPropertyMetadata.CanContainSubjects`. Run:
+
+```bash
+dotnet test src/Namotion.Interceptor.Tests/Namotion.Interceptor.Tests.csproj --filter "FullyQualifiedName~InterceptorTests.WhenReadingMetadata_ThenItShouldBeCorrect" --no-restore
+git diff --check -- src/Namotion.Interceptor.Tests/InterceptorTests.WhenReadingMetadata_ThenItShouldBeCorrect.verified.txt
+git add src/Namotion.Interceptor.Tests/InterceptorTests.WhenReadingMetadata_ThenItShouldBeCorrect.verified.txt
+git diff --cached --check
+git diff --cached --name-only
+git commit -m "Correct structural metadata oracle"
+```
+
+The focused test must pass and the cached name list must contain only that exact oracle. This distinct correction commit closes carried-forward Task 1 evidence debt before Task 2 closes. The path is not part of the Task 2 128-path union, and `GetOwnershipValue` is not the cause of its five boolean lines.
+
+#### Subphase A: Original final RED set plus implementation-discovered Registry RED
+
+**Files:** Exact atomic 128-path Task 2 manifest in the internal map, including every Core/Tracking/Registry/Generator/Dynamic test, test double, all four changed Public API oracles, generated Verify snapshots, both changed callback oracles, the five CycleTests source/oracle paths, Hosting and Connectors production/tests, the WebSocket SampleClient, every SyncRoot/inheritance consumer, and the OPC UA compile consumer.
 
 **Interfaces produced:**
 
@@ -247,7 +267,9 @@ dotnet test src/Namotion.Interceptor.Generator.Tests/Namotion.Interceptor.Genera
 
 Expected: each changed oracle or existing-surface behavior fails for its intended old callback/API/lock/route/generated-shape semantics. Record method execution and exact mismatch for each command. If a row unexpectedly names a final absent type, move it to the compilation-RED set below and record that it did not execute; do not add a production stub to recover a semantic RED.
 
-Then author every remaining structural, recursive-membership, metadata, Registry, callback-order, pinning, constructor, Dynamic, Hosting, Connectors, OPC UA, Public API, and Verify test listed in Subphases B/C and in the map's 123-path closed union. No production or test-support implementation starts yet. Source-review every final test method and oracle against that union, including the exact `SubjectPrivateLockTests`, `ContextOwnershipRouteTests`, `StructuralInterceptorPinningTests`, Core, Tracking, Registry, and Connectors `VerifyChecksTests.PublicApi`, Core callback oracle, Dynamic callback oracle, and Generator class filters. The callback schedule uses `factoryEntered`, `externalAttemptingEntry`, `allowFactory`, `nestedCompleted`, and `externalCallbackEntered`. The external task signals immediately before its public call and waits outside its context monitor. Assert predicate/factory counts are exactly one and the external callback has not entered before release.
+Then author every remaining structural, recursive-membership, metadata, Registry, callback-order, pinning, constructor, Dynamic, Hosting, Connectors, OPC UA, Public API, and Verify test listed in Subphases B/C and in the map's 128-path closed union. No production or test-support implementation starts yet. Source-review every final test method and oracle against that union, including the exact `SubjectPrivateLockTests`, `ContextOwnershipRouteTests`, `StructuralInterceptorPinningTests`, Core, Tracking, Registry, and Connectors `VerifyChecksTests.PublicApi`, Core callback oracle, Dynamic callback oracle, and Generator class filters. The callback schedule uses `factoryEntered`, `externalAttemptingEntry`, `allowFactory`, `nestedCompleted`, and `externalCallbackEntered`. The external task signals immediately before its public call and waits outside its context monitor. Assert predicate/factory counts are exactly one and the external callback has not entered before release.
+
+The existing full Registry oracle later exposed a semantic RED after Task 2 production work had begun: the rooted planner releases the unanchored `A -> B <-> C` component and strict constructors keep both configured subjects as explicit roots. Record that discovery timing honestly. Rename `WhenBreakingCycle_ThenBothDetach` to `WhenBreakingCycleBetweenExplicitRoots_ThenBothStayAttached` and `WhenInternalCycleOrphaned_ThenCycleStaysAttached_Limitation` to `WhenInternalCycleOrphaned_ThenWholeComponentDetaches`, delete both legacy oracles, and create both final-semantic oracles. Do not claim these renamed tests preceded production. Before accepting either oracle, review callback order and reference-count values against the ordinary single-context contract. The orphan oracle must prove `A`, `B`, and `C` all release, not merely copy the current received text.
 
 - [ ] **Step 2: Run the complete atomic RED gate**
 
@@ -410,6 +432,7 @@ OwnershipMembershipTests.WhenPropertyAddsChild_ThenMembershipAndBaselineCommitBe
 OwnershipMembershipTests.WhenCyclesAndSharedDagAreAttached_ThenEachMembershipIsCountedOncePerProperty
 OwnershipMembershipTests.WhenRepeatedCollectionReferenceOccurs_ThenCoreCountIsOneAndIndicesAreRetained
 OwnershipMembershipTests.WhenCommittedNestedGenerationWins_ThenStaleCallbackTailCannotClearIt
+OwnershipMembershipTests.WhenFinalAnchorRemovalOrphansCycle_ThenEveryMembershipAndRouteClearsAndEachSubjectDetachesOnce
 SubjectMetadataAdditionTests.WhenScalarMetadataIsAdded_ThenNoLifecycleWorkRuns
 SubjectMetadataAdditionTests.WhenInputEnumerableIsObserved_ThenItIsMaterializedExactlyOnce
 SubjectMetadataAdditionTests.WhenTwoStructuralMetadataEntriesAreAdded_ThenOneAtomicBatchReconciles
@@ -438,13 +461,15 @@ LifecycleCallbackOrderTests.WhenAttachAndDetachRun_ThenCombinedCurrentOrderAndRo
 LifecycleArrayPinningTests.WhenCommittedHandlerAddsServiceAndNests_ThenAllOuterPhasesStayPinned
 ```
 
+For `WhenFinalAnchorRemovalOrphansCycle_ThenEveryMembershipAndRouteClearsAndEachSubjectDetachesOnce`, arrange `Root -> A -> B <-> C`, remove `Root -> A`, and inspect Core ownership views plus Tracking callbacks directly. Assert that every property membership and effective route for `A`, `B`, and `C` is absent after commit and that final detach runs exactly once per subject in the ordinary callback order. This assertion is independent of the Registry Verify oracle.
+
 **Reference gate:** every row must have been authored and source-reviewed in Steps 1-2. Save semantic RED only for a row that executed; otherwise retain the exact project-level compiler RED and defer semantic proof to Step 20.
 
 Do not create a transitional provider or rerun an intermediate GREEN.
 
 - [ ] **Step 17: Implement recursive provider and committed reconciliation**
 
-Create pooled cycle-aware traversal and an internal TLS LIFO `LifecycleReconciliationState`. Preparation exists only for domains with one exact resolved `ILifecycleInterceptor`; the standard `LifecycleInterceptor` and an advanced custom implementation receive the same protocol. It reserves exact membership/route changes and invokes only `SubjectPropertyMetadata.GetOwnershipValue`, never ordinary `GetValue`. For every subject/phase it pins current arrays for detach work and prospective arrays plus exact coordinator indexes for attach work from the current state/route overlay. A downstream-repeater coordinator invocation retains one entry baseline and replaces its final committed delta after each successful terminal; it emits no per-terminal callback queue. Core commits after provider return. `ReconcileSubjectOwnership` records committed baselines before callbacks, performs complete old detach before new attach, dispatches the exact coordinator slot recursively, and checks exact generation/descriptor before each stale-tail action. At the route slot it builds the descriptor/routed state from the then-current immutable executor state after the exact stale check. Core calls `ReleaseSubjectOwnership` once after success, cancellation, restart, or exception; Tracking clears and returns the frame.
+Create pooled cycle-aware traversal and an internal TLS LIFO `LifecycleReconciliationState`. Preparation exists only for domains with one exact resolved `ILifecycleInterceptor`; the standard `LifecycleInterceptor` and an advanced custom implementation receive the same protocol. It reserves exact membership/route changes and invokes only `SubjectPropertyMetadata.GetOwnershipValue`, never ordinary `GetValue`. For every subject/phase it pins current arrays for detach work and prospective arrays plus exact coordinator indexes for attach work from the current state/route overlay. The prospective graph is rooted only in explicit anchors. Every subject that was reachable from the committed root set but is absent from the prospective rooted graph receives `ReserveFinalRelease`, so simple final-anchor orphan-component release is a Task 2 invariant and requires no synthetic root or disconnected attached-subject state. A downstream-repeater coordinator invocation retains one entry baseline and replaces its final committed delta after each successful terminal; it emits no per-terminal callback queue. Core commits after provider return. `ReconcileSubjectOwnership` records committed baselines before callbacks, performs complete old detach before new attach, dispatches the exact coordinator slot recursively, and checks exact generation/descriptor before each stale-tail action. At the route slot it builds the descriptor/routed state from the then-current immutable executor state after the exact stale check. Core calls `ReleaseSubjectOwnership` once after success, cancellation, restart, or exception; Tracking clears and returns the frame.
 
 Add `SubjectPropertyMetadata.GetOwnershipValue` as `Func<IInterceptorSubject, string, Type, object?>?` and the matching final optional constructor parameter. Generator intercepted partial structural metadata emits a noncapturing direct backing-field delegate; computed/nonintercepted metadata emits null. In `DynamicSubjectFactory.cs`, keep `DynamicSubjectInterceptor._propertyValues` and the ordinary read path. Create the interceptor explicitly, create the proxy, then add the exact interceptor to `subject.Data` under one private static package-qualified GUID tuple key before metadata cache lookup and `AddProperties`. Cached metadata uses one static noncapturing helper receiving subject/name/type, resolves that subject-owned interceptor, and calls its direct `ReadProperty`. Preserve the current memoized missing-value default, allocate only the existing interceptor plus one Data node per proxy, and retain no subject in static state. Update Core Public API and every generator/Dynamic snapshot. Add XML/static normal-path tests only; no arbitrary `GetValue` traversal or runtime custom-reader diagnostic remains.
 
@@ -484,6 +509,7 @@ dotnet test src/Namotion.Interceptor.Tests/Namotion.Interceptor.Tests.csproj --n
 dotnet test src/Namotion.Interceptor.Generator.Tests/Namotion.Interceptor.Generator.Tests.csproj --no-restore
 dotnet test src/Namotion.Interceptor.Dynamic.Tests/Namotion.Interceptor.Dynamic.Tests.csproj --no-restore
 dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --no-restore
+dotnet test src/Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj --filter "FullyQualifiedName~CycleTests.WhenBreakingCycleBetweenExplicitRoots_ThenBothStayAttached|FullyQualifiedName~CycleTests.WhenInternalCycleOrphaned_ThenWholeComponentDetaches" --no-restore
 dotnet test src/Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj --no-restore
 dotnet test src/Namotion.Interceptor.Hosting.Tests/Namotion.Interceptor.Hosting.Tests.csproj --no-restore
 dotnet test src/Namotion.Interceptor.Connectors.Tests/Namotion.Interceptor.Connectors.Tests.csproj --no-restore
@@ -497,7 +523,7 @@ dotnet build src/Namotion.Interceptor.slnx --no-restore
 git diff --check
 ```
 
-Inspect all Verify outputs. Do not commit until the entire atomic Task 2 gate is green and independent review approves the atomic diff. Stage exactly the map's deduplicated 123-path manifest, not a broad `src` or project-prefix pathspec:
+Inspect the two renamed CycleTests outputs before the full Registry result. Confirm the explicit-root oracle has no final detach, and confirm the orphan oracle releases `A`, `B`, and `C` with ordinary callback order and correct reference counts. Do not mechanically accept a received file. Do not commit until the entire atomic Task 2 gate is green and independent review approves the atomic diff. Stage exactly the map's deduplicated 128-path manifest, not a broad `src` or project-prefix pathspec:
 
 ```bash
 git add -- \
@@ -541,6 +567,11 @@ git add -- \
   src/Namotion.Interceptor.OpcUa.Tests/Client/OpcUaSubjectLoaderTests.cs \
   src/Namotion.Interceptor.Registry.Tests/ConcurrentStructuralWriteLeakTests.cs \
   src/Namotion.Interceptor.Registry.Tests/DynamicPropertyLifecycleTests.cs \
+  src/Namotion.Interceptor.Registry.Tests/GraphBehavior/CycleTests.WhenBreakingCycleBetweenExplicitRoots_ThenBothStayAttached.verified.txt \
+  src/Namotion.Interceptor.Registry.Tests/GraphBehavior/CycleTests.WhenBreakingCycle_ThenBothDetach.verified.txt \
+  src/Namotion.Interceptor.Registry.Tests/GraphBehavior/CycleTests.WhenInternalCycleOrphaned_ThenCycleStaysAttached_Limitation.verified.txt \
+  src/Namotion.Interceptor.Registry.Tests/GraphBehavior/CycleTests.WhenInternalCycleOrphaned_ThenWholeComponentDetaches.verified.txt \
+  src/Namotion.Interceptor.Registry.Tests/GraphBehavior/CycleTests.cs \
   src/Namotion.Interceptor.Registry.Tests/RegistryHandlerOrderTests.cs \
   src/Namotion.Interceptor.Registry.Tests/VerifyChecksTests.PublicApi.verified.txt \
   src/Namotion.Interceptor.Registry/Abstractions/RegisteredSubject.cs \
@@ -626,7 +657,7 @@ git add -- \
   src/Namotion.Interceptor/SubjectPropertyMetadata.cs
 ```
 
-Immediately after staging, prove that the index is the exact 123-path union shown in the map and that no Task 2 manifest path is unstaged or untracked:
+Immediately after staging, prove that the index is the exact 128-path union shown in the map and that no Task 2 manifest path is unstaged or untracked:
 
 ```bash
 git diff --cached --name-only
@@ -634,7 +665,7 @@ git diff --exit-code -- src/Namotion.Interceptor src/Namotion.Interceptor.Tests 
 git ls-files --others --exclude-standard -- src/Namotion.Interceptor src/Namotion.Interceptor.Tests src/Namotion.Interceptor.Tracking src/Namotion.Interceptor.Tracking.Tests src/Namotion.Interceptor.Registry src/Namotion.Interceptor.Registry.Tests src/Namotion.Interceptor.Generator src/Namotion.Interceptor.Generator.Tests src/Namotion.Interceptor.Dynamic src/Namotion.Interceptor.Dynamic.Tests src/Namotion.Interceptor.Hosting src/Namotion.Interceptor.Hosting.Tests src/Namotion.Interceptor.Connectors src/Namotion.Interceptor.Connectors.Tests src/Namotion.Interceptor.WebSocket.SampleClient src/Namotion.Interceptor.OpcUa.Tests
 ```
 
-The first output must equal the map's sorted 123-path union exactly. The second command must exit zero with no output, and the third must produce no output. Any extra staged path or missing/unstaged/untracked manifest path blocks the commit. Then make the one Task 2 commit and prove that none of those project scopes can leak into Task 5:
+The first output must equal the map's sorted 128-path union exactly. The second command must exit zero with no output, and the third must produce no output. Any extra staged path or missing/unstaged/untracked manifest path blocks the commit. Then make the one Task 2 commit and prove that none of those project scopes can leak into Task 5:
 
 ```bash
 git commit -m "Implement atomic subject ownership"
@@ -643,7 +674,7 @@ git status --short --untracked-files=all -- src/Namotion.Interceptor src/Namotio
 
 Expected after commit: no output. If any Task 2 manifest path remains, amend the Task 2 commit before starting Task 3 or Task 5. Task 5's later broad stage command must never collect a Task 2 cutover path.
 
-### Task 3: Deterministic Routes, Cycles, and Component Release
+### Task 3: Deterministic Routes, Compatibility, and Advanced Topology Verification
 
 **Files:**
 
@@ -663,15 +694,15 @@ src/Namotion.Interceptor.Registry.Tests/DynamicPropertyLifecycleTests.cs
 
 **Consumes:** Task 2 ordered memberships, Core views/reservations, recursive callback seam, and exact self-gating route mutator.
 
-**Produces:** earliest surviving acyclic route, explicit-to-inherited transfer, whole-subtree compatibility validation, and anchored-component release.
+**Produces:** deterministic acyclic route selection, explicit-to-inherited transfer, complete subtree compatibility validation, exact multi-anchor/DAG/repeated-occurrence membership, weak-reference cleanup proof, and an optional behavior-neutral affected-component traversal optimization.
 
 - [ ] **Step 1: Add route and capability RED tests**
 
 Add `WhenSecondCompatibleParentIsAdded_ThenReferenceCountIncrementsWithoutRouteChurn`, `WhenActiveParentIsRemoved_ThenEarliestSurvivingAcyclicParentBecomesRoute`, `WhenExplicitAnchorExists_ThenParentDoesNotReplaceRoute`, `WhenExplicitAnchorDetachesWithParentRemaining_ThenRouteTransfersWithoutLifecycleChurn`, `WhenDescendantBelongsToDifferentDomain_ThenBackingValueDoesNotCommit`, `WhenTwoPlainContextsShareCoordinator_ThenDomainsRemainIncompatible`, `WhenRepeatedOccurrencesUseOneParentProperty_ThenCountIsOne`, `WhenSameSubjectUsesTwoParentProperties_ThenCountIsTwo`, and `WhenBranchServicesDiffer_ThenDescendantsRemainSiblingIsolated`.
 
-- [ ] **Step 2: Add object, collection, dictionary, cycle, and DAG RED tests**
+- [ ] **Step 2: Add advanced object, collection, dictionary, cycle, DAG, and lifetime tests**
 
-Add `WhenOneAnchorOwnsCycle_ThenEverySubjectHasOneDomain`, `WhenTwoAnchorsReachCycle_ThenFinalAnchorReleaseControlsLifetime`, `WhenParentsShareDag_ThenMembershipsRemainExact`, `WhenEarliestParentWouldCreateRouteCycle_ThenNextAcyclicParentWins`, `WhenDictionaryAndRepeatedCollectionReferencesChange_ThenKeysIndicesAndCountsAgree`, and `WhenFinalExternalAnchorIsRemoved_ThenInternalCycleCountsDoNotRetainComponent`.
+Add `WhenOneAnchorOwnsCycle_ThenEverySubjectHasOneDomain`, `WhenTwoAnchorsReachCycle_ThenFinalAnchorReleaseControlsLifetime`, `WhenParentsShareDag_ThenMembershipsRemainExact`, `WhenEarliestParentWouldCreateRouteCycle_ThenNextAcyclicParentWins`, `WhenDictionaryAndRepeatedCollectionReferencesChange_ThenKeysIndicesAndCountsAgree`, and `WhenFinalExternalAnchorIsRemoved_ThenInternalCycleCountsDoNotRetainComponent`. The final-external-anchor row is cross-layer verification and must already be GREEN from Task 2's rooted-release invariant. The two-anchor, shared-DAG, repeated-occurrence, route-cycle, subtree-compatibility, and weak-reference assertions provide the advanced Task 3 evidence.
 
 Use this exact skeleton contract for every Task 3 row:
 
@@ -679,21 +710,23 @@ Use this exact skeleton contract for every Task 3 row:
 |---|---|---|---|
 | `OwnershipRouteSelectionTests.cs` | two configured roots, ordered exact parent properties, descriptor capture | add/remove/transfer one membership through a setter or strict detach | explicit route wins or earliest surviving acyclic parent wins; old descriptor cannot mutate later state |
 | `OwnershipCompatibilityTests.cs` | complete proposed subtree with compatible or distinct exact domain/coordinator identities | execute one structural setter | compatible graph commits once; incompatible graph leaves backing value, ledgers, routes, baselines, and callbacks unchanged |
-| `OwnershipCycleTests.cs` | isolated cycle/DAG plus exact external anchors and weak references | attach, change repeated property occurrences, then remove anchors | exact property-key counts and index projections; component release only after final outside anchor; weak references collect |
+| `OwnershipCycleTests.cs` | isolated cycle/DAG plus exact external anchors and weak references | attach, change repeated property occurrences, then remove anchors | Task 2 simple final-anchor release stays GREEN; exact multi-anchor property-key counts and index projections remain correct; weak references collect |
 
 Each method contains `// Arrange`, one `// Act`, and `// Assert`; exception rows use `// Act & Assert`. No helper hides the public operation under test.
 
-- [ ] **Step 3: Run RED**
+- [ ] **Step 3: Run the mixed inherited-GREEN and advanced-RED gate**
 
 ```bash
 dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --filter "FullyQualifiedName~OwnershipRouteSelectionTests|FullyQualifiedName~OwnershipCycleTests|FullyQualifiedName~OwnershipCompatibilityTests" --no-restore
 ```
 
-Expected: semantic failures on route transfer, cycle avoidance, compatibility, or component release, not compile failures.
+Expected: `WhenFinalExternalAnchorIsRemoved_ThenInternalCycleCountsDoNotRetainComponent` passes against Task 2. Only genuinely missing deterministic route selection, explicit-to-inherited transfer, complete-subtree compatibility, multi-anchor/DAG/repeated-occurrence accounting, or weak-reference behavior may fail semantically. No compile failure or simple orphan-release failure is acceptable.
 
-- [ ] **Step 4: Implement the minimal route and component algorithms**
+- [ ] **Step 4: Implement missing advanced route/compatibility behavior and optionally optimize affected-component traversal**
 
-Keep the first parent inline and allocate insertion-ordered overflow only on the second distinct parent property. Explicit route wins. Otherwise scan survivors only when the active parent disappears and skip a candidate whose target ancestry contains the subject. Traverse every new reachable child before terminal commit and reserve each subject once. On possible final anchor loss, pooled-scan only the affected component for explicit or outside incoming anchors; if none exists, reserve release of the complete component. Every install, transfer, and clear creates a fresh PR #474 descriptor and checks exact generation plus descriptor. Add no new synchronization; every mutation uses the existing topology turn and self-gating route mutator.
+Keep the first parent inline and allocate insertion-ordered overflow only on the second distinct parent property. Explicit route wins. Otherwise scan survivors only when the active parent disappears and skip a candidate whose target ancestry contains the subject. Traverse every new reachable child before terminal commit and reserve each subject once. Every install, transfer, and clear creates a fresh PR #474 descriptor and checks exact generation plus descriptor. Add no new synchronization; every mutation uses the existing topology turn and self-gating route mutator.
+
+Task 2's whole-root prospective traversal and simple final-anchor orphan release are binding behavior, not missing Task 3 implementation. If profiling shows the whole-root scan must be narrowed, Task 3 may replace it with a pooled affected-component scan only as a behavior-neutral optimization: on possible anchor loss, scan the affected component for explicit or outside incoming anchors and reserve complete release only when none exists. Before retaining that optimization, prove identical callback order/counts, Core ledger and route state, Tracking baselines, Registry projection, weak-reference cleanup, and allocation behavior for the Task 2 simple case plus Task 3 multi-anchor, DAG, and repeated-reference schedules. Otherwise keep the Task 2 traversal unchanged.
 
 - [ ] **Step 5: Run GREEN and commit**
 
