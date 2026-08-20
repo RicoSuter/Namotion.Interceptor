@@ -151,6 +151,7 @@ namespace Namotion.Interceptor.Connectors
         protected System.Threading.Tasks.Task CompleteResumeAsync(int resumeEpoch, System.Threading.CancellationToken cancellationToken) { }
         public override void Dispose() { }
         public abstract System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
+        protected void ParkChangesForRetry(System.ReadOnlySpan<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes) { }
         protected void ReportConnectionLost() { }
         protected override sealed System.Threading.Tasks.Task RunAsync(System.Threading.CancellationToken stoppingToken) { }
         public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }

@@ -682,6 +682,75 @@ public class WebSocketClientLivenessTests
         }
     }
 
+    [Fact]
+    public async Task WhenTheConnectionIsReplacedWhileAWriteWaitsForTheLock_ThenThatWriteIsParkedRatherThanSent()
+    {
+        // Arrange - the check-then-act residual this pins: a write captures the socket instance before
+        // waiting on the connection lock, so a reconnect that finishes while it still waits must not
+        // let it slip through onto the replaced connection unreconciled.
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = await StartServerAsync(portLease.Port);
+        await using var source = CreateClientSource(portLease.Port, reconnectDelay: TimeSpan.FromMilliseconds(50));
+        await source.StartAsync(CancellationToken.None);
+
+        var clientRoot = (TestRoot)source.RootSubject;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+
+        clientRoot.Name = "First";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => server.Root!.Name == "First",
+            message: "The first write should reach the server over the still-healthy connection.");
+
+        using var connectionLockGate = new ConnectionLockGate();
+        source.BeforeConnectionLockWaitForTest = connectionLockGate.Wait;
+
+        // Fires deterministically the instant the guard trips, rather than requiring a poll to catch
+        // the retry queue's depth before the connected-phase flush drains it right back out again.
+        var guardFired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        source.AfterConnectionReplacedGuardFiredForTest = () => guardFired.TrySetResult();
+
+        try
+        {
+            // Act - the second write captures the current socket instance and then blocks before it
+            // can wait on the connection lock.
+            var socketBeforeDisconnect = GetWebSocket(source);
+            clientRoot.Name = "Second";
+            await connectionLockGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // The connection is replaced for real while the second write is held back. Checked via the
+            // field itself rather than IsOperational: that flag reads true both before the disconnect
+            // has been noticed and once the replacement is up, so it cannot prove the socket instance
+            // has actually changed.
+            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => !ReferenceEquals(GetWebSocket(source), socketBeforeDisconnect) &&
+                      source.Diagnostics.IsOperational &&
+                      server.Root!.Name == "First",
+                timeout: TimeSpan.FromSeconds(15),
+                message: "The reconnect should complete and reload the server's value before the second write is admitted.");
+
+            connectionLockGate.Release();
+
+            // Assert - the second write hits the guard rather than reaching the server over the
+            // replaced connection.
+            await guardFired.Task.WaitAsync(TimeSpan.FromSeconds(15));
+
+            // Not lost: the retry queue eventually delivers it.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Root!.Name == "Second",
+                timeout: TimeSpan.FromSeconds(15),
+                message: "The parked write should eventually reach the server.");
+        }
+        finally
+        {
+            connectionLockGate.Release();
+            source.BeforeConnectionLockWaitForTest = null;
+            source.AfterConnectionReplacedGuardFiredForTest = null;
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
     private async Task<WebSocketTestServer<TestRoot>> StartServerAsync(int port)
     {
         var server = new WebSocketTestServer<TestRoot>(_output);
@@ -780,6 +849,30 @@ public class WebSocketClientLivenessTests
 
             next(ref context);
         }
+    }
+
+    /// <summary>
+    /// Blocks inside <see cref="WebSocketSubjectClientSource.BeforeConnectionLockWaitForTest"/>, the
+    /// window between a write capturing the current socket and it waiting on the connection lock.
+    /// </summary>
+    private sealed class ConnectionLockGate : IDisposable
+    {
+        private readonly ManualResetEventSlim _release = new(false);
+        private readonly TaskCompletionSource _entered =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Completes once a write has reached the window this gate blocks.</summary>
+        public Task Entered => _entered.Task;
+
+        public void Wait()
+        {
+            _entered.TrySetResult();
+            _release.Wait();
+        }
+
+        public void Release() => _release.Set();
+
+        public void Dispose() => _release.Dispose();
     }
 
     private sealed class UpdateAdmissionGate : IDisposable
@@ -932,6 +1025,11 @@ public class WebSocketClientLivenessTests
             _stopping.Dispose();
         }
     }
+
+    private static object? GetWebSocket(WebSocketSubjectClientSource source) =>
+        typeof(WebSocketSubjectClientSource)
+            .GetField("_webSocket", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(source);
 
     private static CancellationTokenSource GetReceiveCancellation(WebSocketSubjectClientSource source) =>
         (CancellationTokenSource)typeof(WebSocketSubjectClientSource)

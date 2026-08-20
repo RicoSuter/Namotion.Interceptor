@@ -610,6 +610,25 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     }
 
     /// <summary>
+    /// Parks changes in the write retry queue, collapsed to one entry per property, so that the next
+    /// reconcile decides whether each is sent, restored or dropped.
+    /// </summary>
+    /// <remarks>
+    /// For a connector that has to re-assert writes it sent but cannot prove were applied. Collapsing
+    /// first is what keeps the occupancy proportional to the number of properties written rather than
+    /// to the number of writes. Does nothing when the retry queue is disabled.
+    /// </remarks>
+    protected void ParkChangesForRetry(ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        if (WriteRetryQueue is null || changes.Length == 0)
+        {
+            return;
+        }
+
+        WriteRetryQueue.Enqueue(CollapsePerProperty(changes.ToArray()).ToArray());
+    }
+
+    /// <summary>
     /// Collapses parked changes to one per property, keeping the oldest old value and the new value
     /// of the highest-revision commit.
     /// </summary>

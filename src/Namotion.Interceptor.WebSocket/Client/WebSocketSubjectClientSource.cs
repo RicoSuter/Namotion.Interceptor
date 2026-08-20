@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Threading;
@@ -46,6 +47,15 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     // A receive loop may finish while its replacement connects. Keep owner publication and both
     // liveness transitions ordered without putting a lock on the message receive path.
     private readonly Lock _receiveLoopLivenessLock = new();
+
+    // Changes handed to SendAsync on the current connection, collapsed per property. A successful send
+    // is not an acknowledgement, so these are re-parked on the next connect, where the reconcile decides
+    // whether each is sent, restored or dropped. Guarded by its own lock rather than by
+    // _connectionLock, which a send holds across an untimed SendAsync: the receive loop retires from
+    // here and must not be able to wedge behind a stalled send.
+    private readonly Lock _inFlightLock = new();
+    private readonly Dictionary<PropertyReference, (long Ordinal, SubjectPropertyChange Change)> _inFlight = new(PropertyReference.Comparer);
+    private long _sendOrdinal;
 
     private int _disposed;
 
@@ -216,6 +226,11 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
     private async Task ConnectCoreAsync(CancellationToken cancellationToken)
     {
+        // Every path that establishes a connection passes here, so this is the single re-park site.
+        // The resume gate holds these in the queue until the reconcile has judged them against the
+        // state the new connection is about to deliver.
+        ReParkInFlightChanges();
+
         await RetireReceiveLoopCommitsAsync().ConfigureAwait(false);
 
         // Clean up any previous connection
@@ -329,6 +344,66 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
     }
 
+    private void ReParkInFlightChanges()
+    {
+        SubjectPropertyChange[] outstanding;
+        lock (_inFlightLock)
+        {
+            if (_inFlight.Count == 0)
+            {
+                _sendOrdinal = 0;
+                return;
+            }
+
+            outstanding = new SubjectPropertyChange[_inFlight.Count];
+            var index = 0;
+            foreach (var entry in _inFlight.Values)
+            {
+                outstanding[index++] = entry.Change;
+            }
+
+            _inFlight.Clear();
+            _sendOrdinal = 0;
+        }
+
+        _logger.LogInformation(
+            "Re-asserting {Count} write(s) that reached the socket but were never acknowledged.", outstanding.Length);
+        ParkChangesForRetry(outstanding);
+    }
+
+    /// <summary>
+    /// Retires in-flight entries the server has reported as applied on <paramref name="connection"/>.
+    /// </summary>
+    /// <remarks>
+    /// The connection is checked rather than assumed. `ConnectCoreAsync` waits only a bounded time for
+    /// the previous receive loop to exit, so a loop suspended between its heartbeat check and this call
+    /// could otherwise retire entries against the previous connection's count, discarding writes the
+    /// new server connection never saw.
+    /// </remarks>
+    internal void RetireInFlightThrough(long appliedThrough, System.Net.WebSockets.WebSocket connection)
+    {
+        if (appliedThrough <= 0 || !ReferenceEquals(_webSocket, connection))
+        {
+            return;
+        }
+
+        lock (_inFlightLock)
+        {
+            if (_inFlight.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var (property, entry) in _inFlight)
+            {
+                if (entry.Ordinal <= appliedThrough)
+                {
+                    _inFlight.Remove(property);
+                }
+            }
+        }
+    }
+
     /// <inheritdoc />
     public override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
@@ -393,6 +468,12 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             return WriteResult.Failure(changes, new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
         }
 
+        // Captured before the wait: a batch queued on the lock across a reconnect would otherwise be
+        // sent over the new connection carrying pre-outage values that nothing has reconciled.
+        var socketAtEntry = _webSocket;
+
+        BeforeConnectionLockWaitForTest?.Invoke();
+
         try
         {
             await _connectionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -409,6 +490,13 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                 return WriteResult.Failure(changes, new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
             }
 
+            if (!ReferenceEquals(_webSocket, socketAtEntry))
+            {
+                AfterConnectionReplacedGuardFiredForTest?.Invoke();
+                return WriteResult.Failure(changes, new InvalidOperationException(
+                    "The connection was replaced while this write waited for the connection lock."));
+            }
+
             var webSocket = _webSocket;
             if (webSocket?.State != WebSocketState.Open)
             {
@@ -421,6 +509,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             _logger.LogDebug("Sending {ByteCount} bytes ({SubjectCount} subjects) to server",
                 _sendBuffer.WrittenCount, update.Subjects.Count);
             await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+            RecordInFlight(changes.Span);
             MaybeShrinkSendBuffer();
             _logger.LogDebug("Sent update successfully");
             return WriteResult.Success;
@@ -439,6 +528,27 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             catch (ObjectDisposedException)
             {
                 // Lock was disposed during operation
+            }
+        }
+    }
+
+    /// <summary>
+    /// Records changes that reached the socket, keyed per property so a later send for the same
+    /// property replaces the earlier one.
+    /// </summary>
+    /// <remarks>
+    /// Called under the connection lock, so the ordinal it assigns matches the order the server
+    /// receives the messages in. The count the server reports back is what retires these.
+    /// </remarks>
+    private void RecordInFlight(ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        var ordinal = ++_sendOrdinal;
+
+        lock (_inFlightLock)
+        {
+            foreach (var change in changes)
+            {
+                _inFlight[change.Property] = (ordinal, change);
             }
         }
     }
@@ -888,4 +998,34 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     internal Action? AfterReceiveLoopCommitDrain { get; set; }
 
     internal Action? BeforeReconnectInitialStateLoad { get; set; }
+
+    /// <summary>
+    /// Fires in <see cref="WriteChangesAsync"/> right after the current socket is captured and before
+    /// waiting on <see cref="_connectionLock"/>, so a test can hold a write there while a reconnect
+    /// replaces the connection underneath it.
+    /// </summary>
+    internal Action? BeforeConnectionLockWaitForTest { get; set; }
+
+    /// <summary>
+    /// Fires right after <see cref="WriteChangesAsync"/> has detected that the connection was replaced
+    /// while it waited for <see cref="_connectionLock"/>, before the resulting failure is parked. The
+    /// park that follows is drained by the connected-phase retry flush almost immediately, so a test
+    /// needs this rather than polling the retry queue's depth for a window that may never be sampled.
+    /// </summary>
+    internal Action? AfterConnectionReplacedGuardFiredForTest { get; set; }
+
+    /// <summary>Number of writes that reached the socket on the current connection but are not yet retired.</summary>
+    internal int InFlightCount
+    {
+        get
+        {
+            lock (_inFlightLock)
+            {
+                return _inFlight.Count;
+            }
+        }
+    }
+
+    /// <summary>The ordinal assigned to the most recent send, for tests that assert retirement order.</summary>
+    internal long SendOrdinal => Interlocked.Read(ref _sendOrdinal);
 }
