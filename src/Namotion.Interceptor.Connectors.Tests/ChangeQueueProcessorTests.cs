@@ -1288,4 +1288,143 @@ public class ChangeQueueProcessorTests
         Assert.Equal(1, Interlocked.Read(ref dropped));
         Assert.Equal(1, processor.DropCount);
     }
+
+    [Fact]
+    public async Task WhenAnImmediatePathWriteIsCancelled_ThenTheChangeIsCounted()
+    {
+        // Arrange: a buffer time of zero is the no-coalescing mode, legal on every server configuration.
+        // Nothing buffers there, so the teardown drain cannot recover the change in flight at the stop.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var dropped = 0L;
+        var writeReached = new ManualResetEventSlim(false);
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: async (_, token) =>
+            {
+                writeReached.Set();
+                await Task.Delay(Timeout.Infinite, token);
+            },
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesAreSettled,
+            dropHandler: count => Interlocked.Add(ref dropped, count));
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "in-flight";
+        Assert.True(writeReached.Wait(TimeSpan.FromSeconds(30)), "the immediate write should have started");
+
+        // Act
+        await cancellation.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => processing.WaitAsync(TimeSpan.FromSeconds(30)));
+
+        // Assert
+        Assert.Equal(1, Interlocked.Read(ref dropped));
+    }
+
+    [Fact]
+    public async Task WhenTheTeardownDrainCannotDeliver_ThenTheRemainingChangesAreCounted()
+    {
+        // Arrange: a buffer time no periodic tick reaches, so the change is still buffered at the stop and
+        // the teardown drain is the only thing that writes it. Its handler fails the way a dead transport
+        // does, by throwing rather than cancelling, so the drain has nowhere left to put the change.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var dropped = 0L;
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => throw new IOException("transport is gone"),
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            dropHandler: count => Interlocked.Add(ref dropped, count));
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "buffered";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processor.QueueDepth == 1,
+            message: "The change should be buffered by the processor before it stops");
+
+        // Act
+        await cancellation.CancelAsync();
+        await processing.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert: exactly once. The failing write inside the drain counts the batch and does not put it
+        // back, so the remainder sweep that follows must find nothing to count a second time.
+        Assert.Equal(1, Interlocked.Read(ref dropped));
+        Assert.Equal(1, processor.DropCount);
+        Assert.Equal(0, processor.QueueDepth);
+    }
+
+    [Fact]
+    public async Task WhenTheTeardownFlushIsCancelledAtTheBound_ThenItsRequeuedBatchIsCounted()
+    {
+        // Arrange: a write only its token can end, so the teardown flush is cancelled at the bound and
+        // requeues its batch while unwinding. The batch is unrecoverable from there, and the count for it
+        // has to come from the drain itself: the waiter reaches the deadline at the same instant and can
+        // read the queue before the requeue lands.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var dropped = 0L;
+        var writeReached = new ManualResetEventSlim(false);
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: async (_, teardownToken) =>
+            {
+                writeReached.Set();
+                await Task.Delay(Timeout.Infinite, teardownToken);
+            },
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            dropHandler: count => Interlocked.Add(ref dropped, count));
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "buffered";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processor.QueueDepth == 1,
+            message: "The change should be buffered by the processor before it stops");
+
+        // Act
+        await cancellation.CancelAsync();
+        Assert.True(writeReached.Wait(TimeSpan.FromSeconds(30)), "the drain should have reached the handler");
+        await processing.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert: the stop returns as soon as the wait is abandoned, so the count lands when the drain
+        // settles rather than before, which is the whole reason it is taken there.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Interlocked.Read(ref dropped) == 1,
+            message: "the requeued batch should have been counted once the drain settled");
+
+        Assert.Equal(1, processor.DropCount);
+        Assert.Equal(0, processor.QueueDepth);
+    }
 }

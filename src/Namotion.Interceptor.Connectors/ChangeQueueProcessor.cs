@@ -47,8 +47,9 @@ public class ChangeQueueProcessor : IDisposable
     internal ChangeDeliveryRule DeliveryRule => _deliveryRule;
 
     /// <summary>
-    /// Number of buffered changes that were never delivered, either dropped on bounded-queue overflow
-    /// or discarded because the write handler failed without cancelling.
+    /// Number of changes this processor accepted but never delivered: dropped on bounded-queue overflow,
+    /// discarded because the write handler failed, discarded because it was cancelled on a path that
+    /// buffers nothing, or still buffered when the teardown drain ended.
     /// </summary>
     public long DropCount => Interlocked.Read(ref _dropCount);
 
@@ -98,9 +99,10 @@ public class ChangeQueueProcessor : IDisposable
     /// increments <see cref="DropCount"/>, so the newest change is retained. Read only on the buffered
     /// path, so a processor with a buffer time of zero never touches the queue this bounds.</param>
     /// <param name="logger">The logger.</param>
-    /// <param name="dropHandler">Optional handler invoked with the number of changes that were never
-    /// delivered, either dropped on bounded-queue overflow or discarded because the write handler failed
-    /// without cancelling. Use this to report the count to queue diagnostics without adding work to
+    /// <param name="dropHandler">Optional handler invoked with the number of changes that were accepted
+    /// but never delivered: dropped on bounded-queue overflow, discarded because the write handler failed,
+    /// discarded because it was cancelled on a path that buffers nothing, or still buffered when the
+    /// teardown drain ended. Use this to report the count to queue diagnostics without adding work to
     /// successful enqueue or dequeue operations.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
     /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
@@ -316,11 +318,15 @@ public class ChangeQueueProcessor : IDisposable
                     }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
+                        // Nothing buffers on this path, so the teardown drain cannot recover this change
+                        // and counting it is the only honest outcome left.
+                        CountUndelivered(1);
                         throw;
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Failed to write changes.");
+                        CountUndelivered(1);
+                        _logger.LogError(ex, "Failed to write a change, which is discarded.");
                     }
                 }
                 else
@@ -381,6 +387,9 @@ public class ChangeQueueProcessor : IDisposable
             }
             finally
             {
+                // Inside the task, so it runs after any requeue this flush performed on its unwind, even
+                // when the waiter gave up at the deadline long before.
+                CountRemainingAfterDrain();
                 teardownTokenSource.Dispose();
             }
         });
@@ -408,15 +417,24 @@ public class ChangeQueueProcessor : IDisposable
             // Never rethrown: a throw here would replace the failure that ended the processing loop.
             _logger.LogError(ex, "Failed to write the remaining buffered changes while stopping.");
         }
+    }
 
-        if (!_changes.IsEmpty)
+    // Runs only once the drain has settled, never on the thread that gave up waiting. Counting at the
+    // deadline would race the requeue a cancelled flush performs on its own unwind and could read the
+    // queue before the batch is put back, which is exactly the loss this drain exists to prevent.
+    private void CountRemainingAfterDrain()
+    {
+        var remaining = 0L;
+        while (_changes.TryDequeue(out _))
         {
-            // A concurrent Dispose held the flush gate, so the drain returned without taking the batch.
-            // Nothing else refills the queue once the dequeue loop has exited, and no later drain can
-            // recover these, so the one thing this must not do is lose them quietly.
+            remaining++;
+        }
+
+        if (remaining > 0)
+        {
+            CountUndelivered(remaining);
             _logger.LogWarning(
-                "{Count} buffered changes were not written while stopping because the flush gate was held " +
-                "by a concurrent dispose. They are discarded.", _changes.Count);
+                "{Count} buffered changes were not written while stopping and are discarded.", remaining);
         }
     }
 
@@ -451,6 +469,19 @@ public class ChangeQueueProcessor : IDisposable
         {
             _dropHandler?.Invoke(droppedCount);
         }
+    }
+
+    // One place for every "accepted by this processor and not delivered" count, so DropCount and the
+    // drop handler cannot disagree about what happened.
+    private void CountUndelivered(long count)
+    {
+        if (count <= 0)
+        {
+            return;
+        }
+
+        Interlocked.Add(ref _dropCount, count);
+        _dropHandler?.Invoke(count);
     }
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
@@ -509,8 +540,7 @@ public class ChangeQueueProcessor : IDisposable
                     // than cancelling, and requeueing against one that keeps failing would grow the
                     // queue without bound.
                     var undelivered = mergedChanges.Length;
-                    Interlocked.Add(ref _dropCount, undelivered);
-                    _dropHandler?.Invoke(undelivered);
+                    CountUndelivered(undelivered);
                     _logger.LogError(ex, "Failed to write {Count} changes, which are discarded.", undelivered);
                 }
             }
