@@ -484,6 +484,8 @@ public class ChangeQueueProcessor : IDisposable
                 {
                     // Cancelled means never confirmed, not failed, and nothing else recovers a batch that
                     // left the subscription. The merger resolves by commit revision, not queue position.
+                    // Requeue the pre-merge list: the finally below returns the merger's pooled buffer,
+                    // so mergedChanges dangles the moment this unwinds.
                     foreach (var change in _flushChanges)
                     {
                         _changes.Enqueue(change);
