@@ -2023,6 +2023,9 @@ public class SubjectSourceBaseTests
 
         // Assert
         Assert.Contains("John", delivered);
+
+        // A stop that catches a write in flight is only a loss when there is no queue to park it in.
+        Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
     }
 
     [Fact]
@@ -2072,6 +2075,110 @@ public class SubjectSourceBaseTests
             "the writes stranded in the retry queue were never counted");
         Assert.True(source.WriteRetryQueue!.IsEmpty,
             "the stranded writes were counted but left in a queue nobody reads");
+    }
+
+    [Fact]
+    public async Task WhenASourceWithoutARetryQueueFailsAWriteWhileStopping_ThenTheLossIsCounted()
+    {
+        // Arrange: the write blocks until the stop cancels it, which is reported as a failed result
+        // rather than thrown. Elsewhere that failure is excused as merely late, but with no retry queue
+        // there is nowhere for it to be late to, so the change is gone and has to be counted.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context);
+
+        var blockingWriteEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hasBlocked = 0;
+
+        using var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(25), writeRetryQueueSize: 0)
+        {
+            // Only the first write blocks, so the teardown that follows is not held up by a second one.
+            WriteChangesOverride = async (_, cancellationToken) =>
+            {
+                if (Interlocked.Exchange(ref hasBlocked, 1) == 0)
+                {
+                    blockingWriteEntered.TrySetResult();
+                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                }
+
+                return WriteResult.Success;
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+
+        using var stopTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        long droppedBeforeStop;
+        try
+        {
+            // A write made before the change processor runs is discarded by the connect-window drain
+            // instead, so the probe is repeated until the write handler proves the processor has it.
+            var probeValue = 0;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    subject.FirstName = "Probe" + probeValue++;
+                    return blockingWriteEntered.Task.IsCompleted;
+                },
+                pollInterval: TimeSpan.FromMilliseconds(25),
+                message: "The change processor never reached the write handler.");
+        }
+        finally
+        {
+            // Read before the stop, so only the write the stop cancels can raise it.
+            droppedBeforeStop = source.Diagnostics.OutboundRetries.TotalDropped;
+            await source.StopAsync(stopTokenSource.Token);
+        }
+
+        // Assert
+        Assert.True(source.Diagnostics.OutboundRetries.TotalDropped > droppedBeforeStop,
+            "the write the stop discarded was never counted");
+    }
+
+    [Fact]
+    public async Task WhenASourceWithoutARetryQueueDrainsTheConnectWindow_ThenTheDiscardedWritesAreCounted()
+    {
+        // Arrange: a write captured while connecting has nowhere to be parked without a retry queue,
+        // and the drain that empties the subscription is the last thing to see it.
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context) { FirstName = "Seed" };
+
+        using var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            writeRetryQueueSize: 0)
+        {
+            // Writing inside the load, rather than from the resume action, is what puts this in the
+            // connect window: the drain that discards it runs after the load returns.
+            LoadInitialStateOverride = _ =>
+            {
+                subject.FirstName = "WrittenWhileConnecting";
+                return Task.FromResult<Action?>(null);
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundRetries.TotalDropped > 0,
+                message: "The connect-window write was discarded without being counted.");
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+
+        // Assert: exactly the one write, so a drain that ran twice cannot count it twice.
+        Assert.Equal(1, source.Diagnostics.OutboundRetries.TotalDropped);
     }
 
     private sealed class CallbackAsyncDisposable(Func<ValueTask> onDisposeAsync) : IAsyncDisposable

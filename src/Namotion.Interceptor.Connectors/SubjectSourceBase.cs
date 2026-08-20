@@ -365,11 +365,23 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             try
             {
                 var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
-                if (!result.IsFullySuccessful && !IsExpectedShutdown(cancellationToken))
+                if (!result.IsFullySuccessful)
                 {
+                    // Counted even while stopping, unlike the guarded paths elsewhere: that guard keeps a
+                    // merely late write out of the loss total, and with no queue there is nowhere to be late to.
                     Metrics.OutboundRetries.AddDropped(result.FailedChanges.Length);
-                    _logger.LogError(result.Error, "Failed to write {Count} changes to source.",
-                        result.FailedChanges.Length);
+
+                    if (IsExpectedShutdown(cancellationToken))
+                    {
+                        _logger.LogWarning(result.Error,
+                            "Discarded {Count} changes that could not be written while stopping.",
+                            result.FailedChanges.Length);
+                    }
+                    else
+                    {
+                        _logger.LogError(result.Error, "Failed to write {Count} changes to source.",
+                            result.FailedChanges.Length);
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -380,8 +392,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             catch (Exception e)
             {
                 // Unreachable today, kept as defence: WriteChangesInBatchesAsync turns every exception
-                // into a failed WriteResult, which is why this drop is unguarded while the reachable
-                // one above is filtered by IsExpectedShutdown.
+                // into a failed WriteResult.
                 Metrics.OutboundRetries.AddDropped(changes.Length);
                 _logger.LogError(e, "Failed to write changes to source.");
             }
@@ -466,15 +477,16 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/> reports even the cancellation
     /// itself as a failed <see cref="WriteResult"/> rather than throwing it.
     /// <para>
-    /// Its second consumer is the drop counting in <see cref="WriteChangesViaRetryQueueAsync"/>, which
-    /// uses it to keep writes that only failed because the host was stopping out of the loss total.
+    /// Its second consumer is the discard logging in <see cref="WriteChangesViaRetryQueueAsync"/>, which
+    /// uses it to report a write the stop killed as a warning rather than an error. That discard is
+    /// counted either way, because a source with no retry queue has lost the change whatever caused it.
     /// </para>
     /// <para>
     /// The run's own stopping token is consulted as well as the caller's, because a write is not always
     /// handed that token: <see cref="ChangeQueueProcessor"/> drains what it still holds on its way out
     /// under a fresh one, deliberately, since the stopping token is already cancelled there and writing
-    /// under it would fail every change. Judging that drain by its token alone would report a loss caused
-    /// solely by the host stopping as a counted drop, which is what this guard exists to prevent.
+    /// under it would fail every change. Judged by its token alone, that drain would report the host
+    /// stopping as a genuine failure.
     /// </para>
     /// </remarks>
     private bool IsExpectedShutdown(CancellationToken cancellationToken) =>
@@ -504,18 +516,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     internal void DrainOwnedWritesToRetryQueue(PropertyChangeQueueSubscription subscription)
     {
-        // No retry queue: still drain the subscription to empty it, but there is nothing to reconcile.
-        // The discards are deliberately uncounted: the subscription carries every committed change in
-        // the process, so attributing them would mean running the ownership filter of the branch below
-        // per change, on a path that exists only when the retry queue is disabled.
-        if (WriteRetryQueue is null)
-        {
-            while (subscription.TryDequeueImmediate(out _))
-            {
-            }
-            return;
-        }
-
         List<SubjectPropertyChange>? owned = null;
         while (subscription.TryDequeueImmediate(out var change))
         {
@@ -535,15 +535,26 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             (owned ??= []).Add(change);
         }
 
-        if (owned is not null)
+        if (owned is null)
         {
-            // Collapsed before parking, not only at reconcile time. The queue is a bounded ring buffer
-            // that drops its oldest entries, so parking raw changes lets a burst on one property evict
-            // other properties' window writes before the reconcile ever sees them. Collapsing first
-            // makes the space this costs proportional to the number of properties written rather than
-            // to the number of writes.
-            WriteRetryQueue.Enqueue(CollapsePerProperty(owned.ToArray()).ToArray());
+            return;
         }
+
+        if (WriteRetryQueue is null)
+        {
+            Metrics.OutboundRetries.AddDropped(owned.Count);
+            _logger.LogWarning(
+                "Write buffering is disabled. Discarding {Count} writes captured while connecting.",
+                owned.Count);
+            return;
+        }
+
+        // Collapsed before parking, not only at reconcile time. The queue is a bounded ring buffer
+        // that drops its oldest entries, so parking raw changes lets a burst on one property evict
+        // other properties' window writes before the reconcile ever sees them. Collapsing first
+        // makes the space this costs proportional to the number of properties written rather than
+        // to the number of writes.
+        WriteRetryQueue.Enqueue(CollapsePerProperty(owned.ToArray()).ToArray());
     }
 
     /// <summary>
