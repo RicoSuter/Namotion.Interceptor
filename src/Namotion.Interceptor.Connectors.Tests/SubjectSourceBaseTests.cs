@@ -1939,4 +1939,143 @@ public class SubjectSourceBaseTests
         // Assert
         Assert.Contains("FirstName=John", receivedWrites);
     }
+
+    [Fact]
+    public async Task WhenTheLastWriteIsCancelledMidFlight_ThenTheParkedBatchIsHandedOverBeforeStopping()
+    {
+        // Arrange: the write carrying the change blocks until the stop cancels it. That cancellation is
+        // reported as a failed result rather than thrown, so the source parks the batch in its retry
+        // queue and returns normally, and the change processor's own teardown drain then finds nothing
+        // buffered to hand over. The listen lifetime stands in for a real transport: once disposed,
+        // every later write fails, so only a flush that runs before that disposal can still deliver it.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context);
+
+        var delivered = new ConcurrentBag<string?>();
+        var blockingWriteEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var transportIsUp = true;
+        var hasBlocked = 0;
+
+        using var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(250))
+        {
+            StartListeningOverride = (_, _) => Task.FromResult<IAsyncDisposable?>(
+                new CallbackAsyncDisposable(() =>
+                {
+                    Volatile.Write(ref transportIsUp, false);
+                    return ValueTask.CompletedTask;
+                })),
+            WriteChangesOverride = async (changes, cancellationToken) =>
+            {
+                var batch = changes.ToArray();
+                if (!Volatile.Read(ref transportIsUp))
+                {
+                    return WriteResult.Failure(batch, new InvalidOperationException("The transport is closed."));
+                }
+
+                if (batch.Any(change => change.GetNewValue<string?>() == "John") &&
+                    Interlocked.Exchange(ref hasBlocked, 1) == 0)
+                {
+                    blockingWriteEntered.TrySetResult();
+                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                }
+
+                foreach (var change in batch)
+                {
+                    delivered.Add(change.GetNewValue<string?>());
+                }
+
+                return WriteResult.Success;
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(subject, nameof(Person.LastName)).SetSource(source);
+
+        using var stopTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            // A write made before the change processor runs is parked by the connect-window drain
+            // instead of being buffered, so the probe is repeated until a buffered depth proves the
+            // processor is the one holding it.
+            var probeValue = 0;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    subject.LastName = "Probe" + probeValue++;
+                    return source.Diagnostics.OutboundChanges.Depth > 0;
+                },
+                pollInterval: TimeSpan.FromMilliseconds(25),
+                message: "The change processor did not start buffering changes.");
+
+            subject.FirstName = "John";
+            await blockingWriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        finally
+        {
+            await source.StopAsync(stopTokenSource.Token);
+        }
+
+        // Assert
+        Assert.Contains("John", delivered);
+    }
+
+    [Fact]
+    public async Task WhenTheRunEnds_ThenStrandedRetryQueueWritesAreCounted()
+    {
+        // Arrange: every write fails, so the batch parks and stays parked. Stopping without disposing is
+        // what a graph detach does, and a stopped source never gets another attempt, so what is still
+        // queued has to be counted rather than left sitting in a queue nobody will read.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "Parked" };
+
+        var writeAttempted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(50))
+        {
+            WriteChangesOverride = (changes, _) =>
+            {
+                writeAttempted.TrySetResult();
+                return ValueTask.FromResult(WriteResult.Failure(
+                    changes, new InvalidOperationException("The source rejects every write.")));
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+
+        // The model already holds the new value, so the reconcile sends this rather than restoring it.
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "Original", "Parked");
+
+        using var stopTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            await writeAttempted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        finally
+        {
+            await source.StopAsync(stopTokenSource.Token);
+        }
+
+        // Assert
+        Assert.True(source.Diagnostics.OutboundRetries.TotalDropped > 0,
+            "the writes stranded in the retry queue were never counted");
+        Assert.True(source.WriteRetryQueue!.IsEmpty,
+            "the stranded writes were counted but left in a queue nobody reads");
+    }
+
+    private sealed class CallbackAsyncDisposable(Func<ValueTask> onDisposeAsync) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync() => onDisposeAsync();
+    }
 }

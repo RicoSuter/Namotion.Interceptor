@@ -312,6 +312,14 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         () => processor.QueueDepth, capacity: null);
 
                     await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+
+                    // Inside the attempt's try on purpose. The listen lifetime declared above is
+                    // disposed when this block exits, and that disposal tears the transport down in
+                    // every source that owns one, so the same call moved into the finally below would
+                    // always write to a dead connection. The processor's own drain runs inside ProcessAsync and
+                    // hands its buffered batch to the write handler, which parks whatever fails, so
+                    // this runs afterwards to get that parked batch out.
+                    await FlushRetryQueueBeforeStoppingAsync().ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -339,6 +347,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
         finally
         {
+            // Every stop, detach and failure path reaches here, unlike Dispose, which a graph detach
+            // never calls. A stopped source never gets another attempt, so anything still queued is lost
+            // and must be counted rather than left sitting in a queue nobody will read.
+            WriteRetryQueue?.Retire();
+
             TransitionStateTo(SourceState.Stopped);
         }
     }
@@ -402,6 +415,45 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         {
             _logger.LogWarning(e, "Failed to write {Count} changes to source, queuing for retry.", changes.Length);
             WriteRetryQueue.Enqueue(changes);
+        }
+    }
+
+    /// <summary>
+    /// Hands over whatever is still parked in the retry queue while the connection is still up.
+    /// </summary>
+    /// <remarks>
+    /// A stop cancels the in-flight write, and
+    /// <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/> reports that cancellation as a
+    /// failed <see cref="WriteResult"/> rather than throwing it, so
+    /// <see cref="WriteChangesViaRetryQueueAsync"/> parks the batch and returns normally. The processor
+    /// therefore sees a successful flush and its own teardown drain finds nothing left to do, which
+    /// leaves the batch in a queue a stopped source never reads again.
+    /// <para>
+    /// Bounded separately from the processor's drain, so a stop can spend up to twice
+    /// <see cref="ChangeQueueProcessor.TeardownFlushBound"/> before it completes. Accepted: the two
+    /// bounds cover different writes, both stay inside the host's shutdown budget, and only a transport
+    /// that accepts nothing while still reporting itself alive spends the full second one.
+    /// </para>
+    /// </remarks>
+    private async Task FlushRetryQueueBeforeStoppingAsync()
+    {
+        if (WriteRetryQueue is null || WriteRetryQueue.IsEmpty)
+        {
+            return;
+        }
+
+        // A fresh token for the same reason the processor's drain uses one: the stopping token is already
+        // cancelled here, so flushing under it would fail every write.
+        using var teardownTokenSource = new CancellationTokenSource(ChangeQueueProcessor.TeardownFlushBound);
+        try
+        {
+            await WriteRetryQueue.FlushAsync(this, teardownTokenSource.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            // Never rethrown: this runs on the way out and a throw would replace the failure that ended
+            // the attempt. Whatever stays queued is accounted for when the run retires the queue.
+            _logger.LogWarning(exception, "Failed to flush queued writes while stopping.");
         }
     }
 
