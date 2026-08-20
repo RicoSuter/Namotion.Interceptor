@@ -614,17 +614,18 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// reconcile decides whether each is sent, restored or dropped.
     /// </summary>
     /// <param name="changes">The changes to park.</param>
-    /// <param name="insertAtFront">
-    /// <c>true</c> for changes older than anything already queued, such as a re-park after a
-    /// reconnect: appending them at the back would rank them as the newest entries, and the ring
-    /// buffer would then evict the genuinely newer ones ahead of them once it is over capacity.
-    /// </param>
     /// <remarks>
     /// For a connector that has to re-assert writes it sent but cannot prove were applied. Collapsing
     /// first is what keeps the occupancy proportional to the number of properties written rather than
     /// to the number of writes. Does nothing when the retry queue is disabled.
+    /// <para>
+    /// Parked entries are inserted at the front of the queue because they are always older than
+    /// anything already queued, such as a re-park after a reconnect: appending them at the back would
+    /// rank them as the newest entries, and the ring buffer would then evict the genuinely newer ones
+    /// ahead of them once it is over capacity.
+    /// </para>
     /// </remarks>
-    protected void ParkChangesForRetry(ReadOnlySpan<SubjectPropertyChange> changes, bool insertAtFront = false)
+    protected void ParkChangesForRetry(ReadOnlySpan<SubjectPropertyChange> changes)
     {
         if (WriteRetryQueue is null || changes.Length == 0)
         {
@@ -632,14 +633,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
 
         var collapsed = CollapsePerProperty(changes.ToArray()).ToArray();
-        if (insertAtFront)
-        {
-            WriteRetryQueue.EnqueueAtFront(collapsed);
-        }
-        else
-        {
-            WriteRetryQueue.Enqueue(collapsed);
-        }
+        WriteRetryQueue.EnqueueAtFront(collapsed);
     }
 
     /// <summary>

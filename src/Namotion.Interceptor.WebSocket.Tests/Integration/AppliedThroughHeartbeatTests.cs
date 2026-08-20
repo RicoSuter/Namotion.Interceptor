@@ -52,12 +52,8 @@ public class AppliedThroughHeartbeatTests
     [Fact]
     public async Task WhenTheServerAcknowledgedAWrite_ThenAReconnectDoesNotReAssertItOverANewerValue()
     {
-        // Arrange: the client writes and the server applies it. Wait for two heartbeat intervals to
-        // elapse afterward, not for the in-flight count to reach zero: that count reaching zero is the
-        // retire mechanism test 1 already pins directly, and gating on it here would only reproduce
-        // that same assertion instead of exercising what this test is actually for, the reconnect
-        // below. Waiting on real time elapsing gives the mechanism the same opportunity to run without
-        // presupposing that it did.
+        // Arrange: the client writes, the server applies it and reports it on a heartbeat, so the entry
+        // is retired rather than carried.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
@@ -70,10 +66,11 @@ public class AppliedThroughHeartbeatTests
         await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
         await AsyncTestHelpers.WaitUntilAsync(() => client.Root!.Name == "Initial");
 
-        var heartbeatsBeforeWrite = client.Source!.HeartbeatsReceived;
         client.Root!.Name = "AcknowledgedByServer";
         await AsyncTestHelpers.WaitUntilAsync(() => server.Root!.Name == "AcknowledgedByServer");
-        await AsyncTestHelpers.WaitUntilAsync(() => client.Source!.HeartbeatsReceived >= heartbeatsBeforeWrite + 2);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Source!.InFlightCount == 0,
+            message: "The write should have been retired before the outage");
 
         // Act: the value moves on at the server while the client is away, then the client reconnects.
         await ((IFaultInjectable)client.Source!).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
@@ -100,8 +97,10 @@ public class AppliedThroughHeartbeatTests
     /// <see cref="AsyncTestHelpers.WaitUntilAsync"/>'s own poll interval as the spacing between samples,
     /// so consecutive successes are genuinely spread over time rather than evaluated back to back.
     /// </summary>
-    private static Task WaitForStableMatchAsync(Func<bool> condition, string message, int requiredConsecutiveMatches = 5)
+    private static Task WaitForStableMatchAsync(Func<bool> condition, string message)
     {
+        const int requiredConsecutiveMatches = 5;
+
         var consecutiveMatches = 0;
         return AsyncTestHelpers.WaitUntilAsync(
             () =>

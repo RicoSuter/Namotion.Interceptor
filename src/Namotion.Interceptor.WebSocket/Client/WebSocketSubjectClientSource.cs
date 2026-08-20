@@ -56,7 +56,6 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     private readonly Lock _inFlightLock = new();
     private readonly Dictionary<PropertyReference, (long Ordinal, SubjectPropertyChange Change)> _inFlight = new(PropertyReference.Comparer);
     private long _sendOrdinal;
-    private long _heartbeatsReceived;
 
     private int _disposed;
 
@@ -182,7 +181,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                 // Not counted as a drop: these reached the socket and may already have been applied, so
                 // treating them as lost here would inflate the drop metric on every clean shutdown.
                 _logger.LogWarning(
-                    "Stopping with {Count} write(s) that reached the socket but were never confirmed applied.",
+                    "Ending this connection with {Count} write(s) that reached the socket but were never confirmed applied. " +
+                    "They remain queued and will be re-asserted on the next connection.",
                     outstanding);
             }
         }
@@ -396,11 +396,9 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         // outage, so appending them at the back would rank them as the newest entries and let the
         // ring buffer evict the genuinely newer outage writes ahead of them.
         //
-        // outstanding is already one entry per property, collapsed above by construction from a
-        // Dictionary keyed on the property. ParkChangesForRetry collapses it again, which is provably
-        // a no-op here, but the batch is small enough that paying it once more is cheaper than a
-        // second protected entry point across the assembly boundary just to skip it.
-        ParkChangesForRetry(outstanding, insertAtFront: true);
+        // outstanding is already one entry per property by construction, so ParkChangesForRetry's own
+        // collapse is a no-op here; paying for it again is cheaper than a second entry point to skip it.
+        ParkChangesForRetry(outstanding);
     }
 
     /// <summary>
@@ -563,7 +561,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             _logger.LogDebug("Sending {ByteCount} bytes ({SubjectCount} subjects) to server",
                 _sendBuffer.WrittenCount, update.Subjects.Count);
 
-            // Reserved before the send, not assigned after it: see RecordInFlight's remarks for why.
+            // Reserved before the send, not assigned after it: see ReserveSendOrdinal's remarks for why.
             var sendOrdinal = ReserveSendOrdinal();
             await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
             RecordInFlight(sendOrdinal, changes.Span);
@@ -706,8 +704,6 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                                         heartbeat.Sequence, sequenceTracker.ExpectedNextSequence);
                                     return; // Exit receive loop -> triggers reconnection
                                 }
-
-                                Interlocked.Increment(ref _heartbeatsReceived);
 
                                 if (heartbeat.AppliedThrough is { } appliedThrough)
                                 {
@@ -1113,24 +1109,4 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             }
         }
     }
-
-    /// <summary>The ordinal assigned to the most recent send, for tests that assert retirement order.</summary>
-    internal long SendOrdinal
-    {
-        get
-        {
-            lock (_inFlightLock)
-            {
-                return _sendOrdinal;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Number of heartbeats received on the current connection, counted regardless of what
-    /// <see cref="HeartbeatPayload.AppliedThrough"/> carries or whether it retires anything. For a test
-    /// that needs real time to have passed for the mechanism to have had a chance to run, without
-    /// depending on the very outcome it is trying not to presuppose.
-    /// </summary>
-    internal long HeartbeatsReceived => Volatile.Read(ref _heartbeatsReceived);
 }

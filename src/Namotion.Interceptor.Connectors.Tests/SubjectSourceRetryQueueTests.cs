@@ -670,8 +670,7 @@ public class SubjectSourceRetryQueueTests
 
         // Act
         source.ParkChangesForRetryForTest(
-            [CreateChange(person, nameof(Person.FirstName), "OldFirst", "InFlightBeforeOutage")],
-            insertAtFront: true);
+            [CreateChange(person, nameof(Person.FirstName), "OldFirst", "InFlightBeforeOutage")]);
 
         // Assert
         var drained = await source.WriteRetryQueue!.DrainForLocalReapplyAsync(CancellationToken.None);

@@ -71,19 +71,21 @@ public class InFlightWriteTests
             configureContext: context => context.WithSourceTransactions());
         await AsyncTestHelpers.WaitUntilAsync(() => client.Root!.Name == "Initial");
 
-        // Act
+        // Act - do not add another write here before the commit: the in-flight set is keyed per
+        // property, so a second property write would push the count to two.
         using (var transaction = await client.Context!.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             client.Root!.Name = "Committed";
             await transaction.CommitAsync(CancellationToken.None);
         }
 
-        // Assert - SendOrdinal rather than InFlightCount: the property was never previously published
-        // to a source, so InFlightCount > 0 would also pass if the arrangement above grew a preceding
-        // non-transactional write. Asserting the ordinal pins that exactly one send happened and it
-        // was this transactional one.
+        // Assert - exactly one, not merely greater than zero: the property was never previously
+        // published to a source, so this also pins that the regression this test guards against, the
+        // set being recorded in the retry-queue wrapper instead of at the send site, would fail here
+        // too, because a transactional commit never passes through that wrapper and the count would be
+        // zero.
         await AsyncTestHelpers.WaitUntilAsync(
-            () => client.Source!.SendOrdinal == 1,
-            message: "A transactional write must be the one and only send recorded in the in-flight set");
+            () => client.Source!.InFlightCount == 1,
+            message: "A transactional write must be the one and only entry recorded in the in-flight set");
     }
 }

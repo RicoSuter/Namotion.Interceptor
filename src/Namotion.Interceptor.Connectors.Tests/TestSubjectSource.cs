@@ -42,8 +42,8 @@ public sealed class TestSubjectSource : SubjectSourceBase
     public int CurrentResumeEpochForTest => CurrentResumeEpoch;
 
     /// <summary>Exposes the protected ParkChangesForRetry seam for tests.</summary>
-    public void ParkChangesForRetryForTest(ReadOnlySpan<SubjectPropertyChange> changes, bool insertAtFront = false) =>
-        ParkChangesForRetry(changes, insertAtFront);
+    public void ParkChangesForRetryForTest(ReadOnlySpan<SubjectPropertyChange> changes) =>
+        ParkChangesForRetry(changes);
 
     public int WriteBatchSizeOverride { get; init; }
 

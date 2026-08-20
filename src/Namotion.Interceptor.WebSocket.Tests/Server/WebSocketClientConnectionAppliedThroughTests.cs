@@ -1,7 +1,3 @@
-using System;
-using System.Net.WebSockets;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.WebSocket.Server;
 using Xunit;
@@ -20,7 +16,7 @@ public class WebSocketClientConnectionAppliedThroughTests
     {
         // Arrange: a connection exercised directly through its update-received/applied/failed methods,
         // with no live socket and no apply behind them.
-        var connection = new WebSocketClientConnection(new NoopWebSocket(), NullLogger.Instance);
+        var connection = new WebSocketClientConnection(new CapturingWebSocket(), NullLogger.Instance);
 
         // Act: one update applies successfully, then one fails, then a later one applies successfully.
         var first = connection.OnUpdateReceived();
@@ -45,7 +41,7 @@ public class WebSocketClientConnectionAppliedThroughTests
     public void WhenEveryApplySucceeds_ThenTheAppliedThroughCountAdvancesToTheLatestOrdinal()
     {
         // Arrange
-        var connection = new WebSocketClientConnection(new NoopWebSocket(), NullLogger.Instance);
+        var connection = new WebSocketClientConnection(new CapturingWebSocket(), NullLogger.Instance);
 
         // Act
         var first = connection.OnUpdateReceived();
@@ -55,34 +51,5 @@ public class WebSocketClientConnectionAppliedThroughTests
 
         // Assert
         Assert.Equal(second, connection.AppliedThrough);
-    }
-
-    /// <summary>A WebSocket whose members are never called by these tests; only its shape is needed to construct a connection.</summary>
-    private sealed class NoopWebSocket : System.Net.WebSockets.WebSocket
-    {
-        public override void Abort()
-        {
-        }
-
-        public override Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
-            => Task.CompletedTask;
-
-        public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
-            => Task.CompletedTask;
-
-        public override void Dispose()
-        {
-        }
-
-        public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken)
-            => throw new NotSupportedException();
-
-        public override Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken)
-            => throw new NotSupportedException();
-
-        public override WebSocketCloseStatus? CloseStatus => null;
-        public override string? CloseStatusDescription => null;
-        public override WebSocketState State => WebSocketState.Open;
-        public override string? SubProtocol => null;
     }
 }

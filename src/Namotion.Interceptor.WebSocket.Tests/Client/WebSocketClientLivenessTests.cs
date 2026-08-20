@@ -706,7 +706,7 @@ public class WebSocketClientLivenessTests
             () => server.Root!.Name == "First",
             message: "The first write should reach the server over the still-healthy connection.");
 
-        using var connectionLockGate = new ConnectionLockGate();
+        using var connectionLockGate = new UpdateAdmissionGate(armed: true);
         source.BeforeConnectionLockWait = connectionLockGate.Wait;
 
         // Fires deterministically the instant the guard trips, rather than requiring a poll to catch
@@ -784,7 +784,7 @@ public class WebSocketClientLivenessTests
 
         var oldSocket = GetWebSocket(source);
 
-        using var connectionLockGate = new ConnectionLockGate();
+        using var connectionLockGate = new UpdateAdmissionGate(armed: true);
         source.BeforeConnectionLockWait = connectionLockGate.Wait;
 
         var guardFired = false;
@@ -857,7 +857,7 @@ public class WebSocketClientLivenessTests
 
         var oldSocket = (System.Net.WebSockets.WebSocket)GetWebSocket(source)!;
 
-        using var retireLockGate = new ConnectionLockGate();
+        using var retireLockGate = new UpdateAdmissionGate(armed: true);
         source.BeforeRetireInFlightLock = retireLockGate.Wait;
 
         try
@@ -1035,29 +1035,13 @@ public class WebSocketClientLivenessTests
     }
 
     /// <summary>
-    /// Blocks inside <see cref="WebSocketSubjectClientSource.BeforeConnectionLockWait"/>, the
-    /// window between a write capturing the current socket and it waiting on the connection lock.
+    /// Blocks the first caller that reaches <see cref="Wait"/> until <see cref="Release"/> is
+    /// called, so a test can hold a production seam open while it orchestrates a race on another
+    /// thread. Only the first caller blocks: a seam that can fire more than once during a test, such
+    /// as <see cref="WebSocketSubjectClientSource.BeforeRetireInFlightLock"/> on a heartbeat that
+    /// arrives while the gate is still held, passes straight through instead of wedging on a gate
+    /// nothing releases it from.
     /// </summary>
-    private sealed class ConnectionLockGate : IDisposable
-    {
-        private readonly ManualResetEventSlim _release = new(false);
-        private readonly TaskCompletionSource _entered =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        /// <summary>Completes once a write has reached the window this gate blocks.</summary>
-        public Task Entered => _entered.Task;
-
-        public void Wait()
-        {
-            _entered.TrySetResult();
-            _release.Wait();
-        }
-
-        public void Release() => _release.Set();
-
-        public void Dispose() => _release.Dispose();
-    }
-
     private sealed class UpdateAdmissionGate : IDisposable
     {
         private readonly ManualResetEventSlim _release = new(false);
@@ -1065,6 +1049,17 @@ public class WebSocketClientLivenessTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _armed;
         private int _blocked;
+
+        /// <param name="armed">
+        /// <c>true</c> when the seam has no separate arm step and must block as soon as it is
+        /// reached, such as <see cref="WebSocketSubjectClientSource.BeforeConnectionLockWait"/> or
+        /// <see cref="WebSocketSubjectClientSource.BeforeRetireInFlightLock"/>. Leave <c>false</c>
+        /// and call <see cref="Arm"/> once other setup needs to run first.
+        /// </param>
+        public UpdateAdmissionGate(bool armed = false)
+        {
+            _armed = armed ? 1 : 0;
+        }
 
         public Task Entered => _entered.Task;
 

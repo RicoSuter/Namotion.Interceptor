@@ -357,9 +357,7 @@ public sealed class WebSocketSubjectHandler
         var sequence = Volatile.Read(ref _sequence);
 
         // Serialized per connection, because the applied-through value is per connection. The cost is
-        // one small payload per connection per heartbeat interval, bounded by MaxConnections. The
-        // serialization itself happens inside SendHeartbeatAsync, after the pre-welcome check, so a
-        // connection that will discard the heartbeat there does not pay for building it.
+        // one small payload per connection per heartbeat interval, bounded by MaxConnections.
         await BroadcastToAllAsync(
             connection =>
             {
