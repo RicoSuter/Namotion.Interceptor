@@ -96,6 +96,93 @@ public class SubjectSourceRetryQueueTests
     }
 
     [Fact]
+    public async Task WhenTheSourceIsIdleWithParkedWrites_ThenTheyAreFlushedWithoutAFurtherChange()
+    {
+        // Arrange: same live-pump arrangement as WhenWriteFailsWithoutEnumeratedFailedChanges_..., with
+        // a short retryTime so the idle tick fires inside the test, and a write that fails once and is
+        // parked.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+
+        var gate = new object();
+        var failWrites = false;
+        var receivedWrites = new List<string>();
+
+        var source = new TestSubjectSource(person, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(8),
+            retryTime: TimeSpan.FromMilliseconds(200))
+        {
+            WriteChangesOverride = (changes, _) =>
+            {
+                lock (gate)
+                {
+                    var batch = changes.ToArray();
+                    if (failWrites && batch.Any(change => change.Property.Name == nameof(Person.FirstName)))
+                    {
+                        return ValueTask.FromResult(WriteResult.Failure(
+                            ReadOnlyMemory<SubjectPropertyChange>.Empty,
+                            new InvalidOperationException("Simulated failure")));
+                    }
+
+                    foreach (var change in batch)
+                    {
+                        receivedWrites.Add($"{change.Property.Name}={change.GetNewValue<object?>()}");
+                    }
+                    return ValueTask.FromResult(WriteResult.Success);
+                }
+            },
+        };
+
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source);
+
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            // Wait until the pump processes outbound changes. The probe is re-written on each
+            // poll because writes enqueued before the pump's subscription exists are not seen.
+            var probeValue = 0;
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                person.LastName = "Probe" + probeValue++;
+                return CountWrites(gate, receivedWrites, nameof(Person.LastName)) >= 1;
+            }, message: "Pump did not start processing changes.");
+
+            lock (gate)
+            {
+                failWrites = true;
+            }
+            person.FirstName = "John";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundRetries.Depth > 0,
+                message: "The failed write was not parked.");
+
+            // Act: let writes succeed again and then make NO further change to any property.
+            lock (gate)
+            {
+                failWrites = false;
+            }
+
+            // Assert: the idle tick drains the parked write on its own; nothing here writes a property.
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                lock (gate)
+                {
+                    return receivedWrites.Contains("FirstName=John");
+                }
+            }, message: "The parked write was never drained while the model was idle.");
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task WhenResumeIsInProgress_ThenOutboundWritesAreParkedInsteadOfSent()
     {
         // Arrange: a live pump whose writes all succeed, so anything not sent was parked by the gate.

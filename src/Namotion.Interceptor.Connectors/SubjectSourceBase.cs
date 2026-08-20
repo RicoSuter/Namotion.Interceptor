@@ -340,7 +340,17 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     using var outboundRegistration = Metrics.OutboundChanges.Register(
                         () => processor.QueueDepth, capacity: null);
 
-                    await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+                    using var idleFlush = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    var idleFlushTask = FlushRetryQueuePeriodicallyAsync(idleFlush.Token);
+                    try
+                    {
+                        await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        await idleFlush.CancelAsync().ConfigureAwait(false);
+                        await idleFlushTask.ConfigureAwait(false);
+                    }
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -466,6 +476,47 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         {
             _logger.LogWarning(e, "Failed to write {Count} changes to source, queuing for retry.", changes.Length);
             WriteRetryQueue.Enqueue(changes);
+        }
+    }
+
+    /// <summary>
+    /// Drains the write retry queue on a timer, so that parked writes are not held until the next
+    /// change happens to trigger a flush.
+    /// </summary>
+    /// <remarks>
+    /// The processor's flush returns early on an empty batch, so its write handler, which is the only
+    /// other thing that drains the queue, is never called while the model is idle.
+    /// <see cref="WriteRetryQueue.FlushAsync"/> is serialized by its own gate, so this racing the
+    /// write handler costs a wait rather than a reorder.
+    /// </remarks>
+    private async Task FlushRetryQueuePeriodicallyAsync(CancellationToken cancellationToken)
+    {
+        if (WriteRetryQueue is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var timer = new PeriodicTimer(_retryTime);
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (Volatile.Read(ref _resumeInProgress) == 1 || WriteRetryQueue.IsEmpty)
+                {
+                    continue;
+                }
+
+                await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            // Swallowed rather than propagated: this loop is raced against the processor and its
+            // failure must not end the attempt that the processor is still serving.
+            _logger.LogError(exception, "Failed to flush the write retry queue on the idle tick.");
         }
     }
 
