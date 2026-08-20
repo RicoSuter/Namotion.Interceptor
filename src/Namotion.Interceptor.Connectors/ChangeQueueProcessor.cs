@@ -13,9 +13,6 @@ namespace Namotion.Interceptor.Connectors;
 /// </summary>
 public class ChangeQueueProcessor : IDisposable
 {
-    // Not configurable: when the host is stopping, BackgroundService.StopAsync already abandons its wait
-    // at HostOptions.ShutdownTimeout, and every other teardown, such as a subject detached from the
-    // graph and stopped without ever being disposed, has no outer deadline at all.
     internal static readonly TimeSpan TeardownFlushBound = TimeSpan.FromSeconds(5);
 
     private readonly Func<PropertyReference, bool> _propertyFilter;
