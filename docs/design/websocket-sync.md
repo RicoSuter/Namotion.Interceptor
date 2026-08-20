@@ -150,6 +150,8 @@ In priority order, matching the spec:
 5. **Make the inbound drop counter attributable.** `SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates` is a process-wide static (`SubjectUpdateDiagnostics.cs:36`); log at warning with the connection id. Cases B4 and S1.
 6. **A write-durability oracle in the Connector Tester**, moved forward from PR D. Without it none of the remaining unhandled cases is visible to a chaos run, because all of them converge.
 
+**How this was split when it came to be built.** Items 1 and 2 landed first, on their own, because they are a self-contained `Namotion.Interceptor.Connectors` reliability fix that every connector inherits and they should not wait behind the acknowledgement work. Items 3 through 6, which need a per-connection in-flight set, a wire field and a new oracle, land in a follow-up that stacks on it. The case verdicts below are written against the whole design; where a case is closed only by an item that has not landed yet, its entry says so.
+
 ### What each message carries and what a receiver does with it
 
 | Message | Direction | Carries | Receiver behaviour |
