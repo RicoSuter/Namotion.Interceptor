@@ -131,6 +131,9 @@ The library has specialized support for:
 
 - **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `attribute` not `attr`).
 - **No em dashes** in docs, READMEs, or PR descriptions. Restructure into plain sentences instead.
+- **Inline comments: a non-obvious why, one or two lines.** Longer means it is arguing a decision, which belongs in the pull request or in `docs/design/`. Never restate the line below.
+- **XML docs state the contract**, not the reasoning. `<remarks>` is for a caveat a caller must act on.
+- **One canonical location per concept**, cross-referenced. Three copies drift.
 - **No hard wrapping** in markdown. Keep a paragraph on one line instead of breaking at a column.
 
 ## Git Rules
