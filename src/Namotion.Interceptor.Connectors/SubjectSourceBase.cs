@@ -77,15 +77,13 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
 
-        // Always constructed, so the queue's size-0 branch is the single definition of what a
-        // disabled queue does: count and discard, including the connect/reconnect-window writes it
-        // would otherwise carry into the reconcile. A negative size fails fast in its constructor.
+        // Always constructed, so the queue's size-0 branch is the single definition of a disabled queue:
+        // count and discard, including the connect/reconnect-window writes it would otherwise reconcile.
         var writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger, metrics.OutboundRetries);
         WriteRetryQueue = writeRetryQueue;
 
         // Never disposed: the queue lives as long as the source, and its count field stays readable
-        // after Dispose. At size 0 the registered capacity is 0 rather than null, because null reads
-        // as unbounded, the opposite of the truth.
+        // after Dispose. Capacity 0 rather than null at size 0, since null reads as unbounded.
         _ = metrics.OutboundRetries.Register(
             () => writeRetryQueue.PendingWriteCount, capacity: writeRetryQueueSize);
 
@@ -300,10 +298,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
                     await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
 
-                    // Inside the attempt's try on purpose. The listen lifetime declared above is
-                    // disposed when this block exits, and that disposal tears the transport down in
-                    // every source that owns one, so the same call moved into the finally below would
-                    // always write to a dead connection.
+                    // Inside the attempt's try: exiting this block disposes the listen lifetime and with
+                    // it the transport, so the same call in the finally below would find it dead.
                     await FlushRetryQueueBeforeStoppingAsync().ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -332,9 +328,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
         finally
         {
-            // Every stop, detach and failure path reaches here, unlike Dispose, which a graph detach
-            // never calls. A stopped source never gets another attempt, so anything still queued is lost
-            // and must be counted rather than left sitting in a queue nobody will read.
+            // Here rather than in Dispose, which a graph detach never calls: a detached source is stopped
+            // but never disposed, and a stopped source never gets another attempt at what is queued.
             WriteRetryQueue.Retire();
 
             TransitionStateTo(SourceState.Stopped);
@@ -398,8 +393,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             return;
         }
 
-        // A fresh token for the same reason the processor's drain uses one: the stopping token is already
-        // cancelled here, so flushing under it would fail every write.
+        // A fresh token: the stopping token is cancelled here, so flushing under it would fail every write.
         using var teardownTokenSource = new CancellationTokenSource(ChangeQueueProcessor.TeardownFlushBound);
         try
         {
@@ -407,8 +401,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
         catch (Exception exception)
         {
-            // Never rethrown: this runs on the way out and a throw would replace the failure that ended
-            // the attempt. Whatever stays queued is accounted for when the run retires the queue.
+            // Never rethrown: a throw here would replace the failure that ended the attempt.
             _logger.LogWarning(exception, "Failed to flush queued writes while stopping.");
         }
     }

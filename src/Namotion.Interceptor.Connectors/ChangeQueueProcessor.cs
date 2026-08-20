@@ -13,15 +13,9 @@ namespace Namotion.Interceptor.Connectors;
 /// </summary>
 public class ChangeQueueProcessor : IDisposable
 {
-    // How long a stop waits for the teardown drain, and the binding constraint on every path, being
-    // tighter than the host's 30 second default shutdown budget.
-    //
-    // Not configurable, because the two cases pull in opposite directions and neither wants a knob.
-    // When the host is stopping, BackgroundService.StopAsync already abandons its wait at
-    // HostOptions.ShutdownTimeout, so a per-connector value would only subdivide a budget the host
-    // enforces anyway. Every other teardown, such as a subject detached from the graph, which is
-    // stopped without ever being disposed, has no outer deadline at all, so something must bound it,
-    // and that something is a safety net against a dead transport rather than a tuning parameter.
+    // Not configurable: when the host is stopping, BackgroundService.StopAsync already abandons its wait
+    // at HostOptions.ShutdownTimeout, and every other teardown, such as a subject detached from the
+    // graph and stopped without ever being disposed, has no outer deadline at all.
     internal static readonly TimeSpan TeardownFlushBound = TimeSpan.FromSeconds(5);
 
     private readonly Func<PropertyReference, bool> _propertyFilter;
@@ -310,8 +304,7 @@ public class ChangeQueueProcessor : IDisposable
                     }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
-                        // Nothing buffers on this path, so the teardown drain cannot recover this change
-                        // and counting it is the only honest outcome left.
+                        // Nothing buffers on this path, so the teardown drain cannot recover this change.
                         CountUndelivered(1);
                         throw;
                     }
@@ -362,15 +355,11 @@ public class ChangeQueueProcessor : IDisposable
         // writing under it would fail every change, which is the loss this exists to prevent.
         var teardownTokenSource = new CancellationTokenSource(TeardownFlushBound);
 
-        // Read once, before the task starts, because the delegate below disposes the source as soon as
-        // the flush returns. Reading Token at the wait instead would race that disposal, and Token
-        // throws ObjectDisposedException once the source is gone.
+        // Read once: Token throws ObjectDisposedException once the task below disposes the token source.
         var teardownToken = teardownTokenSource.Token;
 
-        // Off this thread, because the token only bounds a handler that observes it and the OPC UA
-        // server writes synchronously under the SDK's node manager lock. Awaiting inline would bound
-        // nothing. The task owns the token source, so the cancel-after timer stays alive for as long as
-        // the work it bounds, rather than being killed by a using on the abandoning thread.
+        // Off this thread: the OPC UA server writes synchronously under the SDK's node manager lock and
+        // ignores its token, so awaiting inline would bound nothing.
         var flushTask = Task.Run(async () =>
         {
             try
@@ -381,25 +370,23 @@ public class ChangeQueueProcessor : IDisposable
                 }
                 finally
                 {
-                    // Inside the task, so it runs after any requeue this flush performed on its unwind,
-                    // even when the waiter gave up at the deadline long before.
+                    // Inside the task, so the count runs after the requeue a cancelled flush performs on
+                    // its unwind, and the token source outlives a waiter that gave up at the deadline.
                     CountRemainingAfterDrain();
                     teardownTokenSource.Dispose();
                 }
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                // Logged here rather than at the waiter, which may have given up long before this ends.
-                // Catching everything is also what keeps an abandoned task from surfacing as an
-                // UnobservedTaskException.
+                // Logged here because the waiter may have given up long before this ends. Catching
+                // everything also keeps an abandoned task off UnobservedTaskException.
                 _logger.LogError(exception, "Failed to write the remaining buffered changes while stopping.");
             }
         });
 
         try
         {
-            // One deadline rather than two. Waiting on the same token the flush runs under removes the
-            // race in which an independent timeout disposed the source and killed its timer.
+            // Waits on the flush's own token, so a stop has one deadline rather than two racing ones.
             await flushTask.WaitAsync(teardownToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -413,9 +400,7 @@ public class ChangeQueueProcessor : IDisposable
         }
     }
 
-    // Runs only once the drain has settled, never on the thread that gave up waiting. Counting at the
-    // deadline would race the requeue a cancelled flush performs on its own unwind and could read the
-    // queue before the batch is put back, which is exactly the loss this drain exists to prevent.
+    // Must run only after the drain settles, never on the thread that gave up waiting at the deadline.
     private void CountRemainingAfterDrain()
     {
         var remaining = 0L;
@@ -448,8 +433,6 @@ public class ChangeQueueProcessor : IDisposable
         CountUndelivered(droppedCount);
     }
 
-    // One place for every "accepted by this processor and not delivered" count, so DropCount and the
-    // drop handler cannot disagree about what happened.
     private void CountUndelivered(long count)
     {
         if (count <= 0)
@@ -499,11 +482,8 @@ public class ChangeQueueProcessor : IDisposable
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    // Cancellation means the batch was never attempted or never confirmed, not that it
-                    // failed, and nothing else can recover it: it has already left the subscription.
-                    // Returning it to the queue is what gives the teardown drain something to hand over.
-                    // Order is safe because the merger resolves by commit revision rather than queue
-                    // position, and the dequeue loop has already exited by the time this runs at a stop.
+                    // Cancelled means never confirmed, not failed, and nothing else recovers a batch that
+                    // left the subscription. The merger resolves by commit revision, not queue position.
                     foreach (var change in _flushChanges)
                     {
                         _changes.Enqueue(change);
@@ -513,9 +493,8 @@ public class ChangeQueueProcessor : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    // Counted rather than requeued. A transport that died on its own throws here rather
-                    // than cancelling, and requeueing against one that keeps failing would grow the
-                    // queue without bound.
+                    // Counted rather than requeued: requeueing against a transport that keeps failing
+                    // would grow the queue without bound.
                     var undelivered = mergedChanges.Length;
                     CountUndelivered(undelivered);
                     _logger.LogError(ex, "Failed to write {Count} changes, which are discarded.", undelivered);

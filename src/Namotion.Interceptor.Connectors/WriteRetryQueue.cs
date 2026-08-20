@@ -26,8 +26,7 @@ internal sealed class WriteRetryQueue : IDisposable
     private readonly int _maxQueueSize;
     private int _count;
 
-    // Only ever read and written under _lock, so a producer cannot pass the check while a retire
-    // clears the list behind it.
+    // Read and written only under _lock, so a producer cannot pass the check while Retire clears it.
     private bool _retired;
 
     // Throttle flush-failure warnings to avoid log spam during extended disconnections
@@ -73,8 +72,7 @@ internal sealed class WriteRetryQueue : IDisposable
         int droppedCount;
         lock (_lock)
         {
-            // Inside the lock rather than ahead of it: a check that lost the race to Retire would park
-            // this batch in a list nobody reads again, which is the silent loss the latch exists to stop.
+            // Checked inside the lock: losing the race to Retire would park this batch where nobody reads it.
             retired = _retired;
             if (retired)
             {
@@ -98,8 +96,7 @@ internal sealed class WriteRetryQueue : IDisposable
             return;
         }
 
-        // Reported outside the lock, so an arbitrary logger implementation cannot stall the write path
-        // or take a second lock while this one is held.
+        // Reported outside the lock, so an arbitrary logger cannot stall the write path or take a second lock.
         _metrics.AddDropped(droppedCount);
         if (retired)
         {
@@ -279,8 +276,7 @@ internal sealed class WriteRetryQueue : IDisposable
         {
             if (_retired)
             {
-                // Retired while this batch was in flight, so no later attempt will pick it up. Report
-                // the whole batch as dropped instead of restoring it into a queue with no reader.
+                // Retired while this batch was in flight: restoring it would park it in a queue with no reader.
                 return changes.Length;
             }
 
