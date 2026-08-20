@@ -8,7 +8,8 @@ namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
 /// Manages a write retry queue with ring buffer semantics for buffering writes during disconnection.
-/// When the queue is full, oldest writes are dropped to make room for new ones.
+/// When the queue is full, oldest writes are dropped to make room for new ones. A queue of size 0
+/// is the disabled configuration: everything handed to it is counted as dropped and discarded.
 /// </summary>
 internal sealed class WriteRetryQueue : IDisposable
 {

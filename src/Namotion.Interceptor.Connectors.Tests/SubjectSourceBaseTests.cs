@@ -1407,7 +1407,7 @@ public class SubjectSourceBaseTests
         IInterceptorSubject subject, string propertyName, TValue oldValue, TValue newValue,
         long revision = 0)
     {
-        var queue = source.WriteRetryQueue!;
+        var queue = source.WriteRetryQueue;
 
         var change = SubjectPropertyChange.Create(
             new PropertyReference(subject, propertyName),
@@ -2073,7 +2073,7 @@ public class SubjectSourceBaseTests
         // Assert
         Assert.True(source.Diagnostics.OutboundRetries.TotalDropped > 0,
             "the writes stranded in the retry queue were never counted");
-        Assert.True(source.WriteRetryQueue!.IsEmpty,
+        Assert.True(source.WriteRetryQueue.IsEmpty,
             "the stranded writes were counted but left in a queue nobody reads");
     }
 

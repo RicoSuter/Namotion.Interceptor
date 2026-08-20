@@ -44,7 +44,7 @@ public class OutboundDropCountingTests
         // Pins the no-setter branch, so the drop below cannot come from the catch beside it.
         Assert.Null(new PropertyReference(person, nameof(Person.FullName)).Metadata.SetValue);
 
-        source.WriteRetryQueue!.Enqueue(new[]
+        source.WriteRetryQueue.Enqueue(new[]
         {
             CreateChange(person, nameof(Person.FullName), oldValue: "old", newValue: "never-current")
         });
@@ -72,7 +72,7 @@ public class OutboundDropCountingTests
         // Pins that a setter exists, so the drop below comes from the catch and not the no-setter branch.
         Assert.NotNull(new PropertyReference(device, nameof(ThrowingDevice.PropertyA)).Metadata.SetValue);
 
-        source.WriteRetryQueue!.Enqueue(new[]
+        source.WriteRetryQueue.Enqueue(new[]
         {
             CreateChange(device, nameof(ThrowingDevice.PropertyA), oldValue: false, newValue: true)
         });
