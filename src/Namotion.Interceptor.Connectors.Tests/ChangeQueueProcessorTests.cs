@@ -1069,8 +1069,14 @@ public class ChangeQueueProcessorTests
 
         // Assert: a lower edge only. An upper one would trip on a loaded agent, but without a lower one
         // the test passes just as happily if the bound regresses to twenty seconds, which its name denies.
+        //
+        // The tolerance is not cosmetic. The bound is enforced by a CancellationTokenSource timer, which
+        // was measured firing up to 0.8ms before Stopwatch agrees it should have, so a zero-tolerance
+        // comparison flakes on roughly one run in ten. Fifty milliseconds is far below any regression
+        // worth catching and far above that skew.
+        var tolerance = TimeSpan.FromMilliseconds(50);
         Assert.True(writeStarted.IsSet, "The teardown drain should have reached the write handler.");
-        Assert.True(elapsed.Elapsed >= ChangeQueueProcessor.TeardownFlushBound,
+        Assert.True(elapsed.Elapsed >= ChangeQueueProcessor.TeardownFlushBound - tolerance,
             $"Stopping should have waited for the teardown bound, but took only {elapsed.Elapsed}.");
     }
 
