@@ -56,6 +56,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     private readonly Lock _inFlightLock = new();
     private readonly Dictionary<PropertyReference, (long Ordinal, SubjectPropertyChange Change)> _inFlight = new(PropertyReference.Comparer);
     private long _sendOrdinal;
+    private long _heartbeatsReceived;
 
     private int _disposed;
 
@@ -561,8 +562,11 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, update);
             _logger.LogDebug("Sending {ByteCount} bytes ({SubjectCount} subjects) to server",
                 _sendBuffer.WrittenCount, update.Subjects.Count);
+
+            // Reserved before the send, not assigned after it: see RecordInFlight's remarks for why.
+            var sendOrdinal = ReserveSendOrdinal();
             await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
-            RecordInFlight(changes.Span);
+            RecordInFlight(sendOrdinal, changes.Span);
             MaybeShrinkSendBuffer();
             _logger.LogDebug("Sent update successfully");
             return WriteResult.Success;
@@ -586,18 +590,35 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     }
 
     /// <summary>
+    /// Reserves the ordinal for the send that is about to happen, before it happens.
+    /// </summary>
+    /// <remarks>
+    /// Reserving ahead of the send rather than assigning after it means a send that reaches the peer
+    /// while, for whatever reason, the matching <see cref="RecordInFlight"/> call is skipped can only
+    /// leave the client's ordinal ahead of the server's count, never behind it. Ahead under-retires,
+    /// which is safe; behind would retire an in-flight entry the server never actually received,
+    /// which is the exact loss this field exists to prevent.
+    /// </remarks>
+    private long ReserveSendOrdinal()
+    {
+        lock (_inFlightLock)
+        {
+            return ++_sendOrdinal;
+        }
+    }
+
+    /// <summary>
     /// Records changes that reached the socket, keyed per property so a later send for the same
     /// property replaces the earlier one.
     /// </summary>
     /// <remarks>
-    /// Called under the connection lock, so the ordinal it assigns matches the order the server
-    /// receives the messages in. The count the server reports back is what retires these.
+    /// Called under the connection lock, so the ordinal matches the order the server receives the
+    /// messages in. The count the server reports back is what retires these.
     /// </remarks>
-    private void RecordInFlight(ReadOnlySpan<SubjectPropertyChange> changes)
+    private void RecordInFlight(long ordinal, ReadOnlySpan<SubjectPropertyChange> changes)
     {
         lock (_inFlightLock)
         {
-            var ordinal = ++_sendOrdinal;
             foreach (var change in changes)
             {
                 _inFlight[change.Property] = (ordinal, change);
@@ -685,6 +706,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                                         heartbeat.Sequence, sequenceTracker.ExpectedNextSequence);
                                     return; // Exit receive loop -> triggers reconnection
                                 }
+
+                                Interlocked.Increment(ref _heartbeatsReceived);
 
                                 if (heartbeat.AppliedThrough is { } appliedThrough)
                                 {
@@ -1102,4 +1125,12 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             }
         }
     }
+
+    /// <summary>
+    /// Number of heartbeats received on the current connection, counted regardless of what
+    /// <see cref="HeartbeatPayload.AppliedThrough"/> carries or whether it retires anything. For a test
+    /// that needs real time to have passed for the mechanism to have had a chance to run, without
+    /// depending on the very outcome it is trying not to presuppose.
+    /// </summary>
+    internal long HeartbeatsReceived => Volatile.Read(ref _heartbeatsReceived);
 }

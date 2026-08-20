@@ -18,17 +18,27 @@ public class WebSocketClientConnectionAppliedThroughTests
     [Fact]
     public void WhenAnApplyFails_ThenTheAppliedThroughCountStopsAdvancing()
     {
-        // Arrange: a handler whose apply throws for one inbound update.
+        // Arrange: a connection exercised directly through its update-received/applied/failed methods,
+        // with no live socket and no apply behind them.
         var connection = new WebSocketClientConnection(new NoopWebSocket(), NullLogger.Instance);
 
-        // Act
+        // Act: one update applies successfully, then one fails, then a later one applies successfully.
         var first = connection.OnUpdateReceived();
-        connection.OnApplyFailed();
-        var second = connection.OnUpdateReceived();
-        connection.OnUpdateApplied(second);
+        connection.OnUpdateApplied(first);
 
-        // Assert: a later success must not retire the update that failed.
-        Assert.True(connection.AppliedThrough < first);
+        connection.OnUpdateReceived();
+        connection.OnApplyFailed();
+
+        var third = connection.OnUpdateReceived();
+        connection.OnUpdateApplied(third);
+
+        // Assert: the count stays at the last ordinal that applied before the failure. With the first
+        // ordinal being 1, asserting only that the value is below it would also pass an implementation
+        // that reset the count to zero on failure, which is a stall in name only: it would stop the
+        // client from ever retiring anything further on this connection rather than holding it at the
+        // point the failure actually reached. Pinning the exact ordinal rules that out, and also rules
+        // out the count resuming past the failure to the later success.
+        Assert.Equal(first, connection.AppliedThrough);
     }
 
     [Fact]

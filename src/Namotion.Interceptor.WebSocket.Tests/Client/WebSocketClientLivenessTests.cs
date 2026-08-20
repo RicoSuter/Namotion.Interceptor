@@ -18,6 +18,7 @@ using Namotion.Interceptor.WebSocket.Client;
 using Namotion.Interceptor.WebSocket.Internal;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
+using Namotion.Interceptor.WebSocket.Server;
 using Namotion.Interceptor.WebSocket.Tests.Integration;
 using Xunit;
 using Xunit.Abstractions;
@@ -896,10 +897,13 @@ public class WebSocketClientLivenessTests
     [Fact]
     public async Task WhenTheSourceStopsWithAnUnacknowledgedInFlightWrite_ThenItIsNotCountedAsADrop()
     {
-        // Arrange - nothing in this stack retires an in-flight entry outside a reconnect, so a write
-        // over a connection that stays healthy remains in flight until the source itself is stopped.
+        // Arrange - the heartbeat is disabled, so the deliberate retire it would otherwise carry never
+        // runs and a write over a connection that stays healthy remains in flight until the source
+        // itself is stopped.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
-        await using var server = await StartServerAsync(portLease.Port);
+        await using var server = await StartServerAsync(
+            portLease.Port,
+            configureServer: configuration => configuration.HeartbeatInterval = TimeSpan.Zero);
         var recordingLogger = new RecordingLogger();
         await using var source = CreateClientSource(portLease.Port, logger: recordingLogger);
         await source.StartAsync(CancellationToken.None);
@@ -923,13 +927,16 @@ public class WebSocketClientLivenessTests
             message => message.Contains("reached the socket but were never confirmed applied", StringComparison.Ordinal));
     }
 
-    private async Task<WebSocketTestServer<TestRoot>> StartServerAsync(int port)
+    private async Task<WebSocketTestServer<TestRoot>> StartServerAsync(
+        int port,
+        Action<WebSocketServerConfiguration>? configureServer = null)
     {
         var server = new WebSocketTestServer<TestRoot>(_output);
         await server.StartAsync(
             context => new TestRoot(context),
             (_, root) => root.Name = "Initial",
-            port: port);
+            port: port,
+            configureServer: configureServer);
         return server;
     }
 

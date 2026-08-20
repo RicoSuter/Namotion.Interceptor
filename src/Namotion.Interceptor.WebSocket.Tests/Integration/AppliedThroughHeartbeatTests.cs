@@ -52,8 +52,12 @@ public class AppliedThroughHeartbeatTests
     [Fact]
     public async Task WhenTheServerAcknowledgedAWrite_ThenAReconnectDoesNotReAssertItOverANewerValue()
     {
-        // Arrange: the client writes, the server applies it and reports it on a heartbeat, so the entry
-        // is retired rather than carried.
+        // Arrange: the client writes and the server applies it. Wait for two heartbeat intervals to
+        // elapse afterward, not for the in-flight count to reach zero: that count reaching zero is the
+        // retire mechanism test 1 already pins directly, and gating on it here would only reproduce
+        // that same assertion instead of exercising what this test is actually for, the reconnect
+        // below. Waiting on real time elapsing gives the mechanism the same opportunity to run without
+        // presupposing that it did.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
@@ -66,22 +70,45 @@ public class AppliedThroughHeartbeatTests
         await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
         await AsyncTestHelpers.WaitUntilAsync(() => client.Root!.Name == "Initial");
 
+        var heartbeatsBeforeWrite = client.Source!.HeartbeatsReceived;
         client.Root!.Name = "AcknowledgedByServer";
         await AsyncTestHelpers.WaitUntilAsync(() => server.Root!.Name == "AcknowledgedByServer");
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => client.Source!.InFlightCount == 0,
-            message: "The write should have been retired before the outage");
+        await AsyncTestHelpers.WaitUntilAsync(() => client.Source!.HeartbeatsReceived >= heartbeatsBeforeWrite + 2);
 
         // Act: the value moves on at the server while the client is away, then the client reconnects.
         await ((IFaultInjectable)client.Source!).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
         server.Root!.Name = "NewerServerValue";
 
-        // Assert: nothing is re-asserted, because there is no in-flight entry left to re-park. If it
-        // were, the client's reconnect would send it back over the newer server value.
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => client.Root!.Name == "NewerServerValue",
-            timeout: TimeSpan.FromSeconds(30),
-            message: "Client should reconnect and converge on the value the server moved to while it was away");
-        Assert.Equal("NewerServerValue", server.Root!.Name);
+        // Assert: nothing is re-asserted, because there is no in-flight entry left to re-park. A single
+        // sample the instant the value first matches cannot prove that: the reconnect's initial-state
+        // load can land the newer value an instant before the reconcile that follows it takes the
+        // restore branch and pushes the stale write back over it, and the first sample can land inside
+        // that window. Require the match to hold for several consecutive polls instead of trusting the
+        // first one, so a revert landing between samples is caught rather than missed.
+        await WaitForStableMatchAsync(
+            () => client.Root!.Name == "NewerServerValue" && server.Root!.Name == "NewerServerValue",
+            message: "Client and server should stably converge on the value the server moved to while the client was away, not just momentarily match it");
+
+        // If the write had been re-asserted, the resend would still be sitting here awaiting its own
+        // acknowledgement.
+        Assert.Equal(0, client.Source!.InFlightCount);
+    }
+
+    /// <summary>
+    /// Waits until <paramref name="condition"/> holds for several consecutive polls rather than trusting
+    /// the first true sample, which a reconcile can revert an instant later. Reuses
+    /// <see cref="AsyncTestHelpers.WaitUntilAsync"/>'s own poll interval as the spacing between samples,
+    /// so consecutive successes are genuinely spread over time rather than evaluated back to back.
+    /// </summary>
+    private static Task WaitForStableMatchAsync(Func<bool> condition, string message, int requiredConsecutiveMatches = 5)
+    {
+        var consecutiveMatches = 0;
+        return AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                consecutiveMatches = condition() ? consecutiveMatches + 1 : 0;
+                return consecutiveMatches >= requiredConsecutiveMatches;
+            },
+            message: message);
     }
 }

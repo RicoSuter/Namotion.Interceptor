@@ -51,6 +51,10 @@ public class PayloadTests
 
         // Assert
         Assert.Equal(0L, payload.Sequence);
+
+        // A newer client reading no value from an older server must behave as if nothing had been
+        // applied, which is what the null default guarantees.
+        Assert.Null(payload.AppliedThrough);
     }
 
     [Fact]

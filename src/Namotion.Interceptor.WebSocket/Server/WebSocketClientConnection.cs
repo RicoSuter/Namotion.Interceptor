@@ -37,7 +37,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
     private long _receivedUpdateCount;
     private long _appliedThrough;
-    private bool _applyStalled;
+    private int _applyStalled;
 
     public string ConnectionId { get; } = Guid.NewGuid().ToString("N")[..8];
 
@@ -58,16 +58,24 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     /// <summary>Advances <see cref="AppliedThrough"/> to <paramref name="ordinal"/>, unless a prior update on this connection failed to apply.</summary>
     public void OnUpdateApplied(long ordinal)
     {
-        if (!Volatile.Read(ref _applyStalled))
+        if (Volatile.Read(ref _applyStalled) == 0)
         {
             Volatile.Write(ref _appliedThrough, ordinal);
         }
     }
 
-    /// <summary>Stops <see cref="AppliedThrough"/> from advancing for the rest of this connection's life.</summary>
+    /// <summary>
+    /// Stops <see cref="AppliedThrough"/> from advancing for the rest of this connection's life, and
+    /// logs the transition once.
+    /// </summary>
     public void OnApplyFailed()
     {
-        Volatile.Write(ref _applyStalled, true);
+        if (Interlocked.CompareExchange(ref _applyStalled, 1, 0) == 0)
+        {
+            _logger.LogWarning(
+                "Client {ConnectionId}: An update failed to apply, so acknowledgement reporting has stopped for this connection. The client will re-assert its outstanding writes at the next reconnect.",
+                ConnectionId);
+        }
     }
 
     public WebSocketClientConnection(
@@ -242,10 +250,13 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         return SendAsync(MessageType.Error, error, trackFailures: false, cancellationToken);
     }
 
-    public Task SendHeartbeatAsync(ReadOnlyMemory<byte> serializedMessage, CancellationToken cancellationToken)
+    public Task SendHeartbeatAsync(HeartbeatPayload heartbeat, CancellationToken cancellationToken)
     {
-        // Skip heartbeats until Welcome has been sent to avoid confusing clients
+        // Skip heartbeats until Welcome has been sent to avoid confusing clients. Checked before
+        // serializing, not after, so a connection that will discard the heartbeat here never pays for
+        // building it.
         if (!_welcomeSent) return Task.CompletedTask;
+        var serializedMessage = _serializer.SerializeMessage(MessageType.Heartbeat, heartbeat);
         return SendPreSerializedAsync(serializedMessage, trackFailures: true, cancellationToken);
     }
 
