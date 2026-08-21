@@ -287,7 +287,44 @@ State after `e5f12994`: build clean, 26 projects, 3338 passed, 0 failed.
 
 # Benchmarks
 
-_pending_
+## Comparison base
+
+`LIFECYCLE_BENCHMARK_BASE = 04fab84a`, which is master plus documentation plus the benchmark scaffold and no runtime change. Comparing the finished branch against that hash is therefore a comparison against master for every runtime purpose, while giving both arms identical benchmark source, which BenchmarkDotNet requires in order to produce comparable rows at all.
+
+## Scaffold rows and why each exists
+
+`LifecycleOwnershipBenchmark` carries ten rows. Two matter more than the rest:
+
+- `SetScalarUnattached` paired with `SetStructuralUnattached`. Today the generated setter short-circuits to a direct field write when the executor field is null, allocating nothing (measured: 0 B, 2.8 ns scalar and 4.6 ns structural). The design requires structural writes to observe attachment state before resolving a chain, which forces executor publication on that path. This pair makes the resulting per-write allocation read directly against today's zero. The original plan measured only the scalar half, so the most likely allocation regression in the change was unmeasured.
+- `ReplaceSingleChildReference` paired with `ReleaseSmallSubtreeFromLargeContext`. Both remove exactly one edge; the second does it in a context holding roughly 2000 additional retained subjects that the benchmark body never touches. **On master these two rows measure identically** (2554 ns and 2599 ns, 488 B each), which proves removal cost is independent of context size today. The design replaces reference-count teardown with a complete context-local reachability scan on every removal, so the ratio between exactly these two rows after the change is the whole answer on whether the full scan is affordable. No noise-floor argument is needed, because the control is inside the same run and the same class.
+
+## Registry exposure
+
+`RegistryBenchmark` is the row set the maintainer is most interested in, and it will not stay unchanged. Its setup holds roughly 5000 subjects (1000 cars, four tires each).
+
+- Expected flat, or slightly faster from the flattened context, which removes a delegation-target branch and a second volatile state read per access: `Write`, `WriteWithTimestampScope`, `WriteNoOp`, `Read`, `DerivedAverage`, `GetOrAddSubjectId`, `GenerateSubjectId`, `KnownSubjectsSnapshot`.
+- Expected slower, because all three remove subjects and therefore pay the new scan against that 5000-subject context: `ChangeAllTires` (removes four tires, so it is the starkest case: constant work today, whole-context work after), `IncrementDerivedAverage` (assigns `PreviousCars = null`), `AddLotsOfPreviousCars`.
+- `ReadParents` carries a semantic risk rather than a timing one: if parent snapshots become occurrence-aware, `Parents.Length` changes value for duplicated children, so the row measures something slightly different.
+
+Note that `GenerateSubjectId` is not a valid noise reference despite touching no subject itself, because its class setup builds a thousand tracked cars. `ServiceOrderResolverBenchmark.LinearChain` is the only genuinely insulated control and must be included in the filter.
+
+## Runbook
+
+Environment was verified before running: governor `performance`, `scaling_min_freq` and `scaling_max_freq` both 3600000, `intel_pstate/no_turbo` 1, reported 3600 MHz. The machine must additionally be quiet, so leftover MSBuild and test host processes have to be gone and the load average low before starting.
+
+The run must happen from a worktree **outside** the repository, because BenchmarkDotNet searches for project files and a worktree nested under `.claude/worktrees/` gives it a second candidate, which aborts the run.
+
+Multiple filter patterns must reach PowerShell as an array. Passing them from bash collapses them into one argument that matches nothing, so the invocation goes through `pwsh -Command` with the array written in PowerShell syntax:
+
+```
+pwsh -Command "& ./scripts/benchmark.ps1 -Filter '*LifecycleOwnershipBenchmark*','*RegistryBenchmark*','*ServiceOrderResolverBenchmark.LinearChain*' -LaunchCount 3 -BaseBranch 04fab84a"
+```
+
+Estimated cost is roughly 15 to 20 minutes per arm for the lifecycle rows plus about 15 minutes per arm for the registry rows, so about an hour and a quarter for the pair. `-Short` decides nothing and must not be used for this.
+
+## Results
+
+_pending the lifecycle rewrite_
 
 ## Environment notes
 
