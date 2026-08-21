@@ -127,6 +127,20 @@ to the local value.
 Both directions keep the two ends in sync. What differs is whether a committed write can vanish without
 an error.
 
+## Why writes are gated shut across a reconnect, not merely queued
+
+A write captured between the moment a connection is judged lost and the moment the replacement connection's state has finished loading cannot be judged yet: it might be exactly what the load is about to supersede, or exactly what the load is about to confirm was never received. Sending it before the load has landed answers that question by guessing, and D4's counterexample is what a wrong guess costs: a write built from the pre-reconnect view, sent the instant the new connection is writable, can push a stale value out over a peer whose state has already moved on.
+
+`SubjectSourceBase.BeginResume` and `CompleteResumeAsync` close that window rather than merely queue writes across it. `BeginResume` is called the moment a drop is detected, before the reconnect itself starts, and every write the processor's write handler receives while the gate is held is parked into the retry queue instead of reaching the destination (`WriteChangesViaRetryQueueAsync`). `CompleteResumeAsync` runs the same reconcile the connect-time drain uses, `ReconcileRetryQueueAsync`, after the state load has returned, and only then reopens the gate. A parked write is therefore always judged against what the reconnect actually loaded, never sent ahead of it and never replayed blindly over it.
+
+The gate carries an epoch rather than a boolean because more than one loop can hold it at once. The outer attempt loop takes it unconditionally, inside `SubjectSourceBase.RunAsync` itself, across every connector's first connect and across any full restart, which is the only reconnection every connector gets for free. It does not by itself cover an inner reconnect loop: transport-level reconnection happens inside `StartListeningAsync` rather than by the outer attempt failing and retrying, and every connector in this repository has one, since the outer attempt stays parked on the change processor for the life of the connection. A connector has to take the same gate again, explicitly, around its own inner reconnect for the protection to reach it there too. The WebSocket client does this in its monitor loop as of this PR; MQTT's and OPC UA's own inner reconnect loops do not yet call `BeginResume` or `CompleteResumeAsync`, so the ordering guarantee below currently covers WebSocket's inner reconnect and every connector's first connect, not MQTT's or OPC UA's inner reconnect. Without the epoch, whichever loop finished its resume first would clear a gate the other loop was still relying on. A transactional commit bypasses the gate entirely, because it reaches the source directly rather than through the retry-queue wrapper; that is acceptable, since it carries fresh intent and the reconcile drops any parked entry a newer commit supersedes.
+
+## Why parked writes are drained on a timer, not only on the next change
+
+The write handler that flushes the retry queue is edge-triggered: `ChangeQueueProcessor` calls it only when a batch is non-empty, so a source with nothing further to write never calls it again after a reconnect. A write parked by the gate above, or by any other retry-queue path, would then sit indefinitely in a client that goes idle immediately after reconnecting, which is a silent, unbounded delay rather than a loss, but it defeats the point of parking the write in the first place: it exists to be delivered, not merely held.
+
+`SubjectSourceBase` now drains the retry queue on its own `_retryTime` timer, running for the life of the connected phase alongside the processor rather than replacing it. It skips a tick whenever the gate above is held or the queue is already empty, so it never races the reconcile and never wakes a source that has nothing to do. Every connector inherits this the same way it inherits the gate, because both live in `SubjectSourceBase` rather than in a connector-specific reconnect path.
+
 ## What actually guarantees convergence
 
 Not the conflict rule. Two properties of the delivery path:
