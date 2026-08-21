@@ -48,6 +48,22 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     private ImmutableArray<SourceMonitor> _registeredMonitors = [];
 
+    // Set while a (re)connect is replacing the peer's view of the model. The retry queue must not be
+    // flushed in that window: the peer's state has not landed yet, so a parked write would be sent
+    // against a view the reconcile has not judged it against, and an older value can win over a newer one.
+    private int _resumeInProgress;
+
+    // The gate has no single owner: a connector whose reconnect runs inside its own loop can have that
+    // loop and the attempt loop both holding it during the same connect window. The epoch is what lets
+    // a completing resume tell whether it still owns the gate before clearing it.
+    private int _resumeEpoch;
+
+    // Test seam for the window between the retry-queue enqueue and the second gate read in
+    // WriteChangesViaRetryQueueAsync, which has no externally observable synchronization point: a test
+    // can clear the gate from inside this hook to land exactly in that window. Always null in
+    // production.
+    internal Action? AfterResumeGateObservedForTest { get; set; }
+
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
     protected SubjectSourceBase(
@@ -269,6 +285,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     // This also caps memory across repeated failed attempts.
                     DrainOwnedWritesToRetryQueue(subscription);
 
+                    // Closes the connect window against an abandoned teardown flush from the previous
+                    // attempt, which can otherwise still be writing when this one starts and would send
+                    // pre-load values on the new connection.
+                    var resumeEpoch = BeginResume();
                     _propertyWriter.StartBuffering();
                     await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
 
@@ -298,7 +318,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
                     // Single reconcile point: send (model already holds it), restore (the load moved the
                     // model off it), drop (a later local write supersedes it).
-                    await ReconcileRetryQueueAsync(stoppingToken).ConfigureAwait(false);
+                    await CompleteResumeAsync(resumeEpoch, stoppingToken).ConfigureAwait(false);
 
                     // Connected phase reuses the source-lifetime subscription and does not own it.
                     using var processor = new ChangeQueueProcessor(
@@ -320,7 +340,17 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     using var outboundRegistration = Metrics.OutboundChanges.Register(
                         () => processor.QueueDepth, capacity: null);
 
-                    await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+                    using var idleFlush = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    var idleFlushTask = FlushRetryQueuePeriodicallyAsync(idleFlush.Token);
+                    try
+                    {
+                        await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        await idleFlush.CancelAsync().ConfigureAwait(false);
+                        await idleFlushTask.ConfigureAwait(false);
+                    }
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -384,6 +414,41 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             return;
         }
 
+        if (Volatile.Read(ref _resumeInProgress) == 1)
+        {
+            if (_stoppingToken.IsCancellationRequested)
+            {
+                // Nothing comes back for these: the queue is disposed with the source, and the
+                // connection they were captured against is being replaced, so writing them now would
+                // put pre-load values on a socket whose peer has moved on. Counted and reported rather
+                // than parked, so a stop cannot hide the loss. This disagrees with the write path above,
+                // which filters a stop-caused failure out of this same total through IsExpectedShutdown:
+                // that guard is for a write torn by the stop itself, while this is a deliberate discard
+                // under a replaced connection, and is counted as a real loss rather than excused by the
+                // shutdown.
+                Metrics.OutboundRetries.AddDropped(changes.Length);
+                _logger.LogError(
+                    "Discarded {Count} change(s) while stopping: a connection replacement was in progress.",
+                    changes.Length);
+                return;
+            }
+
+            // Parked rather than dropped: CompleteResumeAsync judges it against the loaded state.
+            WriteRetryQueue.Enqueue(changes);
+
+            AfterResumeGateObservedForTest?.Invoke();
+
+            if (Volatile.Read(ref _resumeInProgress) == 0)
+            {
+                // The gate cleared while this batch was being parked, so no completing resume will come
+                // back for it, and an empty later batch means the write handler is not called again.
+                // Judge it here rather than leaving it stranded.
+                await ReconcileRetryQueueAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            return;
+        }
+
         // First flush any queued changes
         var succeeded = await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
         if (!succeeded)
@@ -411,6 +476,47 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         {
             _logger.LogWarning(e, "Failed to write {Count} changes to source, queuing for retry.", changes.Length);
             WriteRetryQueue.Enqueue(changes);
+        }
+    }
+
+    /// <summary>
+    /// Drains the write retry queue on a timer, so that parked writes are not held until the next
+    /// change happens to trigger a flush.
+    /// </summary>
+    /// <remarks>
+    /// The processor's flush returns early on an empty batch, so its write handler, which is the only
+    /// other thing that drains the queue, is never called while the model is idle.
+    /// <see cref="WriteRetryQueue.FlushAsync"/> is serialized by its own gate, so this racing the
+    /// write handler costs a wait rather than a reorder.
+    /// </remarks>
+    private async Task FlushRetryQueuePeriodicallyAsync(CancellationToken cancellationToken)
+    {
+        if (WriteRetryQueue is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var timer = new PeriodicTimer(_retryTime);
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (Volatile.Read(ref _resumeInProgress) == 1 || WriteRetryQueue.IsEmpty)
+                {
+                    continue;
+                }
+
+                await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            // Swallowed rather than propagated: this loop is raced against the processor and its
+            // failure must not end the attempt that the processor is still serving.
+            _logger.LogError(exception, "Failed to flush the write retry queue on the idle tick.");
         }
     }
 
@@ -552,9 +658,115 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         return collapsed;
     }
 
+    /// <summary>
+    /// Suspends outbound delivery until the returned epoch is passed to <see cref="CompleteResumeAsync"/>
+    /// or <see cref="AbortResume"/>, so that writes captured while the connection is being replaced are
+    /// parked rather than sent.
+    /// </summary>
+    /// <remarks>
+    /// The epoch exists because more than one loop can hold the gate. A connector's own reconnect loop
+    /// runs concurrently with the attempt loop for the whole first connect window, so without it the
+    /// attempt loop's completion clears a gate the reconnect is still holding and leaves a writable
+    /// socket unguarded.
+    /// <para>
+    /// A transactional commit bypasses this gate entirely, because it reaches the source without passing
+    /// through the retry-queue wrapper. That is acceptable: it carries fresh intent, and the reconcile
+    /// drops any parked entry the commit supersedes.
+    /// </para>
+    /// <para>
+    /// Callers must take this gate at the moment the drop is detected, not just before the reconnect
+    /// begins, and the backoff between the two is not incidental slack. The gate read in the write
+    /// handler and the socket becoming writable again are not atomic, so a flush that races past the
+    /// gate check an instant before this call still targets the socket that just failed and simply
+    /// parks, because that socket stays unwritable for at least the reconnect delay. Taking the gate
+    /// later, just before the reconnect itself, would move that same race onto a socket about to become
+    /// writable: the raced flush would block on the connection lock instead of failing, and be released
+    /// the instant the new connection opens, sending the whole unjudged retry queue ahead of the
+    /// initial-state load.
+    /// </para>
+    /// </remarks>
+    protected int BeginResume()
+    {
+        var epoch = Interlocked.Increment(ref _resumeEpoch);
+        Volatile.Write(ref _resumeInProgress, 1);
+        return epoch;
+    }
+
+    /// <summary>
+    /// Re-opens outbound delivery if <paramref name="resumeEpoch"/> is still the newest one, so that a
+    /// completing resume cannot clear a gate a later resume has taken over.
+    /// </summary>
+    /// <returns>
+    /// <c>true</c> if this call actually cleared the gate, <c>false</c> if a later resume already owns
+    /// it. Callers that only act when they were the ones who cleared it (rather than merely observing
+    /// the gate as clear, which a later resume's own clearing can also produce) should gate on this
+    /// rather than re-reading the flag.
+    /// </returns>
+    protected bool AbortResume(int resumeEpoch)
+    {
+        if (Volatile.Read(ref _resumeEpoch) == resumeEpoch)
+        {
+            Volatile.Write(ref _resumeInProgress, 0);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Reconciles the parked writes against the state that was just loaded, then re-opens outbound
+    /// delivery unless a later resume has already taken the gate over. Runs after the initial-state
+    /// load, never before it.
+    /// </summary>
+    /// <remarks>
+    /// The second reconcile pass below and the self-heal inside
+    /// <see cref="WriteChangesViaRetryQueueAsync"/> both exist because judged and unjudged entries share
+    /// one retry queue and the flush that drains it is edge-triggered on a non-empty batch rather than
+    /// level-triggered on the queue's contents. The second pass covers entries parked during the
+    /// reconcile above, and the self-heal covers the entry parked in the window between the gate read
+    /// and the enqueue, which the second pass's emptiness check cannot see.
+    /// <para>
+    /// Two shapes would genuinely reduce this to one mechanism, and neither belongs in this stack:
+    /// tagging retry-queue entries as judged or unjudged so the two kinds stop sharing a queue, and a
+    /// single-writer discipline where resume transitions are executed on the processor's flush thread so
+    /// there is no cross-thread gate at all. Both are larger rewrites of shared infrastructure.
+    /// </para>
+    /// </remarks>
+    protected async Task CompleteResumeAsync(int resumeEpoch, CancellationToken cancellationToken)
+    {
+        bool clearedByThisResume;
+        try
+        {
+            await ReconcileRetryQueueAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Cleared even when the reconcile throws: a stuck gate parks every later write for the
+            // life of the source, which is a worse failure than an unreconciled flush.
+            clearedByThisResume = AbortResume(resumeEpoch);
+        }
+
+        // The reconcile's own restores are local commits, so a live processor consuming the same
+        // subscription can park them right back while the gate is still held above, and an empty later
+        // batch means the write handler is never called again to drain them. They were parked after the
+        // drain that fed the reconcile above, so nothing has judged them yet: a second pass judges them
+        // rather than leaving them stuck, now that the gate is clear so their own send reaches the source
+        // through the normal connected path instead of being parked again.
+        //
+        // Gated on this call having actually cleared the gate, not merely on the gate reading clear: a
+        // newer resume can have taken the gate over and already cleared it itself, and running a second
+        // pass here on top of that one's would race it rather than complete this one's own.
+        if (clearedByThisResume && WriteRetryQueue is { IsEmpty: false })
+        {
+            await ReconcileRetryQueueAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     internal async Task ReconcileRetryQueueAsync(CancellationToken cancellationToken)
     {
-        var retryChanges = WriteRetryQueue?.DrainForLocalReapply();
+        var retryChanges = WriteRetryQueue is null
+            ? null
+            : await WriteRetryQueue.DrainForLocalReapplyAsync(cancellationToken).ConfigureAwait(false);
         if (retryChanges is null || retryChanges.Length == 0)
         {
             return;

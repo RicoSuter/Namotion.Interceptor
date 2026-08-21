@@ -146,6 +146,9 @@ namespace Namotion.Interceptor.Connectors
         public System.DateTimeOffset StateChangeTime { get; }
         public virtual int WriteBatchSize { get; }
         public event System.EventHandler<Namotion.Interceptor.Connectors.Monitoring.SourceEvent>? StateChanged;
+        protected bool AbortResume(int resumeEpoch) { }
+        protected int BeginResume() { }
+        protected System.Threading.Tasks.Task CompleteResumeAsync(int resumeEpoch, System.Threading.CancellationToken cancellationToken) { }
         public override void Dispose() { }
         public abstract System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
         protected void ReportConnectionLost() { }
