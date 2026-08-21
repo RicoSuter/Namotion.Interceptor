@@ -22,6 +22,12 @@ namespace Namotion.Interceptor.Registry;
 [RunsBefore(typeof(ParentTrackingHandler), typeof(ContextInheritanceHandler))]
 public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
 {
+    /// <summary>
+    /// Tripwire: attaches whose subject ID was already held by a different subject, see
+    /// <see cref="SubjectRegistryDiagnostics.DuplicateSubjectIdAttaches"/>.
+    /// </summary>
+    internal static long DuplicateSubjectIdAttachCount;
+
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
     private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
     private ImmutableDictionary<IInterceptorSubject, RegisteredSubject>? _knownSubjectsSnapshot;
@@ -147,6 +153,14 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                             || ReferenceEquals(existingSubject, change.Subject))
                         {
                             _subjectIdToSubject[subjectId] = change.Subject;
+                        }
+                        else
+                        {
+                            // The skip keeps the first subject reachable under the ID and leaves the
+                            // second one invisible to every ID lookup, so it is the last line of
+                            // defence against a fabricated duplicate. Count it, see
+                            // SubjectRegistryDiagnostics.DuplicateSubjectIdAttaches.
+                            Interlocked.Increment(ref DuplicateSubjectIdAttachCount);
                         }
                     }
                 }

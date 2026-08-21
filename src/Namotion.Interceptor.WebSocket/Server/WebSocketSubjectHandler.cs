@@ -273,10 +273,10 @@ public sealed class WebSocketSubjectHandler
             sequence = Interlocked.Increment(ref _sequence);
         }
 
-        var updatePayload = new UpdatePayload
+        // Copy through the constructor, never field by field: the payload derives from SubjectUpdate,
+        // and a field of the base left out here is absent from every update the server sends.
+        var updatePayload = new UpdatePayload(update)
         {
-            Root = update.Root,
-            Subjects = update.Subjects,
             Sequence = sequence
         };
 

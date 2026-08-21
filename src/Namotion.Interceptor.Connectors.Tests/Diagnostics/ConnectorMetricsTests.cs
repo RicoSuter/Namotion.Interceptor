@@ -221,7 +221,18 @@ public class ConnectorMetricsTests
         ClockTestHelpers.WaitForClockTick();
 
         // Act
-        var restart = Task.Run(metrics.MarkStarted);
+        // LongRunning, so this runs on a dedicated thread rather than a pool thread: Reset signals
+        // Entered and then parks its caller for the rest of the test. A pool thread doing that
+        // publishes the awaiting continuation into its own local queue and then never drains that
+        // queue again, leaving it reachable only by work stealing, which a busy worker reaches only
+        // after its own local queue and the global one. Under load the wait below then times out
+        // even though Entered completed microseconds after the start.
+        var restart = Task.Factory.StartNew(
+            metrics.MarkStarted,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+
         await resettable.Entered.WaitAsync(TimeSpan.FromSeconds(5));
 
         try

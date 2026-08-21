@@ -12,6 +12,10 @@
       "commandName": "Project",
       "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket-chaos" }
     },
+    "websocket-structural": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket-structural" }
+    },
     "opcua-load": {
       "commandName": "Project",
       "environmentVariables": { "DOTNET_ENVIRONMENT": "opcua-load" }

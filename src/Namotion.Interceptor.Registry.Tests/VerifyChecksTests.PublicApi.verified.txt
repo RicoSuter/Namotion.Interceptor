@@ -114,6 +114,10 @@ namespace Namotion.Interceptor.Registry
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubject? TryGetRegisteredSubject(Namotion.Interceptor.IInterceptorSubject subject) { }
         public bool TryGetSubjectById(string subjectId, out Namotion.Interceptor.IInterceptorSubject subject) { }
     }
+    public static class SubjectRegistryDiagnostics
+    {
+        public static long DuplicateSubjectIdAttaches { get; }
+    }
     public static class SubjectRegistryExtensions
     {
         public static System.Collections.Generic.IEnumerable<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty> GetAllProperties(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject) { }

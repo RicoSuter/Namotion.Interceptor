@@ -102,13 +102,14 @@ This is critical because a concurrent `next()` may have written an unattached ch
 
 ### 5. Removed on detach
 
-Entries are cleaned up in three places:
+Entries are cleaned up in four places:
 
 | Location | When |
 |----------|------|
-| `DetachFromProperty` (isLastDetach) | Last reference to subject removed — all structural property entries cleaned |
-| `DetachFromContext` | Root subject removed — all structural property entries cleaned |
-| Parent-dead check in `WriteProperty` | Undo after attaching to a dead parent — single entry cleaned |
+| `DetachFromProperty` (isLastDetach) | Last reference to subject removed, all structural property entries cleaned |
+| `EndBatchScope` | A last detach deferred by a batch scope is confirmed at scope close, all structural property entries cleaned |
+| `DetachFromContext` | Root subject removed, all structural property entries cleaned |
+| Parent-dead check in `WriteProperty` | Undo after attaching to a dead parent, single entry cleaned |
 
 ## The Parent-Dead Check
 
@@ -131,6 +132,10 @@ This catches the following race:
 5. Thread B: **parent-dead check** — parent not in `_attachedSubjects` → undo
 
 Without this check, the child would be attached to a dead parent and never cleaned up — a memory leak.
+
+### The check is suspended inside a batch scope
+
+A last detach that a batch scope defers leaves the parent in `_attachedSubjects` as a present-but-empty entry, so `ContainsKey` still returns true and the parent-dead check does not fire for that parent while the scope is open. That is intended: the deferral exists precisely because the parent may come back, and a subject that is re-attached before the scope closes was never dead. It self-heals at scope close. If the entry is still empty then, `EndBatchScope` runs the full detach for the parent, which walks its `_lastProcessedValues` entries and recursively detaches every child, including any child attached to it while the check was suspended.
 
 ## Concurrency Scenarios
 
@@ -234,7 +239,7 @@ Pinned by `RegistryHandlerOrderTests`, and for the derived-getter path by `Regis
 After all concurrent `WriteProperty` / `DetachFromProperty` / `AttachSubjectToContext` / `DetachSubjectFromContext` operations complete:
 
 1. **Reachable → Registered**: Every subject reachable from the root via the object graph is in `_attachedSubjects`
-2. **Not reachable → Not registered**: Every subject NOT reachable from the root is NOT in `_attachedSubjects`
+2. **Not reachable → Not registered**: Every subject NOT reachable from the root is NOT in `_attachedSubjects`. A batch scope suspends this invariant on its own thread for as long as it is open: a subject whose last reference is removed inside the scope stays in `_attachedSubjects` as a present-but-empty entry, so that moving it between structural properties within one update does not transiently detach and deregister it. Disposing the outermost scope restores the invariant by running the full detach for every entry that is still empty.
 3. **`_lastProcessedValues` matches attachment state**: For every attached subject, `_lastProcessedValues` entries exist for all structural properties that have been written or seeded
 4. **No dangling entries**: No `_lastProcessedValues` entries exist for detached subjects
 

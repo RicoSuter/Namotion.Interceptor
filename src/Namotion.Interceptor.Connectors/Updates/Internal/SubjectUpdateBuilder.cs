@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
@@ -8,33 +9,57 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// </summary>
 internal sealed class SubjectUpdateBuilder
 {
-    private int _nextId;
+    private Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> _subjects = new();
+
     private readonly Dictionary<IInterceptorSubject, string> _subjectToId = new();
-    private readonly Dictionary<SubjectPropertyUpdate, (RegisteredSubjectProperty Property, IDictionary<string, SubjectPropertyUpdate> Parent)> _propertyUpdates = new();
+    private readonly Dictionary<
+        SubjectPropertyUpdate, (RegisteredSubjectProperty Property, 
+        IDictionary<string, SubjectPropertyUpdate> Parent)> _propertyUpdates = new();
 
     public ISubjectUpdateProcessor[] Processors { get; private set; } = [];
-    
-    public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = new();
 
     public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = [];
 
-    public HashSet<IInterceptorSubject> PathVisited { get; } = [];
+    /// <summary>
+    /// Tracks subjects whose IDs were first created by a value change (ProcessPropertyChange),
+    /// not by a structural reference (BuildObjectReference/ProcessSubjectComplete).
+    /// When a structural reference later encounters such a subject, ProcessSubjectComplete
+    /// must still be called to populate the remaining properties that weren't in the change.
+    /// </summary>
+    public HashSet<IInterceptorSubject> SubjectsWithPartialChanges { get; } = [];
 
-    public void Initialize(IInterceptorSubject rootSubject, ISubjectUpdateProcessor[] processors)
+    private bool _isPartialUpdate;
+    private HashSet<string>? _completeSubjectIds;
+
+    public void Initialize(IInterceptorSubject rootSubject, ISubjectUpdateProcessor[] processors, bool isPartialUpdate = false)
     {
         Processors = processors;
-        GetOrCreateId(rootSubject); // Ensure root subject gets ID "1"
+        _isPartialUpdate = isPartialUpdate;
+        if (isPartialUpdate)
+        {
+            // A partial update always carries the set, even when it stays empty. An absent set means
+            // "every referenced subject is complete", which would licence the receiver to fabricate
+            // default-valued subjects for ids a reorder or a removal only references.
+            _completeSubjectIds = [];
+        }
+        GetOrCreateId(rootSubject);
+    }
+
+    /// <summary>
+    /// Marks a subject ID as having complete state in this update.
+    /// Only tracked for partial updates (complete updates are implicitly all-complete).
+    /// </summary>
+    public void MarkSubjectComplete(string subjectId)
+    {
+        if (_isPartialUpdate)
+        {
+            _completeSubjectIds ??= [];
+            _completeSubjectIds.Add(subjectId);
+        }
     }
 
     public string GetOrCreateId(IInterceptorSubject subject)
-    {
-        if (!_subjectToId.TryGetValue(subject, out var id))
-        {
-            id = (++_nextId).ToString();
-            _subjectToId[subject] = id;
-        }
-        return id;
-    }
+        => GetOrCreateIdWithStatus(subject).Id;
 
     /// <summary>
     /// Gets an existing ID for a subject, or creates a new one.
@@ -43,32 +68,21 @@ internal sealed class SubjectUpdateBuilder
     public (string Id, bool IsNew) GetOrCreateIdWithStatus(IInterceptorSubject subject)
     {
         if (_subjectToId.TryGetValue(subject, out var id))
-        {
             return (id, false);
-        }
 
-        id = (++_nextId).ToString();
+        id = subject.GetOrAddSubjectId();
         _subjectToId[subject] = id;
         return (id, true);
     }
 
     public Dictionary<string, SubjectPropertyUpdate> GetOrCreateProperties(string subjectId)
     {
-        if (!Subjects.TryGetValue(subjectId, out var properties))
+        if (!_subjects.TryGetValue(subjectId, out var properties))
         {
             properties = new Dictionary<string, SubjectPropertyUpdate>();
-            Subjects[subjectId] = properties;
+            _subjects[subjectId] = properties;
         }
         return properties;
-    }
-
-    public bool SubjectHasUpdates(IInterceptorSubject subject)
-    {
-        if (_subjectToId.TryGetValue(subject, out var id))
-        {
-            return Subjects.TryGetValue(id, out var properties) && properties.Count > 0;
-        }
-        return false;
     }
 
     public void TrackPropertyUpdate(
@@ -90,10 +104,29 @@ internal sealed class SubjectUpdateBuilder
         ApplyTransformations();
 
         var rootId = GetOrCreateId(subject);
+
+        // Build an ordered dictionary with root entry first for deterministic output.
+        var orderedSubjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>();
+        if (_subjects.TryGetValue(rootId, out var rootProps))
+        {
+            orderedSubjects[rootId] = rootProps;
+        }
+        foreach (var (key, value) in _subjects)
+        {
+            if (key != rootId)
+            {
+                orderedSubjects[key] = value;
+            }
+        }
+
+        // Root is always included, also when the root subject has no property entries of its own: it
+        // is what lets the receiver map the sender's root ID onto its own root subject, and a subject
+        // that references the root (a parent pointer, for example) is otherwise unresolvable there.
         var update = new SubjectUpdate
         {
             Root = rootId,
-            Subjects = Subjects
+            Subjects = orderedSubjects,
+            CompleteSubjectIds = _completeSubjectIds
         };
 
         for (var i = 0; i < Processors.Length; i++)
@@ -109,13 +142,15 @@ internal sealed class SubjectUpdateBuilder
     /// </summary>
     public void Clear()
     {
-        _nextId = 0;
+        _subjects = new(); // create a fresh dictionary, old one transferred to result
         _subjectToId.Clear();
         _propertyUpdates.Clear();
+
         ProcessedSubjects.Clear();
-        PathVisited.Clear();
-        Subjects = new(); // create a fresh dictionary, old one transferred to result
+        SubjectsWithPartialChanges.Clear();
         Processors = [];
+        _isPartialUpdate = false;
+        _completeSubjectIds = null;
     }
 
     private void ApplyTransformations()

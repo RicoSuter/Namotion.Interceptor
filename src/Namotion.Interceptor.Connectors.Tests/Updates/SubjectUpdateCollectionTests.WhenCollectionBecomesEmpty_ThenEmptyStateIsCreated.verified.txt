@@ -1,11 +1,10 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
+    SubjectId_1: {
       Items: {
         Kind: Collection,
-        Timestamp: DateTimeOffset_1,
-        Count: 0
+        Timestamp: DateTimeOffset_1
       }
     }
   }

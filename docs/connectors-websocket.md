@@ -233,14 +233,14 @@ Client                                 Server
    |-------- WebSocket Connect ---------->|
    |                                      |
    |-------- Hello ---------------------->|
-   |  [0, {version:1}]                    |
+   |  [0, {version:2}]                    |
    |                                      |
    |              (server registers connection for broadcasts)
    |              (server reads current sequence under update lock)
    |              (server builds snapshot under update lock)
    |                                      |
    |<------- Welcome ---------------------|
-   |  [1, {version:1, format:"json", state: SubjectUpdate, sequence: 5}]
+   |  [1, {version:2, format:"json", state: SubjectUpdate, sequence: 5}]
    |                                      |
    |  (client sets expectedNext = 6)      |
    |                                      |
@@ -279,7 +279,7 @@ The snapshot does not need to be fully up-to-date; it is just a baseline. The bu
 **HelloPayload**
 ```json
 {
-  "version": 1,
+  "version": 2,
   "format": "json"
 }
 ```
@@ -287,12 +287,14 @@ The snapshot does not need to be fully up-to-date; it is just a baseline. The bu
 **WelcomePayload**
 ```json
 {
-  "version": 1,
+  "version": 2,
   "format": "json",
   "state": { /* Complete SubjectUpdate */ },
   "sequence": 5
 }
 ```
+
+- `version`: The protocol version, currently 2 (stable-ID updates). The server accepts only its own version, so a peer that sends `"version": 1` is rejected at the handshake with an Error message and the connection is closed.
 
 - `sequence`: Server's current sequence number at snapshot time. Clients initialize their expected next sequence to `sequence + 1`.
 

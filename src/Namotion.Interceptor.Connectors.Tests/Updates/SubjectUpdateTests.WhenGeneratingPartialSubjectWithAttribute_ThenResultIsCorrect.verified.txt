@@ -1,13 +1,7 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
-      mother: {
-        Kind: Object,
-        Id: 2
-      }
-    },
-    2: {
+    SubjectId_2: {
       firstName: {
         Attributes: {
           test1: {

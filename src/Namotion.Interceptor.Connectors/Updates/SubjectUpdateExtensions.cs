@@ -11,13 +11,26 @@ public static class SubjectUpdateExtensions
     /// <summary>
     /// Applies update to a subject.
     /// </summary>
+    /// <remarks>
+    /// Subjects the update creates are populated before they enter the graph, so that the subgraph is
+    /// complete by the time a concurrent reader can observe it. A subject only inherits the graph's
+    /// context once it is assigned, so those initial writes run against an empty interceptor chain:
+    /// they perform no validation, no equality check, no derived-property recalculation, and raise no
+    /// change events, and <paramref name="transformValueBeforeApply"/> does not run for them either
+    /// because its registered property cannot be resolved yet. Values written to subjects that already
+    /// exist locally take the normal intercepted path. Lifecycle correctness is unaffected: attaching
+    /// the subject seeds change tracking from the backing store, so the first later write to one of
+    /// these properties is compared against the applied value, not against the type default.
+    /// </remarks>
     /// <param name="subject">The subject.</param>
     /// <param name="update">The update data.</param>
-    /// <param name="subjectFactory">The subject factory to create missing subjects, null to ignore updates on missing subjects.</param>
+    /// <param name="subjectFactory">The subject factory used to create subjects the update introduces,
+    /// or null to use <see cref="DefaultSubjectFactory.Instance"/>.</param>
     /// <param name="origin">The origin to stamp on the applied changes. Pass <see cref="ChangeOrigin.Local"/>
     /// for local writes, or <see cref="ChangeOrigin.FromSource"/> when applying an inbound update from a
     /// source so echo suppression skips that source's own outbound path.</param>
-    /// <param name="transformValueBeforeApply">The function to transform the update before applying it.</param>
+    /// <param name="transformValueBeforeApply">The function to transform the update before applying it.
+    /// Not invoked for subjects this update creates, see the remarks.</param>
     public static void ApplySubjectUpdate(
         this IInterceptorSubject subject,
         SubjectUpdate update,

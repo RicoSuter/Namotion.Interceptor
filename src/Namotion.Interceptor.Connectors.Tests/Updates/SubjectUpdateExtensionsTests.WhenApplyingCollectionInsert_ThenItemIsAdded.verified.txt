@@ -1,28 +1,21 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
+    SubjectId_1: {
       Children: {
         Kind: Collection,
         Timestamp: DateTimeOffset_1,
-        Operations: [
+        Items: [
           {
-            Action: Insert,
-            Index: 1,
-            Id: 2
+            Id: SubjectId_2
+          },
+          {
+            Id: SubjectId_3
           }
-        ],
-        Count: 2
+        ]
       }
     },
-    2: {
-      Children: {
-        Kind: Collection,
-        Count: 0
-      },
-      Father: {
-        Kind: Object
-      },
+    SubjectId_3: {
       FirstName: {
         Kind: Value,
         Value: NewChild,
@@ -48,12 +41,21 @@
       LastName: {
         Kind: Value
       },
+      Father: {
+        Kind: Object
+      },
       Mother: {
         Kind: Object
       },
+      Children: {
+        Kind: Collection
+      },
       Relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     }
-  }
+  },
+  CompleteSubjectIds: [
+    SubjectId_3
+  ]
 }

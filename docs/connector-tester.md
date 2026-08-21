@@ -18,6 +18,9 @@ dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile o
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-chaos --configuration Release
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-chaos --configuration Release
 
+# Structural churn test: high-rate collection/dictionary mutations, no chaos, transactions off
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-structural --configuration Release
+
 # Load test: throughput and latency at 20k changes/sec
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load --configuration Release
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-load --configuration Release
