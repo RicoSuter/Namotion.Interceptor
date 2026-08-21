@@ -1940,40 +1940,32 @@ public class SubjectSourceBaseTests
         Assert.Contains("FirstName=John", receivedWrites);
     }
 
-    [Fact]
-    public async Task WhenTheLastWriteIsCancelledMidFlight_ThenTheParkedBatchIsHandedOverBeforeStopping()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenStoppingWithParkedWrites_ThenRetryHandoffUsesSharedBound(bool consumeSharedBound)
     {
-        // Arrange: the write carrying the change blocks until the stop cancels it. That cancellation is
-        // reported as a failed result rather than thrown, so the source parks the batch in its retry
-        // queue and returns normally, and the change processor's own teardown drain then finds nothing
-        // buffered to hand over. The listen lifetime stands in for a real transport: once disposed,
-        // every later write fails, so only a flush that runs before that disposal can still deliver it.
+        // Arrange: the write carrying John blocks until the stop parks it in the retry queue. One case
+        // blocks that final handoff; the other leaves another buffered write to consume the shared bound.
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
         var subject = new Person(context);
 
-        var delivered = new ConcurrentBag<string?>();
         var blockingWriteEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var transportIsUp = true;
+        var retryWriteEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRetryWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var retryWriteCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var hasBlocked = 0;
+        var deadlineWriteCount = 0;
 
         using var source = new TestSubjectSource(subject, context, NullLogger.Instance,
             bufferTime: TimeSpan.FromMilliseconds(250))
         {
-            StartListeningOverride = (_, _) => Task.FromResult<IAsyncDisposable?>(
-                new CallbackAsyncDisposable(() =>
-                {
-                    Volatile.Write(ref transportIsUp, false);
-                    return ValueTask.CompletedTask;
-                })),
             WriteChangesOverride = async (changes, cancellationToken) =>
             {
                 var batch = changes.ToArray();
-                if (!Volatile.Read(ref transportIsUp))
-                {
-                    return WriteResult.Failure(batch, new InvalidOperationException("The transport is closed."));
-                }
+                var completesRetryWrite = false;
 
                 if (batch.Any(change => change.GetNewValue<string?>() == "John") &&
                     Interlocked.Exchange(ref hasBlocked, 1) == 0)
@@ -1981,10 +1973,31 @@ public class SubjectSourceBaseTests
                     blockingWriteEntered.TrySetResult();
                     await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
                 }
-
-                foreach (var change in batch)
+                else if (batch.Any(change => change.GetNewValue<string?>() == "ConsumesDeadline"))
                 {
-                    delivered.Add(change.GetNewValue<string?>());
+                    if (Interlocked.Increment(ref deadlineWriteCount) == 1)
+                    {
+                        await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        return WriteResult.Failure(batch,
+                            new InvalidOperationException("The retry handoff received a fresh deadline."));
+                    }
+                }
+                else if (batch.Any(change => change.GetNewValue<string?>() == "John"))
+                {
+                    if (!consumeSharedBound)
+                    {
+                        retryWriteEntered.TrySetResult();
+                        await releaseRetryWrite.Task.ConfigureAwait(false);
+                        completesRetryWrite = true;
+                    }
+                }
+
+                if (completesRetryWrite)
+                {
+                    retryWriteCompleted.TrySetResult();
                 }
 
                 return WriteResult.Success;
@@ -1994,9 +2007,8 @@ public class SubjectSourceBaseTests
         new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
         new PropertyReference(subject, nameof(Person.LastName)).SetSource(source);
 
-        using var stopTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
         // Act
+        Task? stopping = null;
         await source.StartAsync(CancellationToken.None);
         try
         {
@@ -2015,17 +2027,59 @@ public class SubjectSourceBaseTests
 
             subject.FirstName = "John";
             await blockingWriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+            if (consumeSharedBound)
+            {
+                subject.LastName = "ConsumesDeadline";
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => source.Diagnostics.OutboundChanges.Depth > 0,
+                    message: "The write that consumes the teardown bound was not buffered.");
+            }
+
+            stopping = source.StopAsync(CancellationToken.None);
+            if (consumeSharedBound)
+            {
+                await stopping.WaitAsync(TimeSpan.FromSeconds(15));
+                Assert.Equal(1, Volatile.Read(ref deadlineWriteCount));
+            }
+            else
+            {
+                await retryWriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+                await stopping.WaitAsync(TimeSpan.FromSeconds(15));
+
+                Assert.False(releaseRetryWrite.Task.IsCompleted,
+                    "Stopping waited for the retry handoff instead of abandoning it at the deadline.");
+            }
         }
         finally
         {
-            await source.StopAsync(stopTokenSource.Token);
+            releaseRetryWrite.TrySetResult();
+            if (stopping is not null)
+            {
+                await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+                if (!consumeSharedBound)
+                {
+                    await retryWriteCompleted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+                }
+            }
+            else
+            {
+                await source.StopAsync(CancellationToken.None);
+            }
         }
 
         // Assert
-        Assert.Contains("John", delivered);
-
-        // A stop that catches a write in flight is only a loss when there is no queue to park it in.
-        Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
+        if (consumeSharedBound)
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundRetries.TotalDropped > 0,
+                message: "The write left after the shared deadline was not retired.");
+        }
+        else
+        {
+            // A stop that catches a write in flight is only a loss when there is no queue to park it in.
+            Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
+        }
     }
 
     [Fact]

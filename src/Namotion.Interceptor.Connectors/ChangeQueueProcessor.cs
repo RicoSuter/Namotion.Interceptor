@@ -22,6 +22,7 @@ public class ChangeQueueProcessor : IDisposable
     private readonly TimeSpan _bufferTime;
     private readonly ChangeDeliveryRule _deliveryRule;
     private readonly Action<long>? _dropHandler;
+    private readonly Func<CancellationToken, ValueTask>? _teardownHandler;
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
@@ -141,7 +142,8 @@ public class ChangeQueueProcessor : IDisposable
         TimeSpan? bufferTime,
         int? maxQueueDepth,
         ILogger logger,
-        Action<long>? dropHandler = null)
+        Action<long>? dropHandler = null,
+        Func<CancellationToken, ValueTask>? teardownHandler = null)
     {
         _source = source;
         _propertyFilter = propertyFilter;
@@ -149,6 +151,7 @@ public class ChangeQueueProcessor : IDisposable
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _dropHandler = dropHandler;
+        _teardownHandler = teardownHandler;
 
         try
         {
@@ -327,23 +330,17 @@ public class ChangeQueueProcessor : IDisposable
         finally
         {
             try { await linkedTokenSource.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
-
-            // Cannot throw: the delegate catches everything and Task.Run was given no token.
-            await flushTask.ConfigureAwait(false);
-
-            await FlushRemainingChangesAsync().ConfigureAwait(false);
+            await CompleteTeardownAsync(flushTask).ConfigureAwait(false);
         }
     }
 
     /// <summary>
-    /// Writes the changes that were taken off the subscription but never flushed. Nothing else can
-    /// recover them: they have already left the subscription, so the retry queue drain on the next
-    /// attempt cannot see them, and a reconnecting connector's initial load then hides the loss by
-    /// making both sides agree on a value the caller never wrote.
+    /// Lets the active flush settle, writes anything it left buffered, and runs the connector's final
+    /// handoff under one deadline.
     /// </summary>
-    private async Task FlushRemainingChangesAsync()
+    private async Task CompleteTeardownAsync(Task periodicFlushTask)
     {
-        if (_changes.IsEmpty)
+        if (periodicFlushTask.IsCompleted && _changes.IsEmpty && _teardownHandler is null)
         {
             return;
         }
@@ -358,13 +355,22 @@ public class ChangeQueueProcessor : IDisposable
 
         // Off this thread: the OPC UA server writes synchronously under the SDK's node manager lock and
         // ignores its token, so awaiting inline would bound nothing.
-        var flushTask = Task.Run(async () =>
+        var teardownTask = Task.Factory.StartNew(() =>
         {
             try
             {
                 try
                 {
-                    await TryFlushAsync(teardownToken).ConfigureAwait(false);
+                    periodicFlushTask.GetAwaiter().GetResult();
+                    if (!teardownToken.IsCancellationRequested)
+                    {
+                        TryFlushAsync(teardownToken).AsTask().GetAwaiter().GetResult();
+                    }
+
+                    if (!teardownToken.IsCancellationRequested && _teardownHandler is { } teardownHandler)
+                    {
+                        teardownHandler(teardownToken).AsTask().GetAwaiter().GetResult();
+                    }
                 }
                 finally
                 {
@@ -386,15 +392,25 @@ public class ChangeQueueProcessor : IDisposable
                 // everything also keeps an abandoned task off UnobservedTaskException.
                 _logger.LogError(exception, "Failed to write the remaining buffered changes while stopping.");
             }
-        });
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
         try
         {
-            // Waits on the flush's own token, so a stop has one deadline rather than two racing ones.
-            await flushTask.WaitAsync(teardownToken).ConfigureAwait(false);
+            await teardownTask.WaitAsync(teardownToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
+            // The active flush may never settle, so count changes still waiting behind it now. The
+            // worker repeats this after it settles to catch a cancelled batch that gets requeued later.
+            try
+            {
+                CountRemainingAfterDrain();
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "Failed to count buffered changes while stopping.");
+            }
+
             // An abandoned write can still reach the wire after the caller has begun tearing the
             // transport down; every client here rejects a write once disposed, so that fails cleanly.
             _logger.LogWarning(
@@ -404,7 +420,7 @@ public class ChangeQueueProcessor : IDisposable
         }
     }
 
-    // Must run only after the drain settles, never on the thread that gave up waiting at the deadline.
+    // The timeout and late-worker sweeps may race; TryDequeue partitions entries between them.
     private void CountRemainingAfterDrain()
     {
         var remaining = 0L;
@@ -463,6 +479,12 @@ public class ChangeQueueProcessor : IDisposable
 
         try
         {
+            if (Volatile.Read(ref _disposed) == 1)
+            {
+                CountRemainingAfterDrain();
+                return;
+            }
+
             // Drain the concurrent queue into the scratch buffer under exclusive flush
             _flushChanges.Clear();
             while (_changes.TryDequeue(out var change))

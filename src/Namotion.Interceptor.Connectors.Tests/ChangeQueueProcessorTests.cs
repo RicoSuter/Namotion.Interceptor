@@ -1080,13 +1080,12 @@ public class ChangeQueueProcessorTests
             $"Stopping should have waited for the teardown bound, but took only {elapsed.Elapsed}.");
     }
 
-    [Fact]
-    public async Task WhenTheTeardownWriteBlocksAndIgnoresCancellation_ThenStoppingStillCompletes()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAWriteIgnoresCancellation_ThenStoppingEndsAtTheBound(bool writeIsAlreadyInFlight)
     {
-        // Arrange: a write handler that blocks synchronously and never reads its token, which is what the
-        // OPC UA server does while it holds the SDK's node manager lock. The token the drain writes under
-        // therefore bounds nothing, so a stop that only asked for cancellation would wait here as long as
-        // the handler cares to block.
+        // Arrange
         var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
@@ -1105,7 +1104,7 @@ public class ChangeQueueProcessorTests
                 releaseWrite.Task.GetAwaiter().GetResult();
                 return ValueTask.CompletedTask;
             },
-            bufferTime: TimeSpan.FromMinutes(5),
+            bufferTime: writeIsAlreadyInFlight ? TimeSpan.FromMilliseconds(1) : TimeSpan.FromMinutes(5),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
             deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
@@ -1119,9 +1118,13 @@ public class ChangeQueueProcessorTests
         var processing = processor.ProcessAsync(cancellation.Token);
 
         subject.FirstName = "buffered";
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => processor.QueueDepth == 1,
-            message: "The change should be buffered by the processor before it stops");
+        if (writeIsAlreadyInFlight)
+        {
+            await writeEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            subject.LastName = "still buffered";
+        }
+
+        await AsyncTestHelpers.WaitUntilAsync(() => processor.QueueDepth == 1);
 
         try
         {
@@ -1130,14 +1133,15 @@ public class ChangeQueueProcessorTests
             await writeEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
             await processing.WaitAsync(TimeSpan.FromSeconds(30));
 
-            // Assert: the stop completed while the handler was still inside the write, which nothing but
-            // an externally enforced deadline can do.
+            // Assert
             Assert.False(releaseWrite.Task.IsCompleted,
-                "The drain waited for the blocked write handler instead of abandoning it at the deadline.");
+                "Stopping waited for the write instead of abandoning it at the deadline.");
+            Assert.Equal(writeIsAlreadyInFlight ? 1 : 0, processor.DropCount);
         }
         finally
         {
             releaseWrite.TrySetResult();
+            await processing.WaitAsync(TimeSpan.FromSeconds(30));
         }
     }
 
