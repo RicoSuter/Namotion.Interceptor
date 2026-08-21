@@ -17,7 +17,7 @@ The earlier effective-route, explicit-ownership, unique-authority, and hosted-li
 ## Goals
 
 - Give every subject zero or one exact context, compared by reference identity.
-- Make `AttachToContext` and context-taking constructors strict explicit-root operations.
+- Make `AttachToContext` a strict explicit-root operation, and make context-taking constructors provisional roots that the first inherited edge releases.
 - Make context inheritance and parent membership intrinsic to the built-in `LifecycleInterceptor`.
 - Support multiple parents, repeated collection occurrences, shared DAGs, arbitrary cycles, and final orphan-cycle release.
 - Keep lifecycle attachment distinct from individual object-reference edges.
@@ -37,6 +37,8 @@ The earlier effective-route, explicit-ownership, unique-authority, and hosted-li
 - No lock-free multi-subject ownership transaction.
 - No automatic backfill when lifecycle, Registry, or another service is registered after subjects are already attached.
 - No subject-local services or public service fallback graph.
+- No mirrored compile-time reimplementation of the runtime subject-type classifier. The generator classifies conservatively and fails closed.
+- No lifecycle lock on the parent-query read path.
 - No automatic ownership from derived, computed, external, or independently changing getters.
 - No runtime guard for calling an interceptor continuation more than once.
 - No obsolete compatibility aliases for removed configuration APIs.
@@ -45,7 +47,8 @@ The earlier effective-route, explicit-ownership, unique-authority, and hosted-li
 ## Concepts
 
 - **Context attachment:** the nullable exact `IInterceptorSubjectContext` stored by a subject executor.
-- **Explicit root:** a subject whose context was anchored by `AttachToContext` or a context-taking constructor. An inherited subject can be promoted to an explicit root in the same context.
+- **Explicit root:** a subject whose context was anchored by `AttachToContext`. An inherited subject can be promoted to an explicit root in the same context.
+- **Provisional root:** a subject anchored by a context-taking constructor. It is owned like an explicit root, and the anchor is cleared automatically the first time the subject gains an inherited structural edge in the same context. It exists so that construction-time attachment, including the dependency-injection path where the container selects the context-taking constructor for every subject it builds, does not create anchors that nothing ever releases.
 - **Inherited ownership:** context attachment retained because the subject is reachable from an explicit root through active structural edges managed by one lifecycle interceptor.
 - **Structural edge:** one active occurrence of a subject in an intercepted, non-derived scalar subject, subject collection, or subject dictionary property.
 - **Owned subject:** a subject currently attached to a context, whether explicitly, by inherited reachability, or both.
@@ -56,9 +59,9 @@ The earlier effective-route, explicit-ownership, unique-authority, and hosted-li
 ## Permanent Invariants
 
 1. An executor stores either no context or one exact context. It never composes several subject contexts.
-2. A subject has at most one explicit root attachment. A repeated explicit attach always throws, including one using the same context.
+2. A subject has at most one root anchor, explicit or provisional. A repeated `AttachToContext` always throws, including one using the same context. A provisional anchor may be promoted to an explicit one by `AttachToContext` while the subject is still unadopted.
 3. An implicitly attached subject may be promoted to an explicit root only in its current exact context.
-4. An explicit detach removes only the explicit-root anchor. The subject remains attached when it is still reachable from another explicit root in the same context.
+4. An explicit detach removes only the root anchor. The subject remains attached when it is still reachable from another root in the same context. Adoption by a structural edge clears a provisional anchor and never clears an explicit one.
 5. A structural edge may connect owned subjects only when both use the same exact context. A conflicting assignment fails before the backing writer.
 6. The object-reference graph may contain any shape supported by ordinary object models, including multiple roots, multiple parents, repeated occurrences, DAGs, self-cycles, and larger cycles.
 7. Subject attach and detach events describe transitions between unattached and context-owned states. They do not describe every structural edge addition or removal.
@@ -102,7 +105,7 @@ public interface IInterceptorSubject
 
 The existing `Data`, `Properties`, and `AddProperties` declarations remain. Generated, Dynamic, and manual subjects expose the same executor contract. The generator's supported-base contract, generated-member collision table, and hijacking diagnostics replace the `Context` and `SyncRoot` slots with `Executor`; this is a contract migration, not only a generated-property rename.
 
-The public monitor is removed because callers could otherwise take a subject lock before entering lifecycle topology work and invert the library lock order. The executor retains one private subject/property monitor for terminal reads, writes, context transitions, and attachment-revision checks.
+The public monitor is removed because callers could otherwise take a subject lock before entering lifecycle topology work and invert the library lock order. The executor retains one private subject/property monitor for terminal reads, writes, context transitions, attachment-revision checks, and metadata publication. Metadata publication belongs on that list because `AddProperties` currently serializes its read-merge-write of the property lookup on the same object that `SyncRoot` exposes, and an unattached `AddProperties` has no lifecycle lock to fall back on.
 
 ### `IInterceptorExecutor`
 
@@ -142,6 +145,10 @@ The concrete executor also supplies a narrow advanced Core state-transition capa
 
 Generated setters select `SetStructuralPropertyValue` from the declared property type at generation time. Dynamic and manual property paths make the equivalent declared-type classification before resolving an interceptor chain. This lets a structural write capture attachment state even when the subject was unattached at entry, while ordinary scalar setters retain their direct path without an attachment-revision comparison.
 
+The compile-time classification must fail closed, and it must not attempt to reproduce the runtime classifier. A Roslyn symbol cannot answer the runtime question: the generator emits the `IInterceptorSubject` base-list entry itself, so a same-compilation subject symbol does not carry that interface, and `dynamic`, unresolved types, and multi-dimensional subject arrays each classify differently at compile time than at run time. The generator therefore emits the scalar route only for declared types that provably cannot hold a subject, which is the primitives, `string`, `decimal`, `DateTime`, `DateTimeOffset`, `TimeSpan`, `Guid`, enums, and nullable forms of those. Everything else, including `object`, `dynamic`, interfaces, unresolved types, and every same-compilation type, takes the structural route. A false positive costs one predictable branch on an uncommon property. A false negative would silently skip the attachment-revision guard on exactly the path the guard exists for, while the lifecycle still performs structural work because it classifies from metadata.
+
+Because the structural route must observe attachment state, a structural write cannot use the generated no-executor short circuit. It publishes the executor first, so a subject that takes a structural write while unattached allocates one executor. Scalar writes on unattached subjects keep the direct field write and allocate nothing. This allocation is intentional, and the benchmark set measures unattached structural writes alongside unattached scalar writes so its size is known rather than assumed.
+
 The exact low-level transition method names may be adjusted during implementation for a smaller safe public surface, but third-party `ILifecycleInterceptor` implementations must be able to perform the same operations without reflection, `ConditionalWeakTable`, subject `Data`, or friend-assembly access.
 
 ### Subject context extensions
@@ -178,7 +185,9 @@ public static void DetachFromContext(
 | No explicit attachment | `DetachFromContext(context)` | Throw before state change |
 | Explicit attachment in another context | `DetachFromContext(context)` | Throw before state change |
 
-`new Subject(context)` and `new DynamicSubject(context)` remain supported and call `AttachToContext(context)` after normal constructor chaining. They therefore create strict explicit roots. A second explicit attach on such a subject throws.
+`new Subject(context)` and `new DynamicSubject(context)` remain supported and attach after normal constructor chaining. They create a *provisional* root anchor, not a strict explicit one. A provisional anchor keeps the subject owned while it is being populated and is cleared automatically the first time the subject gains an inherited structural edge in the same context. `AttachToContext` sets a strict explicit anchor that is never cleared automatically, and a second `AttachToContext` still throws.
+
+The distinction exists because a context-taking constructor is not a deliberate statement that the subject is a root. Dependency injection makes that decisive: when the context is registered as a service, `ActivatorUtilities.CreateInstance` selects the context-taking constructor for every subject it builds, so every deserialized object would otherwise become an unreleasable explicit root whose hosted services never stop and whose Registry entry is never evicted. Master already behaves the way a provisional anchor behaves, because the constructor's fallback addition is silently consumed by the later parent edge and released when the subject is unparented. Provisional anchors keep that ergonomics while leaving the strict contract available to callers who ask for it by name.
 
 When no lifecycle interceptor is configured, explicit attach sets only the root executor context and explicit bit. Explicit detach clears them. The root's structural descendants remain unattached.
 
@@ -202,7 +211,9 @@ finally
 
 After the assignment succeeds, removing the explicit anchor is callback-silent because the parent edge keeps the child reachable. If population or assignment fails, the same `finally` releases the temporary root and its otherwise unreachable component. Collection and dictionary loaders perform the detach only after the complete structural value has been assigned so every new child already has an inherited route.
 
-This pattern applies to OPC UA subject loading and connector update application. Long-lived application roots such as HomeBlaze's deserialized root use a normal explicit attach and do not perform the final detach. Context-taking child constructors follow the same rule: assigning such a child does not implicitly remove its explicit anchor.
+This explicit pattern is required only when a loader attaches an already-constructed subject with `AttachToContext`. A child built through a context-taking constructor needs no `finally` at all, because its provisional anchor is cleared by the assignment itself. That removes the transfer protocol from the OPC UA loader, the connector update appliers, and every dependency-injection construction path, which is where it would otherwise have been hardest: `SubjectItemsUpdateApplier` creates items at four call sites and commits the structural value at two, so temporary roots would have had to be threaded through both commit points with release on the exception and no-change paths.
+
+Long-lived application roots such as HomeBlaze's deserialized root are already attached by their constructor. They must not be attached a second time; if a strict anchor is wanted there, it is a promotion of the existing provisional anchor rather than a fresh attach.
 
 ## Removed Context and Configuration Capabilities
 
@@ -324,7 +335,11 @@ The common one-parent and unique-subject cases should retain inline or pooled st
 
 `GetReferenceCount()` derives the number of active incoming lifecycle edge occurrences. An explicit root contributes zero. `[a, a, b]` gives `a` a count of two and `b` a count of one.
 
-`GetParents()` remains a Tracking extension and queries the authoritative lifecycle state through the subject's current context. It returns occurrence-aware parent entries, including list indices and dictionary keys. It does not depend on Registry. An unattached subject or a subject in a context without the built-in lifecycle returns an empty result.
+`GetParents()` remains a Tracking extension and returns occurrence-aware parent entries, including list indices and dictionary keys. It does not depend on Registry. An unattached subject or a subject in a context without the built-in lifecycle returns an empty result.
+
+`GetParents()` must not take the lifecycle lock. The lifecycle is the only writer of parent state, but it publishes that state as an immutable per-subject snapshot that readers take without any lock, exactly as the current `ParentsSet` does. This is not an optimization, it is required for correctness: `SourceMonitor` holds its own lock across a graph walk that calls `GetParents()`, and it is also called from inside the lifecycle lock through `HandleLifecycleChange`. A `GetParents()` that acquired the lifecycle lock would make those two orders opposite and deadlock. `SourceOwnershipManager` and `HostedServiceHandler` compose into the same cycle. Single authority is preserved because the lifecycle remains the sole writer; only the read is lock-free.
+
+Occurrence identity is new work rather than preserved behavior. Master's parent entries are already wrong for duplicates and reorders: a reorder leaves stale indices because parent tracking never observes collection refresh, and a duplicate removal leaks a parent entry permanently because attach records the first occurrence index while removal iterates in reverse and records the last. Index-stable occurrence identity therefore has to be built and tested from scratch.
 
 Registry may retain its optimized parent and child snapshots for navigation, but those snapshots are projections. They do not become a second ownership authority.
 
@@ -466,7 +481,19 @@ Replacing one structural property value continues to publish removals before add
 
 `ContextInheritanceHandler` and `ParentTrackingHandler` are removed as separate implementations. The reference-identical built-in `LifecycleInterceptor` occupies the former context-inheritance descent slot, and authoritative parent membership is updated internally before notification. Registry, SourceMonitor, user handlers, subject handlers, events, and property handlers retain their observable relative order around that boundary.
 
-One narrow observation changes intentionally: because incoming edges and parent membership become one authoritative lifecycle state, `GetParents()` reflects the committed edge before the first context handler runs. On master, the separate `ParentTrackingHandler` made that query visible later in the handler sequence. The first-party ordering audit finds Registry before that old slot and SourceMonitor after it; neither requires the old delayed query visibility. Preserving it would require a second staged parent view and would recreate the split authority this design removes.
+Several observations change intentionally, and all of them are breaking.
+
+`GetParents()` reflects the committed edge before the first context handler runs. The earlier claim that master merely made this visible later was wrong in kind: `ParentTrackingHandler` is opt-in, and neither `WithFullPropertyTracking()` nor `WithRegistry()` registers it, so for the common Registry configuration the change is from empty to populated rather than from later to earlier. The resolved order on master is Registry, then parent tracking, then descent. Registry does not read parent state during attach, so it does not require the old visibility, but the ordering audit must also account for `HostedServiceHandler`, which is ordered after the descent, and for three first-party handlers that carry no ordering attributes at all and are therefore positioned by registration order.
+
+The inherited context becomes visible before the first attach callback. On master a child's context does not yet resolve the parent's services inside the first context handler, because the inheritance handler has not run.
+
+Structural writes from lifecycle callbacks stop working. Master permits them for a property other than the one being reconciled and forbids only same-property reentrancy. This design forbids all of them, which also retires the deadlock-avoidance path in the derived-property handler that exists so derived getters with subject-typed side effects can run inside the lifecycle lock.
+
+Subject-local service registration and subtree-scoped services are removed. No first-party production code uses them, but they are a documented capability with a written rationale and an ordering guarantee.
+
+Making the lifecycle terminal moves `ValidationInterceptor` from inside the lifecycle to outside it, because its only ordering attribute is vacuous unless transactions are registered and registration order decides today. A validation throw therefore happens at a different point relative to provisional subject claiming.
+
+Adding a structural accessor helper changes the generated base contract, so every base assembly compiled by an older generator must be rebuilt. That surfaces as the existing stale-base diagnostic, which is a build error under warnings-as-errors.
 
 ## Reference Count and Parents
 
@@ -579,10 +606,10 @@ Fallback removal should substantially simplify context service snapshots, servic
 
 - Keep `LifecycleInterceptor`, `_lastProcessedValues`, traversal helpers, pools, events, and handler dispatch.
 - Replace `_attachedSubjects` reference-count ownership decisions with occurrence-aware subject state, explicit roots, and reachability.
-- Add one reentrant lock per lifecycle interceptor and remove the post-writer concurrent-baseline repair model where terminal ordering now makes it unnecessary.
+- Add one reentrant lock per lifecycle interceptor and hold it across the terminal write. Holding the lock across the terminal is what retires the post-writer concurrent-baseline repair model; terminal ordering is the precondition that makes holding it safe, not the cause. Position in the chain alone changes nothing, because the backing write would still commit outside the lock and two threads writing one structural property would interleave exactly as they do now. The repair must therefore not be removed before the lock scope changes, or the concurrency defect its tests pin is reintroduced. The authoritative getter reread is kept for a separate reason: it is the only place the stored value is read back for setters that normalize.
 - Integrate context inheritance and parent membership directly.
 - Remove `ContextInheritanceHandler`, `ParentTrackingHandler`, `WithContextInheritance()`, and `WithParents()`.
-- Keep `GetParents()` and `GetReferenceCount()` as lifecycle state queries.
+- Keep `GetReferenceCount()` as a derived lifecycle state query, and reimplement `GetParents()` over lifecycle-published immutable snapshots with occurrence-stable indices. The latter is new work with new tests, not a carry-over.
 - Add callback-depth reentrancy validation.
 - Make built-in feature extensions establish their required default lifecycle before adding dependent services, while preserving runtime interceptor and handler order through ordering metadata.
 

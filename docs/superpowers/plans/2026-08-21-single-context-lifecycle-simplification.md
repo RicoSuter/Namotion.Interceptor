@@ -10,6 +10,30 @@
 
 **Design reference:** `docs/superpowers/specs/2026-08-21-single-context-lifecycle-simplification-design.md`
 
+## Corrections after implementation review (authoritative, override the task text below)
+
+Four independent verification passes checked this plan against the code. Findings and evidence are in `docs/spike/SPIKE-FINDINGS.md`. The corrections below take precedence wherever they disagree with a task.
+
+**Ordering.** The original Tasks 3 and 4 are merged into one commit, and consumer migration to the nullable context accessor moves into it. Task 4 removed `AddFallbackContext`/`RemoveFallbackContext` while six production callers outside its file list still used them, so the tree did not compile from Task 4 through Task 9 and Task 9's own cross-project gate was unreachable. The Task 3 shim could not bridge the gap either, because `Context => Executor.GetContext()` throws on unattached subjects and the canonical attach idiom is `subject.Context.AddFallbackContext(ctx)` on an unattached subject, 108 occurrences across 29 files. Subsequent task numbers shift down by one.
+
+**C1. `GetParents()` must not take the lifecycle lock.** It reads an immutable per-subject snapshot published by the lifecycle. `SourceMonitor` holds its own lock across a graph walk that calls `GetParents()`, and is also called from inside the lifecycle lock, so a locking `GetParents()` deadlocks. Occurrence-stable indices are new work with new tests, not a carry-over.
+
+**C2. No mirrored Roslyn classifier.** Delete that work item. The generator emits the scalar route only for provably non-subject declared types and the structural route for everything else. A symbol classifier cannot match the runtime one, and a false negative silently skips the guard.
+
+**C3. Context-taking constructors create provisional roots**, cleared by the first inherited edge. `AttachToContext` stays strict. This removes the temporary-construction try/finally protocol from every loader and applier, which was the plan's hardest migration item. It also fixes an otherwise fatal collision: the context is a dependency-injection singleton, so `ActivatorUtilities` picks the context-taking constructor for every deserialized subject, and strict roots would make `RootManager`'s attach throw at startup and leak the entire device graph.
+
+**C4. The lifecycle lock is held across the terminal write.** Terminal ordering is the precondition, not the cause. Do not delete the concurrent-baseline repair before the lock scope changes. Keep the authoritative getter reread; it also serves normalizing setters.
+
+**C5.** The executor monitor covers metadata publication as well.
+
+**C6.** Structural setters publish the executor rather than using the no-executor short circuit, so an unattached structural write allocates one executor. Measured by a dedicated benchmark row.
+
+**C9.** A second per-`TProperty` terminal cache carries the structural route so the scalar terminal is untouched. One shared `PropertyWriteContext` and one interceptor-set-keyed terminal cannot otherwise keep the scalar path free of the check.
+
+**Files missing from every task, all of which break the build when reached:** `Tests/InterceptorTests.cs`, `Tests/Context/ContextStateReflection.cs`, `Tracking.Tests/Lifecycle/PropertyReferenceSetTests.cs`, `Generator.Tests/SubjectBaseDiagnosticsTests.cs` and all 16 generator Verify snapshots, `Tracking.Tests/WriteTimestampTests.cs`, `ConnectorTester/Hosting/ConnectorTesterHost.cs` and nine ConnectorTester test files, `HomeBlaze.Services/ConfigurableSubjectSerializer.cs`, `SubjectFactory.cs`, `ServiceCollectionExtensions.cs`, `Connectors/DefaultSubjectFactory.cs`, `Registry/SubjectRegistryExtensions.cs` nullability at the two hot lookups, `Namotion.Interceptor.Testing/ObjectExtensions.cs` (delete rather than migrate).
+
+**Simplification gate, added to every task.** Before committing, delete what the change made dead and confirm the diff is net-negative wherever the task's purpose was removal. Named opportunities: the multi-`SourceMonitor` paths become unreachable once the singleton contract lands (the count-throw branch, `WaitForAllMonitorsAsync`, the composite disposable, and `SubjectSourceBase`'s monitor array with its unwind path); `ContextInheritanceHandler` and `ParentTrackingHandler` collapse into the lifecycle along with their configuration extensions and the ordering-cycle hazard they created; `PropertyReferenceSet` and its tests go with the reconciliation rewrite. Anti-simplifications that must survive: the authoritative getter reread, the per-frame `ServiceOrderResolver` call, instance dedup by reference, and `ContextState.IsEmpty` reduced to the service array rather than deleted.
+
 ## Non-negotiable implementation constraints
 
 - Preserve correctness first, then allocations/CPU, then style.
