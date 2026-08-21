@@ -125,6 +125,12 @@ public interface IInterceptorExecutor
         TProperty currentValue,
         Action<IInterceptorSubject, TProperty> writeValue);
 
+    bool SetStructuralPropertyValue<TProperty>(
+        string propertyName,
+        TProperty newValue,
+        TProperty currentValue,
+        Action<IInterceptorSubject, TProperty> writeValue);
+
     object? InvokeMethod(
         string methodName,
         object?[] parameters,
@@ -133,6 +139,8 @@ public interface IInterceptorExecutor
 ```
 
 The concrete executor also supplies a narrow advanced Core state-transition capability used by lifecycle providers. It can attach an unowned executor to an exact context, promote inherited attachment to explicit, remove an explicit anchor, and clear a context after lifecycle release. These operations are allocation-free, enforce local one-context invariants, serialize through the private executor monitor, and update an internal attachment revision. They do not know about edges, reachability, Registry, or callbacks.
+
+Generated setters select `SetStructuralPropertyValue` from the declared property type at generation time. Dynamic and manual property paths make the equivalent declared-type classification before resolving an interceptor chain. This lets a structural write capture attachment state even when the subject was unattached at entry, while ordinary scalar setters retain their direct path without an attachment-revision comparison.
 
 The exact low-level transition method names may be adjusted during implementation for a smaller safe public surface, but third-party `ILifecycleInterceptor` implementations must be able to perform the same operations without reflection, `ConditionalWeakTable`, subject `Data`, or friend-assembly access.
 
@@ -497,6 +505,8 @@ One call performs:
 If input enumeration, duplicate validation, a qualifying getter, context validation, or provisional claiming fails, no metadata, Registry property, lifecycle edge, or committed ownership state is published. Provisional executor claims are released before the failure escapes. The generated and Dynamic metadata publisher is a synchronous direct immutable-dictionary assignment. A custom publisher that mutates and then throws violates the publication contract; no rollback is promised for that violation.
 
 Ownership getters used during metadata admission must be synchronous, stable, side-effect-free, callable before metadata publication, and authoritative for the property's initial stored value. They must not mutate ownership or metadata. Later structural changes must pass through the intercepted setter. Computed structural values that change independently are unsupported ownership sources.
+
+The input metadata enumerable follows the same cold-path contract: it is synchronous, stable, and free of topology or metadata side effects. Core materializes it exactly once after callback reentrancy admission. Iterator reentrancy or mutation is a contract violation and receives no replay or rollback.
 
 Adding properties to an unattached subject only publishes metadata. A later lifecycle attach discovers then-current intercepted, non-derived structural properties through their normal getters.
 
