@@ -143,8 +143,11 @@ public sealed class WebSocketSubjectHandler
                 initialState = SubjectUpdate.CreateCompleteUpdate(_subject, _processors);
             }
 
-            // Send Welcome (flushes queued updates under _sendLock)
-            await connection.SendWelcomeAsync(initialState, welcomeSequence, stoppingToken).ConfigureAwait(false);
+            // Send Welcome (flushes queued updates under _sendLock). The acknowledgement capability is
+            // set from whether heartbeats are enabled: with them off, this connection never gets a
+            // heartbeat to carry an applied-through value on, so promising one would be a lie.
+            var acknowledgesAppliedUpdates = _configuration.HeartbeatInterval > TimeSpan.Zero;
+            await connection.SendWelcomeAsync(initialState, welcomeSequence, acknowledgesAppliedUpdates, stoppingToken).ConfigureAwait(false);
 
             _logger.LogInformation("Client {ConnectionId}: Welcome sent, waiting for updates...", connection.ConnectionId);
 

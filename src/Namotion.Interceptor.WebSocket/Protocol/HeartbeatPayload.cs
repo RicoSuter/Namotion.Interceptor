@@ -20,9 +20,13 @@ public class HeartbeatPayload
     /// keeps applying later ones, so the value can lag behind what the server has actually processed
     /// on this connection.
     /// <para>
-    /// Additive: a peer that does not know this field ignores it, and a peer that reads no value
-    /// behaves as if nothing had been applied, which re-asserts the whole set at the next reconnect.
-    /// Safe in both directions, so it carries no protocol version of its own.
+    /// Its absence is not safe. A client that reads no value cannot tell "nothing has been applied"
+    /// from "this peer does not report applied-through", and since a re-parked entry that flows back
+    /// through the write path is recorded again, treating absence as the former turns re-park, reconcile,
+    /// re-send, re-record into a closed loop that converges on every property the client has ever
+    /// written. That is why <see cref="WelcomePayload.AcknowledgesAppliedUpdates"/> exists: the client
+    /// reads it once at connect and, when it is absent or false, does not maintain the in-flight set for
+    /// that connection at all, rather than maintaining one this field can never safely retire.
     /// </para>
     /// </remarks>
     public long? AppliedThrough { get; set; }

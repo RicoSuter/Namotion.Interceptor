@@ -136,7 +136,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         }
     }
 
-    public async Task SendWelcomeAsync(SubjectUpdate initialState, long sequence, CancellationToken cancellationToken)
+    public async Task SendWelcomeAsync(SubjectUpdate initialState, long sequence, bool acknowledgesAppliedUpdates, CancellationToken cancellationToken)
     {
         await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -145,7 +145,8 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
             {
                 Format = WebSocketFormat.Json,
                 State = initialState,
-                Sequence = sequence
+                Sequence = sequence,
+                AcknowledgesAppliedUpdates = acknowledgesAppliedUpdates
             };
 
             _sendBuffer!.Clear();

@@ -57,6 +57,16 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     private readonly Dictionary<PropertyReference, (long Ordinal, SubjectPropertyChange Change)> _inFlight = new(PropertyReference.Comparer);
     private long _sendOrdinal;
 
+    // Read by WriteChangesAsync under _connectionLock, the same section that reads _webSocket, and by
+    // the receive loop's heartbeat handling on its own thread, so it is volatile rather than merely
+    // lock-guarded. Written only in ConnectCoreAsync, which every connection attempt passes through
+    // before the socket it sets is usable, so a write always precedes any read that could see it.
+    private volatile bool _acknowledgesAppliedUpdates;
+
+    // Guards the once-per-change warning below. Read and written only inside ConnectCoreAsync, which
+    // _connectionLock serializes across every connection attempt, so a plain field is enough.
+    private bool? _lastLoggedAcknowledgesAppliedUpdates;
+
     private int _disposed;
 
     /// <inheritdoc />
@@ -343,6 +353,11 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             _initialState = welcome.State;
             sequenceTracker.InitializeFromWelcome(welcome.Sequence);
 
+            // Stored for this connection attempt: read again on every WriteChangesAsync call while this
+            // connection lasts, and re-read here on every reconnect since a peer can change its mind
+            // between connections (a server restarted with heartbeats toggled).
+            RecordAcknowledgementMode(welcome.AcknowledgesAppliedUpdates);
+
             Volatile.Write(ref _receiveLoopCommitLease, receiveLoopCommitLease);
             PublishReceiveLoopAndMarkOperational(receiveLoopCompletion);
             _logger.LogInformation("Connected to WebSocket server (sequence: {Sequence})", welcome.Sequence);
@@ -365,6 +380,32 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                 receiveLoopCompletion.TrySetResult();
             }
         }
+    }
+
+    /// <summary>
+    /// Stores whether the server this connection just reached acknowledges applied updates on it, and
+    /// warns once when the no-acknowledgement mode is entered or re-entered.
+    /// </summary>
+    /// <param name="acknowledgesAppliedUpdates">The capability the Welcome from this connect reported.</param>
+    /// <remarks>
+    /// Logged at most once per change, not once per reconnect: with heartbeats disabled the receive
+    /// timeout treats silence as connection loss, so an idle client reconnects roughly once a minute,
+    /// and a per-reconnect warning here would fire forever at that cadence. Entering the acknowledging
+    /// mode is not itself warned about, since it is the safe side and needs no operator attention; only
+    /// the transition into, or back into, the mode where losses cannot be repaired is worth a warning.
+    /// </remarks>
+    private void RecordAcknowledgementMode(bool acknowledgesAppliedUpdates)
+    {
+        if (!acknowledgesAppliedUpdates && _lastLoggedAcknowledgesAppliedUpdates != false)
+        {
+            _logger.LogWarning(
+                "Server does not acknowledge applied writes on this connection. Writes that reach the " +
+                "socket but are not confirmed applied before a disconnect will not be re-asserted after " +
+                "the next reconnect.");
+        }
+
+        _lastLoggedAcknowledgesAppliedUpdates = acknowledgesAppliedUpdates;
+        _acknowledgesAppliedUpdates = acknowledgesAppliedUpdates;
     }
 
     private void ReParkInFlightChanges()
@@ -508,10 +549,32 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
         // Captured before the wait: a batch queued on the lock across a reconnect would otherwise be
         // sent over the new connection carrying pre-outage values that nothing has reconciled. The
-        // resume epoch is captured alongside it so the guard below can tell that case apart from a
-        // fresh commit that also waits across the same reconnect.
-        var socketAtEntry = _webSocket;
-        var resumeEpochAtEntry = CurrentResumeEpoch;
+        // resume epoch is captured alongside the socket so the guard below can tell that case apart
+        // from a fresh commit that also waits across the same reconnect.
+        //
+        // The pair has to be a consistent snapshot, not two independent reads: reading the socket then
+        // the epoch, or the epoch then the socket, both leave a window in which a reconnect that lands
+        // inside it produces a combination, old socket with new epoch or new socket with old epoch, that
+        // the guard below cannot tell apart from a batch that genuinely predates the reconnect. Taken
+        // seqlock style instead: read the epoch, read the socket, re-read the epoch, and retry the pair
+        // if it moved. This is sound only because on every path that establishes a connection the epoch
+        // bump always precedes the socket assignment, the same precondition CurrentResumeEpoch's own
+        // remarks document, so an epoch that reads the same both times means no replacement began
+        // between the two reads, and the socket read in between it genuinely belongs to that epoch.
+        ClientWebSocket? socketAtEntry;
+        int resumeEpochAtEntry;
+        while (true)
+        {
+            resumeEpochAtEntry = CurrentResumeEpoch;
+            BeforeSocketSnapshotRead?.Invoke();
+            socketAtEntry = _webSocket;
+            if (CurrentResumeEpoch == resumeEpochAtEntry)
+            {
+                break;
+            }
+        }
+
+        AfterConnectionSnapshotCaptured?.Invoke(socketAtEntry, resumeEpochAtEntry);
 
         BeforeConnectionLockWait?.Invoke();
 
@@ -561,10 +624,40 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             _logger.LogDebug("Sending {ByteCount} bytes ({SubjectCount} subjects) to server",
                 _sendBuffer.WrittenCount, update.Subjects.Count);
 
-            // Reserved before the send, not assigned after it: see ReserveSendOrdinal's remarks for why.
-            var sendOrdinal = ReserveSendOrdinal();
-            await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
-            RecordInFlight(sendOrdinal, changes.Span);
+            if (_acknowledgesAppliedUpdates)
+            {
+                // Reserved before the send, not assigned after it: see ReserveSendOrdinal's remarks for why.
+                var sendOrdinal = ReserveSendOrdinal();
+                BeforeReservedSendAttempt?.Invoke();
+                try
+                {
+                    await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // A failed send after the ordinal was reserved would otherwise leave a permanent
+                    // gap: nothing above it can ever retire, so it is re-parked at every reconnect and
+                    // re-asserts a stale value forever. Abort rather than returning a failure on a
+                    // socket that might still be usable, so the reconnect this forces resets the ordinal
+                    // and the gap cannot persist. This abort is the fix for that gap, not a redundant
+                    // belt-and-braces call; do not remove it on the assumption the retry path alone
+                    // covers a failed send here.
+                    webSocket.Abort();
+                    throw;
+                }
+
+                RecordInFlight(sendOrdinal, changes.Span);
+            }
+            else
+            {
+                // No acknowledgement on this connection: nothing would ever retire an entry recorded
+                // here, and a re-parked entry that is re-sent flows back through this same method, so
+                // recording anyway would grow the set across every reconnect for the life of the source.
+                // Send without reserving an ordinal or recording, so the set stays empty and the re-park
+                // on the next connect finds nothing to carry over.
+                await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+            }
+
             MaybeShrinkSendBuffer();
             _logger.LogDebug("Sent update successfully");
             return WriteResult.Success;
@@ -593,9 +686,14 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     /// <remarks>
     /// Reserving ahead of the send rather than assigning after it means a send that reaches the peer
     /// while, for whatever reason, the matching <see cref="RecordInFlight"/> call is skipped can only
-    /// leave the client's ordinal ahead of the server's count, never behind it. Ahead under-retires,
-    /// which is safe; behind would retire an in-flight entry the server never actually received,
-    /// which is the exact loss this field exists to prevent.
+    /// leave the client's ordinal ahead of the server's count, never behind it. Behind would retire an
+    /// in-flight entry the server never actually received, which is the loss this field exists to
+    /// prevent. Ahead is not the safe alternative it first looks like: a send that fails after this
+    /// reserves an ordinal leaves a gap that nothing above it can ever retire, so those entries are
+    /// re-parked at every reconnect and re-assert stale values forever, which is a permanent loss of a
+    /// different shape rather than a safe one. What actually closes that gap is the caller aborting the
+    /// connection when a reserved send fails, in <see cref="WriteChangesAsync"/>, so the reconnect that
+    /// follows resets the ordinal to zero.
     /// </remarks>
     private long ReserveSendOrdinal()
     {
@@ -636,6 +734,10 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         var timeoutCts = new CancellationTokenSource();
         CancellationTokenSource? linkedCts = null;
         var consecutiveErrors = 0;
+
+        // Scoped to this call, so it resets naturally on every reconnect rather than needing an explicit
+        // reset: this loop runs once per connection.
+        var warnedMissingAppliedThroughOnThisConnection = false;
 
         try
         {
@@ -710,6 +812,18 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                                     // The loop's own socket, not the field: a suspended zombie loop must
                                     // not retire against the connection that replaced it.
                                     RetireInFlightThrough(appliedThrough, webSocket);
+                                }
+                                else if (_acknowledgesAppliedUpdates && !warnedMissingAppliedThroughOnThisConnection)
+                                {
+                                    // The server promised acknowledgement at connect and has now sent a
+                                    // heartbeat without the value it promised. No peer in this repository
+                                    // can produce that state, so this is a foreign or misbehaving
+                                    // implementation. Warn once and leave the mode as is: flipping it
+                                    // mid-connection would race against entries already recorded under
+                                    // the acknowledging assumption.
+                                    warnedMissingAppliedThroughOnThisConnection = true;
+                                    _logger.LogWarning(
+                                        "Server advertised applied-update acknowledgement at connect but sent a heartbeat without an applied-through value. Ignoring; the in-flight set for this connection is left as is.");
                                 }
                                 break;
 
@@ -1077,6 +1191,28 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     internal Action? AfterReceiveLoopCommitDrain { get; set; }
 
     internal Action? BeforeReconnectInitialStateLoad { get; set; }
+
+    /// <summary>
+    /// Fires in <see cref="WriteChangesAsync"/>'s connection snapshot loop, after the resume epoch is
+    /// read and before the socket is read, so a test can hold a write there while a reconnect races the
+    /// two reads underneath it. Fires on every iteration of the loop, including retries.
+    /// </summary>
+    internal Action? BeforeSocketSnapshotRead { get; set; }
+
+    /// <summary>
+    /// Fires in <see cref="WriteChangesAsync"/> once the connection snapshot loop has produced a pair
+    /// it accepts, carrying the socket and resume epoch it captured, so a test can assert the pair is
+    /// self-consistent with the source's current state rather than a torn combination of an old and a
+    /// new read.
+    /// </summary>
+    internal Action<ClientWebSocket?, int>? AfterConnectionSnapshotCaptured { get; set; }
+
+    /// <summary>
+    /// Fires in <see cref="WriteChangesAsync"/> right after an ordinal is reserved for the send that is
+    /// about to happen, before the send is attempted, so a test can force that specific send to fail
+    /// without depending on whatever a real transport happens to do when a send fails.
+    /// </summary>
+    internal Action? BeforeReservedSendAttempt { get; set; }
 
     /// <summary>
     /// Fires in <see cref="WriteChangesAsync"/> right after the current socket is captured and before
