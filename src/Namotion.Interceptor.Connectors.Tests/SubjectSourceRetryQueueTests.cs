@@ -679,6 +679,67 @@ public class SubjectSourceRetryQueueTests
         Assert.Equal(nameof(Person.LastName), drained[1].Property.Name);
     }
 
+    [Fact]
+    public void WhenASubjectDetachesBeforeTheDrain_ThenItsDiscardedWritesAreCountedAndLogged()
+    {
+        // Arrange: a child subject owned by the source, written to and then detached from the graph.
+        var logger = new RecordingLogger();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        var source = new TestSubjectSource(person, context, logger);
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        var child = new Person(context) { FirstName = "Child" };
+        person.Father = child;
+
+        // Ownership through the manager, not a raw SetSource: nothing clears a raw SetSource on
+        // detach, so the change would take the owned branch, be parked, and never reach the branch
+        // under test.
+        using var ownership = new SourceOwnershipManager(source);
+        ownership.ClaimSource(new PropertyReference(child, nameof(Person.FirstName)));
+
+        child.FirstName = "WrittenBeforeDetach";
+        person.Father = null;
+
+        // Act
+        source.DrainOwnedWritesToRetryQueue(subscription);
+
+        // Assert
+        Assert.Contains(logger.Warnings, warning => warning.Contains("detached", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void WhenANormalWriteToAnAttachedSubjectIsNotOwned_ThenNoWarningIsLogged()
+    {
+        // Arrange: a write to a subject that stays attached and was never owned by this source, the
+        // everyday "not mine" discard that must not be mistaken for the detached case above.
+        var logger = new RecordingLogger();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        var source = new TestSubjectSource(person, context, logger);
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        person.FirstName = "NeverOwned";
+
+        // Act
+        source.DrainOwnedWritesToRetryQueue(subscription);
+
+        // Assert
+        Assert.Empty(logger.Warnings);
+    }
+
     private static void EnqueueRetryChange(TestSubjectSource source,
         IInterceptorSubject subject, string propertyName, string? oldValue, string? newValue) =>
         source.WriteRetryQueue!.Enqueue(new[] { CreateChange(subject, propertyName, oldValue, newValue) });

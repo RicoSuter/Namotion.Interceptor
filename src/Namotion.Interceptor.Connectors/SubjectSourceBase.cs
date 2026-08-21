@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Connectors.Monitoring;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -580,6 +581,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
 
         List<SubjectPropertyChange>? owned = null;
+        var detachedDiscards = 0;
         while (subscription.TryDequeueImmediate(out var change))
         {
             if (ReferenceEquals(change.Origin.Source, this) && !ChangeDeliveryFilter.NeedsWriteBack(in change))
@@ -592,7 +594,16 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
             if (!(change.Property.TryGetSource(out var source) && source == this))
             {
-                continue; // not owned by this source
+                // The same branch discards changes this source never owned, which is most of the
+                // subscription, so only the detached case is reported: a subject that left the graph
+                // between capture and drain had its source cleared, which is indistinguishable from
+                // never having been owned unless the subject itself is checked.
+                if (change.Property.Subject.TryGetRegisteredSubject() is null)
+                {
+                    detachedDiscards++;
+                }
+
+                continue;
             }
 
             (owned ??= []).Add(change);
@@ -606,6 +617,13 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             // makes the space this costs proportional to the number of properties written rather than
             // to the number of writes.
             WriteRetryQueue.Enqueue(CollapsePerProperty(owned.ToArray()).ToArray());
+        }
+
+        if (detachedDiscards > 0)
+        {
+            _logger.LogWarning(
+                "Discarded {Count} captured write(s) whose subject has detached from the graph, so they cannot be written to the source.",
+                detachedDiscards);
         }
     }
 
