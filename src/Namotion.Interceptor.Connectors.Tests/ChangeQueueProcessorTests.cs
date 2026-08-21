@@ -1146,6 +1146,78 @@ public class ChangeQueueProcessorTests
     }
 
     [Fact]
+    public async Task WhenACancellationCallbackBlocks_ThenSynchronousStoppingStillEndsAtTheBound()
+    {
+        // Arrange
+        // Hosted services request cancellation synchronously. If the processor links its handler token
+        // directly to that request, this callback can hold both the caller and ProcessAsync forever.
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.WithPropertyChangeSubscriptions();
+
+        var subject = new Person(context);
+        var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writeCalls = 0;
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: async (_, token) =>
+            {
+                if (Interlocked.Increment(ref writeCalls) != 1)
+                {
+                    return;
+                }
+
+                using var registration = token.Register(() =>
+                {
+                    callbackEntered.TrySetResult();
+                    releaseCallback.Task.GetAwaiter().GetResult();
+                });
+
+                writeEntered.TrySetResult();
+                await Task.Delay(Timeout.Infinite, token);
+            },
+            bufferTime: TimeSpan.FromMilliseconds(1),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "buffered";
+        await writeEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Act
+        var cancellationRequest = Task.Run(cancellation.Cancel);
+        await callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        try
+        {
+            await cancellationRequest.WaitAsync(TimeSpan.FromSeconds(30));
+            await processing.WaitAsync(TimeSpan.FromSeconds(30));
+
+            // Assert
+            Assert.False(releaseCallback.Task.IsCompleted,
+                "Stopping waited for a cancellation callback instead of abandoning it at the deadline.");
+        }
+        finally
+        {
+            releaseCallback.TrySetResult();
+            await cancellationRequest.WaitAsync(TimeSpan.FromSeconds(30));
+            await processing.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processor.DropCount == 1,
+            message: "the abandoned write should unwind and count its buffered change");
+    }
+
+    [Fact]
     public async Task WhenTheTeardownDrainIsAbandoned_ThenTheFlushGateIsReleasedAndTheBufferReturned()
     {
         // Arrange: pins the contract that an abandoned teardown flush is still cancelled and still

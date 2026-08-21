@@ -15,6 +15,50 @@ public class ChangeQueueProcessor : IDisposable
 {
     internal static readonly TimeSpan TeardownFlushBound = TimeSpan.FromSeconds(5);
 
+    private sealed class ProcessingCancellationState(
+        CancellationTokenSource processingTokenSource,
+        CancellationTokenSource dequeueStopTokenSource) : IDisposable
+    {
+        private readonly object _gate = new();
+        private Task? _processingCancellationTask;
+
+        public void RequestCancellation()
+        {
+            try
+            {
+                dequeueStopTokenSource.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Unregister can race a callback that was already queued.
+            }
+
+            _ = GetProcessingCancellationTask();
+        }
+
+        public Task GetProcessingCancellationTask()
+        {
+            lock (_gate)
+            {
+                if (_processingCancellationTask is not null)
+                {
+                    return _processingCancellationTask;
+                }
+
+                try
+                {
+                    return _processingCancellationTask = processingTokenSource.CancelAsync();
+                }
+                catch (Exception exception)
+                {
+                    return _processingCancellationTask = Task.FromException(exception);
+                }
+            }
+        }
+
+        public void Dispose() => processingTokenSource.Dispose();
+    }
+
     private readonly Func<PropertyReference, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
     private readonly object? _source;
@@ -217,44 +261,69 @@ public class ChangeQueueProcessor : IDisposable
         var queuedBeforeStart = _subscription.Count;
 
         using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
-        using var linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-        var flushTask = periodicTimer is not null
-            ? Task.Run(async () =>
-            {
-                try
-                {
-                    // ReSharper disable AccessToDisposedClosure
-                    while (await periodicTimer.WaitForNextTickAsync(linkedTokenSource.Token).ConfigureAwait(false))
-                    {
-                        await TryFlushAsync(linkedTokenSource.Token).ConfigureAwait(false);
-                    }
-                    // ReSharper restore AccessToDisposedClosure
-                }
-                catch (Exception ex)
-                {
-                    if (ex is not OperationCanceledException)
-                    {
-                        _logger.LogError(ex, "Failed to flush changes.");
-                    }
-                }
-            })
-            : Task.CompletedTask;
-
-        if (periodicTimer is null)
-        {
-            _logger.LogWarning(
-                "Change queue processor is running without buffering (bufferTime <= 0). " +
-                "Each property change will be processed individually without merging, " +
-                "which can cause high CPU usage under load. " +
-                "Consider setting a bufferTime (e.g., 8-50ms) to enable batching and merging.");
-        }
+        var processingTokenSource = new CancellationTokenSource();
+        var processingToken = processingTokenSource.Token;
+        using var dequeueStopTokenSource = new CancellationTokenSource();
+        var processingCancellationState = new ProcessingCancellationState(
+            processingTokenSource,
+            dequeueStopTokenSource);
+        RegisteredWaitHandle? cancellationWait = null;
+        var flushTask = Task.CompletedTask;
 
         try
         {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                processingCancellationState.RequestCancellation();
+            }
+            else if (cancellationToken.CanBeCanceled)
+            {
+                // Do not link the processing source to the input token. Hosted services cancel their
+                // stopping source synchronously, so a blocking handler callback would otherwise also
+                // block the host before its shutdown timeout can begin. The input token's wait handle is
+                // set before callbacks execute and lets this processor request cancellation independently.
+                cancellationWait = ThreadPool.RegisterWaitForSingleObject(
+                    cancellationToken.WaitHandle,
+                    static (state, _) => ((ProcessingCancellationState)state!).RequestCancellation(),
+                    processingCancellationState,
+                    Timeout.InfiniteTimeSpan,
+                    executeOnlyOnce: true);
+            }
+
+            flushTask = periodicTimer is not null
+                ? Task.Run(async () =>
+                {
+                    try
+                    {
+                        // ReSharper disable AccessToDisposedClosure
+                        while (await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
+                        {
+                            await TryFlushAsync(processingToken).ConfigureAwait(false);
+                        }
+                        // ReSharper restore AccessToDisposedClosure
+                    }
+                    catch (Exception ex)
+                    {
+                        if (ex is not OperationCanceledException)
+                        {
+                            _logger.LogError(ex, "Failed to flush changes.");
+                        }
+                    }
+                })
+                : Task.CompletedTask;
+
+            if (periodicTimer is null)
+            {
+                _logger.LogWarning(
+                    "Change queue processor is running without buffering (bufferTime <= 0). " +
+                    "Each property change will be processed individually without merging, " +
+                    "which can cause high CPU usage under load. " +
+                    "Consider setting a bufferTime (e.g., 8-50ms) to enable batching and merging.");
+            }
+
             await Task.Yield();
 
-            while (_subscription.TryDequeue(out var change, linkedTokenSource.Token))
+            while (_subscription.TryDequeue(out var change, dequeueStopTokenSource.Token))
             {
                 var wasQueuedBeforeStart = queuedBeforeStart > 0;
                 if (wasQueuedBeforeStart)
@@ -300,7 +369,7 @@ public class ChangeQueueProcessor : IDisposable
                     _immediateBuffer[0] = change;
                     try
                     {
-                        await _writeHandler(_immediateBuffer, linkedTokenSource.Token).ConfigureAwait(false);
+                        await _writeHandler(_immediateBuffer, processingToken).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
@@ -329,8 +398,8 @@ public class ChangeQueueProcessor : IDisposable
         }
         finally
         {
-            try { await linkedTokenSource.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
-            await CompleteTeardownAsync(flushTask).ConfigureAwait(false);
+            cancellationWait?.Unregister(null);
+            await CompleteTeardownAsync(flushTask, processingCancellationState).ConfigureAwait(false);
         }
     }
 
@@ -338,13 +407,10 @@ public class ChangeQueueProcessor : IDisposable
     /// Lets the active flush settle, writes anything it left buffered, and runs the connector's final
     /// handoff under one deadline.
     /// </summary>
-    private async Task CompleteTeardownAsync(Task periodicFlushTask)
+    private async Task CompleteTeardownAsync(
+        Task periodicFlushTask,
+        ProcessingCancellationState processingCancellationState)
     {
-        if (periodicFlushTask.IsCompleted && _changes.IsEmpty && _teardownHandler is null)
-        {
-            return;
-        }
-
         // A fresh token, not the one ProcessAsync was given: that one is already cancelled here, so
         // writing under it would fail every change, which is the loss this exists to prevent.
         var teardownTokenSource = new CancellationTokenSource(TeardownFlushBound);
@@ -353,46 +419,23 @@ public class ChangeQueueProcessor : IDisposable
         // registration taken on a disposed source is dropped silently, leaving the wait below unbounded.
         var teardownToken = teardownTokenSource.Token;
 
-        // Off this thread: the OPC UA server writes synchronously under the SDK's node manager lock and
-        // ignores its token, so awaiting inline would bound nothing.
-        var teardownTask = Task.Factory.StartNew(() =>
-        {
-            try
-            {
-                try
-                {
-                    periodicFlushTask.GetAwaiter().GetResult();
-                    if (!teardownToken.IsCancellationRequested)
-                    {
-                        TryFlushAsync(teardownToken).AsTask().GetAwaiter().GetResult();
-                    }
+        var cancellationTask = processingCancellationState.GetProcessingCancellationTask();
 
-                    if (!teardownToken.IsCancellationRequested && _teardownHandler is { } teardownHandler)
-                    {
-                        teardownHandler(teardownToken).AsTask().GetAwaiter().GetResult();
-                    }
-                }
-                finally
-                {
-                    // Inside the task, so the count runs after the requeue a cancelled flush performs on
-                    // its unwind, and the token source outlives a waiter that gave up at the deadline.
-                    try
-                    {
-                        CountRemainingAfterDrain();
-                    }
-                    finally
-                    {
-                        teardownTokenSource.Dispose();
-                    }
-                }
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                // Logged here because the waiter may have given up long before this ends. Catching
-                // everything also keeps an abandoned task off UnobservedTaskException.
-                _logger.LogError(exception, "Failed to write the remaining buffered changes while stopping.");
-            }
-        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        if (cancellationTask.IsCompleted && periodicFlushTask.IsCompleted &&
+            _changes.IsEmpty && _teardownHandler is null)
+        {
+            try { await cancellationTask.ConfigureAwait(false); } catch { /* ignore */ }
+            processingCancellationState.Dispose();
+            teardownTokenSource.Dispose();
+            return;
+        }
+
+        var teardownTask = RunTeardownWorkerAsync(
+            cancellationTask,
+            periodicFlushTask,
+            processingCancellationState,
+            teardownTokenSource,
+            teardownToken);
 
         try
         {
@@ -417,6 +460,68 @@ public class ChangeQueueProcessor : IDisposable
                 "Gave up waiting after {Bound} for the remaining buffered changes to be written while " +
                 "stopping. A write handler that ignores cancellation may still complete it.",
                 TeardownFlushBound);
+        }
+    }
+
+    private async Task RunTeardownWorkerAsync(
+        Task cancellationTask,
+        Task periodicFlushTask,
+        ProcessingCancellationState processingCancellationState,
+        CancellationTokenSource teardownTokenSource,
+        CancellationToken teardownToken)
+    {
+        try
+        {
+            try
+            {
+                try { await cancellationTask.ConfigureAwait(false); } catch { /* ignore */ }
+                await periodicFlushTask.ConfigureAwait(false);
+
+                // The OPC UA server writes synchronously under the SDK's node manager lock and ignores
+                // its token. Use a dedicated thread only for the drain that can run such a handler, not
+                // while waiting for cancellation callbacks or an already active periodic flush to settle.
+                if (!teardownToken.IsCancellationRequested)
+                {
+                    await Task.Factory.StartNew(() =>
+                    {
+                        if (!teardownToken.IsCancellationRequested)
+                        {
+                            TryFlushAsync(teardownToken).AsTask().GetAwaiter().GetResult();
+                        }
+
+                        if (!teardownToken.IsCancellationRequested && _teardownHandler is { } teardownHandler)
+                        {
+                            teardownHandler(teardownToken).AsTask().GetAwaiter().GetResult();
+                        }
+                    }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                // After a timed-out wait, this runs only once the active work settles. It catches a
+                // cancelled batch that gets requeued later and keeps both token sources alive until then.
+                try
+                {
+                    CountRemainingAfterDrain();
+                }
+                finally
+                {
+                    try
+                    {
+                        processingCancellationState.Dispose();
+                    }
+                    finally
+                    {
+                        teardownTokenSource.Dispose();
+                    }
+                }
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Logged here because the waiter may have given up long before this ends. Catching exceptions
+            // also keeps an abandoned task off UnobservedTaskException.
+            _logger.LogError(exception, "Failed to write the remaining buffered changes while stopping.");
         }
     }
 
