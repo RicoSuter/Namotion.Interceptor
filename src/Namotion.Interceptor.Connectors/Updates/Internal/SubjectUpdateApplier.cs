@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
@@ -28,7 +29,8 @@ internal static class SubjectUpdateApplier
         SubjectUpdate update,
         ISubjectFactory subjectFactory,
         ChangeOrigin origin,
-        Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
+        Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null,
+        ILogger? logger = null)
     {
         var context = ContextPool.Rent();
         try
@@ -113,12 +115,20 @@ internal static class SubjectUpdateApplier
                             // registry: drop the update. The next update carrying the subject's
                             // complete state converges it. The counter is the production tripwire.
                             Interlocked.Increment(ref DroppedInboundSubjectUpdateCount);
+                            context.RecordDroppedSubject(subjectId);
                         }
                     }
                 }
 
                 // The retry pass can root further subjects, which queue attribute updates of their own.
                 ApplyDeferredAttributeUpdates(context, appliedAttributeUpdates);
+            }
+
+            if (logger is not null && context.DroppedSubjectIds is { Count: > 0 } dropped)
+            {
+                logger.LogWarning(
+                    "Dropped {Count} inbound subject update(s) from {Origin} because their subjects could not be resolved: {SubjectIds}.",
+                    dropped.Count, origin.Source ?? (object)"local", string.Join(", ", dropped));
             }
         }
         finally
@@ -342,6 +352,7 @@ internal static class SubjectUpdateApplier
             // mutation removed it). Skip: the next update carrying its complete state heals it.
             // The reference is lost until then, so count it as a drop.
             Interlocked.Increment(ref DroppedInboundSubjectUpdateCount);
+            context.RecordDroppedSubject(propertyUpdate.Id);
             return;
         }
 

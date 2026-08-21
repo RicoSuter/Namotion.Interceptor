@@ -105,6 +105,7 @@ internal static class SubjectItemsUpdateApplier
                 // A dictionary entry without a key cannot be placed, so the entry is lost until the
                 // next update carrying complete state for this dictionary.
                 Interlocked.Increment(ref SubjectUpdateApplier.DroppedInboundSubjectUpdateCount);
+                context.RecordDroppedSubject(itemUpdate.Id);
                 continue;
             }
 
@@ -179,6 +180,7 @@ internal static class SubjectItemsUpdateApplier
             // that includes complete state for this subject. Until then the applied collection or
             // dictionary is one item short, so count the drop.
             Interlocked.Increment(ref SubjectUpdateApplier.DroppedInboundSubjectUpdateCount);
+            context.RecordDroppedSubject(subjectId);
             return (null, false);
         }
 

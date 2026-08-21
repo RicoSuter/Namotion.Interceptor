@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Updates.Internal;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -31,18 +32,22 @@ public static class SubjectUpdateExtensions
     /// source so echo suppression skips that source's own outbound path.</param>
     /// <param name="transformValueBeforeApply">The function to transform the update before applying it.
     /// Not invoked for subjects this update creates, see the remarks.</param>
+    /// <param name="logger">Logs unresolvable-subject drops with the origin; omit to keep the drops
+    /// counter-only.</param>
     public static void ApplySubjectUpdate(
         this IInterceptorSubject subject,
         SubjectUpdate update,
         ISubjectFactory? subjectFactory,
         ChangeOrigin origin,
-        Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
+        Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null,
+        ILogger? logger = null)
     {
         SubjectUpdateApplier.ApplyUpdate(
             subject,
             update,
             subjectFactory ?? DefaultSubjectFactory.Instance,
             origin,
-            transformValueBeforeApply);
+            transformValueBeforeApply,
+            logger);
     }
 }

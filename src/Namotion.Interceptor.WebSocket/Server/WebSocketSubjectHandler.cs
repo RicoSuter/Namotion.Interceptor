@@ -216,7 +216,7 @@ public sealed class WebSocketSubjectHandler
                 // The lock serializes update application so concurrent client updates apply one at a time.
                 lock (_applyUpdateLock)
                 {
-                    _subject.ApplySubjectUpdate(update, factory, ChangeOrigin.FromSource(connection));
+                    _subject.ApplySubjectUpdate(update, factory, ChangeOrigin.FromSource(connection), logger: _logger);
                 }
 
                 connection.OnUpdateApplied(ordinal);

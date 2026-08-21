@@ -389,4 +389,6 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         _cts.Dispose();
     }
 
+    /// <summary>Renders as <see cref="ConnectionId"/>, so logging the origin identifies the connection.</summary>
+    public override string ToString() => ConnectionId;
 }

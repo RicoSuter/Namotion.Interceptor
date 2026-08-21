@@ -809,7 +809,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         if (propertyWriter is null) return;
 
         propertyWriter.Write(
-            (update, subject: _subject, factory: _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance, source: this, commitLease),
+            (update, subject: _subject, factory: _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance, source: this, commitLease, logger: _logger),
             static state =>
             {
                 if (!state.commitLease.TryAcquireCommit())
@@ -822,7 +822,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                     state.subject.ApplySubjectUpdate(
                         state.update,
                         state.factory,
-                        ChangeOrigin.FromSource(state.source));
+                        ChangeOrigin.FromSource(state.source),
+                        logger: state.logger);
                 }
                 finally
                 {
