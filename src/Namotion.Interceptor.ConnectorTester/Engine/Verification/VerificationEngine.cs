@@ -104,7 +104,10 @@ public class VerificationEngine : BackgroundService
             _coordinator.SetCycle(_cycleNumber);
 
             foreach (var engine in _mutationEngines)
+            {
                 engine.ResetCounters();
+                engine.ResetDurabilityLedger();
+            }
             foreach (var engine in _chaosEngines)
                 engine.ResetCounters();
 
@@ -138,6 +141,25 @@ public class VerificationEngine : BackgroundService
 
             if (outcome.Converged)
             {
+                var durabilityViolations = CollectDurabilityViolations();
+                if (durabilityViolations.Count > 0)
+                {
+                    _logger.LogError(
+                        "=== Cycle {Cycle}: FAIL ({Count} write-durability violation(s)) ===",
+                        _cycleNumber, durabilityViolations.Count);
+                    foreach (var violation in durabilityViolations)
+                    {
+                        _logger.LogError("  {Violation}", violation);
+                    }
+
+                    await _failureDiagnostics.RunAsync(_cycleNumber, outcome.Snapshots, stoppingToken);
+                    _cycleStatistics.RecordFail(_cycleNumber, cycleStopwatch.Elapsed, outcome.Elapsed, activeProfileName);
+                    _cycleRecorder?.FinishCycle(_cycleNumber, CycleResult.Fail);
+                    _failed = true;
+                    _applicationLifetime.StopApplication();
+                    return;
+                }
+
                 _findingsLog.AppendIfAny(outcome.Snapshots, outcome.Elapsed);
                 _cycleStatistics.RecordPass(_cycleNumber, cycleStopwatch.Elapsed, outcome.Elapsed, activeProfileName);
                 var (subjects, properties) = SnapshotComparer.CountSubjectsAndProperties(outcome.Snapshots[0].Snapshot);
@@ -164,6 +186,23 @@ public class VerificationEngine : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Runs the write-durability oracle across all participants. Empty when
+    /// <see cref="ConnectorTesterConfiguration.DisjointProperties"/> is off, because without disjoint
+    /// property assignment a legitimate overwrite is indistinguishable from a loss.
+    /// </summary>
+    private List<string> CollectDurabilityViolations()
+    {
+        if (!_configuration.DisjointProperties)
+        {
+            return [];
+        }
+
+        return _mutationEngines
+            .SelectMany(engine => engine.VerifyWriteDurability())
+            .ToList();
+    }
+
     private void LogStartupInformation()
     {
         _logger.LogInformation("""
@@ -180,9 +219,14 @@ public class VerificationEngine : BackgroundService
 
         foreach (var engine in _mutationEngines)
         {
-            _logger.LogInformation("  {Name}: {Rate} value mutations/sec, {StructuralRate} structural mutations/sec",
-                engine.Name, engine.ValueMutationRate, engine.StructuralMutationRate);
+            _logger.LogInformation("  {Name}: {Rate} value mutations/sec, {StructuralRate} structural mutations/sec{Transactions}",
+                engine.Name, engine.ValueMutationRate, engine.StructuralMutationRate,
+                engine.UseTransactions ? ", transactions" : "");
         }
+
+        _logger.LogInformation(_configuration.DisjointProperties
+            ? "  Write-durability oracle: enabled (each participant's last-written value must survive to quiescence)"
+            : "  Write-durability oracle: disabled, only cross-participant agreement is checked");
 
         if (_configuration.ChaosProfiles.Count > 0)
         {

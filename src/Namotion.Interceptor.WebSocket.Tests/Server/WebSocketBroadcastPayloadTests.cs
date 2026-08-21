@@ -164,70 +164,70 @@ public class WebSocketBroadcastPayloadTests
         var (_, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(message);
         return _serializer.Deserialize<T>(message.AsSpan(payloadStart, payloadLength));
     }
+}
 
-    /// <summary>
-    /// A WebSocket that hands the handler a queued inbound message, parks on every further receive
-    /// until cancellation, and keeps every message the server sends for inspection.
-    /// </summary>
-    private sealed class CapturingWebSocket : System.Net.WebSockets.WebSocket
+/// <summary>
+/// A WebSocket that hands the handler a queued inbound message, parks on every further receive
+/// until cancellation, and keeps every message the server sends for inspection.
+/// </summary>
+internal sealed class CapturingWebSocket : System.Net.WebSockets.WebSocket
+{
+    private readonly ConcurrentQueue<byte[]> _incoming = new();
+    private readonly ConcurrentQueue<byte[]> _sent = new();
+
+    public void EnqueueIncoming(byte[] message) => _incoming.Enqueue(message);
+
+    public bool TryGetMessage(MessageType messageType, IWebSocketSerializer serializer, out byte[] message)
     {
-        private readonly ConcurrentQueue<byte[]> _incoming = new();
-        private readonly ConcurrentQueue<byte[]> _sent = new();
-
-        public void EnqueueIncoming(byte[] message) => _incoming.Enqueue(message);
-
-        public bool TryGetMessage(MessageType messageType, IWebSocketSerializer serializer, out byte[] message)
+        foreach (var sent in _sent.ToArray())
         {
-            foreach (var sent in _sent.ToArray())
+            if (serializer.DeserializeMessageEnvelope(sent).Type == messageType)
             {
-                if (serializer.DeserializeMessageEnvelope(sent).Type == messageType)
-                {
-                    message = sent;
-                    return true;
-                }
+                message = sent;
+                return true;
             }
-
-            message = [];
-            return false;
         }
 
-        public override async Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken)
+        message = [];
+        return false;
+    }
+
+    public override async Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken)
+    {
+        if (_incoming.TryDequeue(out var message))
         {
-            if (_incoming.TryDequeue(out var message))
-            {
-                var count = Math.Min(message.Length, buffer.Count);
-                message.AsSpan(0, count).CopyTo(buffer.AsSpan());
-                return new WebSocketReceiveResult(count, WebSocketMessageType.Text, true);
-            }
-
-            var parked = new TaskCompletionSource<WebSocketReceiveResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-            await using var registration = cancellationToken.Register(() => parked.TrySetCanceled(cancellationToken));
-            return await parked.Task.ConfigureAwait(false);
+            var count = Math.Min(message.Length, buffer.Count);
+            message.AsSpan(0, count).CopyTo(buffer.AsSpan());
+            return new WebSocketReceiveResult(count, WebSocketMessageType.Text, true);
         }
 
-        public override Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken)
-        {
-            _sent.Enqueue(buffer.ToArray());
-            return Task.CompletedTask;
-        }
+        var parked = new TaskCompletionSource<WebSocketReceiveResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var registration = cancellationToken.Register(() => parked.TrySetCanceled(cancellationToken));
+        return await parked.Task.ConfigureAwait(false);
+    }
 
-        public override WebSocketCloseStatus? CloseStatus => null;
-        public override string? CloseStatusDescription => null;
-        public override WebSocketState State => WebSocketState.Open;
-        public override string? SubProtocol => null;
+    public override Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken)
+    {
+        _sent.Enqueue(buffer.ToArray());
+        return Task.CompletedTask;
+    }
 
-        public override void Abort()
-        {
-        }
+    public override WebSocketCloseStatus? CloseStatus => null;
+    public override string? CloseStatusDescription => null;
+    public override WebSocketState State => WebSocketState.Open;
+    public override string? SubProtocol => null;
 
-        public override Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
-            => Task.CompletedTask;
+    public override void Abort()
+    {
+    }
 
-        public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
-            => Task.CompletedTask;
+    public override Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
+        => Task.CompletedTask;
 
-        public override void Dispose()
-        {
-        }
+    public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
+        => Task.CompletedTask;
+
+    public override void Dispose()
+    {
     }
 }

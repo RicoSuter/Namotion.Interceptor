@@ -21,6 +21,12 @@ dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile w
 # Structural churn test: high-rate collection/dictionary mutations, no chaos, transactions off
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-structural --configuration Release
 
+# Write-durability test: chaos plus the write-durability oracle, one property per participant
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-durability --configuration Release
+
+# Transactional test: write-durability chaos with every mutation wrapped in a transaction
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-transactions --configuration Release
+
 # Load test: throughput and latency at 20k changes/sec
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load --configuration Release
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-load --configuration Release
@@ -85,6 +91,18 @@ Each test cycle has two phases:
 2. **Converge phase**: The VerificationEngine pauses all engines via the TestCycleCoordinator, recovers any active chaos disruptions, waits a grace period (20s for OPC UA) for reconnection, then polls snapshots every 5 seconds. `SnapshotComparer.Capture` produces a normalized, deterministic JSON per participant. Structural property timestamps (Collection, Dictionary, Object) are stripped since they reflect local creation time. Value property timestamps are preserved and must converge. A null timestamp on either side matches any value (legitimate after server rebuild or when the equality interceptor suppresses a redundant write).
 
 A cycle **passes** when all participant snapshots match. It **fails** if the convergence timeout expires. On failure, the process writes per-participant JSON snapshots to disk, logs per-property diffs with write timestamps, runs a re-sync diagnostic, gracefully shuts down all hosted services, and exits with code 1.
+
+### Write-Durability Oracle
+
+`SnapshotComparer` proves agreement, not durability, and the difference matters: a write that reaches the wire and is then lost, for example a connection dropping between the send completing and the peer's apply running, disappears the same way from every participant. Recovery loads the surviving state, which never held the write, and everyone converges on the value that is actually there. `SnapshotComparer` passes, because agreement is exactly what it checks, and the lost write is invisible to it. This is not hypothetical: it is precisely the class of loss the WebSocket write-durability work fixes, and an agreement check alone would have passed on every one of those losses.
+
+`WriteDurabilityLedger` closes that gap. Each `RandomValueMutationStrategy` and `BatchValueMutationStrategy` records the last value it wrote to each property it owns, and once a cycle's mutate phase ends and chaos recoveries have settled, `VerificationEngine` checks each participant's own model against what the ledger last recorded for it. A mismatch is a write-durability violation, not merely a disagreement between participants: it means a participant's own committed write did not survive, even though the run may still show every participant agreeing with every other one.
+
+The ledger is sound only where each property has exactly one writer. With overlapping writers, a value the ledger recorded can be legitimately overwritten by another participant's later write, which the ledger cannot distinguish from a loss. Set `DisjointProperties: true` to make the oracle sound: `RandomValueMutationStrategy` then fixes each participant to one of `TestNode`'s four mutable value properties by its index (`participantIndex % 4`) instead of picking randomly, so no two participants ever write the same property and every mismatch the ledger reports really is a loss. `ConnectorTesterConfiguration.ValidateDisjointProperties()` throws at startup if more participants are configured than there are mutable properties, since beyond that limit two participants would have to share one and the oracle would report their legitimate overwrites as losses.
+
+`DisjointProperties` is off by default, so most profiles run only the agreement check. It is on in the `websocket-durability` and `websocket-transactions` profiles, and the startup log reports "Write-durability oracle: enabled" when it is active, "disabled" otherwise. Because it requires disjoint writers, the oracle cannot see the multi-client cases where two clients legitimately race to write the same property: those stay agreement-only, checked by `SnapshotComparer` alone.
+
+`websocket-durability` and `websocket-transactions` are near-verbatim copies of `websocket-chaos`, differing by one and four lines respectively: `appsettings.{name}.json` has no way to layer one profile's settings on top of another, so each has to restate the whole configuration to add its own setting. Keeping all three still buys real coverage, not just belt and braces: with `DisjointProperties` on, each participant is fixed to one property, so `websocket-chaos` is the only profile left that exercises properties more than one participant writes.
 
 ### Chaos via IFaultInjectable
 
@@ -247,6 +265,7 @@ See `appsettings.opcua-chaos.json` and `appsettings.opcua-load.json` for example
 | `Clients[].Chaos.IntervalMin/Max` | `00:01:00`/`00:05:00` | Time between disruptions |
 | `Clients[].Chaos.DurationMin/Max` | `00:00:05`/`00:00:30` | Disruption hold time |
 | `ChaosProfiles` | `[]` | Named profiles that rotate round-robin. Empty = all chaos always active |
+| `DisjointProperties` | `false` | Assigns each participant one of `TestNode`'s mutable properties by index and enables the write-durability oracle. See [Write-Durability Oracle](#write-durability-oracle). Throws at startup with more participants than mutable properties (four) |
 
 Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfiguration.cs`, and `ChaosConfiguration.cs`. Chaos intervals must be shorter than `MutatePhaseDuration`. Set `IntervalMax` to at most half of `MutatePhaseDuration`.
 

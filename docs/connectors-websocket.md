@@ -290,7 +290,8 @@ The snapshot does not need to be fully up-to-date; it is just a baseline. The bu
   "version": 2,
   "format": "json",
   "state": { /* Complete SubjectUpdate */ },
-  "sequence": 5
+  "sequence": 5,
+  "acknowledgesAppliedUpdates": true
 }
 ```
 
@@ -298,16 +299,21 @@ The snapshot does not need to be fully up-to-date; it is just a baseline. The bu
 
 - `sequence`: Server's current sequence number at snapshot time. Clients initialize their expected next sequence to `sequence + 1`.
 
+- `acknowledgesAppliedUpdates`: Whether the server reports, on this connection's heartbeat, how many of the client's updates it has applied. Set from whether heartbeats are enabled on the server (`HeartbeatInterval > 0`). See [Write Durability](#write-durability) for what a client does with this.
+
 **HeartbeatPayload**
 ```json
 {
-  "sequence": 42
+  "sequence": 42,
+  "appliedThrough": 17
 }
 ```
 
 - `sequence`: Server's current sequence number (last broadcast batch). Does **not** increment the counter; it reflects the current value.
 
-Example wire format: `[4, {"sequence": 42}]`
+- `appliedThrough`: The ordinal of the last update from this connection the server applied, with every earlier update on this connection also applied, or absent when the server does not report it (see `acknowledgesAppliedUpdates` above). A client retires its unacknowledged writes at or below this value; see [Write Durability](#write-durability).
+
+Example wire format: `[4, {"sequence": 42, "appliedThrough": 17}]`
 
 **ErrorPayload**
 ```json
@@ -357,7 +363,7 @@ configuration.ReconnectDelay = TimeSpan.FromSeconds(5);      // Initial delay
 configuration.MaxReconnectDelay = TimeSpan.FromSeconds(60);  // Maximum delay
 ```
 
-On reconnection, the client performs the Hello/Welcome handshake to obtain a state snapshot from the server. The base class then handles loading initial state, replaying buffered updates, and reconcile of queued writes by commit order (see [Connectors: Initialization Sequence](connectors.md#initialization)).
+On reconnection, the client performs the Hello/Welcome handshake to obtain a state snapshot from the server. The base class then handles loading initial state, replaying buffered updates, and reconciling queued writes by commit order (see [Connectors: Initialization Sequence](connectors.md#initialization)), in that order: the reconcile runs after the state load, never before it, so a parked write is judged against what the server just sent rather than replayed over it. This applies equally to the client's own monitor-loop reconnect, not only to the first connection attempt.
 
 The circuit breaker pauses reconnection attempts after repeated failures:
 
@@ -365,6 +371,20 @@ The circuit breaker pauses reconnection attempts after repeated failures:
 configuration.CircuitBreakerFailureThreshold = 5;               // Open after 5 consecutive failures (default)
 configuration.CircuitBreakerCooldown = TimeSpan.FromSeconds(60); // Wait before retrying (default)
 ```
+
+### Write Durability
+
+A write that reaches the socket is not assumed applied. Without this, a client-owned write that reached the server but was lost before the server's apply ran, for example the connection dropping in the gap between the send completing and the apply happening, was gone with no signal on either side: the client's reconnect loaded the server's state, which never held the write, and both ends silently converged on the value the server did have. The client now tracks, per connection, the writes it has sent but not yet had acknowledged, collapsed to one entry per property. On reconnect, whatever is still in that set is re-parked into the write retry queue and judged by the same reconcile that decides send, restore or drop for any other parked write (see [Write Retry Queue](#write-retry-queue) above), which runs after the reconnect's state load rather than before it, so a parked write is judged against what the server just sent rather than replayed blindly over it.
+
+The server reports, on each connection's heartbeat, how many of that connection's updates it has applied, as `appliedThrough` in `HeartbeatPayload`. The client retires an outstanding write once the server reports having applied it, so a write that is genuinely accounted for stops being re-parked at every future reconnect. Whether the server does this at all is advertised once, at connect, as `acknowledgesAppliedUpdates` on `WelcomePayload`, set from whether the server's heartbeat is enabled. When it is not, whether because the server is an older version or because heartbeats are turned off, the client does not track outstanding writes for that connection at all, which is exactly the behaviour a client had before this mechanism existed: a write that reached the socket is treated as done, and nothing re-asserts it after a reconnect.
+
+Parked writes, whether re-parked from an unacknowledged in-flight set or parked for any other reason, are also drained on a timer rather than only when the next local property change happens to trigger a flush. A client that reconnects and then goes fully idle still delivers its outstanding writes within one retry interval, rather than holding them until something else happens to write.
+
+This does not make every write durable, and three limits are worth stating rather than leaving implicit.
+
+- **A reconnecting client can still re-assert a stale write over a newer value another client committed.** In the default configuration, where the server acknowledges applied updates, the reconcile that judges a re-parked write cannot distinguish "the server never received mine" from "someone else wrote a newer value while I was disconnected": both look the same, a value in the loaded state that differs from what the client has parked. When two clients can write the same property, a reconnecting client's stale write can win over the value that arrived while it was away. This is the residual of the mechanism above, not a case it closes, and it is the headline behavioural trade of this design.
+- **An acknowledgement means the apply did not throw and did not drop anything it could identify.** If an update references a subject, a collection item or a dictionary entry the server cannot resolve, that part is dropped and the acknowledgement stalls at the update before it, so the client keeps re-asserting it at every future reconnect until it either succeeds or the target is never created and it never does. A property the receiving subject does not declare at all is different: it is counted by a separate tripwire rather than treated as an unresolved reference, and it does not stall the acknowledgement, so an update carrying an unknown property is still reported as applied even though that one property update was silently skipped.
+- **A source can report itself synchronized before its outstanding writes have been judged.** The transition to a synchronized state happens as part of loading the reconnect's snapshot, before the reconcile that decides what happens to parked writes runs afterwards. A caller waiting for synchronization can therefore observe it complete while writes are still outstanding. The window this leaves is bounded by the reconcile and its follow-up flush rather than open-ended, which is narrower than before, but it is not zero.
 
 ### Sequence Numbers and Gap Detection
 
@@ -382,10 +402,10 @@ The server maintains a monotonically increasing sequence counter that is increme
 - A null or zero sequence is treated as "unassigned" for client-to-server messages which do not carry sequence numbers.
 
 **Recovery flow on gap detection:**
-Gap detected -> receive loop exits -> `RunMonitorLoopAsync` detects connection lost -> `StartBuffering` -> exponential backoff delay -> `ConnectAsync` -> Welcome with full state + new sequence -> `SubjectPropertyWriter.LoadInitialStateAndResumeAsync` calls the source's `LoadInitialStateAsync` to fetch the apply action, runs it under the buffer lock, and replays buffered updates. No new recovery logic is needed; the existing reconnection flow handles everything.
+Gap detected -> receive loop exits -> `RunMonitorLoopAsync` detects connection lost -> `StartBuffering` -> exponential backoff delay -> `ConnectAsync` -> Welcome with full state + new sequence -> `SubjectPropertyWriter.LoadInitialStateAndResumeAsync` calls the source's `LoadInitialStateAsync` to fetch the apply action, runs it under the buffer lock, and replays buffered updates -> the client's outstanding writes are reconciled against the freshly loaded state. See [Write Durability](#write-durability) for what that reconcile does with a write that reached the socket but was never acknowledged.
 
 **Why only server-to-client messages carry sequence numbers:**
-Client-to-server writes are covered by the write retry queue (ring buffer, oldest-dropped-when-full) and flush-before-load on reconnection. The server applies updates synchronously under a lock, so silent drops within the server are impossible.
+Client-to-server writes are covered by the write retry queue (ring buffer, oldest-dropped-when-full), reconciled against the server's state after every reconnect, and by the write-durability mechanism described in [Write Durability](#write-durability) below. The server applies updates under a lock, but that only serializes concurrent applies against each other; it does not make a drop within the apply impossible. If the applier cannot resolve a subject, a collection item or a dictionary entry an update references, it drops that part and logs a warning naming the connection, without throwing. See [Write Durability](#write-durability) for what this means for a client's writes.
 
 ### Heartbeat
 

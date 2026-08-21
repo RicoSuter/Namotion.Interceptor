@@ -35,11 +35,48 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     private int _disposed;
     private int _consecutiveSendFailures;
 
+    private long _receivedUpdateCount;
+    private long _appliedThrough;
+    private int _applyStalled;
+
     public string ConnectionId { get; } = Guid.NewGuid().ToString("N")[..8];
-    
+
     public bool IsConnected => _webSocket.State == WebSocketState.Open;
 
     public bool HasRepeatedSendFailures => Volatile.Read(ref _consecutiveSendFailures) >= 3;
+
+    /// <summary>
+    /// The number of updates received on this connection that were applied, counted only while every
+    /// update so far has applied. A failure stops it for the life of the connection, so the client
+    /// keeps re-asserting from that point and the next reconnect repairs it.
+    /// </summary>
+    public long AppliedThrough => Volatile.Read(ref _appliedThrough);
+
+    /// <summary>Assigns the next ordinal to an inbound update, before it is applied.</summary>
+    public long OnUpdateReceived() => Interlocked.Increment(ref _receivedUpdateCount);
+
+    /// <summary>Advances <see cref="AppliedThrough"/> to <paramref name="ordinal"/>, unless a prior update on this connection failed to apply.</summary>
+    public void OnUpdateApplied(long ordinal)
+    {
+        if (Volatile.Read(ref _applyStalled) == 0)
+        {
+            Volatile.Write(ref _appliedThrough, ordinal);
+        }
+    }
+
+    /// <summary>
+    /// Stops <see cref="AppliedThrough"/> from advancing for the rest of this connection's life, and
+    /// logs the transition once.
+    /// </summary>
+    public void OnApplyFailed()
+    {
+        if (Interlocked.CompareExchange(ref _applyStalled, 1, 0) == 0)
+        {
+            _logger.LogWarning(
+                "Client {ConnectionId}: An update failed to apply, so acknowledgement reporting has stopped for this connection. The client will re-assert its outstanding writes at the next reconnect.",
+                ConnectionId);
+        }
+    }
 
     public WebSocketClientConnection(
         System.Net.WebSockets.WebSocket webSocket,
@@ -99,7 +136,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         }
     }
 
-    public async Task SendWelcomeAsync(SubjectUpdate initialState, long sequence, CancellationToken cancellationToken)
+    public async Task SendWelcomeAsync(SubjectUpdate initialState, long sequence, bool acknowledgesAppliedUpdates, CancellationToken cancellationToken)
     {
         await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -108,7 +145,8 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
             {
                 Format = WebSocketFormat.Json,
                 State = initialState,
-                Sequence = sequence
+                Sequence = sequence,
+                AcknowledgesAppliedUpdates = acknowledgesAppliedUpdates
             };
 
             _sendBuffer!.Clear();
@@ -213,10 +251,13 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         return SendAsync(MessageType.Error, error, trackFailures: false, cancellationToken);
     }
 
-    public Task SendHeartbeatAsync(ReadOnlyMemory<byte> serializedMessage, CancellationToken cancellationToken)
+    public Task SendHeartbeatAsync(HeartbeatPayload heartbeat, CancellationToken cancellationToken)
     {
-        // Skip heartbeats until Welcome has been sent to avoid confusing clients
+        // Skip heartbeats until Welcome has been sent to avoid confusing clients. Checked before
+        // serializing, not after, so a connection that will discard the heartbeat here never pays for
+        // building it.
         if (!_welcomeSent) return Task.CompletedTask;
+        var serializedMessage = _serializer.SerializeMessage(MessageType.Heartbeat, heartbeat);
         return SendPreSerializedAsync(serializedMessage, trackFailures: true, cancellationToken);
     }
 
@@ -349,4 +390,6 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         _cts.Dispose();
     }
 
+    /// <summary>Renders as <see cref="ConnectionId"/>, so logging the origin identifies the connection.</summary>
+    public override string ToString() => ConnectionId;
 }

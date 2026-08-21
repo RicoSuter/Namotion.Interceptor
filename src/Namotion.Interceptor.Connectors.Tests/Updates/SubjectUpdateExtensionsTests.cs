@@ -1787,4 +1787,35 @@ public partial class SubjectUpdateExtensionsTests
             $"This indicates a registry leak during concurrent complete graph replacement " +
             $"(Welcome apply) and structural property writes (MutationEngine).");
     }
+
+    [Fact]
+    public void WhenAnInboundUpdateAddressesAnUnresolvableSubject_ThenTheDropIsLoggedWithItsOrigin()
+    {
+        // Arrange: an update whose subjects entry references an ID the receiver does not have and which
+        // is not marked complete, so the applier cannot create it.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var subject = new CycleTestNode(context) { Name = "Root" };
+        var source = new object();
+        var logger = new Namotion.Interceptor.Connectors.Tests.RecordingLogger();
+        const string missingSubjectId = "missing-subject-id";
+
+        var update = new SubjectUpdate
+        {
+            Root = null,
+            Subjects = new()
+            {
+                [missingSubjectId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "Dropped" }
+                }
+            }
+        };
+
+        // Act
+        subject.ApplySubjectUpdate(update, null, ChangeOrigin.FromSource(source), logger: logger);
+
+        // Assert
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains(missingSubjectId, warning);
+    }
 }

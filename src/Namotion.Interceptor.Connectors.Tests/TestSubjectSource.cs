@@ -38,6 +38,10 @@ public sealed class TestSubjectSource : SubjectSourceBase
     /// <summary>Exposes the protected AbortResume seam for tests, returning whether it cleared the gate.</summary>
     public bool AbortResumeForTest(int resumeEpoch) => AbortResume(resumeEpoch);
 
+    /// <summary>Exposes the protected ParkChangesForRetry seam for tests.</summary>
+    public void ParkChangesForRetryForTest(ReadOnlySpan<SubjectPropertyChange> changes) =>
+        ParkChangesForRetry(changes);
+
     public int WriteBatchSizeOverride { get; init; }
 
     public override int WriteBatchSize => WriteBatchSizeOverride;

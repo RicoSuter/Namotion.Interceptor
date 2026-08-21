@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Threading;
@@ -46,6 +47,44 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     // A receive loop may finish while its replacement connects. Keep owner publication and both
     // liveness transitions ordered without putting a lock on the message receive path.
     private readonly Lock _receiveLoopLivenessLock = new();
+
+    // Changes handed to SendAsync on the current connection, collapsed per property. A successful send
+    // is not an acknowledgement, so these are re-parked on the next connect, where the reconcile decides
+    // whether each is sent, restored or dropped. Guarded by its own lock rather than by
+    // _connectionLock, which a send holds across an untimed SendAsync: the receive loop retires from
+    // here and must not be able to wedge behind a stalled send.
+    private readonly Lock _inFlightLock = new();
+    private readonly Dictionary<PropertyReference, (long Ordinal, SubjectPropertyChange Change)> _inFlight = new(PropertyReference.Comparer);
+    private long _sendOrdinal;
+
+    // Read by WriteChangesAsync under _connectionLock, the same section that reads _webSocket, and by
+    // the receive loop's heartbeat handling on its own thread, so it is volatile rather than merely
+    // lock-guarded. Written only in ConnectCoreAsync, which every connection attempt passes through
+    // before the socket it sets is usable, so a write always precedes any read that could see it.
+    private volatile bool _acknowledgesAppliedUpdates;
+
+    // Guards the once-per-change warning below. Read and written only inside ConnectCoreAsync, which
+    // _connectionLock serializes across every connection attempt, so a plain field is enough.
+    private bool? _lastLoggedAcknowledgesAppliedUpdates;
+
+    // Whether an applied-through value has actually been observed on the connection that is about to
+    // end, as opposed to merely promised by its Welcome. The server's heartbeat interval has no upper
+    // bound, so a connection can claim acknowledgement and still reconnect before ever reporting one;
+    // keying re-park on the promise alone would then re-park, reconcile's send branch would re-record,
+    // and the loop never closes. Read and reset together in ReParkInFlightChanges, the one place every
+    // connection attempt passes through, and set from the receive loop's own thread, so it is volatile.
+    private volatile bool _appliedThroughObservedOnCurrentConnection;
+
+    // Whether the connection about to end was itself lost to its own receive timeout, as opposed to a
+    // transport drop, a forced kill, a server restart or a graceful close. Claiming acknowledgement and
+    // observing nothing is expected for any connection that simply did not live long enough to see a
+    // heartbeat, on a perfectly healthy acknowledging server, so that alone cannot tell a genuinely
+    // non-acknowledging server apart from a short-lived healthy one. A connection that instead idled
+    // out its own receive timeout without ever hearing from the server is the one case where no
+    // heartbeat could possibly have arrived within its lifetime, which is what actually narrows the
+    // discard in ReParkInFlightChanges to its intended case. Read and reset together with the field
+    // above, and set from the receive loop's own thread, so it is volatile.
+    private volatile bool _receiveTimedOutOnCurrentConnection;
 
     private int _disposed;
 
@@ -139,6 +178,13 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         await RetireReceiveLoopCommitsAsync().ConfigureAwait(false);
 
         var receiveCts = _receiveCts;
+        var webSocket = _webSocket;
+
+        // Gated on there being anything left to tear down here, not merely on the in-flight count: the
+        // belt-and-braces call from DisposeAsync finds both fields already null and would otherwise
+        // repeat this log for the same writes a prior call already reported.
+        var hadTeardownWork = receiveCts is not null || webSocket is not null;
+
         if (receiveCts is not null)
         {
             try { await receiveCts.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
@@ -153,7 +199,23 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             _receiveCts = null;
         }
 
-        var webSocket = _webSocket;
+        if (hadTeardownWork)
+        {
+            // Read after the receive loop has exited, not before: a retire that lands on the loop's
+            // own thread during the wait above must be reflected here, or this overstates what
+            // genuinely survived teardown.
+            var outstanding = InFlightCount;
+            if (outstanding > 0)
+            {
+                // Not counted as a drop: these reached the socket and may already have been applied, so
+                // treating them as lost here would inflate the drop metric on every clean shutdown.
+                _logger.LogWarning(
+                    "Ending this connection with {Count} write(s) that reached the socket but were never confirmed applied. " +
+                    "They are held in memory and will be re-asserted only if the source reconnects.",
+                    outstanding);
+            }
+        }
+
         if (webSocket is not null)
         {
             try { webSocket.Abort(); } catch { /* ignore */ }
@@ -235,6 +297,14 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             oldCts.Dispose();
         }
 
+        // Every path that establishes a connection passes here, so this is the single re-park site.
+        // The resume gate holds these in the queue until the reconcile has judged them against the
+        // state the new connection is about to deliver. Placed after the previous receive loop has
+        // been drained above, not before: evidence the loop's own thread sets while that wait was in
+        // flight must be observed here, or a heartbeat that lands during teardown would be lost and
+        // push this toward a wrongful discard.
+        ReParkInFlightChanges();
+
         // Now safe to dispose socket
         _webSocket?.Dispose();
 
@@ -305,6 +375,11 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             _initialState = welcome.State;
             sequenceTracker.InitializeFromWelcome(welcome.Sequence);
 
+            // Stored for this connection attempt: read again on every WriteChangesAsync call while this
+            // connection lasts, and re-read here on every reconnect since a peer can change its mind
+            // between connections (a server restarted with heartbeats toggled).
+            RecordAcknowledgementMode(welcome.AcknowledgesAppliedUpdates);
+
             Volatile.Write(ref _receiveLoopCommitLease, receiveLoopCommitLease);
             PublishReceiveLoopAndMarkOperational(receiveLoopCompletion);
             _logger.LogInformation("Connected to WebSocket server (sequence: {Sequence})", welcome.Sequence);
@@ -329,6 +404,136 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
     }
 
+    /// <summary>
+    /// Stores whether the server this connection just reached acknowledges applied updates on it, and
+    /// warns once when the no-acknowledgement mode is entered or re-entered.
+    /// </summary>
+    /// <param name="acknowledgesAppliedUpdates">The capability the Welcome from this connect reported.</param>
+    /// <remarks>
+    /// Logged at most once per change, not once per reconnect: with heartbeats disabled the receive
+    /// timeout treats silence as connection loss, so an idle client reconnects roughly once a minute,
+    /// and a per-reconnect warning here would fire forever at that cadence. Entering the acknowledging
+    /// mode is not itself warned about, since it is the safe side and needs no operator attention; only
+    /// the transition into, or back into, the mode where losses cannot be repaired is worth a warning.
+    /// </remarks>
+    private void RecordAcknowledgementMode(bool acknowledgesAppliedUpdates)
+    {
+        if (!acknowledgesAppliedUpdates && _lastLoggedAcknowledgesAppliedUpdates != false)
+        {
+            _logger.LogWarning(
+                "Server does not acknowledge applied writes on this connection. Writes that reach the " +
+                "socket but are not confirmed applied before a disconnect will not be re-asserted after " +
+                "the next reconnect.");
+        }
+
+        _lastLoggedAcknowledgesAppliedUpdates = acknowledgesAppliedUpdates;
+        _acknowledgesAppliedUpdates = acknowledgesAppliedUpdates;
+    }
+
+    private void ReParkInFlightChanges()
+    {
+        // Read for the connection that is ending and reset for the one about to start, in the same
+        // place: every path that establishes a connection passes through here first, so this is the one
+        // spot a fresh connection's evidence always starts clean, whether or not anything was in flight
+        // to re-park below.
+        var appliedThroughObservedOnEndingConnection = _appliedThroughObservedOnCurrentConnection;
+        var receiveTimedOutOnEndingConnection = _receiveTimedOutOnCurrentConnection;
+        _appliedThroughObservedOnCurrentConnection = false;
+        _receiveTimedOutOnCurrentConnection = false;
+
+        SubjectPropertyChange[] outstanding;
+        lock (_inFlightLock)
+        {
+            if (_inFlight.Count == 0)
+            {
+                _sendOrdinal = 0;
+                return;
+            }
+
+            outstanding = new SubjectPropertyChange[_inFlight.Count];
+            var index = 0;
+            foreach (var entry in _inFlight.Values)
+            {
+                outstanding[index++] = entry.Change;
+            }
+
+            _inFlight.Clear();
+            _sendOrdinal = 0;
+        }
+
+        if (_acknowledgesAppliedUpdates && !appliedThroughObservedOnEndingConnection && receiveTimedOutOnEndingConnection)
+        {
+            // The server claimed acknowledgement at connect but the ending connection never actually
+            // reported an applied-through value, and it ended because its own receive timeout expired
+            // rather than for any other reason. That combination is the one case where no heartbeat
+            // could possibly have arrived within the connection's lifetime: a transport drop, a forced
+            // kill, a server restart or a graceful close says nothing about whether the server would
+            // eventually have reported one, and treating those the same as a genuine non-acknowledging
+            // server would discard the in-flight set of every connection shorter than the heartbeat
+            // interval, on an otherwise healthy server. Discarded rather than re-parked, since nothing
+            // here could ever have retired them either.
+            Metrics.OutboundRetries.AddDropped(outstanding.Length);
+            _logger.LogWarning(
+                "Discarded {Count} write(s) that reached the socket but were never confirmed applied: " +
+                "the server claimed applied-update acknowledgement but the connection idled out its own " +
+                "receive timeout ({ReceiveTimeout}) without ever reporting an applied-through value. This " +
+                "most likely means the server's heartbeat interval is at or above this client's receive " +
+                "timeout.",
+                outstanding.Length, _configuration.ReceiveTimeout);
+            return;
+        }
+
+        _logger.LogInformation(
+            "Re-asserting {Count} write(s) that reached the socket but were never acknowledged.", outstanding.Length);
+
+        // Inserted at the front: these predate everything the gate has already parked during this
+        // outage, so appending them at the back would rank them as the newest entries and let the
+        // ring buffer evict the genuinely newer outage writes ahead of them.
+        //
+        // outstanding is already one entry per property by construction, so ParkChangesForRetry's own
+        // collapse is a no-op here; paying for it again is cheaper than a second entry point to skip it.
+        ParkChangesForRetry(outstanding);
+    }
+
+    /// <summary>
+    /// Retires in-flight entries the server has reported as applied on <paramref name="connection"/>.
+    /// </summary>
+    /// <remarks>
+    /// The connection identity is checked inside <see cref="_inFlightLock"/>, not before it.
+    /// <see cref="ConnectCoreAsync"/> waits only a bounded time for the previous receive loop to
+    /// exit, so a loop suspended between reading the connection and taking the lock could otherwise
+    /// pass the check against the old connection, then, once resumed, remove an entry the new
+    /// connection already recorded. Checking under the lock is sufficient rather than merely
+    /// narrower: <see cref="RecordInFlight"/> and <see cref="ReParkInFlightChanges"/> both run under
+    /// <c>_connectionLock</c>, which <see cref="ConnectCoreAsync"/> holds continuously from the map
+    /// clear through the new socket's assignment, so while <see cref="_inFlightLock"/> is held, a
+    /// connection field matching <paramref name="connection"/> implies every remaining entry belongs
+    /// to it. Socket instances are never reused, so there is no ABA problem.
+    /// </remarks>
+    internal void RetireInFlightThrough(long appliedThrough, System.Net.WebSockets.WebSocket connection)
+    {
+        if (appliedThrough <= 0)
+        {
+            return;
+        }
+
+        lock (_inFlightLock)
+        {
+            if (!ReferenceEquals(_webSocket, connection) || _inFlight.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var (property, entry) in _inFlight)
+            {
+                if (entry.Ordinal <= appliedThrough)
+                {
+                    _inFlight.Remove(property);
+                }
+            }
+        }
+    }
+
     /// <inheritdoc />
     public override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
@@ -340,7 +545,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         return Task.FromResult<Action?>(() =>
         {
             var factory = _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance;
-            _subject.ApplySubjectUpdate(_initialState, factory, ChangeOrigin.FromSource(this));
+            _subject.ApplySubjectUpdate(_initialState, factory, ChangeOrigin.FromSource(this), logger: _logger);
 
             // Claim ownership of all properties matching the path provider
             ClaimPropertyOwnership();
@@ -409,6 +614,11 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                 return WriteResult.Failure(changes, new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
             }
 
+            // A batch that predates a connection replacement is not rejected here: the retry-queue path
+            // parks it under a gate that is now level-triggered on WriteRetryQueue.FlushAsync's own
+            // batch loop (see WriteRetryQueue.FlushAsync and SubjectSourceBase.BeginResume), and a
+            // transactional commit, which bypasses that path, is meant to land on whatever connection is
+            // current once it gets the lock.
             var webSocket = _webSocket;
             if (webSocket?.State != WebSocketState.Open)
             {
@@ -420,7 +630,58 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, update);
             _logger.LogDebug("Sending {ByteCount} bytes ({SubjectCount} subjects) to server",
                 _sendBuffer.WrittenCount, update.Subjects.Count);
-            await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+
+            if (_acknowledgesAppliedUpdates)
+            {
+                // Reserved before the send, not assigned after it: see ReserveSendOrdinal's remarks for why.
+                var sendOrdinal = ReserveSendOrdinal();
+                try
+                {
+                    // A no-op in production; a test can throw from this seam to force the send to fail
+                    // without touching the transport, exercising the same catch below that a genuine
+                    // send failure would.
+                    BeforeReservedSendAttempt?.Invoke();
+                    await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // A failed send after the ordinal was reserved would otherwise leave a permanent
+                    // gap: nothing above it can ever retire, so it is re-parked at every reconnect and
+                    // re-asserts a stale value forever. Abort rather than returning a failure on a
+                    // socket that might still be usable, so the reconnect this forces resets the ordinal
+                    // and the gap cannot persist. This abort is the fix for that gap, not a redundant
+                    // belt-and-braces call; do not remove it on the assumption the retry path alone
+                    // covers a failed send here.
+                    //
+                    // Filtered to non-cancellation failures: a cancellation from the caller, most likely
+                    // the teardown flush, must not abort a healthy socket, since aborting skips the close
+                    // handshake and downgrades a graceful stop into one.
+                    webSocket.Abort();
+                    throw;
+                }
+                catch (Exception)
+                {
+                    // The send was cancelled by the caller rather than genuinely failing, so the socket
+                    // above is left open and there will be no reconnect to reset the ordinal. Roll the
+                    // reservation back instead: nothing reached the wire, the connection lock is held for
+                    // this entire method, and the ordinal is only ever touched under it, so no other send
+                    // can have reserved in between and releasing it here is safe.
+                    ReleaseSendOrdinal(sendOrdinal);
+                    throw;
+                }
+
+                RecordInFlight(sendOrdinal, changes.Span);
+            }
+            else
+            {
+                // No acknowledgement on this connection: nothing would ever retire an entry recorded
+                // here, and a re-parked entry that is re-sent flows back through this same method, so
+                // recording anyway would grow the set across every reconnect for the life of the source.
+                // Send without reserving an ordinal or recording, so the set stays empty and the re-park
+                // on the next connect finds nothing to carry over.
+                await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+            }
+
             MaybeShrinkSendBuffer();
             _logger.LogDebug("Sent update successfully");
             return WriteResult.Success;
@@ -439,6 +700,65 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             catch (ObjectDisposedException)
             {
                 // Lock was disposed during operation
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reserves the ordinal for the send that is about to happen, before it happens.
+    /// </summary>
+    /// <remarks>
+    /// Reserving ahead of the send rather than assigning after it means a send that reaches the peer
+    /// while, for whatever reason, the matching <see cref="RecordInFlight"/> call is skipped can only
+    /// leave the client's ordinal ahead of the server's count, never behind it. Behind would retire an
+    /// in-flight entry the server never actually received, which is the loss this field exists to
+    /// prevent. Ahead is not the safe alternative it first looks like: a send that fails after this
+    /// reserves an ordinal leaves a gap that nothing above it can ever retire, so those entries are
+    /// re-parked at every reconnect and re-assert stale values forever, which is a permanent loss of a
+    /// different shape rather than a safe one. What actually closes that gap is <see cref="WriteChangesAsync"/>,
+    /// which either aborts the connection so the reconnect that follows resets the ordinal to zero, for
+    /// a genuine send failure, or rolls the reservation back through <see cref="ReleaseSendOrdinal"/>
+    /// on the still-open connection, for a send the caller cancelled.
+    /// </remarks>
+    private long ReserveSendOrdinal()
+    {
+        lock (_inFlightLock)
+        {
+            return ++_sendOrdinal;
+        }
+    }
+
+    /// <summary>
+    /// Rolls back a reservation from <see cref="ReserveSendOrdinal"/> whose send never reached the
+    /// wire, so a cancelled send does not leave the client permanently one ordinal ahead of the server
+    /// for the life of the connection.
+    /// </summary>
+    private void ReleaseSendOrdinal(long ordinal)
+    {
+        lock (_inFlightLock)
+        {
+            if (_sendOrdinal == ordinal)
+            {
+                _sendOrdinal--;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Records changes that reached the socket, keyed per property so a later send for the same
+    /// property replaces the earlier one.
+    /// </summary>
+    /// <remarks>
+    /// Called under the connection lock, so the ordinal matches the order the server receives the
+    /// messages in. The count the server reports back is what retires these.
+    /// </remarks>
+    private void RecordInFlight(long ordinal, ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        lock (_inFlightLock)
+        {
+            foreach (var change in changes)
+            {
+                _inFlight[change.Property] = (ordinal, change);
             }
         }
     }
@@ -523,6 +843,21 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                                         heartbeat.Sequence, sequenceTracker.ExpectedNextSequence);
                                     return; // Exit receive loop -> triggers reconnection
                                 }
+
+                                if (heartbeat.AppliedThrough is { } appliedThrough)
+                                {
+                                    // Only counts as evidence for this loop's own connection: a suspended
+                                    // zombie loop whose connection has already been replaced must not make
+                                    // the replacement's evidence look observed on its behalf.
+                                    if (ReferenceEquals(_webSocket, webSocket))
+                                    {
+                                        _appliedThroughObservedOnCurrentConnection = true;
+                                    }
+
+                                    // The loop's own socket, not the field: a suspended zombie loop must
+                                    // not retire against the connection that replaced it.
+                                    RetireInFlightThrough(appliedThrough, webSocket);
+                                }
                                 break;
 
                             case MessageType.Error:
@@ -544,10 +879,30 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                     // Normal shutdown
                     break;
                 }
+                catch (OperationCanceledException) when (timeoutCts.Token.IsCancellationRequested)
+                {
+                    // Genuinely this receive's own timeout: filtered on timeoutCts specifically rather
+                    // than on the exception type alone, because an external abort, such as a fault
+                    // injection, a failed reserved send or a force-kill, also surfaces from a pending
+                    // receive as a bare OperationCanceledException tied to neither cancellationToken nor
+                    // timeoutCts. Treating that as a timeout here would be exactly the false positive
+                    // this flag exists to avoid. Only counts as this connection's own timeout, not a
+                    // zombie loop's: see the same guard on the applied-through flag above.
+                    if (ReferenceEquals(_webSocket, webSocket))
+                    {
+                        _receiveTimedOutOnCurrentConnection = true;
+                    }
+
+                    _logger.LogWarning("Receive timeout exceeded ({Timeout}), connection considered lost", _configuration.ReceiveTimeout);
+                    break;
+                }
                 catch (OperationCanceledException)
                 {
-                    // Receive timeout - connection considered lost
-                    _logger.LogWarning("Receive timeout exceeded ({Timeout}), connection considered lost", _configuration.ReceiveTimeout);
+                    // Cancelled for a reason that is neither this loop's own shutdown nor its own receive
+                    // timeout, most likely the socket having been aborted out from under a pending
+                    // receive. Connection considered lost the same as the other two, but not counted as a
+                    // timeout.
+                    _logger.LogWarning("Connection cancelled unexpectedly, considered lost");
                     break;
                 }
                 catch (Exception ex)
@@ -621,7 +976,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         if (propertyWriter is null) return;
 
         propertyWriter.Write(
-            (update, subject: _subject, factory: _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance, source: this, commitLease),
+            (update, subject: _subject, factory: _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance, source: this, commitLease, logger: _logger),
             static state =>
             {
                 if (!state.commitLease.TryAcquireCommit())
@@ -634,7 +989,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                     state.subject.ApplySubjectUpdate(
                         state.update,
                         state.factory,
-                        ChangeOrigin.FromSource(state.source));
+                        ChangeOrigin.FromSource(state.source),
+                        logger: state.logger);
                 }
                 finally
                 {
@@ -692,6 +1048,13 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                     if (forceReconnect)
                     {
                         forceReconnect = false;
+
+                        // Same backoff the drop path below takes before its own reconnect: without it, a
+                        // reconnect on this path queues for the connection lock with no delay at all, so a
+                        // batch would only have to be preempted by microseconds rather than a full
+                        // reconnect delay to land on a connection that is about to be replaced.
+                        await Task.Delay(reconnectDelay, linkedToken).ConfigureAwait(false);
+
                         reconnectDelay = await ReconnectAndResumeAsync(
                             "WebSocket reconnected after force-kill", resumeEpoch, reconnectDelay, maxDelay, linkedToken).ConfigureAwait(false);
                         return;
@@ -888,4 +1251,24 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     internal Action? AfterReceiveLoopCommitDrain { get; set; }
 
     internal Action? BeforeReconnectInitialStateLoad { get; set; }
+
+    /// <summary>
+    /// Fires in <see cref="WriteChangesAsync"/> right after an ordinal is reserved for the send that is
+    /// about to happen, inside the same try that guards the send itself, so a test can throw from this
+    /// seam to force that specific send to fail without depending on whatever a real transport happens
+    /// to do when a send fails, and without touching the socket directly.
+    /// </summary>
+    internal Action? BeforeReservedSendAttempt { get; set; }
+
+    /// <summary>Number of writes that reached the socket on the current connection but are not yet retired.</summary>
+    internal int InFlightCount
+    {
+        get
+        {
+            lock (_inFlightLock)
+            {
+                return _inFlight.Count;
+            }
+        }
+    }
 }

@@ -143,8 +143,11 @@ public sealed class WebSocketSubjectHandler
                 initialState = SubjectUpdate.CreateCompleteUpdate(_subject, _processors);
             }
 
-            // Send Welcome (flushes queued updates under _sendLock)
-            await connection.SendWelcomeAsync(initialState, welcomeSequence, stoppingToken).ConfigureAwait(false);
+            // Send Welcome (flushes queued updates under _sendLock). The acknowledgement capability is
+            // set from whether heartbeats are enabled: with them off, this connection never gets a
+            // heartbeat to carry an applied-through value on, so promising one would be a lie.
+            var acknowledgesAppliedUpdates = _configuration.HeartbeatInterval > TimeSpan.Zero;
+            await connection.SendWelcomeAsync(initialState, welcomeSequence, acknowledgesAppliedUpdates, stoppingToken).ConfigureAwait(false);
 
             _logger.LogInformation("Client {ConnectionId}: Welcome sent, waiting for updates...", connection.ConnectionId);
 
@@ -208,17 +211,34 @@ public sealed class WebSocketSubjectHandler
                 break;
             }
 
+            var ordinal = connection.OnUpdateReceived();
+
             try
             {
                 var factory = _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance;
                 // The lock serializes update application so concurrent client updates apply one at a time.
+                bool appliedEverything;
                 lock (_applyUpdateLock)
                 {
-                    _subject.ApplySubjectUpdate(update, factory, ChangeOrigin.FromSource(connection));
+                    appliedEverything = _subject.ApplySubjectUpdate(update, factory, ChangeOrigin.FromSource(connection), logger: _logger);
+                }
+
+                if (appliedEverything)
+                {
+                    connection.OnUpdateApplied(ordinal);
+                }
+                else
+                {
+                    // A dropped subject, collection item or dictionary entry is not an exception, but the
+                    // update was not fully applied either: the acknowledgement count must not advance past
+                    // it, or the client would retire a write whose effect never landed. The drop itself is
+                    // already logged by the apply.
+                    connection.OnApplyFailed();
                 }
             }
             catch (Exception ex)
             {
+                connection.OnApplyFailed();
                 _logger.LogError(ex, "Error applying update from client {ConnectionId}", connection.ConnectionId);
                 await connection.SendErrorAsync(new ErrorPayload
                 {
@@ -349,15 +369,25 @@ public sealed class WebSocketSubjectHandler
     {
         if (_connections.IsEmpty) return;
 
-        var heartbeat = new HeartbeatPayload
-        {
-            Sequence = Volatile.Read(ref _sequence)
-        };
+        var sequence = Volatile.Read(ref _sequence);
 
-        var serializedMessage = _serializer.SerializeMessage(MessageType.Heartbeat, heartbeat);
-
+        // Serialized per connection, because the applied-through value is per connection. The cost is
+        // one small payload per connection per heartbeat interval, bounded by MaxConnections.
         await BroadcastToAllAsync(
-            connection => connection.SendHeartbeatAsync(serializedMessage, cancellationToken),
+            connection =>
+            {
+                // Sampled at fan-out time, per connection: a heartbeat delayed past the broadcast
+                // timeout can therefore arrive carrying a lower value than one already delivered. That
+                // is harmless because a retire only removes entries at or below the value it carries
+                // and removing is idempotent, so an out-of-order or stale heartbeat never re-adds one.
+                var heartbeat = new HeartbeatPayload
+                {
+                    Sequence = sequence,
+                    AppliedThrough = connection.AppliedThrough
+                };
+
+                return connection.SendHeartbeatAsync(heartbeat, cancellationToken);
+            },
             cancellationToken).ConfigureAwait(false);
     }
 

@@ -3,6 +3,8 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Connectors.Monitoring;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -66,6 +68,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
+    // Cached rather than allocated per call: passed to WriteRetryQueue.FlushAsync from both
+    // connected-phase call sites as the level-triggered re-check on its batch loop.
+    private readonly Func<bool> _isResumeInProgress;
+
     protected SubjectSourceBase(
         IInterceptorSubjectContext context,
         ILogger logger,
@@ -97,6 +103,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
         _context = context;
         _logger = logger;
+        _isResumeInProgress = () => Volatile.Read(ref _resumeInProgress) == 1;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
         // Validated here and not only in the processor, which a source builds after connecting: a bad
@@ -450,7 +457,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
 
         // First flush any queued changes
-        var succeeded = await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
+        var succeeded = await WriteRetryQueue.FlushAsync(this, cancellationToken, _isResumeInProgress).ConfigureAwait(false);
         if (!succeeded)
         {
             WriteRetryQueue.Enqueue(changes);
@@ -506,7 +513,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     continue;
                 }
 
-                await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
+                await WriteRetryQueue.FlushAsync(this, cancellationToken, _isResumeInProgress).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -579,7 +586,12 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             return;
         }
 
+        // Resolved once rather than per change: the branch below that needs it is most of the
+        // subscription, on a drain that runs at every connect, reconnect and teardown.
+        var registry = _context.TryGetService<ISubjectRegistry>();
+
         List<SubjectPropertyChange>? owned = null;
+        var detachedDiscards = 0;
         while (subscription.TryDequeueImmediate(out var change))
         {
             if (ReferenceEquals(change.Origin.Source, this) && !ChangeDeliveryFilter.NeedsWriteBack(in change))
@@ -592,7 +604,16 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
             if (!(change.Property.TryGetSource(out var source) && source == this))
             {
-                continue; // not owned by this source
+                // The same branch discards changes this source never owned, which is most of the
+                // subscription, so only the detached case is reported: a subject that left the graph
+                // between capture and drain had its source cleared, which is indistinguishable from
+                // never having been owned unless the subject itself is checked.
+                if (registry?.TryGetRegisteredSubject(change.Property.Subject) is null)
+                {
+                    detachedDiscards++;
+                }
+
+                continue;
             }
 
             (owned ??= []).Add(change);
@@ -607,6 +628,40 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             // to the number of writes.
             WriteRetryQueue.Enqueue(CollapsePerProperty(owned.ToArray()).ToArray());
         }
+
+        if (detachedDiscards > 0)
+        {
+            _logger.LogWarning(
+                "Discarded {Count} captured write(s) whose subject has detached from the graph, so they cannot be written to the source.",
+                detachedDiscards);
+        }
+    }
+
+    /// <summary>
+    /// Parks changes in the write retry queue, collapsed to one entry per property, so that the next
+    /// reconcile decides whether each is sent, restored or dropped.
+    /// </summary>
+    /// <param name="changes">The changes to park.</param>
+    /// <remarks>
+    /// For a connector that has to re-assert writes it sent but cannot prove were applied. Collapsing
+    /// first is what keeps the occupancy proportional to the number of properties written rather than
+    /// to the number of writes. Does nothing when the retry queue is disabled.
+    /// <para>
+    /// Parked entries are inserted at the front of the queue because they are always older than
+    /// anything already queued, such as a re-park after a reconnect: appending them at the back would
+    /// rank them as the newest entries, and the ring buffer would then evict the genuinely newer ones
+    /// ahead of them once it is over capacity.
+    /// </para>
+    /// </remarks>
+    protected void ParkChangesForRetry(ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        if (WriteRetryQueue is null || changes.Length == 0)
+        {
+            return;
+        }
+
+        var collapsed = CollapsePerProperty(changes.ToArray()).ToArray();
+        WriteRetryQueue.EnqueueAtFront(collapsed);
     }
 
     /// <summary>

@@ -192,6 +192,40 @@ public class WriteRetryQueueTests
     }
 
     [Fact]
+    public async Task WhenEnqueueAtFrontOverflowsCapacity_ThenTheFrontEntriesAreDroppedFirstRatherThanTheBackOnes()
+    {
+        // Arrange: the queue already holds writes the gate parked during an outage. EnqueueAtFront then
+        // stands in for a reconnect's re-park, whose entries predate every one of those outage writes.
+        var queue = new WriteRetryQueue(5, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = new Mock<ISubjectSource>();
+
+        SubjectPropertyChange[]? writtenChanges = null;
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                writtenChanges = changes.ToArray();
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        // Act
+        queue.Enqueue(CreateChanges(3, startId: 10));       // outage writes 10, 11, 12
+        queue.EnqueueAtFront(CreateChanges(4, startId: 0)); // older in-flight entries 0, 1, 2, 3
+
+        // Assert - capacity 5 keeps all three outage writes and drops the two oldest in-flight entries,
+        // the reverse of what appending at the back (ranking the in-flight entries as newest) would do.
+        Assert.Equal(5, queue.PendingWriteCount);
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        Assert.NotNull(writtenChanges);
+        Assert.Equal(5, writtenChanges.Length);
+        Assert.Equal(2, writtenChanges[0].GetOldValue<int>());
+        Assert.Equal(3, writtenChanges[1].GetOldValue<int>());
+        Assert.Equal(10, writtenChanges[2].GetOldValue<int>());
+        Assert.Equal(11, writtenChanges[3].GetOldValue<int>());
+        Assert.Equal(12, writtenChanges[4].GetOldValue<int>());
+    }
+
+    [Fact]
     public void WhenMaxQueueSizeIsZero_ThenWritesAreDropped()
     {
         // Arrange

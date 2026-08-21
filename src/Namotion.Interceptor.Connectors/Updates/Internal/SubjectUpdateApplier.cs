@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
@@ -23,12 +24,17 @@ internal static class SubjectUpdateApplier
     /// <summary>Tripwire: inbound properties skipped because the subject does not declare them.</summary>
     internal static long UnknownInboundPropertyCount;
 
-    public static void ApplyUpdate(
+    /// <returns>
+    /// <c>true</c> if every part of the update applied; <c>false</c> if a subject, collection item or
+    /// dictionary entry the update referenced could not be resolved and was dropped.
+    /// </returns>
+    public static bool ApplyUpdate(
         IInterceptorSubject subject,
         SubjectUpdate update,
         ISubjectFactory subjectFactory,
         ChangeOrigin origin,
-        Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
+        Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null,
+        ILogger? logger = null)
     {
         var context = ContextPool.Rent();
         try
@@ -113,6 +119,7 @@ internal static class SubjectUpdateApplier
                             // registry: drop the update. The next update carrying the subject's
                             // complete state converges it. The counter is the production tripwire.
                             Interlocked.Increment(ref DroppedInboundSubjectUpdateCount);
+                            context.RecordDroppedSubject(subjectId);
                         }
                     }
                 }
@@ -120,6 +127,17 @@ internal static class SubjectUpdateApplier
                 // The retry pass can root further subjects, which queue attribute updates of their own.
                 ApplyDeferredAttributeUpdates(context, appliedAttributeUpdates);
             }
+
+            var droppedAnything = context.DroppedSubjectIds is { Count: > 0 };
+            if (logger is not null && droppedAnything)
+            {
+                var dropped = context.DroppedSubjectIds!;
+                logger.LogWarning(
+                    "Dropped {Count} inbound subject update(s) from {Origin} because their subjects could not be resolved: {SubjectIds}.",
+                    dropped.Count, origin.Source ?? (object)"local", string.Join(", ", dropped));
+            }
+
+            return !droppedAnything;
         }
         finally
         {
@@ -342,6 +360,7 @@ internal static class SubjectUpdateApplier
             // mutation removed it). Skip: the next update carrying its complete state heals it.
             // The reference is lost until then, so count it as a drop.
             Interlocked.Increment(ref DroppedInboundSubjectUpdateCount);
+            context.RecordDroppedSubject(propertyUpdate.Id);
             return;
         }
 

@@ -14,6 +14,7 @@ internal sealed class SubjectUpdateApplyContext
     private readonly Dictionary<string, IInterceptorSubject> _preResolvedSubjects = [];
     private readonly Dictionary<string, IInterceptorSubject> _boundSubjects = [];
     private readonly List<(IInterceptorSubject Subject, Dictionary<string, SubjectPropertyUpdate> Properties)> _deferredAttributeUpdates = [];
+    private HashSet<string>? _droppedSubjectIds;
 
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = null!;
     public ISubjectFactory SubjectFactory { get; private set; } = null!;
@@ -161,6 +162,22 @@ internal sealed class SubjectUpdateApplyContext
         => _processedSubjectIds.Add(subjectId);
 
     /// <summary>
+    /// The subject IDs this apply could not resolve. Distinct, because one logically missing subject
+    /// is reached from more than one site and a caller wants the subjects, not the site count.
+    /// </summary>
+    public IReadOnlyCollection<string>? DroppedSubjectIds => _droppedSubjectIds;
+
+    /// <summary>
+    /// Records that <paramref name="subjectId"/> could not be resolved and its update was dropped.
+    /// </summary>
+    public void RecordDroppedSubject(string? subjectId)
+    {
+        var id = subjectId ?? "(no id)";
+        _droppedSubjectIds ??= [];
+        _droppedSubjectIds.Add(id);
+    }
+
+    /// <summary>
     /// The attribute updates queued for subjects populated before they entered the graph, in the
     /// order they were queued. Attribute names resolve through the registry, which only knows a
     /// subject once it is rooted, so these are applied after all structural writes have landed.
@@ -184,6 +201,7 @@ internal sealed class SubjectUpdateApplyContext
         _preResolvedSubjects.Clear();
         _boundSubjects.Clear();
         _deferredAttributeUpdates.Clear();
+        _droppedSubjectIds?.Clear();
         _completeSubjectIds = null;
         Subjects = null!;
         SubjectFactory = null!;

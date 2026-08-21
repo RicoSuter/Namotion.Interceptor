@@ -1,20 +1,25 @@
 using System;
+using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.WebSocket.Client;
 using Namotion.Interceptor.WebSocket.Internal;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
+using Namotion.Interceptor.WebSocket.Server;
 using Namotion.Interceptor.WebSocket.Tests.Integration;
 using Xunit;
 using Xunit.Abstractions;
@@ -682,21 +687,501 @@ public class WebSocketClientLivenessTests
         }
     }
 
-    private async Task<WebSocketTestServer<TestRoot>> StartServerAsync(int port)
+    [Fact]
+    public async Task WhenRetireIsCalledWithASocketThatIsNotTheCurrentOne_ThenNothingIsRemoved()
+    {
+        // Arrange - a single write in flight on the current connection.
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = await StartServerAsync(portLease.Port);
+        await using var source = CreateClientSource(portLease.Port);
+        await source.StartAsync(CancellationToken.None);
+
+        var clientRoot = (TestRoot)source.RootSubject;
+
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+
+            clientRoot.Name = "InFlight";
+            await AsyncTestHelpers.WaitUntilAsync(() => source.InFlightCount > 0);
+
+            // Act - a retire call quoting a socket that is not the current connection, with an
+            // applied-through value larger than anything the current connection could ever report.
+            using var mismatchedSocket = new ClientWebSocket();
+            source.RetireInFlightThrough(long.MaxValue, mismatchedSocket);
+
+            // Assert - the identity check inside the lock rejects it by construction, not by timing.
+            Assert.Equal(1, source.InFlightCount);
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheSourceStopsWithAnUnacknowledgedInFlightWrite_ThenItIsNotCountedAsADrop()
+    {
+        // Arrange - the heartbeat interval is left long enough that none fires during the test, so the
+        // deliberate retire it would otherwise carry never runs and a write over a connection that stays
+        // healthy remains in flight until the source itself is stopped. Heartbeats still have to be
+        // enabled on the server, or the client never records the write as in flight at all: with
+        // acknowledgement unavailable the client does not maintain the in-flight set for the connection.
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = await StartServerAsync(
+            portLease.Port,
+            configureServer: configuration => configuration.HeartbeatInterval = TimeSpan.FromMinutes(5));
+        var recordingLogger = new RecordingLogger();
+        await using var source = CreateClientSource(portLease.Port, logger: recordingLogger);
+        await source.StartAsync(CancellationToken.None);
+
+        var clientRoot = (TestRoot)source.RootSubject;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+
+        // Act
+        clientRoot.Name = "StillInFlightAtStop";
+        await AsyncTestHelpers.WaitUntilAsync(() => source.InFlightCount > 0);
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert - not counted as a drop: the write reached the socket and may already have been
+        // applied, so counting it would inflate the metric on every clean shutdown that catches a write
+        // mid-flight. Also assert the teardown log itself, which is this scenario's actual deliverable:
+        // the drop total alone would still read zero even if that log line were deleted.
+        Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
+        lock (recordingLogger.Warnings)
+        {
+            Assert.Contains(
+                recordingLogger.Warnings,
+                message => message.Contains("reached the socket but were never confirmed applied", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheServerDoesNotAcknowledgeAppliedWrites_ThenAReconnectDoesNotReAssertAWriteAndTheModeIsWarnedOnce()
+    {
+        // Arrange - heartbeats disabled server-side means the Welcome reports no acknowledgement, so the
+        // client must not maintain the in-flight set at all: for a re-parked entry the loaded value
+        // either equals the parked one, which makes re-sending redundant, or differs, which is
+        // unjudgeable without an applied-through report, so the only size that is ever correct is zero.
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = await StartServerAsync(
+            portLease.Port,
+            configureServer: configuration => configuration.HeartbeatInterval = TimeSpan.Zero);
+        var recordingLogger = new RecordingLogger();
+        await using var source = CreateClientSource(portLease.Port, logger: recordingLogger);
+        await source.StartAsync(CancellationToken.None);
+
+        var clientRoot = (TestRoot)source.RootSubject;
+
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+
+            var oldSocket = GetWebSocket(source);
+
+            // Act - write, let it reach the server, then drop the connection and let the server move
+            // the property on to a value the client never wrote while the client is away.
+            clientRoot.Name = "Written";
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Root!.Name == "Written");
+
+            // Never recorded in the first place, not merely retired quickly: with no acknowledgement,
+            // WriteChangesAsync skips reserving an ordinal and recording this write at all.
+            Assert.Equal(0, source.InFlightCount);
+
+            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
+            server.Root!.Name = "MovedOnWhileClientWasAway";
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational,
+                timeout: TimeSpan.FromSeconds(15),
+                message: "The client should reconnect to the still-running server.");
+
+            // Assert - the server's value survives, because there was never an in-flight entry to
+            // re-park and re-assert over it. Unlike the acknowledged case, nothing here can park a
+            // restore, so there is no reconcile race a later sample could catch that a first one missed,
+            // and a single wait is enough.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientRoot.Name == "MovedOnWhileClientWasAway" && server.Root!.Name == "MovedOnWhileClientWasAway",
+                message: "The client should converge on the server's value rather than re-asserting its own.");
+            Assert.Equal(0, source.InFlightCount);
+
+            // The mode warning fires once, at the first connect, and not again at the reconnect: with
+            // acknowledgement unavailable on both connections the mode did not change between them, and
+            // a per-reconnect log would otherwise repeat at every reconnect for the life of a source left
+            // in this mode, which with heartbeats disabled is roughly once a minute.
+            Assert.Single(
+                recordingLogger.Warnings,
+                message => message.Contains("does not acknowledge applied writes", StringComparison.Ordinal));
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheServerClaimsAcknowledgementButNeverReportsAnAppliedThroughAndTheConnectionDropsInstead_ThenTheInFlightSetIsReParkedNotDiscarded()
+    {
+        // Arrange - heartbeats are enabled, so the Welcome claims acknowledgement, but the interval is
+        // left long enough that none arrives before the fault below: the promise is made but never
+        // backed by an observed applied-through value. This connection is not the discard's intended
+        // case even so: it ends on a transport drop, not its own receive timeout, which on a healthy
+        // acknowledging server is indistinguishable from a connection that simply did not live long
+        // enough to see a heartbeat. Re-parking rather than discarding is what keeps that case from
+        // losing the write.
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = await StartServerAsync(
+            portLease.Port,
+            configureServer: configuration => configuration.HeartbeatInterval = TimeSpan.FromMinutes(5));
+        var recordingLogger = new RecordingLogger();
+        await using var source = CreateClientSource(portLease.Port, logger: recordingLogger);
+        await source.StartAsync(CancellationToken.None);
+
+        var clientRoot = (TestRoot)source.RootSubject;
+
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+
+            var oldSocket = GetWebSocket(source);
+
+            // Act - write, let it reach the server and be recorded as in flight (heartbeats are
+            // enabled, so the Welcome claims acknowledgement), then drop the connection before any
+            // heartbeat can arrive and let the server move the value on while the client is away.
+            clientRoot.Name = "Written";
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Root!.Name == "Written");
+            await AsyncTestHelpers.WaitUntilAsync(() => source.InFlightCount > 0);
+
+            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
+            server.Root!.Name = "MovedOnWhileClientWasAway";
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational,
+                timeout: TimeSpan.FromSeconds(15),
+                message: "The client should reconnect to the still-running server.");
+
+            // Assert - the entry was re-parked rather than discarded: the reconcile restores the client
+            // locally to its own write and re-sends it, so both sides converge back on it rather than on
+            // the server's value from while the client was away, and nothing is counted as dropped.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientRoot.Name == "Written" && server.Root!.Name == "Written",
+                timeout: TimeSpan.FromSeconds(15),
+                message: "The client's own write should be restored and re-asserted rather than lost to the server's value from while it was away.");
+            Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
+            lock (recordingLogger.Warnings)
+            {
+                Assert.DoesNotContain(
+                    recordingLogger.Warnings,
+                    message => message.Contains("idled out its own receive timeout", StringComparison.Ordinal));
+            }
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheServerClaimsAcknowledgementAndTheConnectionIdlesOutItsOwnReceiveTimeout_ThenTheInFlightSetIsDiscardedNotReParked()
+    {
+        // Arrange - heartbeats are enabled, so the Welcome claims acknowledgement, but the interval is
+        // left long enough that none arrives before the connection idles out its own receive timeout
+        // below, which is shortened so the test does not have to wait out the real default. This is the
+        // one ending the discard is actually meant for: no heartbeat could possibly have arrived within
+        // this connection's lifetime, so the promise can never be told apart from a genuinely
+        // non-acknowledging server.
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = await StartServerAsync(
+            portLease.Port,
+            configureServer: configuration => configuration.HeartbeatInterval = TimeSpan.FromMinutes(5));
+        var recordingLogger = new RecordingLogger();
+        await using var source = CreateClientSource(
+            portLease.Port, receiveTimeout: TimeSpan.FromSeconds(5), logger: recordingLogger);
+        await source.StartAsync(CancellationToken.None);
+
+        var clientRoot = (TestRoot)source.RootSubject;
+
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+
+            var oldSocket = GetWebSocket(source);
+
+            // Act - write, let it reach the server and be recorded as in flight, then let the
+            // connection idle out its own receive timeout rather than forcing any fault, and let the
+            // server move the value on while the client is away.
+            clientRoot.Name = "Written";
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Root!.Name == "Written");
+            await AsyncTestHelpers.WaitUntilAsync(() => source.InFlightCount > 0);
+
+            server.Root!.Name = "MovedOnWhileClientWasAway";
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "The client should reconnect once its own receive timeout fires.");
+
+            // Assert - the entry was discarded rather than re-parked: the server's post-outage value
+            // survives, the discard is counted, and the reason is logged.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientRoot.Name == "MovedOnWhileClientWasAway" && server.Root!.Name == "MovedOnWhileClientWasAway",
+                message: "The client should converge on the server's value rather than re-asserting its own.");
+            Assert.Equal(0, source.InFlightCount);
+            Assert.True(source.Diagnostics.OutboundRetries.TotalDropped > 0);
+            lock (recordingLogger.Warnings)
+            {
+                Assert.Contains(
+                    recordingLogger.Warnings,
+                    message => message.Contains("idled out its own receive timeout", StringComparison.Ordinal));
+            }
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheGateGoesUpBetweenBatchesOfAMultiBatchFlush_ThenTheUnsentBatchesAreRequeuedRatherThanSent()
+    {
+        // Arrange - design document case D4's residual: WriteRetryQueue.FlushAsync's scratch buffer
+        // grows to 128 entries on the first non-empty flush, so parking more than that spans two
+        // batches within one flush call, which is what makes a reconnect landing between them
+        // genuinely reachable rather than only a single edge-triggered check before the whole flush.
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = await StartServerAsync(portLease.Port);
+        await using var source = CreateClientSource(portLease.Port);
+        await source.StartAsync(CancellationToken.None);
+
+        var clientRoot = (TestRoot)source.RootSubject;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+
+        const int parkedCount = 200;
+        var parked = new SubjectPropertyChange[parkedCount];
+        for (var i = 0; i < parkedCount; i++)
+        {
+            parked[i] = CreateChange(clientRoot, nameof(TestRoot.Name), "Initial", $"Parked{i}");
+        }
+        source.WriteRetryQueue!.Enqueue(parked);
+
+        var sendAttempts = 0;
+        source.BeforeReservedSendAttempt = () =>
+        {
+            // Stands in for a reconnect beginning between one batch and the next: the gate is raised
+            // through the same BeginResume a real reconnect calls, right after the first batch's send
+            // has been admitted and before the flush loop moves on to the next one.
+            if (Interlocked.Increment(ref sendAttempts) == 1)
+            {
+                BeginResumeViaReflection(source);
+            }
+        };
+
+        try
+        {
+            // Act - a fresh write flushes the parked backlog before sending itself, which is where the
+            // multi-batch flush runs.
+            clientRoot.Name = "Trigger";
+
+            // Assert - only the first batch reached WriteChangesAsync: the second batch's gate check
+            // requeued the remainder instead of sending it. Depth settles rather than continuing to
+            // fall, because the gate stays up and nothing clears it in this test.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => Volatile.Read(ref sendAttempts) > 0);
+            var depthAfterFirstBatch = -1;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    var depth = source.Diagnostics.OutboundRetries.Depth;
+                    var settled = depth == depthAfterFirstBatch;
+                    depthAfterFirstBatch = depth;
+                    return settled;
+                },
+                message: "The retry queue depth did not settle after the multi-batch flush stopped.");
+
+            Assert.Equal(1, Volatile.Read(ref sendAttempts));
+            Assert.True(
+                depthAfterFirstBatch > 0 && depthAfterFirstBatch < parkedCount,
+                $"Expected some but not all of the {parkedCount} parked entries to remain queued, got {depthAfterFirstBatch}.");
+            Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
+        }
+        finally
+        {
+            source.BeforeReservedSendAttempt = null;
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAReservedSendFails_ThenTheConnectionIsAbortedSoTheOrdinalCannotLeaveAPermanentGap()
+    {
+        // Arrange - a short heartbeat interval so the applied-through report needed to prove the
+        // replacement connection's write retires arrives quickly.
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = await StartServerAsync(
+            portLease.Port,
+            configureServer: configuration => configuration.HeartbeatInterval = WebSocketServerConfiguration.MinimumHeartbeatInterval);
+        await using var source = CreateClientSource(portLease.Port);
+        await source.StartAsync(CancellationToken.None);
+
+        var clientRoot = (TestRoot)source.RootSubject;
+
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+
+            var oldSocket = GetWebSocket(source);
+
+            // The seam throws in place of the send genuinely failing, from inside the same try that
+            // guards the send itself, so nothing in this test touches the socket directly: only the
+            // production catch can be what aborts it. Not a cancellation of the caller's own token,
+            // since that is filtered out of the abort deliberately (see WriteChangesAsync's catch), so
+            // this needs a failure that is not one.
+            source.BeforeReservedSendAttempt = () => throw new InvalidOperationException("Simulated send failure.");
+
+            // Act - an ordinal is reserved for this send, then the seam throws before the send ever
+            // reaches the wire, standing in for a send that fails after the reservation for whatever
+            // reason, without depending on what a real transport happens to do to its own state when
+            // that happens.
+            var failingChange = CreateChange(clientRoot, nameof(TestRoot.Name), "Initial", "NeverSent");
+            var failingResult = await source.WriteChangesAsync(new[] { failingChange }, CancellationToken.None);
+            Assert.False(failingResult.IsFullySuccessful);
+
+            // Assert - the connection is aborted rather than left running with an ordinal reserved that
+            // nothing will ever send, so a reconnect follows and resets the ordinal for the next send.
+            // This is the only route to a reconnect here, since the test never touched the socket
+            // itself: it proves the production catch's own abort ran.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational,
+                timeout: TimeSpan.FromSeconds(15),
+                message: "The failed reserved send should force a reconnect rather than leaving the " +
+                         "ordinal gap on a connection that keeps running.");
+
+            // Cleared now rather than only in the finally: the seam throws unconditionally, so leaving
+            // it set would fail the follow-up write below too, forcing another abort and reconnect
+            // instead of letting the replacement connection actually carry it.
+            source.BeforeReservedSendAttempt = null;
+
+            // Assert - a write on the replacement connection retires normally through the heartbeat.
+            // Had the ordinal not been reset, this entry would be recorded one ordinal above whatever
+            // the server could ever report as applied on this connection, and would never retire.
+            clientRoot.Name = "AfterReconnect";
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Root!.Name == "AfterReconnect");
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.InFlightCount == 0,
+                message: "The write on the replacement connection should retire once the server's heartbeat reports it applied.");
+        }
+        finally
+        {
+            source.BeforeReservedSendAttempt = null;
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAReservedSendIsCancelledByTheCaller_ThenTheConnectionIsNotAborted()
+    {
+        // Arrange - the abort that WhenAReservedSendFails_... pins must not fire on a cancellation from
+        // the caller, most likely the teardown flush: aborting a healthy socket there skips the close
+        // handshake and downgrades a graceful stop into one. Heartbeat interval short enough that the
+        // follow-up write's applied-through report needed to prove the reservation was released arrives
+        // quickly.
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = await StartServerAsync(
+            portLease.Port,
+            configureServer: configuration => configuration.HeartbeatInterval = WebSocketServerConfiguration.MinimumHeartbeatInterval);
+        await using var source = CreateClientSource(portLease.Port);
+        await source.StartAsync(CancellationToken.None);
+
+        var clientRoot = (TestRoot)source.RootSubject;
+
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+
+            var socketBeforeCancellation = GetWebSocket(source);
+
+            using var sendGate = new UpdateAdmissionGate(armed: true);
+            source.BeforeReservedSendAttempt = sendGate.Wait;
+
+            // Act - an ordinal is reserved for this send, then the send itself is held back and made
+            // to fail by cancelling the caller's own token before it ever reaches the wire.
+            using var callerCts = new CancellationTokenSource();
+            var failingChange = CreateChange(clientRoot, nameof(TestRoot.Name), "Initial", "NeverSent");
+
+            var failingWriteTask = Task.Run(
+                async () => await source.WriteChangesAsync(new[] { failingChange }, callerCts.Token));
+
+            await sendGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+            await callerCts.CancelAsync();
+            sendGate.Release();
+
+            var failingResult = await failingWriteTask.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(failingResult.IsFullySuccessful);
+
+            // Assert - the connection is still the same instance and still usable, rather than having
+            // been aborted and replaced by a reconnect.
+            clientRoot.Name = "AfterCancelledSend";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Root!.Name == "AfterCancelledSend",
+                message: "The connection should still be usable for a further write.");
+            Assert.Same(socketBeforeCancellation, GetWebSocket(source));
+
+            // The cancelled send's reservation must have been released, not merely left unaborted: had
+            // it stayed reserved, this write would be recorded one ordinal above what the server could
+            // ever report as applied on this connection, since the server itself only ever received this
+            // one message, and it would never retire.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.InFlightCount == 0,
+                message: "The write after the cancelled send should retire once the server's heartbeat " +
+                         "reports it applied, proving the cancelled reservation was released rather than " +
+                         "left as a permanent gap.");
+        }
+        finally
+        {
+            source.BeforeReservedSendAttempt = null;
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    private static SubjectPropertyChange CreateChange(
+        IInterceptorSubject subject, string propertyName, string? oldValue, string? newValue) =>
+        SubjectPropertyChange.Create(
+            new PropertyReference(subject, propertyName),
+            ChangeOrigin.Local,
+            DateTimeOffset.UtcNow,
+            null,
+            oldValue,
+            newValue);
+
+    private async Task<WebSocketTestServer<TestRoot>> StartServerAsync(
+        int port,
+        Action<WebSocketServerConfiguration>? configureServer = null)
     {
         var server = new WebSocketTestServer<TestRoot>(_output);
         await server.StartAsync(
             context => new TestRoot(context),
             (_, root) => root.Name = "Initial",
-            port: port);
+            port: port,
+            configureServer: configureServer);
         return server;
     }
 
     private static WebSocketSubjectClientSource CreateClientSource(
         int port,
         TimeSpan? reconnectDelay = null,
+        TimeSpan? receiveTimeout = null,
         IWriteInterceptor? writeInterceptor = null,
-        int? circuitBreakerFailureThreshold = null)
+        int? circuitBreakerFailureThreshold = null,
+        Action<IInterceptorSubjectContext>? configureContext = null,
+        ILogger<WebSocketSubjectClientSource>? logger = null)
     {
         var context = InterceptorSubjectContext
             .Create()
@@ -709,12 +1194,19 @@ public class WebSocketClientLivenessTests
             context.AddService(writeInterceptor);
         }
 
+        configureContext?.Invoke(context);
+
         var configuration = new WebSocketClientConfiguration
         {
             ServerUri = new Uri($"ws://localhost:{port}/ws"),
             ReconnectDelay = reconnectDelay ?? TimeSpan.FromMilliseconds(200),
             MaxReconnectDelay = TimeSpan.FromSeconds(10)
         };
+
+        if (receiveTimeout is { } timeout)
+        {
+            configuration.ReceiveTimeout = timeout;
+        }
 
         if (circuitBreakerFailureThreshold is { } threshold)
         {
@@ -724,7 +1216,7 @@ public class WebSocketClientLivenessTests
         return new WebSocketSubjectClientSource(
             new TestRoot(context),
             configuration,
-            NullLogger<WebSocketSubjectClientSource>.Instance);
+            logger ?? NullLogger<WebSocketSubjectClientSource>.Instance);
     }
 
     /// <summary>
@@ -782,6 +1274,12 @@ public class WebSocketClientLivenessTests
         }
     }
 
+    /// <summary>
+    /// Blocks the first caller that reaches <see cref="Wait"/> until <see cref="Release"/> is
+    /// called, so a test can hold a production seam open while it orchestrates a race on another
+    /// thread. Only the first caller blocks: a seam that can fire more than once during a test passes
+    /// straight through instead of wedging on a gate nothing releases it from.
+    /// </summary>
     private sealed class UpdateAdmissionGate : IDisposable
     {
         private readonly ManualResetEventSlim _release = new(false);
@@ -789,6 +1287,15 @@ public class WebSocketClientLivenessTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _armed;
         private int _blocked;
+
+        /// <param name="armed">
+        /// <c>true</c> when the seam has no separate arm step and must block as soon as it is
+        /// reached. Leave <c>false</c> and call <see cref="Arm"/> once other setup needs to run first.
+        /// </param>
+        public UpdateAdmissionGate(bool armed = false)
+        {
+            _armed = armed ? 1 : 0;
+        }
 
         public Task Entered => _entered.Task;
 
@@ -932,6 +1439,43 @@ public class WebSocketClientLivenessTests
             _stopping.Dispose();
         }
     }
+
+    /// <summary>Captures warning messages logged through it, to assert on the teardown diagnostics.</summary>
+    private sealed class RecordingLogger : ILogger<WebSocketSubjectClientSource>
+    {
+        public List<string> Warnings { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning)
+            {
+                lock (Warnings)
+                {
+                    Warnings.Add(formatter(state, exception));
+                }
+            }
+        }
+    }
+
+    private static object? GetWebSocket(WebSocketSubjectClientSource source) =>
+        typeof(WebSocketSubjectClientSource)
+            .GetField("_webSocket", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(source);
+
+    /// <summary>
+    /// Invokes the protected <c>SubjectSourceBase.BeginResume</c> through reflection, so a test can
+    /// raise the resume gate the same way a real reconnect does without staging one.
+    /// </summary>
+    private static void BeginResumeViaReflection(WebSocketSubjectClientSource source) =>
+        typeof(SubjectSourceBase)
+            .GetMethod("BeginResume", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(source, null);
 
     private static CancellationTokenSource GetReceiveCancellation(WebSocketSubjectClientSource source) =>
         (CancellationTokenSource)typeof(WebSocketSubjectClientSource)

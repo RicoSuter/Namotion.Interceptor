@@ -57,10 +57,8 @@ internal sealed class WriteRetryQueue : IDisposable
     /// </summary>
     public void Enqueue(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
-        if (_maxQueueSize is 0)
+        if (RejectWhenDisabled(changes.Length))
         {
-            _metrics.AddDropped(changes.Length);
-            _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes.", changes.Length);
             return;
         }
 
@@ -84,22 +82,74 @@ internal sealed class WriteRetryQueue : IDisposable
             Volatile.Write(ref _count, _pendingWrites.Count);
         }
 
-        if (droppedCount > 0)
+        ReportDropped(droppedCount);
+    }
+
+    /// <summary>
+    /// Inserts changes at the front of the queue, for entries older than anything already queued, and
+    /// reports any that the ring buffer then drops. Thread-safe via the same lock as <see cref="Enqueue"/>.
+    /// </summary>
+    /// <remarks>
+    /// Mirrors <see cref="RequeueChanges"/>: eviction always removes from the front, so inserting
+    /// older entries there is what makes the ring buffer drop them first when it is over capacity,
+    /// ahead of the newer entries already further back in the queue.
+    /// </remarks>
+    public void EnqueueAtFront(ReadOnlyMemory<SubjectPropertyChange> changes)
+    {
+        if (RejectWhenDisabled(changes.Length))
         {
-            _metrics.AddDropped(droppedCount);
-            _logger.LogWarning(
-                "Write queue at capacity, dropped {Count} oldest writes (queue size: {QueueSize}).",
-                droppedCount,
-                _maxQueueSize);
+            return;
         }
+
+        ReportDropped(RequeueChanges(changes.Span));
+    }
+
+    /// <summary>
+    /// Drops <paramref name="changeCount"/> writes and reports them when the queue is disabled.
+    /// </summary>
+    /// <returns><c>true</c> when the queue is disabled and the writes were dropped.</returns>
+    private bool RejectWhenDisabled(int changeCount)
+    {
+        if (_maxQueueSize is not 0)
+        {
+            return false;
+        }
+
+        _metrics.AddDropped(changeCount);
+        _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes.", changeCount);
+        return true;
+    }
+
+    /// <summary>Reports the ring buffer having dropped <paramref name="droppedCount"/> oldest writes.</summary>
+    private void ReportDropped(int droppedCount)
+    {
+        if (droppedCount <= 0)
+        {
+            return;
+        }
+
+        _metrics.AddDropped(droppedCount);
+        _logger.LogWarning(
+            "Write queue at capacity, dropped {Count} oldest writes (queue size: {QueueSize}).",
+            droppedCount,
+            _maxQueueSize);
     }
 
     /// <summary>
     /// Flushes pending writes from the queue to the source.
     /// Returns true if flush succeeded (or queue was empty), false if flush failed.
     /// </summary>
+    /// <param name="source">The source to write the flushed batches to.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <param name="isGateHeld">
+    /// Checked at the top of every batch iteration, not only once before this call: a flush that spans
+    /// several batches can otherwise straddle a reconnect that begins partway through it, sending
+    /// pre-outage values on the connection the reconcile has not yet judged them against. When it
+    /// returns true the batch just dequeued is put back rather than sent, and the flush stops. Pass
+    /// null for a caller, such as the reconcile, that must be able to flush while the gate is held.
+    /// </param>
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
-    public async ValueTask<bool> FlushAsync(ISubjectSource source, CancellationToken cancellationToken)
+    public async ValueTask<bool> FlushAsync(ISubjectSource source, CancellationToken cancellationToken, Func<bool>? isGateHeld = null)
     {
         if (IsEmpty)
         {
@@ -154,6 +204,19 @@ internal sealed class WriteRetryQueue : IDisposable
                     }
                     _pendingWrites.RemoveRange(0, count);
                     Volatile.Write(ref _count, _pendingWrites.Count);
+                }
+
+                if (isGateHeld?.Invoke() == true)
+                {
+                    // The gate went up again after this flush started, most likely a reconnect that
+                    // began between one batch and the next: the batch just dequeued has not been judged
+                    // against the state the new connection is about to deliver, so it goes back rather
+                    // than out. The return value is what the ring then evicted to make room for it, not
+                    // the number put back, so it is reported the same way Enqueue's own eviction is.
+                    var droppedCount = RequeueChanges(new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count).Span);
+                    ReportDropped(droppedCount);
+                    Array.Clear(_scratchBuffer, 0, count);
+                    return false;
                 }
 
                 var memory = new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count);

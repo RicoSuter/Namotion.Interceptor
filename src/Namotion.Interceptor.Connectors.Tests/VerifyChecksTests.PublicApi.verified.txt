@@ -151,6 +151,7 @@ namespace Namotion.Interceptor.Connectors
         protected System.Threading.Tasks.Task CompleteResumeAsync(int resumeEpoch, System.Threading.CancellationToken cancellationToken) { }
         public override void Dispose() { }
         public abstract System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
+        protected void ParkChangesForRetry(System.ReadOnlySpan<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes) { }
         protected void ReportConnectionLost() { }
         protected override sealed System.Threading.Tasks.Task RunAsync(System.Threading.CancellationToken stoppingToken) { }
         public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
@@ -474,6 +475,6 @@ namespace Namotion.Interceptor.Connectors.Updates
     }
     public static class SubjectUpdateExtensions
     {
-        public static void ApplySubjectUpdate(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Connectors.Updates.SubjectUpdate update, Namotion.Interceptor.Connectors.ISubjectFactory? subjectFactory, Namotion.Interceptor.ChangeOrigin origin, System.Action<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate>? transformValueBeforeApply = null) { }
+        public static bool ApplySubjectUpdate(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Connectors.Updates.SubjectUpdate update, Namotion.Interceptor.Connectors.ISubjectFactory? subjectFactory, Namotion.Interceptor.ChangeOrigin origin, System.Action<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate>? transformValueBeforeApply = null, Microsoft.Extensions.Logging.ILogger? logger = null) { }
     }
 }
