@@ -44,7 +44,7 @@ public class OutboundDropCountingTests
         // Pins the no-setter branch, so the drop below cannot come from the catch beside it.
         Assert.Null(new PropertyReference(person, nameof(Person.FullName)).Metadata.SetValue);
 
-        source.WriteRetryQueue!.Enqueue(new[]
+        source.WriteRetryQueue.Enqueue(new[]
         {
             CreateChange(person, nameof(Person.FullName), oldValue: "old", newValue: "never-current")
         });
@@ -72,7 +72,7 @@ public class OutboundDropCountingTests
         // Pins that a setter exists, so the drop below comes from the catch and not the no-setter branch.
         Assert.NotNull(new PropertyReference(device, nameof(ThrowingDevice.PropertyA)).Metadata.SetValue);
 
-        source.WriteRetryQueue!.Enqueue(new[]
+        source.WriteRetryQueue.Enqueue(new[]
         {
             CreateChange(device, nameof(ThrowingDevice.PropertyA), oldValue: false, newValue: true)
         });
@@ -145,13 +145,17 @@ public class OutboundDropCountingTests
                 failFirstName = true;
             }
 
+            // Read once the connected phase is reached: a source with no queue also counts what its
+            // connect-window drain discarded, and the probes above land there under load.
+            var droppedBeforeWrite = source.Diagnostics.OutboundRetries.TotalDropped;
+
             person.FirstName = "John";
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.OutboundRetries.TotalDropped > 0,
+                () => source.Diagnostics.OutboundRetries.TotalDropped > droppedBeforeWrite,
                 message: "The discarded direct write was not counted.");
 
             // Assert
-            Assert.Equal(1, source.Diagnostics.OutboundRetries.TotalDropped);
+            Assert.Equal(droppedBeforeWrite + 1, source.Diagnostics.OutboundRetries.TotalDropped);
             Assert.Equal(0, source.Diagnostics.OutboundRetries.Capacity);
             Assert.Equal(0, source.Diagnostics.OutboundRetries.Depth);
         }
@@ -161,54 +165,8 @@ public class OutboundDropCountingTests
         }
     }
 
-    /// <summary>
-    /// A graceful stop that catches a write in flight is not a loss an operator can act on, and
-    /// <c>WriteChangesInBatchesAsync</c> reports that cancellation as a failed result rather than
-    /// throwing it.
-    /// </summary>
     [Fact]
-    public async Task WhenAWriteIsCancelledByTheStop_ThenItIsNotCountedAsDropped()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry().WithFullPropertyTracking();
-        var person = new Person(context);
-
-        using var writeStarted = new ManualResetEventSlim(false);
-        using var source = new TestSubjectSource(person, context, NullLogger.Instance,
-            bufferTime: TimeSpan.FromMilliseconds(8), writeRetryQueueSize: 0)
-        {
-            WriteChangesOverride = async (_, cancellationToken) =>
-            {
-                writeStarted.Set();
-
-                // Held until the stop cancels the token, so the write is in flight when it lands.
-                await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
-                return WriteResult.Success;
-            }
-        };
-
-        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
-
-        await source.StartAsync(CancellationToken.None);
-
-        // Re-written on each poll because writes captured before the connected phase are drained
-        // rather than written.
-        var probeValue = 0;
-        await AsyncTestHelpers.WaitUntilAsync(() =>
-        {
-            person.FirstName = "v" + probeValue++;
-            return writeStarted.IsSet;
-        }, message: "The pump never reached a write.");
-
-        // Act
-        await source.StopAsync(CancellationToken.None);
-
-        // Assert
-        Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
-    }
-
-    [Fact]
-    public void WhenTheDisabledQueueDrainRuns_ThenNothingIsCounted()
+    public void WhenTheDisabledQueueDrainRuns_ThenAnUnownedChangeIsNotCounted()
     {
         // Arrange: no retry queue, and a change on a property this source does not own.
         var context = InterceptorSubjectContext.Create().WithRegistry().WithPropertyChangeSubscriptions();

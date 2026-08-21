@@ -1407,7 +1407,7 @@ public class SubjectSourceBaseTests
         IInterceptorSubject subject, string propertyName, TValue oldValue, TValue newValue,
         long revision = 0)
     {
-        var queue = source.WriteRetryQueue!;
+        var queue = source.WriteRetryQueue;
 
         var change = SubjectPropertyChange.Create(
             new PropertyReference(subject, propertyName),
@@ -1940,20 +1940,303 @@ public class SubjectSourceBaseTests
         Assert.Contains("FirstName=John", receivedWrites);
     }
 
-    [Fact]
-    public void WhenTeardownFlushTimeoutIsNegative_ThenConstructionThrows()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenStoppingWithParkedWrites_ThenRetryHandoffUsesSharedBound(bool consumeSharedBound)
     {
-        // Arrange: the source builds its processor only after connecting, so a guard left to the
-        // processor would surface as an attempt failure the retry loop repeats forever.
-        var context = InterceptorSubjectContext
-            .Create()
+        // Arrange: the write carrying John blocks until the stop parks it in the retry queue. One case
+        // blocks that final handoff; the other leaves another buffered write to consume the shared bound.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context);
+
+        var blockingWriteEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var retryWriteEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRetryWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var retryWriteCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hasBlocked = 0;
+        var deadlineWriteCount = 0;
+
+        using var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(250))
+        {
+            WriteChangesOverride = async (changes, cancellationToken) =>
+            {
+                var batch = changes.ToArray();
+                var completesRetryWrite = false;
+
+                if (batch.Any(change => change.GetNewValue<string?>() == "John") &&
+                    Interlocked.Exchange(ref hasBlocked, 1) == 0)
+                {
+                    blockingWriteEntered.TrySetResult();
+                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                }
+                else if (batch.Any(change => change.GetNewValue<string?>() == "ConsumesDeadline"))
+                {
+                    if (Interlocked.Increment(ref deadlineWriteCount) == 1)
+                    {
+                        await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        return WriteResult.Failure(batch,
+                            new InvalidOperationException("The retry handoff received a fresh deadline."));
+                    }
+                }
+                else if (batch.Any(change => change.GetNewValue<string?>() == "John"))
+                {
+                    if (!consumeSharedBound)
+                    {
+                        retryWriteEntered.TrySetResult();
+                        await releaseRetryWrite.Task.ConfigureAwait(false);
+                        completesRetryWrite = true;
+                    }
+                }
+
+                if (completesRetryWrite)
+                {
+                    retryWriteCompleted.TrySetResult();
+                }
+
+                return WriteResult.Success;
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(subject, nameof(Person.LastName)).SetSource(source);
+
+        // Act
+        Task? stopping = null;
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            // A write made before the change processor runs is parked by the connect-window drain
+            // instead of being buffered, so the probe is repeated until a buffered depth proves the
+            // processor is the one holding it.
+            var probeValue = 0;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    subject.LastName = "Probe" + probeValue++;
+                    return source.Diagnostics.OutboundChanges.Depth > 0;
+                },
+                pollInterval: TimeSpan.FromMilliseconds(25),
+                message: "The change processor did not start buffering changes.");
+
+            subject.FirstName = "John";
+            await blockingWriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+            if (consumeSharedBound)
+            {
+                subject.LastName = "ConsumesDeadline";
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => source.Diagnostics.OutboundChanges.Depth > 0,
+                    message: "The write that consumes the teardown bound was not buffered.");
+            }
+
+            stopping = source.StopAsync(CancellationToken.None);
+            if (consumeSharedBound)
+            {
+                await stopping.WaitAsync(TimeSpan.FromSeconds(15));
+                Assert.Equal(1, Volatile.Read(ref deadlineWriteCount));
+            }
+            else
+            {
+                await retryWriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+                await stopping.WaitAsync(TimeSpan.FromSeconds(15));
+
+                Assert.False(releaseRetryWrite.Task.IsCompleted,
+                    "Stopping waited for the retry handoff instead of abandoning it at the deadline.");
+            }
+        }
+        finally
+        {
+            releaseRetryWrite.TrySetResult();
+            if (stopping is not null)
+            {
+                await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+                if (!consumeSharedBound)
+                {
+                    await retryWriteCompleted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+                }
+            }
+            else
+            {
+                await source.StopAsync(CancellationToken.None);
+            }
+        }
+
+        // Assert
+        if (consumeSharedBound)
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundRetries.TotalDropped > 0,
+                message: "The write left after the shared deadline was not retired.");
+        }
+        else
+        {
+            // A stop that catches a write in flight is only a loss when there is no queue to park it in.
+            Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheRunEnds_ThenStrandedRetryQueueWritesAreCounted()
+    {
+        // Arrange: every write fails, so the batch parks and stays parked. Stopping without disposing is
+        // what a graph detach does, and a stopped source never gets another attempt, so what is still
+        // queued has to be counted rather than left sitting in a queue nobody will read.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "Parked" };
+
+        var writeAttempted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(50))
+        {
+            WriteChangesOverride = (changes, _) =>
+            {
+                writeAttempted.TrySetResult();
+                return ValueTask.FromResult(WriteResult.Failure(
+                    changes, new InvalidOperationException("The source rejects every write.")));
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+
+        // The model already holds the new value, so the reconcile sends this rather than restoring it.
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "Original", "Parked");
+
+        using var stopTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            await writeAttempted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        finally
+        {
+            await source.StopAsync(stopTokenSource.Token);
+        }
+
+        // Assert
+        Assert.True(source.Diagnostics.OutboundRetries.TotalDropped > 0,
+            "the writes stranded in the retry queue were never counted");
+        Assert.True(source.WriteRetryQueue.IsEmpty,
+            "the stranded writes were counted but left in a queue nobody reads");
+    }
+
+    [Fact]
+    public async Task WhenASourceWithoutARetryQueueFailsAWriteWhileStopping_ThenTheLossIsCounted()
+    {
+        // Arrange: the write blocks until the stop cancels it, which is reported as a failed result
+        // rather than thrown. Elsewhere that failure is excused as merely late, but with no retry queue
+        // there is nowhere for it to be late to, so the change is gone and has to be counted.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context);
+
+        var blockingWriteEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hasBlocked = 0;
+
+        using var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(25), writeRetryQueueSize: 0)
+        {
+            // Only the first write blocks, so the teardown that follows is not held up by a second one.
+            WriteChangesOverride = async (_, cancellationToken) =>
+            {
+                if (Interlocked.Exchange(ref hasBlocked, 1) == 0)
+                {
+                    blockingWriteEntered.TrySetResult();
+                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                }
+
+                return WriteResult.Success;
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+
+        using var stopTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        long droppedBeforeStop;
+        try
+        {
+            // A write made before the change processor runs is discarded by the connect-window drain
+            // instead, so the probe is repeated until the write handler proves the processor has it.
+            var probeValue = 0;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    subject.FirstName = "Probe" + probeValue++;
+                    return blockingWriteEntered.Task.IsCompleted;
+                },
+                pollInterval: TimeSpan.FromMilliseconds(25),
+                message: "The change processor never reached the write handler.");
+        }
+        finally
+        {
+            // Read before the stop, so only the write the stop cancels can raise it.
+            droppedBeforeStop = source.Diagnostics.OutboundRetries.TotalDropped;
+            await source.StopAsync(stopTokenSource.Token);
+        }
+
+        // Assert
+        Assert.True(source.Diagnostics.OutboundRetries.TotalDropped > droppedBeforeStop,
+            "the write the stop discarded was never counted");
+    }
+
+    [Fact]
+    public async Task WhenASourceWithoutARetryQueueDrainsTheConnectWindow_ThenTheDiscardedWritesAreCounted()
+    {
+        // Arrange: a write captured while connecting has nowhere to be parked without a retry queue,
+        // and the drain that empties the subscription is the last thing to see it.
+        var context = InterceptorSubjectContext.Create()
             .WithRegistry()
-            .WithFullPropertyTracking();
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context) { FirstName = "Seed" };
 
-        var person = new Person(context);
+        using var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            writeRetryQueueSize: 0)
+        {
+            // Writing inside the load, rather than from the resume action, is what puts this in the
+            // connect window: the drain that discards it runs after the load returns.
+            LoadInitialStateOverride = _ =>
+            {
+                subject.FirstName = "WrittenWhileConnecting";
+                return Task.FromResult<Action?>(null);
+            },
+        };
 
-        // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => new TestSubjectSource(
-            person, context, NullLogger.Instance, teardownFlushTimeout: TimeSpan.FromMilliseconds(-1)));
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundRetries.TotalDropped > 0,
+                message: "The connect-window write was discarded without being counted.");
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+
+        // Assert: exactly the one write, so a drain that ran twice cannot count it twice.
+        Assert.Equal(1, source.Diagnostics.OutboundRetries.TotalDropped);
+    }
+
+    private sealed class CallbackAsyncDisposable(Func<ValueTask> onDisposeAsync) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync() => onDisposeAsync();
     }
 }

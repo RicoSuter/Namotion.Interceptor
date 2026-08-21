@@ -321,21 +321,4 @@ public partial class OpcUaRegistrationTests
         Assert.StartsWith("OpcUaVariable:", first.OpcUaVariableKey);
         Assert.StartsWith("OpcUaVariable:", second.OpcUaVariableKey);
     }
-
-    [Fact]
-    public void WhenTeardownFlushTimeoutIsNegative_ThenServerConstructionThrows()
-    {
-        // Arrange: the processor is built inside the run attempt, where a throw becomes an endless
-        // restart rather than a startup failure.
-        var subject = CreateSubject();
-        var configuration = new OpcUaServerConfiguration
-        {
-            ValueConverter = new OpcUaValueConverter(),
-            TeardownFlushTimeout = TimeSpan.FromMilliseconds(-1)
-        };
-
-        // Act & Assert
-        Assert.Throws<ArgumentException>(() => new OpcUaSubjectServer(
-            subject, configuration, NullLogger<OpcUaSubjectServer>.Instance));
-    }
 }

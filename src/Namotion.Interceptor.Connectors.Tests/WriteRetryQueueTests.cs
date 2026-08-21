@@ -8,6 +8,8 @@ namespace Namotion.Interceptor.Connectors.Tests;
 
 public class WriteRetryQueueTests
 {
+    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+
     [Fact]
     public async Task WhenEnqueueAndFlush_ThenChangesAreWritten()
     {
@@ -415,6 +417,134 @@ public class WriteRetryQueueTests
         // Assert
         Assert.Empty(drained);
         Assert.True(queue.IsEmpty);
+    }
+
+    [Fact]
+    public void WhenANonEmptyQueueIsRetired_ThenThePendingWritesAreCountedAndLogged()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var diagnostics = new QueueDiagnostics(metrics);
+        var logger = new RecordingLogger();
+        using var queue = new WriteRetryQueue(100, logger, metrics);
+        queue.Enqueue(CreateChanges(3));
+
+        // Act
+        queue.Retire();
+
+        // Assert
+        Assert.True(queue.IsEmpty);
+        Assert.Equal(0, queue.PendingWriteCount);
+        Assert.Equal(3, diagnostics.TotalDropped);
+        Assert.Contains(logger.Warnings, message => message.Contains("never delivered"));
+    }
+
+    [Fact]
+    public void WhenAWriteArrivesAfterRetirement_ThenItIsCountedInsteadOfParked()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var diagnostics = new QueueDiagnostics(metrics);
+        using var queue = new WriteRetryQueue(100, NullLogger.Instance, metrics);
+        queue.Retire();
+
+        // Act
+        queue.Enqueue(CreateChanges(4));
+
+        // Assert
+        Assert.True(queue.IsEmpty);
+        Assert.Equal(0, queue.PendingWriteCount);
+        Assert.Equal(4, diagnostics.TotalDropped);
+    }
+
+    [Fact]
+    public void WhenRetireIsCalledTwice_ThenThePendingWritesAreCountedOnce()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var diagnostics = new QueueDiagnostics(metrics);
+        var logger = new RecordingLogger();
+        using var queue = new WriteRetryQueue(100, logger, metrics);
+        queue.Enqueue(CreateChanges(3));
+
+        // Act
+        queue.Retire();
+        queue.Retire();
+
+        // Assert
+        Assert.Equal(3, diagnostics.TotalDropped);
+        Assert.Single(logger.Warnings);
+    }
+
+    [Fact]
+    public void WhenAnEmptyQueueIsRetired_ThenNothingIsCountedAndNothingIsLogged()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var diagnostics = new QueueDiagnostics(metrics);
+        var logger = new RecordingLogger();
+        using var queue = new WriteRetryQueue(100, logger, metrics);
+
+        // Act
+        queue.Retire();
+
+        // Assert
+        Assert.Equal(0, diagnostics.TotalDropped);
+        Assert.Empty(logger.Warnings);
+        Assert.Empty(logger.Errors);
+    }
+
+    [Fact]
+    public void WhenARetiredQueueIsDrainedForLocalReapply_ThenNothingIsReturned()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        using var queue = new WriteRetryQueue(100, NullLogger.Instance, metrics);
+        queue.Enqueue(CreateChanges(3));
+
+        // Act
+        queue.Retire();
+        var drained = queue.DrainForLocalReapply();
+
+        // Assert
+        Assert.Empty(drained);
+    }
+
+    [Fact]
+    public async Task WhenTheQueueIsRetiredWhileAFailingFlushIsInFlight_ThenTheBatchIsCountedAndNotRequeued()
+    {
+        // Arrange: the in-flight batch has already left the pending list, so the retire itself cannot
+        // count it and the requeue on failure is the only place it can still be accounted for.
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var diagnostics = new QueueDiagnostics(metrics);
+        using var queue = new WriteRetryQueue(100, NullLogger.Instance, metrics);
+        var sourceMock = new Mock<ISubjectSource>();
+        var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completeWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        sourceMock
+            .Setup(source => source.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                writeStarted.SetResult();
+                await completeWrite.Task;
+                return WriteResult.Failure(changes, new InvalidOperationException("Connection failed"));
+            });
+
+        queue.Enqueue(CreateChanges(3));
+
+        // Act
+        var flush = queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        await writeStarted.Task.WaitAsync(TestTimeout);
+        queue.Retire();
+        completeWrite.SetResult();
+        var result = await flush.AsTask().WaitAsync(TestTimeout);
+
+        // Assert
+        Assert.False(result);
+        Assert.True(queue.IsEmpty);
+        Assert.Equal(3, diagnostics.TotalDropped);
     }
 
     private static SubjectPropertyChange CreateChange(int id)

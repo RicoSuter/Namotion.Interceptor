@@ -465,10 +465,69 @@ public class SubjectSourceExtensionsTests
         // Assert - Should return failure instead of throwing
         Assert.NotNull(result.Error);
         Assert.IsAssignableFrom<OperationCanceledException>(result.Error);
+        Assert.Single(result.FailedChanges);
 
         // Cleanup
         blockingSource.UnblockWrite();
         await blockingTask;
+    }
+
+    /// <summary>
+    /// The source-side drop accounting assumes this method absorbs every failure, so a caller's own
+    /// requeue and counting paths never fire for a source and cannot double count against the write
+    /// retry queue. These two tests plus
+    /// <see cref="WriteChangesInBatchesAsync_CancellationDuringSemaphoreWait_ReturnsFailure"/> pin that
+    /// for the three ways a write can fail: a throw, a cancellation seen inside the write, and a
+    /// cancellation seen while waiting for the write lock.
+    /// </summary>
+    [Fact]
+    public async Task WhenTheSourceThrows_ThenTheFailureIsReportedInTheResultRatherThanThrown()
+    {
+        // Arrange
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
+        sourceMock
+            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _)
+                => throw new InvalidOperationException("Transport boom"));
+
+        var changes = CreateChanges(3);
+
+        // Act
+        var result = await sourceMock.Object.WriteChangesInBatchesAsync(changes, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result.Error);
+        Assert.Equal("Transport boom", result.Error!.Message);
+        Assert.Equal(3, result.FailedChanges.Length);
+    }
+
+    [Fact]
+    public async Task WhenTheSourceObservesCancellation_ThenTheFailureIsReportedInTheResultRatherThanThrown()
+    {
+        // Arrange: the token is still live when the write lock is taken and is cancelled by the write
+        // itself, so the cancellation is observed inside the write rather than by the lock wait.
+        using var cancellationTokenSource = new CancellationTokenSource();
+
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.WriteBatchSize).Returns(0);
+        sourceMock
+            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken cancellationToken) =>
+            {
+                cancellationTokenSource.Cancel();
+                cancellationToken.ThrowIfCancellationRequested();
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        var changes = CreateChanges(2);
+
+        // Act
+        var result = await sourceMock.Object.WriteChangesInBatchesAsync(changes, cancellationTokenSource.Token);
+
+        // Assert
+        Assert.IsAssignableFrom<OperationCanceledException>(result.Error);
+        Assert.Equal(2, result.FailedChanges.Length);
     }
 
     private static SubjectPropertyChange CreateChange(int id)

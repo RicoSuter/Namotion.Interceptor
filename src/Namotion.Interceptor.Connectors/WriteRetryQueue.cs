@@ -8,7 +8,8 @@ namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
 /// Manages a write retry queue with ring buffer semantics for buffering writes during disconnection.
-/// When the queue is full, oldest writes are dropped to make room for new ones.
+/// When the queue is full, oldest writes are dropped to make room for new ones. A queue of size 0
+/// is the disabled configuration: everything handed to it is counted as dropped and discarded.
 /// </summary>
 internal sealed class WriteRetryQueue : IDisposable
 {
@@ -24,6 +25,9 @@ internal sealed class WriteRetryQueue : IDisposable
     private readonly QueueMetrics _metrics;
     private readonly int _maxQueueSize;
     private int _count;
+
+    // Read and written only under _lock, so a producer cannot pass the check while Retire clears it.
+    private bool _retired;
 
     // Throttle flush-failure warnings to avoid log spam during extended disconnections
     private long _lastFlushWarningTimestamp;
@@ -64,33 +68,85 @@ internal sealed class WriteRetryQueue : IDisposable
             return;
         }
 
+        bool retired;
         int droppedCount;
         lock (_lock)
         {
-            // Add all new items
-            var span = changes.Span;
-            for (var i = 0; i < span.Length; i++)
+            // Checked inside the lock: losing the race to Retire would park this batch where nobody reads it.
+            retired = _retired;
+            if (retired)
             {
-                _pendingWrites.Add(span[i]);
+                // Exclusive with the ring trim below, so the batch is counted exactly once.
+                droppedCount = changes.Length;
             }
-
-            // Ring buffer: Drop the oldest if over capacity
-            droppedCount = _pendingWrites.Count - _maxQueueSize;
-            if (droppedCount > 0)
+            else
             {
-                _pendingWrites.RemoveRange(0, droppedCount);
-            }
+                var span = changes.Span;
+                for (var i = 0; i < span.Length; i++)
+                {
+                    _pendingWrites.Add(span[i]);
+                }
 
-            Volatile.Write(ref _count, _pendingWrites.Count);
+                droppedCount = TrimToCapacity();
+            }
         }
 
-        if (droppedCount > 0)
+        if (droppedCount <= 0)
         {
-            _metrics.AddDropped(droppedCount);
+            return;
+        }
+
+        // Reported outside the lock, so an arbitrary logger cannot stall the write path or take a second lock.
+        _metrics.AddDropped(droppedCount);
+        if (retired)
+        {
+            _logger.LogWarning(
+                "{Count} writes settled after the source stopped and are discarded.",
+                droppedCount);
+        }
+        else
+        {
             _logger.LogWarning(
                 "Write queue at capacity, dropped {Count} oldest writes (queue size: {QueueSize}).",
                 droppedCount,
                 _maxQueueSize);
+        }
+    }
+
+    /// <summary>
+    /// Retires the queue: counts and logs whatever is still pending, and makes every later enqueue
+    /// count instead of park. Idempotent.
+    /// </summary>
+    /// <remarks>
+    /// Meant to be called when the run ends rather than only from <see cref="Dispose"/>, because a
+    /// source detached from the graph is stopped and never disposed, and a stopped source never gets
+    /// another attempt to flush. The latch is what keeps a write that settles afterwards, such as an
+    /// abandoned teardown flush, from parking into a queue nobody will read. No producer adds past it,
+    /// so the pending list stays empty and <see cref="DrainForLocalReapply"/> returns nothing.
+    /// One-way: a retired queue never parks again and cannot serve a second run.
+    /// </remarks>
+    public void Retire()
+    {
+        int stranded;
+        lock (_lock)
+        {
+            if (_retired)
+            {
+                return;
+            }
+
+            _retired = true;
+            stranded = _pendingWrites.Count;
+            _pendingWrites.Clear();
+            Volatile.Write(ref _count, 0);
+        }
+
+        if (stranded > 0)
+        {
+            _metrics.AddDropped(stranded);
+            _logger.LogWarning(
+                "{Count} queued writes were never delivered before the source stopped and are discarded.",
+                stranded);
         }
     }
 
@@ -219,26 +275,44 @@ internal sealed class WriteRetryQueue : IDisposable
     {
         lock (_lock)
         {
+            if (_retired)
+            {
+                // Retired while this batch was in flight: restoring it would park it in a queue with no reader.
+                return changes.Length;
+            }
+
             _pendingWrites.InsertRange(0, changes);
 
             // The failed in-flight changes are older than anything enqueued while the write was in
             // progress. Ring semantics therefore evict from the front after restoring the batch.
-            var droppedCount = _pendingWrites.Count - _maxQueueSize;
-            if (droppedCount > 0)
-            {
-                _pendingWrites.RemoveRange(0, droppedCount);
-            }
-
-            Volatile.Write(ref _count, _pendingWrites.Count);
-            return droppedCount;
+            return TrimToCapacity();
         }
+    }
+
+    // Ring semantics: evict from the front once over capacity. Callers must hold the lock.
+    private int TrimToCapacity()
+    {
+        var droppedCount = _pendingWrites.Count - _maxQueueSize;
+        if (droppedCount > 0)
+        {
+            _pendingWrites.RemoveRange(0, droppedCount);
+        }
+
+        Volatile.Write(ref _count, _pendingWrites.Count);
+        return droppedCount;
     }
 
     /// <summary>
     /// Disposes the write retry queue and releases resources.
     /// </summary>
+    /// <remarks>
+    /// Retires first, so a queue disposed without its run ever reaching <see cref="Retire"/> still
+    /// reports what it throws away. The two stay separate in the other direction: a retire happens
+    /// while the source is still unwinding and must leave the flush semaphore usable.
+    /// </remarks>
     public void Dispose()
     {
+        Retire();
         _flushSemaphore.Dispose();
     }
 }

@@ -30,11 +30,9 @@ public class SourceDiagnostics : ConnectorDiagnostics
     /// is rejecting writes.
     /// </summary>
     /// <remarks>
-    /// When the source is configured without a retry queue this block reports a capacity of 0 and a
-    /// depth of 0, while <see cref="QueueDiagnostics.TotalDropped"/> still rises: failed writes are
-    /// then discarded directly and are attributed here. In that configuration the total is a floor
-    /// rather than the whole loss, because the connect-window drain discards captured writes without
-    /// counting them.
+    /// When the source is configured with a retry queue size of 0 this block reports a capacity of 0
+    /// and a depth of 0, while <see cref="QueueDiagnostics.TotalDropped"/> still rises: failed writes
+    /// and connect-window writes are then discarded and attributed here.
     /// </remarks>
     public QueueDiagnostics OutboundRetries { get; }
 

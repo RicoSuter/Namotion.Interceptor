@@ -26,7 +26,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     // must agree; if only one ranked against the last commit, the other would still deliver an older one.
     private const ChangeDeliveryRule DeliveryRule = ChangeDeliveryRule.SourceValuesMayBeStale;
     private readonly TimeSpan _retryTime;
-    private readonly TimeSpan? _teardownFlushTimeout;
     private readonly SubjectPropertyWriter _propertyWriter;
 
     private static readonly TimeSpan ConnectWindowDrainInterval = TimeSpan.FromSeconds(1);
@@ -42,13 +41,9 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     private SourceStateSnapshot _stateSnapshot = new(SourceState.Synchronizing, DateTimeOffset.UtcNow, null);
     private int _started;
 
-    // The run's stopping token, so a write can still tell a shutdown from a genuine failure when it was
-    // handed a different token. Reference-sized, so it is written and read atomically.
-    private CancellationToken _stoppingToken;
-
     private ImmutableArray<SourceMonitor> _registeredMonitors = [];
 
-    internal WriteRetryQueue? WriteRetryQueue { get; }
+    internal WriteRetryQueue WriteRetryQueue { get; }
 
     protected SubjectSourceBase(
         IInterceptorSubjectContext context,
@@ -56,10 +51,9 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         TimeSpan? bufferTime = null,
         TimeSpan? retryTime = null,
         int writeRetryQueueSize = 1000,
-        TimeSpan? teardownFlushTimeout = null,
         ThroughputCounter? incomingThroughput = null,
         ThroughputCounter? outgoingThroughput = null)
-        : this(context, logger, bufferTime, retryTime, writeRetryQueueSize, teardownFlushTimeout,
+        : this(context, logger, bufferTime, retryTime, writeRetryQueueSize,
             new SourceMetrics(incomingThroughput, outgoingThroughput))
     {
     }
@@ -72,7 +66,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         TimeSpan? bufferTime,
         TimeSpan? retryTime,
         int writeRetryQueueSize,
-        TimeSpan? teardownFlushTimeout,
         SourceMetrics metrics)
         : base(metrics)
     {
@@ -83,30 +76,18 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
-        // Validated here and not only in the processor, which a source builds after connecting: a bad
-        // value would otherwise throw inside the retry loop, be swallowed as an attempt failure and be
-        // retried every retry interval forever instead of failing at construction.
-        ChangeQueueProcessor.ValidateTeardownFlushTimeout(teardownFlushTimeout);
-        _teardownFlushTimeout = teardownFlushTimeout;
 
-        // The retry queue also carries writes captured while (re)connecting. With size 0 it is
-        // disabled, and those connect/reconnect-window writes are dropped rather than reconciled.
-        if (writeRetryQueueSize > 0)
-        {
-            var writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger, metrics.OutboundRetries);
-            WriteRetryQueue = writeRetryQueue;
+        ArgumentOutOfRangeException.ThrowIfNegative(writeRetryQueueSize);
 
-            // Never disposed: the queue lives as long as the source, and its count field stays
-            // readable after Dispose.
-            _ = metrics.OutboundRetries.Register(
-                () => writeRetryQueue.PendingWriteCount, capacity: writeRetryQueueSize);
-        }
-        else
-        {
-            // Registered as disabled rather than left unregistered: an unregistered QueueMetrics
-            // reports a null capacity, which reads as unbounded, the opposite of the truth.
-            _ = metrics.OutboundRetries.Register(static () => 0, capacity: 0);
-        }
+        // Always constructed, so the queue's size-0 branch is the single definition of a disabled queue:
+        // count and discard, including the connect/reconnect-window writes it would otherwise reconcile.
+        var writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger, metrics.OutboundRetries);
+        WriteRetryQueue = writeRetryQueue;
+
+        // Never disposed: the queue lives as long as the source, and its count field stays readable
+        // after Dispose. Capacity 0 rather than null at size 0, since null reads as unbounded.
+        _ = metrics.OutboundRetries.Register(
+            () => writeRetryQueue.PendingWriteCount, capacity: writeRetryQueueSize);
 
         _propertyWriter = new SubjectPropertyWriter(this, logger, metrics.InboundBuffer);
     }
@@ -231,8 +212,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// <inheritdoc />
     protected sealed override async Task RunAsync(CancellationToken stoppingToken)
     {
-        _stoppingToken = stoppingToken;
-
         // Inside the try, so the finally below still publishes Stopped when startup fails. Outside it, a
         // configuration error leaves the source registered as Synchronizing for the process lifetime:
         // the DI path tears the host down, but on the graph-attach path the faulted task is swallowed and
@@ -311,7 +290,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         maxQueueDepth: null,
                         logger: _logger,
                         dropHandler: Metrics.OutboundChanges.AddDropped,
-                        teardownFlushTimeout: _teardownFlushTimeout);
+                        teardownHandler: async teardownToken =>
+                            await WriteRetryQueue.FlushAsync(this, teardownToken).ConfigureAwait(false));
 
                     // Declared after the processor so it is released first, which is what lets the
                     // retry loop's next attempt register its own: a second Register while one is
@@ -334,7 +314,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     // cancellation, while a stop tears the connection down mid-connect with an
                     // arbitrary exception: recording that would overwrite the genuine fault for good,
                     // since LastError is sticky and a stopped source never restarts.
-                    if (!IsExpectedShutdown(stoppingToken))
+                    if (!stoppingToken.IsCancellationRequested)
                     {
                         Metrics.ReportError(ex);
                     }
@@ -348,6 +328,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
         finally
         {
+            // Here rather than in Dispose, which a graph detach never calls: a detached source is stopped
+            // but never disposed, and a stopped source never gets another attempt at what is queued.
+            WriteRetryQueue.Retire();
+
             TransitionStateTo(SourceState.Stopped);
         }
     }
@@ -355,35 +339,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
     private async ValueTask WriteChangesViaRetryQueueAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        if (WriteRetryQueue is null)
-        {
-            // Discards are attributed to OutboundRetries, which reports capacity 0 here.
-            try
-            {
-                var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
-                if (!result.IsFullySuccessful && !IsExpectedShutdown(cancellationToken))
-                {
-                    Metrics.OutboundRetries.AddDropped(result.FailedChanges.Length);
-                    _logger.LogError(result.Error, "Failed to write {Count} changes to source.",
-                        result.FailedChanges.Length);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Ahead of the catch-all below, so a cancellation is never counted as a dropped write.
-                throw;
-            }
-            catch (Exception e)
-            {
-                // Unreachable today, kept as defence: WriteChangesInBatchesAsync turns every exception
-                // into a failed WriteResult, which is why this drop is unguarded while the reachable
-                // one above is filtered by IsExpectedShutdown.
-                Metrics.OutboundRetries.AddDropped(changes.Length);
-                _logger.LogError(e, "Failed to write changes to source.");
-            }
-            return;
-        }
-
         // First flush any queued changes
         var succeeded = await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
         if (!succeeded)
@@ -415,29 +370,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     }
 
     /// <summary>
-    /// Whether a failure is nothing more than the host stopping while the work was in flight.
-    /// </summary>
-    /// <remarks>
-    /// Decided by the token rather than by the exception type, because a stop tears down connections and
-    /// the failure that produces can be any exception, while
-    /// <see cref="SubjectSourceExtensions.WriteChangesInBatchesAsync"/> reports even the cancellation
-    /// itself as a failed <see cref="WriteResult"/> rather than throwing it.
-    /// <para>
-    /// Its second consumer is the drop counting in <see cref="WriteChangesViaRetryQueueAsync"/>, which
-    /// uses it to keep writes that only failed because the host was stopping out of the loss total.
-    /// </para>
-    /// <para>
-    /// The run's own stopping token is consulted as well as the caller's, because a write is not always
-    /// handed that token: <see cref="ChangeQueueProcessor"/> drains what it still holds on its way out
-    /// under a fresh one, deliberately, since the stopping token is already cancelled there and writing
-    /// under it would fail every change. Judging that drain by its token alone would report a loss caused
-    /// solely by the host stopping as a counted drop, which is what this guard exists to prevent.
-    /// </para>
-    /// </remarks>
-    private bool IsExpectedShutdown(CancellationToken cancellationToken) =>
-        cancellationToken.IsCancellationRequested || _stoppingToken.IsCancellationRequested;
-
-    /// <summary>
     /// Parks owned writes into the retry queue at intervals while the initial state loads, so a slow
     /// load cannot grow the subscription without bound. Collapsed per property like every other drain,
     /// so a property written repeatedly costs one slot rather than one per write.
@@ -461,18 +393,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     internal void DrainOwnedWritesToRetryQueue(PropertyChangeQueueSubscription subscription)
     {
-        // No retry queue: still drain the subscription to empty it, but there is nothing to reconcile.
-        // The discards are deliberately uncounted: the subscription carries every committed change in
-        // the process, so attributing them would mean running the ownership filter of the branch below
-        // per change, on a path that exists only when the retry queue is disabled.
-        if (WriteRetryQueue is null)
-        {
-            while (subscription.TryDequeueImmediate(out _))
-            {
-            }
-            return;
-        }
-
         List<SubjectPropertyChange>? owned = null;
         while (subscription.TryDequeueImmediate(out var change))
         {
@@ -492,15 +412,17 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             (owned ??= []).Add(change);
         }
 
-        if (owned is not null)
+        if (owned is null)
         {
-            // Collapsed before parking, not only at reconcile time. The queue is a bounded ring buffer
-            // that drops its oldest entries, so parking raw changes lets a burst on one property evict
-            // other properties' window writes before the reconcile ever sees them. Collapsing first
-            // makes the space this costs proportional to the number of properties written rather than
-            // to the number of writes.
-            WriteRetryQueue.Enqueue(CollapsePerProperty(owned.ToArray()).ToArray());
+            return;
         }
+
+        // Collapsed before parking, not only at reconcile time. The queue is a bounded ring buffer
+        // that drops its oldest entries, so parking raw changes lets a burst on one property evict
+        // other properties' window writes before the reconcile ever sees them. Collapsing first
+        // makes the space this costs proportional to the number of properties written rather than
+        // to the number of writes.
+        WriteRetryQueue.Enqueue(CollapsePerProperty(owned.ToArray()).ToArray());
     }
 
     /// <summary>
@@ -554,8 +476,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     internal async Task ReconcileRetryQueueAsync(CancellationToken cancellationToken)
     {
-        var retryChanges = WriteRetryQueue?.DrainForLocalReapply();
-        if (retryChanges is null || retryChanges.Length == 0)
+        var retryChanges = WriteRetryQueue.DrainForLocalReapply();
+        if (retryChanges.Length == 0)
         {
             return;
         }
@@ -629,7 +551,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
         if (toSend is not null)
         {
-            WriteRetryQueue!.Enqueue(toSend.ToArray());
+            WriteRetryQueue.Enqueue(toSend.ToArray());
             await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
         }
 
@@ -756,7 +678,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             monitor.Unregister(this);
         }
 
-        WriteRetryQueue?.Dispose();
+        WriteRetryQueue.Dispose();
         base.Dispose();
     }
 }
