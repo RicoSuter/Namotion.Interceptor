@@ -138,7 +138,6 @@ namespace Namotion.Interceptor.Connectors
     public abstract class SubjectSourceBase : Namotion.Interceptor.Connectors.SubjectConnectorBase, Namotion.Interceptor.Connectors.ISubjectConnector, Namotion.Interceptor.Connectors.ISubjectSource
     {
         protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000, System.TimeSpan? teardownFlushTimeout = default, Namotion.Interceptor.Connectors.ThroughputCounter? incomingThroughput = null, Namotion.Interceptor.Connectors.ThroughputCounter? outgoingThroughput = null) { }
-        protected int CurrentResumeEpoch { get; }
         [get: System.Runtime.CompilerServices.PreserveBaseOverrides]
         public new virtual Namotion.Interceptor.Connectors.Diagnostics.SourceDiagnostics Diagnostics { get; }
         public System.DateTimeOffset? LastSynchronizedAt { get; }
@@ -476,6 +475,6 @@ namespace Namotion.Interceptor.Connectors.Updates
     }
     public static class SubjectUpdateExtensions
     {
-        public static void ApplySubjectUpdate(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Connectors.Updates.SubjectUpdate update, Namotion.Interceptor.Connectors.ISubjectFactory? subjectFactory, Namotion.Interceptor.ChangeOrigin origin, System.Action<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate>? transformValueBeforeApply = null, Microsoft.Extensions.Logging.ILogger? logger = null) { }
+        public static bool ApplySubjectUpdate(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Connectors.Updates.SubjectUpdate update, Namotion.Interceptor.Connectors.ISubjectFactory? subjectFactory, Namotion.Interceptor.ChangeOrigin origin, System.Action<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate>? transformValueBeforeApply = null, Microsoft.Extensions.Logging.ILogger? logger = null) { }
     }
 }

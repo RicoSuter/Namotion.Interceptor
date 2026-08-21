@@ -217,12 +217,24 @@ public sealed class WebSocketSubjectHandler
             {
                 var factory = _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance;
                 // The lock serializes update application so concurrent client updates apply one at a time.
+                bool appliedEverything;
                 lock (_applyUpdateLock)
                 {
-                    _subject.ApplySubjectUpdate(update, factory, ChangeOrigin.FromSource(connection), logger: _logger);
+                    appliedEverything = _subject.ApplySubjectUpdate(update, factory, ChangeOrigin.FromSource(connection), logger: _logger);
                 }
 
-                connection.OnUpdateApplied(ordinal);
+                if (appliedEverything)
+                {
+                    connection.OnUpdateApplied(ordinal);
+                }
+                else
+                {
+                    // A dropped subject, collection item or dictionary entry is not an exception, but the
+                    // update was not fully applied either: the acknowledgement count must not advance past
+                    // it, or the client would retire a write whose effect never landed. The drop itself is
+                    // already logged by the apply.
+                    connection.OnApplyFailed();
+                }
             }
             catch (Exception ex)
             {

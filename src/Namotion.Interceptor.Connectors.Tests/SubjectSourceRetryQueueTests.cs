@@ -633,31 +633,6 @@ public class SubjectSourceRetryQueueTests
     }
 
     [Fact]
-    public void WhenBeginResumeIsCalledRepeatedly_ThenCurrentResumeEpochTracksTheLatestOne()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry().WithFullPropertyTracking();
-        var person = new Person(context);
-        var source = new TestSubjectSource(person, context, NullLogger.Instance);
-
-        // Act & Assert - no resume has opened the gate yet.
-        Assert.Equal(0, source.CurrentResumeEpochForTest);
-
-        var firstEpoch = source.BeginResumeForTest();
-        Assert.Equal(firstEpoch, source.CurrentResumeEpochForTest);
-
-        var secondEpoch = source.BeginResumeForTest();
-        Assert.Equal(secondEpoch, source.CurrentResumeEpochForTest);
-        Assert.True(secondEpoch > firstEpoch, "A later BeginResume must open a newer epoch.");
-
-        // Clearing the gate must not roll the epoch back: it is a caller of CurrentResumeEpoch's job
-        // to tell a value captured before this resume apart from one captured during it, and that only
-        // works if the epoch keeps climbing rather than resetting once the resume completes.
-        source.AbortResumeForTest(secondEpoch);
-        Assert.Equal(secondEpoch, source.CurrentResumeEpochForTest);
-    }
-
-    [Fact]
     public async Task WhenParkingWithInsertAtFront_ThenTheParkedEntriesPrecedeAnyAlreadyQueued()
     {
         // Arrange - stands in for the re-park after a reconnect: the in-flight entries being re-parked

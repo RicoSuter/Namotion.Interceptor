@@ -67,6 +67,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
+    // Cached rather than allocated per call: passed to WriteRetryQueue.FlushAsync from both
+    // connected-phase call sites as the level-triggered re-check on its batch loop.
+    private readonly Func<bool> _isResumeInProgress;
+
     protected SubjectSourceBase(
         IInterceptorSubjectContext context,
         ILogger logger,
@@ -98,6 +102,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
         _context = context;
         _logger = logger;
+        _isResumeInProgress = () => Volatile.Read(ref _resumeInProgress) == 1;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
         // Validated here and not only in the processor, which a source builds after connecting: a bad
@@ -451,7 +456,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
 
         // First flush any queued changes
-        var succeeded = await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
+        var succeeded = await WriteRetryQueue.FlushAsync(this, cancellationToken, _isResumeInProgress).ConfigureAwait(false);
         if (!succeeded)
         {
             WriteRetryQueue.Enqueue(changes);
@@ -507,7 +512,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     continue;
                 }
 
-                await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
+                await WriteRetryQueue.FlushAsync(this, cancellationToken, _isResumeInProgress).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -736,21 +741,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         Volatile.Write(ref _resumeInProgress, 1);
         return epoch;
     }
-
-    /// <summary>
-    /// The epoch a resume last opened, whether or not one is currently in progress.
-    /// </summary>
-    /// <remarks>
-    /// A caller that captured this alongside other connection state before waiting on a lock can tell,
-    /// once it resumes, whether a resume started in between: the epoch only advances inside
-    /// <see cref="BeginResume"/>, so a value that is still unchanged means nothing captured before it
-    /// predates a connection replacement, even if the connection itself has already been replaced.
-    /// That guarantee depends on every connection replacement being preceded by a call to
-    /// <see cref="BeginResume"/>; this base class has no way to enforce that on a derived connector, so
-    /// a caller building a guard on this member is trusting its own connector's discipline, not
-    /// anything this class checks.
-    /// </remarks>
-    protected int CurrentResumeEpoch => Volatile.Read(ref _resumeEpoch);
 
     /// <summary>
     /// Re-opens outbound delivery if <paramref name="resumeEpoch"/> is still the newest one, so that a

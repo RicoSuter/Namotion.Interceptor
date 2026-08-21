@@ -1,8 +1,15 @@
 using System;
+using System.Buffers;
+using System.Collections.Generic;
+using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.WebSocket.Internal;
+using Namotion.Interceptor.WebSocket.Protocol;
+using Namotion.Interceptor.WebSocket.Serialization;
 using Namotion.Interceptor.WebSocket.Server;
 using Xunit;
 using Xunit.Abstractions;
@@ -89,6 +96,101 @@ public class AppliedThroughHeartbeatTests
         // If the write had been re-asserted, the resend would still be sitting here awaiting its own
         // acknowledgement.
         Assert.Equal(0, client.Source!.InFlightCount);
+    }
+
+    [Fact]
+    public async Task WhenAnUpdateDropsPartOfItsContent_ThenTheAppliedThroughCountStallsAtIt()
+    {
+        // Arrange: a raw client, so an update can reference a subject ID the server can never resolve.
+        // WebSocketSubjectClientSource never builds such a payload itself, since everything it sends is
+        // locally resolvable, so reaching the server's drop path needs a hand-built message.
+        var serializer = JsonWebSocketSerializer.Instance;
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketTestServer<TestRoot>(_output);
+        await server.StartAsync(
+            context => new TestRoot(context),
+            (_, root) => root.Name = "Initial",
+            port: portLease.Port,
+            configureServer: configuration => configuration.HeartbeatInterval = WebSocketServerConfiguration.MinimumHeartbeatInterval);
+
+        using var rawClient = new ClientWebSocket();
+        await rawClient.ConnectAsync(new Uri($"ws://localhost:{portLease.Port}/ws"), CancellationToken.None);
+
+        var hello = new HelloPayload { Format = WebSocketFormat.Json };
+        var sendBuffer = new ArrayBufferWriter<byte>(256);
+        serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, hello);
+        await rawClient.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
+
+        using (var welcomeResult = await WebSocketMessageReader.ReadMessageAsync(rawClient, 10 * 1024 * 1024, CancellationToken.None))
+        {
+            var (welcomeType, _, _) = serializer.DeserializeMessageEnvelope(welcomeResult.MessageBytes.Span);
+            Assert.Equal(MessageType.Welcome, welcomeType);
+        }
+
+        // Act: an update whose only content references a subject ID the server has never seen and
+        // cannot resolve, so the apply drops it without throwing, followed by a genuinely valid update
+        // to the root's own property.
+        var droppingUpdate = new SubjectUpdate
+        {
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["ghost-subject"] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "Ghost" }
+                }
+            }
+        };
+        await SendUpdateAsync(rawClient, serializer, droppingUpdate);
+
+        var validUpdate = new SubjectUpdate
+        {
+            Root = "raw-root",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["raw-root"] = new()
+                {
+                    [nameof(TestRoot.Name)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "AfterDrop" }
+                }
+            }
+        };
+        await SendUpdateAsync(rawClient, serializer, validUpdate);
+
+        // Assert: the second update genuinely reached the model, proving the stall is not simply
+        // because nothing else applied, and the heartbeat's applied-through count never advances past
+        // the failed first update despite it.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => server.Root!.Name == "AfterDrop",
+            message: "The valid update after the drop should still reach the model.");
+
+        var heartbeat = await ReceiveHeartbeatAsync(rawClient, serializer, TimeSpan.FromSeconds(10));
+        Assert.NotNull(heartbeat.AppliedThrough);
+        Assert.Equal(0L, heartbeat.AppliedThrough!.Value);
+    }
+
+    private static async Task SendUpdateAsync(ClientWebSocket rawClient, JsonWebSocketSerializer serializer, SubjectUpdate update)
+    {
+        var sendBuffer = new ArrayBufferWriter<byte>(256);
+        serializer.SerializeMessageTo(sendBuffer, MessageType.Update, update);
+        await rawClient.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Reads messages until a Heartbeat arrives, skipping any Update or Error broadcasts in between,
+    /// since either can legitimately interleave with the two sends above.
+    /// </summary>
+    private static async Task<HeartbeatPayload> ReceiveHeartbeatAsync(
+        ClientWebSocket rawClient, JsonWebSocketSerializer serializer, TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+        while (true)
+        {
+            using var result = await WebSocketMessageReader.ReadMessageAsync(rawClient, 10 * 1024 * 1024, cts.Token);
+            var (messageType, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(result.MessageBytes.Span);
+            if (messageType == MessageType.Heartbeat)
+            {
+                return serializer.Deserialize<HeartbeatPayload>(result.MessageBytes.Span.Slice(payloadStart, payloadLength));
+            }
+        }
     }
 
     /// <summary>

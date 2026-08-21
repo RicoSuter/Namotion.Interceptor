@@ -34,7 +34,13 @@ public static class SubjectUpdateExtensions
     /// Not invoked for subjects this update creates, see the remarks.</param>
     /// <param name="logger">Logs unresolvable-subject drops with the origin; omit to keep the drops
     /// counter-only.</param>
-    public static void ApplySubjectUpdate(
+    /// <returns>
+    /// <c>true</c> if every part of the update applied; <c>false</c> if a subject, collection item or
+    /// dictionary entry the update referenced could not be resolved and was dropped. A caller that
+    /// treats its own apply as an acknowledgement, such as a server advancing what it has applied for a
+    /// connection, must not do so when this returns <c>false</c>.
+    /// </returns>
+    public static bool ApplySubjectUpdate(
         this IInterceptorSubject subject,
         SubjectUpdate update,
         ISubjectFactory? subjectFactory,
@@ -42,7 +48,7 @@ public static class SubjectUpdateExtensions
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null,
         ILogger? logger = null)
     {
-        SubjectUpdateApplier.ApplyUpdate(
+        return SubjectUpdateApplier.ApplyUpdate(
             subject,
             update,
             subjectFactory ?? DefaultSubjectFactory.Instance,

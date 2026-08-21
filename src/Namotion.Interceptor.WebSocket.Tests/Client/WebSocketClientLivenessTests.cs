@@ -688,93 +688,17 @@ public class WebSocketClientLivenessTests
     }
 
     [Fact]
-    public async Task WhenTheConnectionIsReplacedWhileAWriteWaitsForTheLock_ThenThatWriteIsParkedRatherThanSent()
+    public async Task WhenATransactionalCommitIsIssuedAfterAReconnect_ThenItSucceedsOnTheNewConnection()
     {
-        // Arrange - the check-then-act residual this pins: a write captures the socket instance before
-        // waiting on the connection lock, so a reconnect that finishes while it still waits must not
-        // let it slip through onto the replaced connection unreconciled.
-        using var portLease = await WebSocketTestPortPool.AcquireAsync();
-        await using var server = await StartServerAsync(portLease.Port);
-        await using var source = CreateClientSource(portLease.Port, reconnectDelay: TimeSpan.FromMilliseconds(50));
-        await source.StartAsync(CancellationToken.None);
-
-        var clientRoot = (TestRoot)source.RootSubject;
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
-
-        clientRoot.Name = "First";
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => server.Root!.Name == "First",
-            message: "The first write should reach the server over the still-healthy connection.");
-
-        using var connectionLockGate = new UpdateAdmissionGate(armed: true);
-        source.BeforeConnectionLockWait = connectionLockGate.Wait;
-
-        // Fires deterministically the instant the guard trips, rather than requiring a poll to catch
-        // the retry queue's depth before the connected-phase flush drains it right back out again.
-        var guardFired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        source.AfterConnectionReplacedGuardFired = () => guardFired.TrySetResult();
-
-        try
-        {
-            // Act - the second write captures the current socket instance and then blocks before it
-            // can wait on the connection lock.
-            var socketBeforeDisconnect = GetWebSocket(source);
-            clientRoot.Name = "Second";
-            await connectionLockGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
-
-            // The connection is replaced for real while the second write is held back. Checked via the
-            // field itself rather than IsOperational: that flag reads true both before the disconnect
-            // has been noticed and once the replacement is up, so it cannot prove the socket instance
-            // has actually changed.
-            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => !ReferenceEquals(GetWebSocket(source), socketBeforeDisconnect) &&
-                      source.Diagnostics.IsOperational &&
-                      server.Root!.Name == "First",
-                timeout: TimeSpan.FromSeconds(15),
-                message: "The reconnect should complete and reload the server's value before the second write is admitted.");
-
-            connectionLockGate.Release();
-
-            // Assert - the second write hits the guard rather than reaching the server over the
-            // replaced connection. Asserted on the mechanism, not the outcome: the write's own value
-            // ("Second") is what both a guarded park-then-retry and an unguarded direct send onto the
-            // replaced connection converge to, since nothing in this scenario moves the server's value
-            // independently during the outage, so the two paths cannot be told apart by end state alone.
-            // Making them distinguishable needs the server's value to diverge during the outage, which
-            // is a case this stack does not close; write a test for it if that lands.
-            await guardFired.Task.WaitAsync(TimeSpan.FromSeconds(15));
-
-            // Not lost: the retry queue eventually delivers it.
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => server.Root!.Name == "Second",
-                timeout: TimeSpan.FromSeconds(15),
-                message: "The parked write should eventually reach the server.");
-        }
-        finally
-        {
-            connectionLockGate.Release();
-            source.BeforeConnectionLockWait = null;
-            source.AfterConnectionReplacedGuardFired = null;
-            await source.StopAsync(CancellationToken.None);
-        }
-    }
-
-    [Fact]
-    public async Task WhenATransactionalCommitArrivesDuringTheReconnectWindow_ThenItSucceedsOnTheNewConnection()
-    {
-        // Arrange - the resume epoch is what lets the connection-replaced guard tell a stale
-        // pre-outage batch apart from a fresh commit issued after the gate is already up: both capture
-        // a socket the reconnect then replaces while they wait on the connection lock, and only the
-        // epoch differs between them. A transactional commit is used because it reaches
-        // WriteChangesAsync directly, bypassing the resume gate in WriteChangesViaRetryQueueAsync that
-        // would otherwise park a plain write itself before it ever reaches this guard.
+        // Arrange - a transactional commit reaches WriteChangesAsync directly, bypassing the resume
+        // gate in WriteChangesViaRetryQueueAsync that would otherwise park a plain write, so removing
+        // the connection-replacement guard must not have broken it: it still has to land on whichever
+        // connection is current once it gets the connection lock.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = await StartServerAsync(portLease.Port);
         await using var source = CreateClientSource(
             portLease.Port,
-            reconnectDelay: TimeSpan.FromSeconds(2),
+            reconnectDelay: TimeSpan.FromMilliseconds(50),
             configureContext: context => context.WithSourceTransactions());
         await source.StartAsync(CancellationToken.None);
 
@@ -785,112 +709,61 @@ public class WebSocketClientLivenessTests
 
         var oldSocket = GetWebSocket(source);
 
-        using var connectionLockGate = new UpdateAdmissionGate(armed: true);
-        source.BeforeConnectionLockWait = connectionLockGate.Wait;
-
-        var guardFired = false;
-        source.AfterConnectionReplacedGuardFired = () => Volatile.Write(ref guardFired, true);
-
         try
         {
-            // Act - waits only for the source to stop reporting operational, which the receive loop
-            // sets before it signals completion, and BeginResume only runs once the monitor loop wakes
-            // up in response to that signal. So this does not itself guarantee BeginResume has already
-            // run by the time the commit below captures its epoch: if that race is lost, the commit
-            // captures the pre-resume epoch, the guard then sees the epoch advance under it exactly as
-            // it would for a genuinely stale batch, and the assertion below fails rather than passing
-            // on coverage it did not actually exercise.
+            // Act - the connection drops for real and the reconnect is given the chance to complete
+            // before the commit is issued: a commit reaching an already-dead socket fails immediately
+            // with no connection to wait for, which is not what this test is about.
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => !source.Diagnostics.IsOperational);
-
-            var commitTask = Task.Run(async () =>
-            {
-                using var transaction = await subjectContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-                clientRoot.Name = "DuringReconnect";
-                await transaction.CommitAsync(CancellationToken.None);
-            });
-            await connectionLockGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
-
-            // The reconnect, already under way from the delay above, completes for real while the
-            // commit is held back before it can wait on the connection lock.
             await AsyncTestHelpers.WaitUntilAsync(
                 () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational,
                 timeout: TimeSpan.FromSeconds(15),
-                message: "The reconnect should complete while the commit is held back.");
+                message: "The reconnect should complete.");
 
-            connectionLockGate.Release();
-            await commitTask.WaitAsync(TimeSpan.FromSeconds(15));
+            using var transaction = await subjectContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+            clientRoot.Name = "AfterReconnect";
+            await transaction.CommitAsync(CancellationToken.None);
 
-            // Assert - the guard did not treat this as a stale pre-outage batch, and the commit reached
-            // the server over the replaced connection rather than being parked.
-            Assert.False(
-                Volatile.Read(ref guardFired),
-                "A commit issued after the gate was already up must not hit the guard.");
+            // Assert - the commit reached the server over the replacement connection.
             await AsyncTestHelpers.WaitUntilAsync(
-                () => server.Root!.Name == "DuringReconnect",
+                () => server.Root!.Name == "AfterReconnect",
                 timeout: TimeSpan.FromSeconds(15),
-                message: "The commit should reach the server over the new connection.");
+                message: "The commit should reach the server.");
         }
         finally
         {
-            connectionLockGate.Release();
-            source.BeforeConnectionLockWait = null;
-            source.AfterConnectionReplacedGuardFired = null;
             await source.StopAsync(CancellationToken.None);
         }
     }
 
     [Fact]
-    public async Task WhenRetireRacesAReconnectAcrossItsCheckAndLock_ThenItDoesNotDiscardTheNewConnectionsEntry()
+    public async Task WhenRetireIsCalledWithASocketThatIsNotTheCurrentOne_ThenNothingIsRemoved()
     {
-        // Arrange - the interleaving item 1 of the review closes: a retire call reads the connection as
-        // still current, is preempted before it takes the map lock, and a reconnect completes and
-        // records a fresh entry underneath it. The check has to be atomic with the mutation, or the
-        // resumed call discards the new connection's entry using a now-stale identity check.
+        // Arrange - a single write in flight on the current connection.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = await StartServerAsync(portLease.Port);
-        await using var source = CreateClientSource(portLease.Port, reconnectDelay: TimeSpan.FromMilliseconds(50));
+        await using var source = CreateClientSource(portLease.Port);
         await source.StartAsync(CancellationToken.None);
 
         var clientRoot = (TestRoot)source.RootSubject;
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
-
-        var oldSocket = (System.Net.WebSockets.WebSocket)GetWebSocket(source)!;
-
-        using var retireLockGate = new UpdateAdmissionGate(armed: true);
-        source.BeforeRetireInFlightLock = retireLockGate.Wait;
 
         try
         {
-            // Act - a retire call for the old connection is started and pauses right before it takes
-            // the in-flight lock, standing in for a receive loop preempted there in production.
-            var retireTask = Task.Run(() => source.RetireInFlightThrough(1, oldSocket));
-            await retireLockGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
-
-            // The connection is replaced for real while the retire call is held back.
-            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational,
-                timeout: TimeSpan.FromSeconds(15),
-                message: "The reconnect should complete before the retire call is released.");
+                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
 
-            // A write on the new connection records a fresh entry with the same ordinal (1) the paused
-            // call was about to retire against the old connection.
-            clientRoot.Name = "AfterReconnect";
+            clientRoot.Name = "InFlight";
             await AsyncTestHelpers.WaitUntilAsync(() => source.InFlightCount > 0);
 
-            retireLockGate.Release();
-            await retireTask.WaitAsync(TimeSpan.FromSeconds(10));
+            // Act - a retire call quoting a socket that is not the current connection, with an
+            // applied-through value larger than anything the current connection could ever report.
+            source.RetireInFlightThrough(long.MaxValue, new ClientWebSocket());
 
-            // Assert - the new connection's entry survives: the check inside the lock sees the replaced
-            // socket and the retire call does nothing.
+            // Assert - the identity check inside the lock rejects it by construction, not by timing.
             Assert.Equal(1, source.InFlightCount);
         }
         finally
         {
-            retireLockGate.Release();
-            source.BeforeRetireInFlightLock = null;
             await source.StopAsync(CancellationToken.None);
         }
     }
@@ -925,9 +798,12 @@ public class WebSocketClientLivenessTests
         // mid-flight. Also assert the teardown log itself, which is this scenario's actual deliverable:
         // the drop total alone would still read zero even if that log line were deleted.
         Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
-        Assert.Contains(
-            recordingLogger.Warnings,
-            message => message.Contains("reached the socket but were never confirmed applied", StringComparison.Ordinal));
+        lock (recordingLogger.Warnings)
+        {
+            Assert.Contains(
+                recordingLogger.Warnings,
+                message => message.Contains("reached the socket but were never confirmed applied", StringComparison.Ordinal));
+        }
     }
 
     [Fact]
@@ -995,16 +871,18 @@ public class WebSocketClientLivenessTests
     }
 
     [Fact]
-    public async Task WhenAReconnectCompletesEntirelyBetweenTheEpochAndSocketReads_ThenTheSnapshotRetriesAndCapturesTheReplacementConnection()
+    public async Task WhenTheServerClaimsAcknowledgementButNeverReportsAnAppliedThrough_ThenTheInFlightSetIsDiscardedNotReParked()
     {
-        // Arrange - the connection snapshot in WriteChangesAsync has to be a consistent pair, not two
-        // independent reads: a reconnect landing between the epoch read and the socket read must not be
-        // allowed to produce a torn pair that mixes state from before and after it. Held right after the
-        // epoch is read for the first time, before the socket is read, standing in for a reconnect that
-        // completes entirely inside that window in production.
+        // Arrange - heartbeats are enabled, so the Welcome claims acknowledgement, but the interval is
+        // left long enough that none arrives before the reconnect below: the promise is made but never
+        // backed by an observed applied-through value, standing in for a heartbeat interval at or above
+        // this client's receive timeout.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
-        await using var server = await StartServerAsync(portLease.Port);
-        await using var source = CreateClientSource(portLease.Port, reconnectDelay: TimeSpan.FromMilliseconds(50));
+        await using var server = await StartServerAsync(
+            portLease.Port,
+            configureServer: configuration => configuration.HeartbeatInterval = TimeSpan.FromMinutes(5));
+        var recordingLogger = new RecordingLogger();
+        await using var source = CreateClientSource(portLease.Port, logger: recordingLogger);
         await source.StartAsync(CancellationToken.None);
 
         var clientRoot = (TestRoot)source.RootSubject;
@@ -1016,45 +894,108 @@ public class WebSocketClientLivenessTests
 
             var oldSocket = GetWebSocket(source);
 
-            using var snapshotGate = new UpdateAdmissionGate(armed: true);
-            source.BeforeSocketSnapshotRead = snapshotGate.Wait;
-
-            object? capturedSocket = null;
-            var capturedEpoch = -1;
-            var captured = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            source.AfterConnectionSnapshotCaptured = (socket, epoch) =>
-            {
-                capturedSocket = socket;
-                capturedEpoch = epoch;
-                captured.TrySetResult();
-            };
-
-            // Act - the write's epoch read happens before the reconnect below; the write is then held
-            // right before its socket read while the reconnect runs to completion underneath it.
-            clientRoot.Name = "DuringSnapshotRace";
-            await snapshotGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+            // Act - write, let it reach the server and be recorded as in flight (heartbeats are
+            // enabled, so the Welcome claims acknowledgement), then drop the connection before any
+            // heartbeat can arrive and let the server move the value on while the client is away.
+            clientRoot.Name = "Written";
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Root!.Name == "Written");
+            await AsyncTestHelpers.WaitUntilAsync(() => source.InFlightCount > 0);
 
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
+            server.Root!.Name = "MovedOnWhileClientWasAway";
+
             await AsyncTestHelpers.WaitUntilAsync(
                 () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational,
                 timeout: TimeSpan.FromSeconds(15),
-                message: "The reconnect should complete while the write's snapshot read is held back.");
+                message: "The client should reconnect to the still-running server.");
 
-            snapshotGate.Release();
-            await captured.Task.WaitAsync(TimeSpan.FromSeconds(10));
-
-            // Assert - the captured pair belongs entirely to the replacement connection: neither the old
-            // socket paired with the new epoch nor the new socket paired with the old epoch, either of
-            // which would let a batch that predates this reconnect pass the guard unreconciled. The
-            // retry inside the snapshot loop is what discards the pair it read across the reconnect and
-            // reads again once the epoch had settled.
-            Assert.Same(GetWebSocket(source), capturedSocket);
-            Assert.Equal(GetCurrentResumeEpoch(source), capturedEpoch);
+            // Assert - the entry was discarded rather than re-parked: the server's post-outage value
+            // survives, the discard is counted, and the reason is logged.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientRoot.Name == "MovedOnWhileClientWasAway" && server.Root!.Name == "MovedOnWhileClientWasAway",
+                message: "The client should converge on the server's value rather than re-asserting its own.");
+            Assert.Equal(0, source.InFlightCount);
+            Assert.True(source.Diagnostics.OutboundRetries.TotalDropped > 0);
+            lock (recordingLogger.Warnings)
+            {
+                Assert.Contains(
+                    recordingLogger.Warnings,
+                    message => message.Contains("never reported an applied-through value", StringComparison.Ordinal));
+            }
         }
         finally
         {
-            source.BeforeSocketSnapshotRead = null;
-            source.AfterConnectionSnapshotCaptured = null;
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheGateGoesUpBetweenBatchesOfAMultiBatchFlush_ThenTheUnsentBatchesAreRequeuedRatherThanSent()
+    {
+        // Arrange - design document case D4's residual: WriteRetryQueue.FlushAsync's scratch buffer
+        // grows to 128 entries on the first non-empty flush, so parking more than that spans two
+        // batches within one flush call, which is what makes a reconnect landing between them
+        // genuinely reachable rather than only a single edge-triggered check before the whole flush.
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = await StartServerAsync(portLease.Port);
+        await using var source = CreateClientSource(portLease.Port);
+        await source.StartAsync(CancellationToken.None);
+
+        var clientRoot = (TestRoot)source.RootSubject;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+
+        const int parkedCount = 200;
+        var parked = new SubjectPropertyChange[parkedCount];
+        for (var i = 0; i < parkedCount; i++)
+        {
+            parked[i] = CreateChange(clientRoot, nameof(TestRoot.Name), "Initial", $"Parked{i}");
+        }
+        source.WriteRetryQueue!.Enqueue(parked);
+
+        var sendAttempts = 0;
+        source.BeforeReservedSendAttempt = () =>
+        {
+            // Stands in for a reconnect beginning between one batch and the next: the gate is raised
+            // through the same BeginResume a real reconnect calls, right after the first batch's send
+            // has been admitted and before the flush loop moves on to the next one.
+            if (Interlocked.Increment(ref sendAttempts) == 1)
+            {
+                BeginResumeViaReflection(source);
+            }
+        };
+
+        try
+        {
+            // Act - a fresh write flushes the parked backlog before sending itself, which is where the
+            // multi-batch flush runs.
+            clientRoot.Name = "Trigger";
+
+            // Assert - only the first batch reached WriteChangesAsync: the second batch's gate check
+            // requeued the remainder instead of sending it. Depth settles rather than continuing to
+            // fall, because the gate stays up and nothing clears it in this test.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => Volatile.Read(ref sendAttempts) > 0);
+            var depthAfterFirstBatch = -1;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    var depth = source.Diagnostics.OutboundRetries.Depth;
+                    var settled = depth == depthAfterFirstBatch;
+                    depthAfterFirstBatch = depth;
+                    return settled;
+                },
+                message: "The retry queue depth did not settle after the multi-batch flush stopped.");
+
+            Assert.Equal(1, Volatile.Read(ref sendAttempts));
+            Assert.True(
+                depthAfterFirstBatch > 0 && depthAfterFirstBatch < parkedCount,
+                $"Expected some but not all of the {parkedCount} parked entries to remain queued, got {depthAfterFirstBatch}.");
+            Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
+        }
+        finally
+        {
+            source.BeforeReservedSendAttempt = null;
             await source.StopAsync(CancellationToken.None);
         }
     }
@@ -1084,20 +1025,21 @@ public class WebSocketClientLivenessTests
             source.BeforeReservedSendAttempt = sendGate.Wait;
 
             // Act - an ordinal is reserved for this send, then the send itself is held back and made
-            // to fail by cancelling its own token before it ever reaches the wire, standing in for a
-            // send that fails after the reservation for whatever reason, without depending on what a
-            // real transport happens to do to its own state when that happens.
-            using var failingSendCts = new CancellationTokenSource();
+            // to fail by aborting the socket underneath it before it ever reaches the wire, standing in
+            // for a send that fails after the reservation for whatever reason, without depending on
+            // what a real transport happens to do to its own state when that happens. Not a
+            // cancellation of the caller's own token: that is filtered out of the abort deliberately
+            // (see WriteChangesAsync's catch), so this needs a failure that is not one.
             var failingChange = CreateChange(clientRoot, nameof(TestRoot.Name), "Initial", "NeverSent");
 
             // Run on its own thread: with the connection lock free, WriteChangesAsync would otherwise
             // reach the blocking gate synchronously on this thread, before this call could ever return
             // control to await the gate's own entry signal below.
             var failingWriteTask = Task.Run(
-                async () => await source.WriteChangesAsync(new[] { failingChange }, failingSendCts.Token));
+                async () => await source.WriteChangesAsync(new[] { failingChange }, CancellationToken.None));
 
             await sendGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
-            await failingSendCts.CancelAsync();
+            ((ClientWebSocket)GetWebSocket(source)!).Abort();
             sendGate.Release();
 
             var failingResult = await failingWriteTask.WaitAsync(TimeSpan.FromSeconds(10));
@@ -1119,6 +1061,59 @@ public class WebSocketClientLivenessTests
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.InFlightCount == 0,
                 message: "The write on the replacement connection should retire once the server's heartbeat reports it applied.");
+        }
+        finally
+        {
+            source.BeforeReservedSendAttempt = null;
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAReservedSendIsCancelledByTheCaller_ThenTheConnectionIsNotAborted()
+    {
+        // Arrange - the abort that WhenAReservedSendFails_... pins must not fire on a cancellation from
+        // the caller, most likely the teardown flush: aborting a healthy socket there skips the close
+        // handshake and downgrades a graceful stop into one.
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = await StartServerAsync(portLease.Port);
+        await using var source = CreateClientSource(portLease.Port);
+        await source.StartAsync(CancellationToken.None);
+
+        var clientRoot = (TestRoot)source.RootSubject;
+
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+
+            var socketBeforeCancellation = GetWebSocket(source);
+
+            using var sendGate = new UpdateAdmissionGate(armed: true);
+            source.BeforeReservedSendAttempt = sendGate.Wait;
+
+            // Act - an ordinal is reserved for this send, then the send itself is held back and made
+            // to fail by cancelling the caller's own token before it ever reaches the wire.
+            using var callerCts = new CancellationTokenSource();
+            var failingChange = CreateChange(clientRoot, nameof(TestRoot.Name), "Initial", "NeverSent");
+
+            var failingWriteTask = Task.Run(
+                async () => await source.WriteChangesAsync(new[] { failingChange }, callerCts.Token));
+
+            await sendGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+            await callerCts.CancelAsync();
+            sendGate.Release();
+
+            var failingResult = await failingWriteTask.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(failingResult.IsFullySuccessful);
+
+            // Assert - the connection is still the same instance and still usable, rather than having
+            // been aborted and replaced by a reconnect.
+            clientRoot.Name = "AfterCancelledSend";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Root!.Name == "AfterCancelledSend",
+                message: "The connection should still be usable for a further write.");
+            Assert.Same(socketBeforeCancellation, GetWebSocket(source));
         }
         finally
         {
@@ -1247,10 +1242,8 @@ public class WebSocketClientLivenessTests
     /// <summary>
     /// Blocks the first caller that reaches <see cref="Wait"/> until <see cref="Release"/> is
     /// called, so a test can hold a production seam open while it orchestrates a race on another
-    /// thread. Only the first caller blocks: a seam that can fire more than once during a test, such
-    /// as <see cref="WebSocketSubjectClientSource.BeforeRetireInFlightLock"/> on a heartbeat that
-    /// arrives while the gate is still held, passes straight through instead of wedging on a gate
-    /// nothing releases it from.
+    /// thread. Only the first caller blocks: a seam that can fire more than once during a test passes
+    /// straight through instead of wedging on a gate nothing releases it from.
     /// </summary>
     private sealed class UpdateAdmissionGate : IDisposable
     {
@@ -1262,9 +1255,7 @@ public class WebSocketClientLivenessTests
 
         /// <param name="armed">
         /// <c>true</c> when the seam has no separate arm step and must block as soon as it is
-        /// reached, such as <see cref="WebSocketSubjectClientSource.BeforeConnectionLockWait"/> or
-        /// <see cref="WebSocketSubjectClientSource.BeforeRetireInFlightLock"/>. Leave <c>false</c>
-        /// and call <see cref="Arm"/> once other setup needs to run first.
+        /// reached. Leave <c>false</c> and call <see cref="Arm"/> once other setup needs to run first.
         /// </param>
         public UpdateAdmissionGate(bool armed = false)
         {
@@ -1442,10 +1433,14 @@ public class WebSocketClientLivenessTests
             .GetField("_webSocket", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(source);
 
-    private static int GetCurrentResumeEpoch(WebSocketSubjectClientSource source) =>
-        (int)typeof(SubjectSourceBase)
-            .GetField("_resumeEpoch", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetValue(source)!;
+    /// <summary>
+    /// Invokes the protected <c>SubjectSourceBase.BeginResume</c> through reflection, so a test can
+    /// raise the resume gate the same way a real reconnect does without staging one.
+    /// </summary>
+    private static void BeginResumeViaReflection(WebSocketSubjectClientSource source) =>
+        typeof(SubjectSourceBase)
+            .GetMethod("BeginResume", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(source, null);
 
     private static CancellationTokenSource GetReceiveCancellation(WebSocketSubjectClientSource source) =>
         (CancellationTokenSource)typeof(WebSocketSubjectClientSource)

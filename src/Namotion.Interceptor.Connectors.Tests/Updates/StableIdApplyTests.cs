@@ -523,10 +523,12 @@ public class StableIdApplyTests
         };
 
         // Act
-        SubjectUpdateApplier.ApplyUpdate(root, unresolvableUpdate, new DefaultSubjectFactory(), ChangeOrigin.Local);
+        var appliedEverything = SubjectUpdateApplier.ApplyUpdate(root, unresolvableUpdate, new DefaultSubjectFactory(), ChangeOrigin.Local);
 
-        // Assert - nothing was created and the drop is counted
+        // Assert - nothing was created, the drop is counted, and the apply reports it did not apply
+        // everything: a caller that treats a clean return as an acknowledgement must not be able to.
         Assert.Null(root.Child);
+        Assert.False(appliedEverything);
         Assert.True(
             SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates >= droppedBefore + 1,
             "The drop must be counted. These counters are process-wide, so other tests running in "
@@ -586,10 +588,11 @@ public class StableIdApplyTests
         var droppedBefore = SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates;
 
         // Act
-        SubjectUpdateApplier.ApplyUpdate(root, update, new DefaultSubjectFactory(), ChangeOrigin.Local);
+        var appliedEverything = SubjectUpdateApplier.ApplyUpdate(root, update, new DefaultSubjectFactory(), ChangeOrigin.Local);
 
         // Assert
         Assert.Equal("RootUpdated", root.Name);
+        Assert.True(appliedEverything);
         Assert.Equal(droppedBefore, SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates);
     }
 

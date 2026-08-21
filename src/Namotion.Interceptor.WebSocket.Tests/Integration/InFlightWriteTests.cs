@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Transactions;
+using Namotion.Interceptor.WebSocket.Server;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -27,14 +28,29 @@ public class InFlightWriteTests
     [Fact]
     public async Task WhenAWriteWasSentButNeverApplied_ThenItIsReAssertedAfterReconnect()
     {
-        // Arrange
+        // Arrange - a short heartbeat interval, and a first write that is allowed to retire before the
+        // write under test. Without that, the connection would end having claimed acknowledgement but
+        // never actually observed an applied-through value on it, which section 2's fix now treats as
+        // non-acknowledging: the in-flight write would be discarded rather than re-parked, which is not
+        // what this test is about. One retirement is enough evidence for the rest of this connection's
+        // life, including for the write under test that follows it.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
 
-        await server.StartAsync(context => new TestRoot(context), (_, root) => root.Name = "Initial", port: portLease.Port);
+        await server.StartAsync(
+            context => new TestRoot(context),
+            (_, root) => root.Name = "Initial",
+            port: portLease.Port,
+            configureServer: configuration => configuration.HeartbeatInterval = WebSocketServerConfiguration.MinimumHeartbeatInterval);
         await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
         await AsyncTestHelpers.WaitUntilAsync(() => client.Root!.Name == "Initial");
+
+        client.Root!.Name = "Warmup";
+        await AsyncTestHelpers.WaitUntilAsync(() => server.Root!.Name == "Warmup");
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Source!.InFlightCount == 0,
+            message: "The warmup write should retire, establishing that this connection's acknowledgement is genuine.");
 
         // Act: write, then kill the connection before the server can apply it, then let it come back.
         client.Root!.Name = "SentButNotApplied";

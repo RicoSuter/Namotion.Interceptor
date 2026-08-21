@@ -24,7 +24,11 @@ internal static class SubjectUpdateApplier
     /// <summary>Tripwire: inbound properties skipped because the subject does not declare them.</summary>
     internal static long UnknownInboundPropertyCount;
 
-    public static void ApplyUpdate(
+    /// <returns>
+    /// <c>true</c> if every part of the update applied; <c>false</c> if a subject, collection item or
+    /// dictionary entry the update referenced could not be resolved and was dropped.
+    /// </returns>
+    public static bool ApplyUpdate(
         IInterceptorSubject subject,
         SubjectUpdate update,
         ISubjectFactory subjectFactory,
@@ -124,12 +128,16 @@ internal static class SubjectUpdateApplier
                 ApplyDeferredAttributeUpdates(context, appliedAttributeUpdates);
             }
 
-            if (logger is not null && context.DroppedSubjectIds is { Count: > 0 } dropped)
+            var droppedAnything = context.DroppedSubjectIds is { Count: > 0 };
+            if (logger is not null && droppedAnything)
             {
+                var dropped = context.DroppedSubjectIds!;
                 logger.LogWarning(
                     "Dropped {Count} inbound subject update(s) from {Origin} because their subjects could not be resolved: {SubjectIds}.",
                     dropped.Count, origin.Source ?? (object)"local", string.Join(", ", dropped));
             }
+
+            return !droppedAnything;
         }
         finally
         {
