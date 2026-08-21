@@ -35,10 +35,15 @@ public static class SubjectUpdateExtensions
     /// <param name="logger">Logs unresolvable-subject drops with the origin; omit to keep the drops
     /// counter-only.</param>
     /// <returns>
-    /// <c>true</c> if every part of the update applied; <c>false</c> if a subject, collection item or
-    /// dictionary entry the update referenced could not be resolved and was dropped. A caller that
-    /// treats its own apply as an acknowledgement, such as a server advancing what it has applied for a
-    /// connection, must not do so when this returns <c>false</c>.
+    /// <c>true</c> if every part of the update that referenced a resolvable subject, collection item or
+    /// dictionary entry applied; <c>false</c> if one of those could not be resolved and was dropped, see
+    /// <see cref="SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates"/>. An inbound property update
+    /// for a property the receiving subject does not declare is dropped too, but is a permanent schema
+    /// mismatch rather than a transient resolution failure, so it is excluded from this flag rather than
+    /// stalling a connection that could never recover from it; it is counted separately, see
+    /// <see cref="SubjectUpdateDiagnostics.UnknownInboundProperties"/>. A caller that treats its own
+    /// apply as an acknowledgement, such as a server advancing what it has applied for a connection,
+    /// must not do so when this returns <c>false</c>.
     /// </returns>
     public static bool ApplySubjectUpdate(
         this IInterceptorSubject subject,

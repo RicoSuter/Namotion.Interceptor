@@ -211,9 +211,10 @@ internal sealed class WriteRetryQueue : IDisposable
                     // The gate went up again after this flush started, most likely a reconnect that
                     // began between one batch and the next: the batch just dequeued has not been judged
                     // against the state the new connection is about to deliver, so it goes back rather
-                    // than out.
-                    var requeuedCount = RequeueChanges(new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count).Span);
-                    _metrics.AddDropped(requeuedCount);
+                    // than out. The return value is what the ring then evicted to make room for it, not
+                    // the number put back, so it is reported the same way Enqueue's own eviction is.
+                    var droppedCount = RequeueChanges(new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count).Span);
+                    ReportDropped(droppedCount);
                     Array.Clear(_scratchBuffer, 0, count);
                     return false;
                 }

@@ -871,12 +871,15 @@ public class WebSocketClientLivenessTests
     }
 
     [Fact]
-    public async Task WhenTheServerClaimsAcknowledgementButNeverReportsAnAppliedThrough_ThenTheInFlightSetIsDiscardedNotReParked()
+    public async Task WhenTheServerClaimsAcknowledgementButNeverReportsAnAppliedThroughAndTheConnectionDropsInstead_ThenTheInFlightSetIsReParkedNotDiscarded()
     {
         // Arrange - heartbeats are enabled, so the Welcome claims acknowledgement, but the interval is
-        // left long enough that none arrives before the reconnect below: the promise is made but never
-        // backed by an observed applied-through value, standing in for a heartbeat interval at or above
-        // this client's receive timeout.
+        // left long enough that none arrives before the fault below: the promise is made but never
+        // backed by an observed applied-through value. This connection is not the discard's intended
+        // case even so: it ends on a transport drop, not its own receive timeout, which on a healthy
+        // acknowledging server is indistinguishable from a connection that simply did not live long
+        // enough to see a heartbeat. Re-parking rather than discarding is what keeps that case from
+        // losing the write.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = await StartServerAsync(
             portLease.Port,
@@ -909,6 +912,68 @@ public class WebSocketClientLivenessTests
                 timeout: TimeSpan.FromSeconds(15),
                 message: "The client should reconnect to the still-running server.");
 
+            // Assert - the entry was re-parked rather than discarded: the reconcile restores the client
+            // locally to its own write and re-sends it, so both sides converge back on it rather than on
+            // the server's value from while the client was away, and nothing is counted as dropped.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientRoot.Name == "Written" && server.Root!.Name == "Written",
+                timeout: TimeSpan.FromSeconds(15),
+                message: "The client's own write should be restored and re-asserted rather than lost to the server's value from while it was away.");
+            Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
+            lock (recordingLogger.Warnings)
+            {
+                Assert.DoesNotContain(
+                    recordingLogger.Warnings,
+                    message => message.Contains("idled out its own receive timeout", StringComparison.Ordinal));
+            }
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheServerClaimsAcknowledgementAndTheConnectionIdlesOutItsOwnReceiveTimeout_ThenTheInFlightSetIsDiscardedNotReParked()
+    {
+        // Arrange - heartbeats are enabled, so the Welcome claims acknowledgement, but the interval is
+        // left long enough that none arrives before the connection idles out its own receive timeout
+        // below, which is shortened so the test does not have to wait out the real default. This is the
+        // one ending the discard is actually meant for: no heartbeat could possibly have arrived within
+        // this connection's lifetime, so the promise can never be told apart from a genuinely
+        // non-acknowledging server.
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = await StartServerAsync(
+            portLease.Port,
+            configureServer: configuration => configuration.HeartbeatInterval = TimeSpan.FromMinutes(5));
+        var recordingLogger = new RecordingLogger();
+        await using var source = CreateClientSource(
+            portLease.Port, receiveTimeout: TimeSpan.FromSeconds(5), logger: recordingLogger);
+        await source.StartAsync(CancellationToken.None);
+
+        var clientRoot = (TestRoot)source.RootSubject;
+
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+
+            var oldSocket = GetWebSocket(source);
+
+            // Act - write, let it reach the server and be recorded as in flight, then let the
+            // connection idle out its own receive timeout rather than forcing any fault, and let the
+            // server move the value on while the client is away.
+            clientRoot.Name = "Written";
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Root!.Name == "Written");
+            await AsyncTestHelpers.WaitUntilAsync(() => source.InFlightCount > 0);
+
+            server.Root!.Name = "MovedOnWhileClientWasAway";
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "The client should reconnect once its own receive timeout fires.");
+
             // Assert - the entry was discarded rather than re-parked: the server's post-outage value
             // survives, the discard is counted, and the reason is logged.
             await AsyncTestHelpers.WaitUntilAsync(
@@ -920,7 +985,7 @@ public class WebSocketClientLivenessTests
             {
                 Assert.Contains(
                     recordingLogger.Warnings,
-                    message => message.Contains("never reported an applied-through value", StringComparison.Ordinal));
+                    message => message.Contains("idled out its own receive timeout", StringComparison.Ordinal));
             }
         }
         finally
@@ -1024,6 +1089,13 @@ public class WebSocketClientLivenessTests
             using var sendGate = new UpdateAdmissionGate(armed: true);
             source.BeforeReservedSendAttempt = sendGate.Wait;
 
+            // Pinned directly rather than inferred from what follows: the abort below, needed to make
+            // the held send genuinely fail, drops the connection on its own and would make every
+            // assertion below pass even with the production catch's own abort deleted. This seam only
+            // fires from inside that specific catch, so it is what actually proves that abort ran.
+            var productionAbortFired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            source.AfterReservedSendAbort = () => productionAbortFired.TrySetResult();
+
             // Act - an ordinal is reserved for this send, then the send itself is held back and made
             // to fail by aborting the socket underneath it before it ever reaches the wire, standing in
             // for a send that fails after the reservation for whatever reason, without depending on
@@ -1045,6 +1117,11 @@ public class WebSocketClientLivenessTests
             var failingResult = await failingWriteTask.WaitAsync(TimeSpan.FromSeconds(10));
             Assert.False(failingResult.IsFullySuccessful);
 
+            // Assert - the production catch's own abort genuinely ran. Without this, the test's own
+            // abort above would make the assertions below pass regardless of whether that catch,
+            // including its abort call, still exists.
+            await productionAbortFired.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
             // The connection is aborted rather than left running with an ordinal reserved that nothing
             // will ever send, so a reconnect follows and resets the ordinal for the next send.
             await AsyncTestHelpers.WaitUntilAsync(
@@ -1065,6 +1142,7 @@ public class WebSocketClientLivenessTests
         finally
         {
             source.BeforeReservedSendAttempt = null;
+            source.AfterReservedSendAbort = null;
             await source.StopAsync(CancellationToken.None);
         }
     }
@@ -1074,9 +1152,13 @@ public class WebSocketClientLivenessTests
     {
         // Arrange - the abort that WhenAReservedSendFails_... pins must not fire on a cancellation from
         // the caller, most likely the teardown flush: aborting a healthy socket there skips the close
-        // handshake and downgrades a graceful stop into one.
+        // handshake and downgrades a graceful stop into one. Heartbeat interval short enough that the
+        // follow-up write's applied-through report needed to prove the reservation was released arrives
+        // quickly.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
-        await using var server = await StartServerAsync(portLease.Port);
+        await using var server = await StartServerAsync(
+            portLease.Port,
+            configureServer: configuration => configuration.HeartbeatInterval = WebSocketServerConfiguration.MinimumHeartbeatInterval);
         await using var source = CreateClientSource(portLease.Port);
         await source.StartAsync(CancellationToken.None);
 
@@ -1114,6 +1196,16 @@ public class WebSocketClientLivenessTests
                 () => server.Root!.Name == "AfterCancelledSend",
                 message: "The connection should still be usable for a further write.");
             Assert.Same(socketBeforeCancellation, GetWebSocket(source));
+
+            // The cancelled send's reservation must have been released, not merely left unaborted: had
+            // it stayed reserved, this write would be recorded one ordinal above what the server could
+            // ever report as applied on this connection, since the server itself only ever received this
+            // one message, and it would never retire.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.InFlightCount == 0,
+                message: "The write after the cancelled send should retire once the server's heartbeat " +
+                         "reports it applied, proving the cancelled reservation was released rather than " +
+                         "left as a permanent gap.");
         }
         finally
         {
@@ -1148,6 +1240,7 @@ public class WebSocketClientLivenessTests
     private static WebSocketSubjectClientSource CreateClientSource(
         int port,
         TimeSpan? reconnectDelay = null,
+        TimeSpan? receiveTimeout = null,
         IWriteInterceptor? writeInterceptor = null,
         int? circuitBreakerFailureThreshold = null,
         Action<IInterceptorSubjectContext>? configureContext = null,
@@ -1172,6 +1265,11 @@ public class WebSocketClientLivenessTests
             ReconnectDelay = reconnectDelay ?? TimeSpan.FromMilliseconds(200),
             MaxReconnectDelay = TimeSpan.FromSeconds(10)
         };
+
+        if (receiveTimeout is { } timeout)
+        {
+            configuration.ReceiveTimeout = timeout;
+        }
 
         if (circuitBreakerFailureThreshold is { } threshold)
         {
