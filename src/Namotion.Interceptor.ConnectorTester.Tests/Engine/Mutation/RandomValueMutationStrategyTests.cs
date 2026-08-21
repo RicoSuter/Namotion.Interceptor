@@ -2,6 +2,7 @@ using Xunit;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Engine;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
+using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
@@ -32,7 +33,8 @@ public class RandomValueMutationStrategyTests
 
         var strategy = new RandomValueMutationStrategy(
             graph, coordinator, context, counters,
-            new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = false });
+            new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = false },
+            participantIndex: 0, disjointProperties: false, new WriteDurabilityLedger());
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
 
@@ -58,7 +60,8 @@ public class RandomValueMutationStrategyTests
 
         var strategy = new RandomValueMutationStrategy(
             graph, coordinator, context, counters,
-            new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = false });
+            new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = false },
+            participantIndex: 0, disjointProperties: false, new WriteDurabilityLedger());
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
 

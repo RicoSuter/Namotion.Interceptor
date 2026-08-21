@@ -34,6 +34,13 @@ public class ConnectorTesterConfiguration
     public TimeSpan MutatePhaseDuration { get; set; } = TimeSpan.FromMinutes(1);
     public TimeSpan ConvergenceTimeout { get; set; } = TimeSpan.FromMinutes(1);
 
+    /// <summary>
+    /// Whether each participant mutates only the property at its own index, so that every property has
+    /// exactly one writer. Required by the write-durability oracle, which cannot tell a lost write from
+    /// a legitimate overwrite when two participants write the same property. Default false.
+    /// </summary>
+    public bool DisjointProperties { get; set; }
+
     public ParticipantConfiguration Server { get; set; } = new()
     {
         Name = "server",

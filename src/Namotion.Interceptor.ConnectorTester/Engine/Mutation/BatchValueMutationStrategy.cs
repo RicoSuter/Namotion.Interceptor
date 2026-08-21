@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Tracking.Transactions;
 
@@ -21,6 +22,7 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
     private readonly TestCycleCoordinator _coordinator;
     private readonly IInterceptorSubjectContext _context;
     private readonly MutationCounters _counters;
+    private readonly WriteDurabilityLedger _ledger;
     private readonly bool _useTransactions;
     private readonly int _valueMutationRate;
     private readonly int _numberOfBatches;
@@ -33,12 +35,14 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
         MutationCounters counters,
         ParticipantConfiguration participantConfiguration,
         int numberOfBatches,
-        int participantIndex)
+        int participantIndex,
+        WriteDurabilityLedger ledger)
     {
         _graph = graph;
         _coordinator = coordinator;
         _context = context;
         _counters = counters;
+        _ledger = ledger;
         _useTransactions = participantConfiguration.UseTransactions;
         _valueMutationRate = participantConfiguration.ValueMutationRate;
         _numberOfBatches = numberOfBatches;
@@ -127,15 +131,36 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
         using var transaction = await _context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort);
 
+        var batch = new List<(TestNode Node, object? Value)>(count);
         using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
         {
             for (var j = 0; j < count; j++)
             {
-                MutateNode(nodes[(nodeIndex + j) % nodeCount], property);
+                var node = nodes[(nodeIndex + j) % nodeCount];
+                var value = MutateNode(node, property);
+                batch.Add((node, value));
             }
         }
 
-        await transaction.CommitAsync(cancellationToken);
+        try
+        {
+            await transaction.CommitAsync(cancellationToken);
+            foreach (var (node, value) in batch)
+            {
+                _ledger.Record(node, property, value);
+            }
+        }
+        catch (SubjectTransactionException)
+        {
+            // Best-effort leaves the local model on the old value for the failed properties,
+            // so recording here would assert a value that never applied.
+            foreach (var (node, _) in batch)
+            {
+                _ledger.Forget(node, property);
+            }
+
+            throw;
+        }
     }
 
     private void MutateBatchParallel(
@@ -149,31 +174,42 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
         {
             using (SubjectChangeContext.WithChangedTimestamp(batchTimestamp))
             {
-                MutateNode(nodes[(nodeIndex + j) % nodeCount], property);
+                var node = nodes[(nodeIndex + j) % nodeCount];
+                var value = MutateNode(node, property);
+                _ledger.Record(node, property, value);
             }
         });
     }
 
-    private void MutateNode(TestNode node, int property)
+    private object MutateNode(TestNode node, int property)
     {
         var counter = GlobalMutationCounter.Next();
+        object value;
 
         switch (property)
         {
             case 0:
-                node.StringValue = counter.ToString("x8");
+                var stringValue = counter.ToString("x8");
+                node.StringValue = stringValue;
+                value = stringValue;
                 break;
             case 1:
-                node.DecimalValue = counter / 100m;
+                var decimalValue = counter / 100m;
+                node.DecimalValue = decimalValue;
+                value = decimalValue;
                 break;
             case 2:
-                node.IntValue = (int)(counter % int.MaxValue);
+                var intValue = (int)(counter % int.MaxValue);
+                node.IntValue = intValue;
+                value = intValue;
                 break;
-            case 3:
+            default:
                 node.LongValue = counter;
+                value = counter;
                 break;
         }
 
         _counters.IncrementValue();
+        return value;
     }
 }

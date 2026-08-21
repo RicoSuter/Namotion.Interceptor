@@ -2,6 +2,7 @@ using Xunit;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Engine;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
+using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
@@ -30,7 +31,8 @@ public class BatchValueMutationStrategyTests
             graph, coordinator, context, counters,
             new ParticipantConfiguration { Name = "test", ValueMutationRate = 1000, UseTransactions = false },
             numberOfBatches: 10,
-            participantIndex: 0);
+            participantIndex: 0,
+            new WriteDurabilityLedger());
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
@@ -76,7 +78,8 @@ public class BatchValueMutationStrategyTests
                 graph, coordinator, context, counters,
                 new ParticipantConfiguration { Name = "test", ValueMutationRate = 100, UseTransactions = false },
                 numberOfBatches: 1,    // one batch per second; batch size = 100.
-                participantIndex: 0);
+                participantIndex: 0,
+                new WriteDurabilityLedger());
 
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(1500));
 
