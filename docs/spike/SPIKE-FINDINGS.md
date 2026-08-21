@@ -17,8 +17,9 @@
 ## Baseline
 
 - `dotnet build src/Namotion.Interceptor.slnx`: green at `1f9366fe`. That commit is docs-only, so this is master's build.
-- `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"`: 3003 passed, 1 failed.
-  - The failure is `ChangeQueueProcessorTests.WhenTheTeardownWriteBlocks_ThenStopEndsAtTheConfiguredTimeout`, which passes in isolation. It is a deadline assertion that misses under full-suite parallel load, so it is a pre-existing baseline flake and not fallout from this work. Later runs must be compared against this baseline rather than against "all green".
+- `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"`: **26 projects, 3299 pre-existing tests, 0 expected failures.**
+  - A first baseline run reported 3003 across 21 projects. That figure was wrong. It used `--no-build`, which silently ran only the projects whose binaries were already present and skipped five `Namotion.Devices.*` assemblies worth 295 tests. This is the `--no-build` trap in a form worth naming: it does not only run stale binaries, it can also quietly reduce the set of assemblies that run at all, and the summary looks entirely normal. Always count the project lines, not just the totals.
+  - `ChangeQueueProcessorTests.WhenTheTeardownWriteBlocks_ThenStopEndsAtTheConfiguredTimeout` failed once under full-suite parallel load and passes in isolation and on later full runs. It is a pre-existing load-sensitive deadline assertion, not fallout from this work, but it is not reliably reproducible either, so a single failure of that one test should not be read as a regression.
 - Solution size: 1201 C# files, about 169.5k lines.
 - Benchmark comparison base `LIFECYCLE_BENCHMARK_BASE`: see the Benchmarks section. It is master plus documentation plus the benchmark scaffold, with no runtime change.
 
@@ -145,6 +146,8 @@ The getter reread is additionally not only a concurrency repair: it is the only 
 
 **D12. The claim set and the commit set can differ, with no stated resolution.** The structural-write protocol discovers and provisionally claims candidates from the *proposed* value before `next`, then reconciles against the *committed* value re-read through the getter. For any setter that normalises or substitutes, those sets differ, and nothing says the claims for subjects that never landed are released.
 
+**D15. The reachability scan yields an unordered set, but detach order is observable and deterministic today.** Found during implementation design rather than by the review passes. Master releases through `DetachFromProperty`, a recursive descent: the subject is removed and notified first, then its children are collected from `_lastProcessedValues` in `subject.Properties` enumeration order and recursed into (`Tracking/Lifecycle/LifecycleInterceptor.cs:196-268`). Detach callbacks therefore arrive top-down in a deterministic order, and `docs/design/tracking-lifecycle.md` documents consumers depending on it: "each ancestor is deregistered further up the descent before the callback reaches a descendant, so the walk stops at the first one". A mark-and-sweep yields a set, and releasing it by iterating the owned-subject dictionary is nondeterministic, because `Dictionary<K,V>` enumeration order depends on insertion and removal history. The specification constrains only cycle traversal ("cycles use deterministic first-visit traversal"), not subtree release order, while separately listing preservation of current ordering as a goal. Fix: after marking, run a second traversal from the removed edge over committed outgoing edges, visiting only unmarked subjects, and release in first-visit order. That reproduces master exactly and stays deterministic for cycles. It has to be specified, because the obvious implementation is both nondeterministic and wrong.
+
 **D13. Connectors bind to the concrete `LifecycleInterceptor`, contradicting the third-party-lifecycle claim.** `SourceOwnershipManager.cs:47-53` resolves `TryGetLifecycleInterceptor()`, which is `TryGetService<LifecycleInterceptor>()` on the concrete class (`Tracking/Lifecycle/LifecycleInterceptorExtensions.cs:11-14`), and subscribes to `LifecycleInterceptor.SubjectDetaching` (`LifecycleInterceptor.cs:31`). Neither `SubjectAttached` nor `SubjectDetaching` appears on the proposed `ILifecycleInterceptor` seam. So "a third-party lifecycle package does not need Tracking internals" holds only if you also give up every connector.
 
 **D14. Subject-local service registration with subtree scoping is a tested, documented capability that the specification deletes without naming it.** `Tracking.Tests/ContextInheritanceHandlerTests.cs:142-180` registers a service on `person.Mother`'s own context and asserts it is visible from `person.Mother` and its ancestors but not from `person`. The semantics are documented as load-bearing in production XML docs (`Connectors/InterceptorSubjectContextExtensions.cs:36-39`) and in `docs/interceptor.md:59-68`. There is no first-party production consumer, so removal is safe, but it is a public capability removal that belongs in the breaking-changes list.
@@ -253,7 +256,26 @@ Each task additionally gains a simplification gate: before committing, delete wh
 
 # Implementation fallout
 
-_pending_
+Recorded per stage as the spike proceeds. Test expectation after each stage is 3299 pre-existing tests plus that stage's additions, with zero failures.
+
+## Task 2, singleton context service contracts (`3d13ba3d`)
+
+Landed clean. 266 insertions across five files, no existing test touched, PublicApi diff exactly one line. Validation is keyed on the closed `ISingletonContextService<TContract>` interface via `IsInstanceOfType`, so a different implementation type, the same instance re-registered, and a different `TService` registration generic all conflict as intended. The per-implementation-type contract cache is a static `ConcurrentDictionary` reachable only from the two mutators, so resolution and interception gained no work.
+
+One semantic wrinkle worth knowing, inherent to the existing reentrancy contract rather than new: when a reentrant `TryAddService` factory publishes a service that then conflicts with the factory's own product, the outer call throws but the reentrant registration stays published. Singleton validation makes that asymmetry observable for the first time.
+
+## Task 3a, additive attachment mechanism (`5737d0a6`)
+
+The staged approach worked. 1124 insertions, one deletion, and the whole suite stayed green, which the original plan's ordering could not have achieved.
+
+The load-bearing constraint held: `git diff` of `Cache/WriteInterceptorFactory.cs` across the commit is **empty**, so the scalar terminal is byte-for-byte unchanged and gained no branch. The structural route got its own factory and its own per-`TProperty` cache in `ContextState`, and `PropertyWriteContext<TProperty>` gained exactly one `long` field, set only by the structural constructor. The two terminals are duplicated rather than factored, deliberately, because any shared helper would have turned the scalar terminal into a call. That duplication is a maintenance liability and is documented as such at both sites.
+
+Two decisions taken during implementation that the design did not specify:
+
+- The structural terminal holds the attachment monitor **through the commit**, not merely for the check. A check-then-release would leave open exactly the race the route exists to close, an attach landing between the validation and the write it validated. Lock order is `SyncRoot`, then the attachment monitor, never the reverse.
+- If the transitional fallback call throws after the new-model transition has been applied, the transition is **not** rolled back. A compensating swap could race a concurrent transition and detach state another thread had already built on, and the old idiom's own partial-failure behaviour is closer to "attached" than to "unattached".
+
+One review finding was sent back rather than accepted: the attachment getters each took the private monitor, so `TryGetContext()` cost an uncontended monitor enter and exit per call. That is the predicate the design migrates all ownership checks onto, and Registry's two hot lookups reach roughly 398 call sites through it, so it must be a lock-free volatile read with a separate locked snapshot method for compare-and-swap callers.
 
 ---
 
