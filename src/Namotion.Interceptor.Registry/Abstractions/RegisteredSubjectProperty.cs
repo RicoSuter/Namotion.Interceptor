@@ -1,8 +1,8 @@
-﻿using System.Collections;
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
@@ -10,10 +10,10 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubjectProperty
 {
-    [ThreadStatic]
-    private static Dictionary<IInterceptorSubject, int>? _reusableCollectionPositions;
-
-    private readonly List<SubjectPropertyChild> _children = [];
+    private readonly Lock _childrenLock = new();
+    private ImmutableArray<SubjectPropertyRelationship> _relationships = [];
+    private Dictionary<IInterceptorSubject, ProvisionalChildState>? _provisionalChildren;
+    private LinkedList<SubjectPropertyRelationship>? _provisionalAdditions;
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
 
     private readonly PropertyAttributeAttribute? _attributeMetadata;
@@ -171,18 +171,56 @@ public class RegisteredSubjectProperty
 
     /// <summary>
     /// Gets the collection or dictionary items of the property.
-    /// Thread-safe: Lock on private readonly List ensures thread-safe access.
+    /// Thread-safe: the relationship view lock protects cache construction and replacement.
     /// Performance: Returns cached ImmutableArray - only rebuilds when invalidated.
     /// </summary>
     public ImmutableArray<SubjectPropertyChild> Children
     {
         get
         {
-            lock (_children)
+            lock (_childrenLock)
             {
                 if (_childrenCache.IsDefault)
                 {
-                    _childrenCache = [.. _children];
+                    var count = _provisionalAdditions?.Count ?? 0;
+                    foreach (var relationship in _relationships)
+                    {
+                        if (_provisionalChildren is null ||
+                            !_provisionalChildren.TryGetValue(relationship.Child, out var state) ||
+                            state.IncludeCommittedRelationships)
+                        {
+                            count++;
+                        }
+                    }
+
+                    var builder = ImmutableArray.CreateBuilder<SubjectPropertyChild>(count);
+                    foreach (var relationship in _relationships)
+                    {
+                        if (_provisionalChildren is null ||
+                            !_provisionalChildren.TryGetValue(relationship.Child, out var state) ||
+                            state.IncludeCommittedRelationships)
+                        {
+                            builder.Add(new SubjectPropertyChild
+                            {
+                                Subject = relationship.Child,
+                                Index = relationship.Index
+                            });
+                        }
+                    }
+
+                    if (_provisionalAdditions is not null)
+                    {
+                        foreach (var relationship in _provisionalAdditions)
+                        {
+                            builder.Add(new SubjectPropertyChild
+                            {
+                                Subject = relationship.Child,
+                                Index = relationship.Index
+                            });
+                        }
+                    }
+
+                    _childrenCache = builder.MoveToImmutable();
                 }
 
                 return _childrenCache;
@@ -320,165 +358,96 @@ public class RegisteredSubjectProperty
         return property.Reference;
     }
 
-    internal void ClearChildren()
+    internal void AddChildRelationship(SubjectPropertyRelationship relationship)
     {
-        lock (_children)
+        lock (_childrenLock)
         {
-            _children.Clear();
-            _childrenCache = default;
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void AddChild(SubjectPropertyChild child)
-    {
-        lock (_children)
-        {
-            // No Contains check needed - LifecycleInterceptor already guarantees
-            // no duplicates via HashSet<PropertyReference?> in _attachedSubjects
-            _children.Add(child);
-            _childrenCache = default;
-        }
-    }
-
-    internal void RemoveChild(SubjectPropertyChild child)
-    {
-        lock (_children)
-        {
-            var index = -1;
-            if (IsSubjectCollection)
+            EnsureProvisionalChildren();
+            if (!_provisionalChildren!.TryGetValue(relationship.Child, out var state))
             {
-                // For collections, match by Subject only. The Index field represents
-                // the collection position which shifts as items are removed.
-                // Search backwards because LifecycleInterceptor detaches in reverse
-                // collection order, making each lookup O(1) instead of O(n).
-                var subject = child.Subject;
-                for (var i = _children.Count - 1; i >= 0; i--)
+                state = new ProvisionalChildState();
+                _provisionalChildren.Add(relationship.Child, state);
+            }
+
+            state.IncludeCommittedRelationships = false;
+            if (state.AdditionNode is not null)
+            {
+                _provisionalAdditions!.Remove(state.AdditionNode);
+            }
+
+            _provisionalAdditions ??= [];
+            state.AdditionNode = _provisionalAdditions.AddLast(relationship);
+            _childrenCache = default;
+        }
+    }
+
+    internal void RemoveChildRelationships(IInterceptorSubject child)
+    {
+        lock (_childrenLock)
+        {
+            EnsureProvisionalChildren();
+            if (_provisionalChildren!.TryGetValue(child, out var state))
+            {
+                var changed = state.IncludeCommittedRelationships || state.AdditionNode is not null;
+                state.IncludeCommittedRelationships = false;
+                if (state.AdditionNode is not null)
                 {
-                    if (_children[i].Subject == subject)
-                    {
-                        index = i;
-                        break;
-                    }
+                    _provisionalAdditions!.Remove(state.AdditionNode);
+                    state.AdditionNode = null;
+                }
+
+                if (!state.HasCommittedRelationships)
+                {
+                    _provisionalChildren.Remove(child);
+                }
+
+                if (changed)
+                {
+                    _childrenCache = default;
                 }
             }
-            else
-            {
-                index = _children.IndexOf(child);
-            }
+        }
+    }
 
-            if (index == -1)
-                return;
-
-            _children.RemoveAt(index);
+    internal void ReplaceChildRelationships(ImmutableArray<SubjectPropertyRelationship> relationships)
+    {
+        lock (_childrenLock)
+        {
+            _relationships = relationships;
+            _provisionalChildren = null;
+            _provisionalAdditions = null;
             _childrenCache = default;
         }
     }
 
-    /// <summary>
-    /// Syncs children's indices and parent entries with the live collection.
-    /// Must be called while LifecycleInterceptor's _attachedSubjects lock is held,
-    /// because this method acquires _children then _knownSubjects, which is the inverse of
-    /// HandleLifecycleChange's lock order. The outer _attachedSubjects lock serializes
-    /// both paths and prevents deadlock.
-    /// </summary>
-    /// <param name="collectionValue">The current collection value (passed from caller to avoid re-reading through interceptors).</param>
-    /// <param name="registry">The subject registry (passed from caller to avoid repeated service resolution per child).</param>
-    internal void RefreshCollectionIndices(object? collectionValue, ISubjectRegistry registry)
+    private void EnsureProvisionalChildren()
     {
-        // Only collection-typed properties need position refresh; dictionary-keyed children
-        // are looked up by key (stable identity) rather than by integer index, so reordering
-        // entries doesn't invalidate their stored Index. The IEnumerable fallback in
-        // BuildCollectionPositions is therefore collection-only by design.
-        if (!IsSubjectCollection)
+        if (_provisionalChildren is not null)
+        {
             return;
+        }
 
-        lock (_children)
+        _provisionalChildren = new Dictionary<IInterceptorSubject, ProvisionalChildState>(
+            ReferenceEqualityComparer.Instance);
+        foreach (var relationship in _relationships)
         {
-            var collectionPositions = BuildCollectionPositions(collectionValue, _children.Count);
-            if (collectionPositions is null)
-                return;
-
-            for (var i = 0; i < _children.Count; i++)
+            if (!_provisionalChildren.ContainsKey(relationship.Child))
             {
-                var child = _children[i];
-                if (!collectionPositions.TryGetValue(child.Subject, out var newIndex))
-                    continue;
-
-                // Compare unboxed to avoid allocating a boxed int when index hasn't changed
-                if (child.Index is int oldIndex && oldIndex == newIndex)
-                    continue;
-
-                var boxedNewIndex = (object)newIndex;
-                _children[i] = child with { Index = boxedNewIndex };
-
-                // child is a readonly record struct snapshot from before the update above,
-                // so child.Index still holds the old value, which is correct for the oldIndex parameter.
-                registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, child.Index, boxedNewIndex);
+                _provisionalChildren.Add(relationship.Child, new ProvisionalChildState
+                {
+                    HasCommittedRelationships = true,
+                    IncludeCommittedRelationships = true
+                });
             }
-
-            // Sort children to match live collection order
-            _children.Sort(static (a, b) => ((int)a.Index!).CompareTo((int)b.Index!));
-            _childrenCache = default;
-
-            // Release references so subjects can be GC'd on idle threads
-            collectionPositions.Clear();
         }
     }
 
-    /// <summary>
-    /// Maps each subject in the collection to its current position.
-    /// Uses IList indexed access when available; falls back to ICollection foreach,
-    /// then IEnumerable for read-only types that implement neither.
-    /// Reuses a ThreadStatic dictionary to avoid allocations.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Dictionary<IInterceptorSubject, int>? BuildCollectionPositions(object? value, int capacityHint)
+    private sealed class ProvisionalChildState
     {
-        if (value is null)
-            return null;
+        public bool HasCommittedRelationships { get; init; }
 
-        var collectionPositions = _reusableCollectionPositions;
-        collectionPositions?.Clear();
+        public bool IncludeCommittedRelationships { get; set; }
 
-        if (value is IList list)
-        {
-            for (var index = 0; index < list.Count; index++)
-            {
-                if (list[index] is IInterceptorSubject subject)
-                {
-                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint);
-                    collectionPositions[subject] = index;
-                }
-            }
-        }
-        else if (value is ICollection collection)
-        {
-            var index = 0;
-            foreach (var item in collection)
-            {
-                if (item is IInterceptorSubject subject)
-                {
-                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint);
-                    collectionPositions[subject] = index;
-                }
-                index++;
-            }
-        }
-        else if (value is IEnumerable enumerable and not string)
-        {
-            var index = 0;
-            foreach (var item in enumerable)
-            {
-                if (item is IInterceptorSubject subject)
-                {
-                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint);
-                    collectionPositions[subject] = index;
-                }
-                index++;
-            }
-        }
-
-        return collectionPositions;
+        public LinkedListNode<SubjectPropertyRelationship>? AdditionNode { get; set; }
     }
 }

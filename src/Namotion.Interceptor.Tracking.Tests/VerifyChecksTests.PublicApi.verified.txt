@@ -1,5 +1,6 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Registry")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tracking.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
 namespace Namotion.Interceptor.Tracking.Change
@@ -163,7 +164,10 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
     {
         void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
         void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
-        void RefreshCollectionProperty(Namotion.Interceptor.PropertyReference property, object? value);
+    }
+    public interface IPropertyRelationshipHandler
+    {
+        void ReconcileChildRelationships(Namotion.Interceptor.PropertyReference property, System.ReadOnlySpan<Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyRelationship> relationships);
     }
     public class LifecycleInterceptor : Namotion.Interceptor.Interceptors.ILifecycleInterceptor, Namotion.Interceptor.Interceptors.IWriteInterceptor
     {
@@ -190,6 +194,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public bool IsPropertyReferenceRemoved { get; init; }
         public Namotion.Interceptor.PropertyReference? Property { get; init; }
         public required int ReferenceCount { get; init; }
+        public Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyRelationship? Relationship { get; }
         public required Namotion.Interceptor.IInterceptorSubject Subject { get; init; }
     }
     public struct SubjectPropertyLifecycleChange : System.IEquatable<Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange>
@@ -198,15 +203,22 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public Namotion.Interceptor.PropertyReference Property { get; set; }
         public Namotion.Interceptor.IInterceptorSubject Subject { get; set; }
     }
+    public sealed class SubjectPropertyRelationship
+    {
+        public Namotion.Interceptor.IInterceptorSubject Child { get; }
+        public object? Index { get; }
+        public Namotion.Interceptor.PropertyReference Parent { get; }
+    }
 }
 namespace Namotion.Interceptor.Tracking.Parent
 {
     [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Lifecycle.ContextInheritanceHandler)})]
-    public class ParentTrackingHandler : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
+    public class ParentTrackingHandler : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyRelationshipHandler
     {
         public ParentTrackingHandler() { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
+        public void ReconcileChildRelationships(Namotion.Interceptor.PropertyReference property, System.ReadOnlySpan<Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyRelationship> relationships) { }
     }
     public static class ParentsHandlerExtensions
     {

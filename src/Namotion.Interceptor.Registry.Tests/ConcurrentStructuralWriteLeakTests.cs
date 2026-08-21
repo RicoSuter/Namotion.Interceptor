@@ -1,6 +1,12 @@
+using System.Runtime.ExceptionServices;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Tests.Models;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Parent;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.Registry.Tests;
@@ -12,18 +18,87 @@ namespace Namotion.Interceptor.Registry.Tests;
 /// The concurrency model:
 /// 1. next(ref context) writes the value to the backing store (no lock held)
 /// 2. Lock on _attachedSubjects is acquired
-/// 3. _lastProcessedValues is read as the baseline, backing store is re-read as new value
+/// 3. Canonical processed property state is read as the baseline, backing store is re-read as new value
 /// 4. Diffs baseline vs new value to determine attach/detach operations
-/// 5. Attaches/detaches subjects, updates _lastProcessedValues
+/// 5. Attaches/detaches subjects, publishes the new canonical state
 ///
 /// The key race window is between step 1 (next) and step 2 (lock acquisition):
 /// another thread's WriteProperty or DetachFromProperty can complete in this window,
-/// modifying _attachedSubjects and _lastProcessedValues. The parent-dead check
-/// (which undoes attachments to concurrently detached parents) and _lastProcessedValues
+/// modifying _attachedSubjects and canonical processed state. The parent-dead check
+/// (which undoes attachments to concurrently detached parents) and canonical-state
 /// seeding ensure no orphaned subjects remain after all concurrent writes settle.
 /// </summary>
 public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
 {
+    [Fact]
+    public void WhenARelationshipCallbackReentersTheSameProperty_ThenTheCommittedGenerationRemainsCanonical()
+    {
+        // Removing the per-authority guard would let the nested setter and downstream lifecycle authority
+        // overwrite the outer generation, stranding memberships or publishing a mixed registry view.
+        // Arrange
+        var firstLifecycle = new LifecycleInterceptor();
+        var secondLifecycle = new LifecycleInterceptor();
+        var thirdLifecycle = new LifecycleInterceptor();
+        var reentrantHandler = new SamePropertyReentrantRelationshipHandler();
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(firstLifecycle);
+        context.AddService(secondLifecycle);
+        context.AddService(thirdLifecycle);
+        context.AddService<IPropertyRelationshipHandler>(reentrantHandler);
+        context
+            .WithFullPropertyTracking()
+            .WithParents()
+            .WithRegistry();
+
+        var registry = context.GetService<ISubjectRegistry>();
+        var parent = new Person(context) { FirstName = "Parent" };
+        var first = new Person { FirstName = "First" };
+        var writtenValue = new[] { first };
+        reentrantHandler.Callback = () => parent.Children = [];
+
+        // Act
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            parent.Children = writtenValue);
+
+        // Assert
+        Assert.Contains("already being reconciled", exception.Message);
+        Assert.Same(writtenValue, parent.Children);
+        AssertSingleRelationshipGeneration(parent, first, registry);
+        Assert.Equal(3, first.GetReferenceCount());
+
+        // Act: a later write must diff from the retained canonical generation.
+        var replacement = new Person { FirstName = "Replacement" };
+        parent.Children = [replacement];
+
+        // Assert
+        AssertSingleRelationshipGeneration(parent, replacement, registry);
+        Assert.Null(registry.TryGetRegisteredSubject(first));
+        Assert.Empty(first.GetParents());
+        Assert.Equal(0, first.GetReferenceCount());
+        Assert.Equal(3, replacement.GetReferenceCount());
+    }
+
+    private static void AssertSingleRelationshipGeneration(
+        Person parent,
+        Person child,
+        ISubjectRegistry registry)
+    {
+        var registeredParent = registry.TryGetRegisteredSubject(parent)!;
+        var childRelationship = Assert.Single(
+            registeredParent.TryGetProperty(nameof(Person.Children))!.Children);
+        var parentRelationship = Assert.Single(registry.TryGetRegisteredSubject(child)!.Parents);
+        var trackedParent = Assert.Single(child.GetParents());
+
+        Assert.Same(child, childRelationship.Subject);
+        Assert.Equal(0, childRelationship.Index);
+        Assert.Same(parent, parentRelationship.Property.Subject);
+        Assert.Equal(nameof(Person.Children), parentRelationship.Property.Name);
+        Assert.Equal(0, parentRelationship.Index);
+        Assert.Same(parent, trackedParent.Property.Subject);
+        Assert.Equal(nameof(Person.Children), trackedParent.Property.Name);
+        Assert.Equal(0, trackedParent.Index);
+    }
+
     /// <summary>
     /// Multiple threads rapidly replace the same ObjectRef property.
     /// After all threads finish and the property is set to a known final value,
@@ -158,104 +233,115 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             $"This indicates the concurrent structural write race condition in LifecycleInterceptor.WriteProperty.");
     }
 
-    /// <summary>
-    /// Reproduces the parent-detach-races-with-child-write scenario.
-    /// One thread repeatedly attaches and detaches a child subtree from the parent,
-    /// while another thread writes to a structural property on the child.
-    /// The child's property write calls next() (writing to backing store) before
-    /// acquiring the lock, creating a window where the parent detach cascade can
-    /// miss the newly written grandchild, leaving it orphaned in the registry.
-    ///
-    /// Because this is a timing-dependent race, we run multiple rounds to
-    /// increase the probability of hitting the interleaving that triggers the leak.
-    /// </summary>
     [Fact]
     [Trait("Category", "Concurrency")]
-    public void ParentDetachDuringChildPropertyWrite_OrphanedGrandchildrenLeakInRegistry()
+    public async Task ParentDetachDuringChildPropertyWrite_OrphanedGrandchildrenLeakInRegistry()
     {
-        const int rounds = 10;
-        const int iterationsPerThread = 2000;
-        var totalOrphaned = 0;
+        // A detach which walks the newer backing value instead of the committed relationship state can
+        // strand the old grandchild, while a late writer which skips the attached-parent check can leak the new one.
+        // Arrange
+        var oldGrandchild = new Person { FirstName = "Old grandchild" };
+        var newGrandchild = new Person { FirstName = "New grandchild" };
+        using var writeGate = new AfterCommitWriteGate(nameof(Person.Mother), newGrandchild);
+        var context = InterceptorSubjectContext.Create();
+        context.AddService<IWriteInterceptor>(writeGate);
+        context
+            .WithFullPropertyTracking()
+            .WithParents()
+            .WithRegistry();
 
-        for (var round = 0; round < rounds; round++)
+        var registry = context.GetService<ISubjectRegistry>();
+        var grandparent = new Person(context) { FirstName = "Grandparent" };
+        var child = new Person
         {
-            // Arrange
-            var context = InterceptorSubjectContext
-                .Create()
-                .WithFullPropertyTracking()
-                .WithRegistry();
+            FirstName = "Child",
+            Mother = oldGrandchild
+        };
+        grandparent.Mother = child;
 
-            var registry = context.GetService<ISubjectRegistry>();
-            var grandparent = new Person(context) { FirstName = "Grandparent" };
-
-            var barrier = new Barrier(2);
-            var child = new Person { FirstName = "Child" };
-
-            // Act:
-            // Thread 1: rapidly attaches/detaches child from grandparent.Mother
-            // Thread 2: rapidly writes grandchild subjects to child.Mother
-            var detachThread = new Thread(() =>
+        // Act: park the descendant writer after its backing commit but before lifecycle reconciliation,
+        // then let the parent detach win the lifecycle writer lock.
+        var writer = Task.Factory.StartNew(
+            () => child.Mother = newGrandchild,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+        ExceptionDispatchInfo? workerFailure = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => writeGate.BackingCommitted.IsSet || writer.IsCompleted,
+                message: "The descendant write should commit its backing value before parent detach.");
+            if (!writeGate.BackingCommitted.IsSet)
             {
-                barrier.SignalAndWait();
-                for (var iteration = 0; iteration < iterationsPerThread; iteration++)
-                {
-                    grandparent.Mother = child;
-                    grandparent.Mother = null;
-                }
-            });
-            detachThread.IsBackground = true;
-
-            var childWriteThread = new Thread(() =>
-            {
-                barrier.SignalAndWait();
-                for (var iteration = 0; iteration < iterationsPerThread; iteration++)
-                {
-                    child.Mother = new Person { FirstName = $"Grandchild_{iteration}" };
-                    child.Mother = null;
-                }
-            });
-            childWriteThread.IsBackground = true;
-
-            detachThread.Start();
-            childWriteThread.Start();
-            detachThread.Join();
-            childWriteThread.Join();
-
-            // Final state: ensure clean detach
-            grandparent.Mother = null;
-            child.Mother = null;
-
-            // Check for leaked subjects
-            var knownSubjects = registry.KnownSubjects;
-            foreach (var kvp in knownSubjects)
-            {
-                if (!ReferenceEquals(kvp.Key, grandparent))
-                {
-                    var name = ((Person)kvp.Key).FirstName;
-                    var refCount = kvp.Value.ReferenceCount;
-                    var parents = kvp.Value.Parents;
-                    var parentDesc = parents.Length > 0
-                        ? string.Join(", ", parents.Select(p => $"{p.Property.Name}"))
-                        : "no-parents";
-                    output.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount} parents=[{parentDesc}]");
-                    totalOrphaned++;
-                }
+                await writer;
             }
-        }
+            Assert.True(writeGate.BackingCommitted.IsSet);
+            Assert.False(writer.IsCompleted);
 
-        // Assert: across all rounds, no orphaned subjects should accumulate
-        Assert.True(
-            totalOrphaned == 0,
-            $"Detected {totalOrphaned} total orphaned subject(s) across {rounds} rounds. " +
-            $"This indicates the parent-detach-during-child-write race condition in " +
-            $"LifecycleInterceptor.WriteProperty where grandchild subjects are attached " +
-            $"to a child that is concurrently being detached from its parent, and the " +
-            $"detach cascade misses the newly written grandchild.");
+            grandparent.Mother = null;
+        }
+        catch (Exception exception)
+        {
+            workerFailure = ExceptionDispatchInfo.Capture(exception);
+        }
+        finally
+        {
+            writeGate.Release.Set();
+            workerFailure = await ObserveWorkerAsync(
+                writer,
+                workerFailure,
+                "The descendant writer should complete after its commit gate is released.");
+        }
+        workerFailure?.Throw();
+
+        // Assert: the detached subtree has no published relationships or lifecycle membership.
+        Assert.Same(newGrandchild, child.Mother);
+        Assert.Equal(0, child.GetReferenceCount());
+        Assert.Equal(0, oldGrandchild.GetReferenceCount());
+        Assert.Equal(0, newGrandchild.GetReferenceCount());
+        Assert.Empty(child.GetParents());
+        Assert.Empty(oldGrandchild.GetParents());
+        Assert.Empty(newGrandchild.GetParents());
+        Assert.Single(registry.KnownSubjects);
+        Assert.Same(grandparent, registry.KnownSubjects.Single().Key);
+        Assert.Null(registry.TryGetRegisteredSubject(child));
+        Assert.Null(registry.TryGetRegisteredSubject(oldGrandchild));
+        Assert.Null(registry.TryGetRegisteredSubject(newGrandchild));
+        Assert.Empty(registry.TryGetRegisteredSubject(grandparent)!
+            .TryGetProperty(nameof(Person.Mother))!.Children);
+
+        // Act: a later reattach must enumerate the successful backing value, proving processed state was cleared.
+        grandparent.Mother = child;
+
+        // Assert
+        var grandparentMother = registry.TryGetRegisteredSubject(grandparent)!
+            .TryGetProperty(nameof(Person.Mother))!;
+        var childMother = registry.TryGetRegisteredSubject(child)!
+            .TryGetProperty(nameof(Person.Mother))!;
+        var childRelationship = Assert.Single(grandparentMother.Children);
+        var grandchildRelationship = Assert.Single(childMother.Children);
+        Assert.Same(child, childRelationship.Subject);
+        Assert.Null(childRelationship.Index);
+        Assert.Same(newGrandchild, grandchildRelationship.Subject);
+        Assert.Null(grandchildRelationship.Index);
+        Assert.Equal(1, child.GetReferenceCount());
+        Assert.Equal(1, newGrandchild.GetReferenceCount());
+        Assert.Equal(0, oldGrandchild.GetReferenceCount());
+        Assert.Equal(3, registry.KnownSubjects.Count);
+
+        var registryParent = Assert.Single(registry.TryGetRegisteredSubject(newGrandchild)!.Parents);
+        var trackedParent = Assert.Single(newGrandchild.GetParents());
+        Assert.Same(childMother, registryParent.Property);
+        Assert.Null(registryParent.Index);
+        Assert.Same(child, trackedParent.Property.Subject);
+        Assert.Equal(nameof(Person.Mother), trackedParent.Property.Name);
+        Assert.Null(trackedParent.Index);
     }
 
     /// <summary>
     /// Concurrent writes to different structural properties (Mother and Father)
-    /// on the same subject. Each property has its own lastProcessed baseline,
+    /// on the same subject. Each property has its own canonical baseline,
     /// but they share the same _attachedSubjects lock. This tests whether
     /// interleaved lock acquisitions across different properties can cause
     /// reference count mismatches that prevent proper cleanup.
@@ -782,7 +868,7 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             $"Detected {totalUnregistered} total inconsistencies across {rounds} rounds. " +
             $"This indicates either subjects reachable from the graph are not registered " +
             $"(parentStillAttached guard preventing registration) or subjects are leaked " +
-            $"in the registry (dangling _lastProcessedValues entries).");
+            $"in the registry (dangling canonical processed-state entries).");
     }
 
     /// <summary>
@@ -790,7 +876,7 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
     /// being concurrently detached. The registry's HandleLifecycleChange re-registers
     /// the parent (via RegisterSubject for the parent side-effect) after the parent was
     /// already removed from _knownSubjects. The parent ends up in _knownSubjects with
-    /// refCount=0 and no parent references — a permanent leak.
+    /// refCount=0 and no parent references, which is a permanent leak.
     ///
     /// Thread A: rapidly attaches/detaches a child from grandparent (which detaches
     ///           the child and triggers _knownSubjects.Remove for the child)
@@ -890,5 +976,90 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             $"This indicates the registry re-registers a parent subject via RegisterSubject " +
             $"after it was concurrently detached, leaving it in _knownSubjects with " +
             $"refCount=0 and no parent references.");
+    }
+
+    private sealed class SamePropertyReentrantRelationshipHandler : IPropertyRelationshipHandler
+    {
+        private bool _hasReentered;
+
+        public Action? Callback { get; set; }
+
+        public void ReconcileChildRelationships(
+            PropertyReference property,
+            ReadOnlySpan<SubjectPropertyRelationship> relationships)
+        {
+            if (!_hasReentered &&
+                property.Name == nameof(Person.Children) &&
+                !relationships.IsEmpty)
+            {
+                _hasReentered = true;
+                Callback?.Invoke();
+            }
+        }
+    }
+
+    private static async Task<ExceptionDispatchInfo?> ObserveWorkerAsync(
+        Task worker,
+        ExceptionDispatchInfo? primaryFailure,
+        string message)
+    {
+        ExceptionDispatchInfo? coordinationFailure = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => worker.IsCompleted,
+                message: message);
+        }
+        catch (Exception exception)
+        {
+            coordinationFailure = ExceptionDispatchInfo.Capture(exception);
+        }
+
+        if (worker.IsCompleted)
+        {
+            try
+            {
+                await worker;
+            }
+            catch (Exception exception)
+            {
+                primaryFailure ??= ExceptionDispatchInfo.Capture(exception);
+            }
+        }
+
+        return primaryFailure ?? coordinationFailure;
+    }
+
+    [RunsAfter(typeof(LifecycleInterceptor))]
+    private sealed class AfterCommitWriteGate(string propertyName, object expectedValue)
+        : IWriteInterceptor, IDisposable
+    {
+        public ManualResetEventSlim BackingCommitted { get; } = new();
+
+        public ManualResetEventSlim Release { get; } = new();
+
+        public void WriteProperty<TProperty>(
+            ref PropertyWriteContext<TProperty> context,
+            WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            if (context.Property.Name != propertyName || !ReferenceEquals(context.NewValue, expectedValue))
+            {
+                return;
+            }
+
+            // ManualResetEventSlim owns publication between the writer and test thread.
+            BackingCommitted.Set();
+            if (!Release.Wait(TimeSpan.FromSeconds(10)))
+            {
+                throw new TimeoutException("The committed structural write was not released.");
+            }
+        }
+
+        public void Dispose()
+        {
+            BackingCommitted.Dispose();
+            Release.Dispose();
+        }
     }
 }

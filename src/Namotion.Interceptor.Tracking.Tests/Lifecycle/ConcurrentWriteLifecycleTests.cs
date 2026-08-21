@@ -1,5 +1,12 @@
+using System.Collections;
+using System.Reflection;
+using System.Runtime.ExceptionServices;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -240,5 +247,285 @@ public class ConcurrentWriteLifecycleTests
         // Verify registry only contains root + current children (no orphaned subjects)
         var registry = context.GetService<ISubjectRegistry>();
         Assert.Equal(1 + currentChildren.Count, registry.KnownSubjects.Count);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public async Task WhenAnOlderSetterOnlyWriteResumesAfterLifecycleReattach_ThenTheLatestTerminalRevisionRemainsAuthoritative()
+    {
+        // Lifecycle cleanup must not make an older getterless invocation eligible again after a newer source
+        // commit, because the authority cannot re-read which value the setter-only backing store retained.
+        // Arrange
+        var first = new Car { Name = "First" };
+        var second = new Car { Name = "Second" };
+        var firstGeneration = new[] { first };
+        var secondGeneration = new[] { second };
+        using var writeGate = new AfterCommitWriteGate(
+            nameof(Garage.SetterOnlyCars),
+            firstGeneration);
+        var relationshipHandler = new RecordingRelationshipHandler(nameof(Garage.SetterOnlyCars));
+        var context = InterceptorSubjectContext.Create();
+        context.AddService<IWriteInterceptor>(writeGate);
+        context.WithLifecycle();
+        context.AddService<IPropertyRelationshipHandler>(relationshipHandler);
+        var garage = new Garage(context);
+        var garageContext = ((IInterceptorSubject)garage).Context;
+        var property = new PropertyReference(garage, nameof(Garage.SetterOnlyCars));
+        relationshipHandler.Generations.Clear();
+
+        // Act: park the first write after its terminal commit, then let the newer write reconcile completely.
+        var firstWriter = Task.Factory.StartNew(
+            () => garage.SetterOnlyCars = firstGeneration,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+        ExceptionDispatchInfo? workerFailure = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => writeGate.BackingCommitted.IsSet || firstWriter.IsCompleted,
+                message: "The older setter-only write should commit before the newer write starts.");
+            if (!writeGate.BackingCommitted.IsSet)
+            {
+                await firstWriter;
+            }
+            Assert.True(writeGate.BackingCommitted.IsSet);
+            Assert.False(firstWriter.IsCompleted);
+
+            property.SetValueFromSource(new object(), null, null, secondGeneration);
+
+            Assert.Equal(0, first.GetReferenceCount());
+            Assert.Equal(1, second.GetReferenceCount());
+            Assert.Same(second, Assert.Single(Assert.Single(relationshipHandler.Generations)).Child);
+            Assert.True(property.TryGetWriteState(
+                includeSourceCommitsInRevision: false,
+                out var latestNonSourceRevision,
+                out _));
+            Assert.Equal(writeGate.CommittedRevision, latestNonSourceRevision);
+            Assert.True(property.TryGetWriteState(
+                includeSourceCommitsInRevision: true,
+                out var latestTerminalRevision,
+                out _));
+            Assert.True(latestTerminalRevision > writeGate.CommittedRevision);
+
+            Assert.True(garageContext.RemoveFallbackContext(context));
+            Assert.Equal(0, second.GetReferenceCount());
+            Assert.True(garageContext.AddFallbackContext(context));
+            Assert.Equal(0, first.GetReferenceCount());
+            Assert.Equal(0, second.GetReferenceCount());
+        }
+        catch (Exception exception)
+        {
+            workerFailure = ExceptionDispatchInfo.Capture(exception);
+        }
+        finally
+        {
+            writeGate.Release.Set();
+            workerFailure = await ObserveWorkerAsync(
+                firstWriter,
+                workerFailure,
+                "The older setter-only writer should complete after its commit gate is released.");
+        }
+        workerFailure?.Throw();
+
+        // Assert
+        Assert.Equal(0, first.GetReferenceCount());
+        Assert.Equal(0, second.GetReferenceCount());
+        Assert.Empty(relationshipHandler.Generations[^1]);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public async Task WhenContextDetachRacesADescendantWrite_ThenDetachClearsAndReattachUsesTheBackingGeneration()
+    {
+        // Walking the descendant's newer backing value during detach would strand the old membership,
+        // while committing the parked writer after detach would leak the replacement into lifecycle state.
+        // Arrange
+        var initial = new Person { FirstName = "Initial" };
+        var replacement = new Person { FirstName = "Replacement" };
+        var replacementGeneration = new[] { replacement };
+        using var writeGate = new AfterCommitWriteGate(
+            nameof(Person.Children),
+            replacementGeneration);
+        var context = InterceptorSubjectContext.Create();
+        context.AddService<IWriteInterceptor>(writeGate);
+        context.WithContextInheritance();
+
+        var child = new Person
+        {
+            FirstName = "Child",
+            Children = [initial]
+        };
+        var root = new Person
+        {
+            FirstName = "Root",
+            Children = [child]
+        };
+        var rootContext = ((IInterceptorSubject)root).Context;
+        Assert.True(rootContext.AddFallbackContext(context));
+        var lifecycle = context.GetService<LifecycleInterceptor>();
+
+        // Act: park the descendant write after backing commit and let context detach serialize first.
+        var writer = Task.Factory.StartNew(
+            () => child.Children = replacementGeneration,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+        ExceptionDispatchInfo? workerFailure = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => writeGate.BackingCommitted.IsSet || writer.IsCompleted,
+                message: "The descendant write should commit before context detach.");
+            if (!writeGate.BackingCommitted.IsSet)
+            {
+                await writer;
+            }
+            Assert.True(writeGate.BackingCommitted.IsSet);
+            Assert.False(writer.IsCompleted);
+
+            Assert.True(rootContext.RemoveFallbackContext(context));
+        }
+        catch (Exception exception)
+        {
+            workerFailure = ExceptionDispatchInfo.Capture(exception);
+        }
+        finally
+        {
+            writeGate.Release.Set();
+            workerFailure = await ObserveWorkerAsync(
+                writer,
+                workerFailure,
+                "The descendant writer should complete after its commit gate is released.");
+        }
+        workerFailure?.Throw();
+
+        // Assert: no attached or processed state survives the detach, and the backing write remains authoritative.
+        Assert.Same(replacementGeneration, child.Children);
+        Assert.Equal(0, root.GetReferenceCount());
+        Assert.Equal(0, child.GetReferenceCount());
+        Assert.Equal(0, initial.GetReferenceCount());
+        Assert.Equal(0, replacement.GetReferenceCount());
+        AssertLifecycleStorageEmpty(lifecycle);
+
+        // Act: reattach must enumerate the backing graph and recreate exactly its memberships.
+        Assert.True(rootContext.AddFallbackContext(context));
+
+        // Assert
+        Assert.Same(child, Assert.Single(root.Children));
+        Assert.Same(replacement, Assert.Single(child.Children));
+        Assert.Equal(0, root.GetReferenceCount());
+        Assert.Equal(1, child.GetReferenceCount());
+        Assert.Equal(0, initial.GetReferenceCount());
+        Assert.Equal(1, replacement.GetReferenceCount());
+
+        Assert.True(rootContext.RemoveFallbackContext(context));
+        AssertLifecycleStorageEmpty(lifecycle);
+        Assert.Equal(0, child.GetReferenceCount());
+        Assert.Equal(0, replacement.GetReferenceCount());
+    }
+
+    private static void AssertLifecycleStorageEmpty(LifecycleInterceptor lifecycle)
+    {
+        // Callers reach this helper only after the worker and the synchronous detach have completed.
+        Assert.Empty(GetPrivateDictionary(lifecycle, "_attachedSubjects"));
+        Assert.Empty(GetPrivateDictionary(lifecycle, "_processedProperties"));
+    }
+
+    private static IDictionary GetPrivateDictionary(LifecycleInterceptor lifecycle, string fieldName)
+    {
+        var field = typeof(LifecycleInterceptor).GetField(
+            fieldName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        return Assert.IsAssignableFrom<IDictionary>(field?.GetValue(lifecycle));
+    }
+
+    private static async Task<ExceptionDispatchInfo?> ObserveWorkerAsync(
+        Task worker,
+        ExceptionDispatchInfo? primaryFailure,
+        string message)
+    {
+        ExceptionDispatchInfo? coordinationFailure = null;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => worker.IsCompleted,
+                message: message);
+        }
+        catch (Exception exception)
+        {
+            coordinationFailure = ExceptionDispatchInfo.Capture(exception);
+        }
+
+        if (worker.IsCompleted)
+        {
+            try
+            {
+                await worker;
+            }
+            catch (Exception exception)
+            {
+                primaryFailure ??= ExceptionDispatchInfo.Capture(exception);
+            }
+        }
+
+        return primaryFailure ?? coordinationFailure;
+    }
+
+    [RunsAfter(typeof(LifecycleInterceptor))]
+    private sealed class AfterCommitWriteGate(string propertyName, object expectedValue)
+        : IWriteInterceptor, IDisposable
+    {
+        private long _committedRevision;
+
+        public ManualResetEventSlim BackingCommitted { get; } = new();
+
+        public ManualResetEventSlim Release { get; } = new();
+
+        public long CommittedRevision => Interlocked.Read(ref _committedRevision);
+
+        public void WriteProperty<TProperty>(
+            ref PropertyWriteContext<TProperty> context,
+            WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            if (context.Property.Name != propertyName || !ReferenceEquals(context.NewValue, expectedValue))
+            {
+                return;
+            }
+
+            // ManualResetEventSlim owns publication between the writer and test thread.
+            Assert.True(context.Property.TryGetWriteState(
+                includeSourceCommitsInRevision: true,
+                out var committedRevision,
+                out _));
+            Interlocked.Exchange(ref _committedRevision, committedRevision);
+            BackingCommitted.Set();
+            if (!Release.Wait(TimeSpan.FromSeconds(10)))
+            {
+                throw new TimeoutException("The committed descendant write was not released.");
+            }
+        }
+
+        public void Dispose()
+        {
+            BackingCommitted.Dispose();
+            Release.Dispose();
+        }
+    }
+
+    private sealed class RecordingRelationshipHandler(string propertyName) : IPropertyRelationshipHandler
+    {
+        public List<SubjectPropertyRelationship[]> Generations { get; } = [];
+
+        public void ReconcileChildRelationships(
+            PropertyReference property,
+            ReadOnlySpan<SubjectPropertyRelationship> relationships)
+        {
+            if (property.Name == propertyName)
+            {
+                Generations.Add(relationships.ToArray());
+            }
+        }
     }
 }

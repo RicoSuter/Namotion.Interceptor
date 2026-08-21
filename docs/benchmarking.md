@@ -14,6 +14,30 @@ pwsh scripts/benchmark.ps1 -Filter "*RegistryBenchmark*","*ServiceOrderResolverB
 
 The script header lists every flag. The one with a trap is `-Filter`: several patterns are matched as OR, but they must be a PowerShell array rather than a comma joined string, and the array form needs a PowerShell caller, since from bash `"a","b"` collapses into one argument that matches nothing. Output is `benchmark_<timestamp>.md` in the working directory.
 
+### Relationship reconciliation benchmarks
+
+Registry relationship work is spread across structural writes, Registry construction, and cached parent reads. Compare these together, plus an unrelated resolver row as the noise reference:
+
+```
+pwsh scripts/benchmark.ps1 -Filter "*ChildIndexRefreshBenchmark*","*RegistryBenchmark.AddLotsOfPreviousCars*","*ParentLookupBenchmark*","*ServiceOrderResolverBenchmark.LinearChain*" -LaunchCount 3
+```
+
+Despite its historical class name, `ChildIndexRefreshBenchmark` measures complete ordered relationship reconciliation. A structural write enumerates the source once. When relationship consumers are enabled, it publishes one relationship per subject-valued occurrence in exact collection or dictionary enumeration order. Its duplicate row repeats each distinct child twice and reverses the occurrence sequence without changing membership.
+
+`Count` selects 4 or 1000 occurrences. `Consumers` selects lifecycle only, Registry, or Registry with parent tracking. Every operation runs with each configuration, so the lifecycle-only rows perform the same structural writes without materializing relationship objects. Compare their allocations with the Registry configurations to detect accidental per-occurrence allocation in compact processed state.
+
+Its current rows measure these operations:
+
+- replacing every collection membership;
+- reversing all retained collection occurrences;
+- moving one retained dictionary occurrence to another key;
+- reversing duplicate occurrences, with each distinct subject appearing twice; and
+- mutating and assigning the same collection instance to request an explicit structural refresh.
+
+The filter selects `RegistryBenchmark.AddLotsOfPreviousCars` for child-graph construction and `ServiceOrderResolverBenchmark.LinearChain` as the unrelated noise row without removing the other pre-existing benchmark rows from their classes. `ParentLookupBenchmark` contributes the cached Registry-parent and tracked-parent read paths. Together the filter selects nine methods and 34 parameterized cases. Previously returned snapshots stay frozen, and readers overlapping reconciliation can receive an old or newer coherent generation. Cross-view agreement is required after writes become quiescent, not while a writer is active.
+
+Allocation columns and scaling shape are the primary acceptance signals. Compare lifecycle only with Registry to isolate relationship materialization, then Registry with Registry and parents to isolate the additional tracked-parent projection. Use identical benchmark source definitions on both refs, especially because `ChildIndexRefreshBenchmark` and `ParentLookupBenchmark` do not exist on the historical base branch. A compatibility adaptation may invoke the implementation available on each ref, but it must not change the measured operations or parameters.
+
 ### Where it goes wrong
 
 The script checks the base branch out **in your working tree**, so:
@@ -34,7 +58,7 @@ Allocation columns survive all of this far better than timings and are usually t
 
 **Read the noise off a row the change cannot reach.** What that row does in the run is what the harness does to unchanged code, and a real delta has to clear it. Take it from your own run, and note that shorter benchmarks are more sensitive to code placement, so a slow reference understates the floor for fast rows.
 
-Choose the reference carefully: `[GlobalSetup]` is per class and heap randomization re-runs it after every iteration, so a row is only insulated when its **class** setup also avoids your change. `RegistryBenchmark.GenerateSubjectId` touches no subject itself, but its class setup builds a thousand tracked `Car`s. `ServiceOrderResolverBenchmark` is the safe fallback, the only class producing rows that avoids subjects in both benchmarks and setup; one row such as `LinearChain` is enough, the whole class gives a spread.
+Choose the reference carefully: `[GlobalSetup]` is per class and heap randomization re-runs it after every iteration, so a row is only insulated when its **class** setup also avoids your change. `ServiceOrderResolverBenchmark` avoids subjects in both its benchmark and setup. The filter selects its `LinearChain` row as the noise reference for relationship comparisons.
 
 **The Error column is not a significance test.** It says how precisely one run measured itself, not whether tomorrow's run agrees, and a reference row can move many times its error bar with provably unchanged code. `-LaunchCount N` does not fix that: each arm keeps its own binary, so a placement difference reproduces on every launch instead of averaging out.
 
@@ -42,7 +66,7 @@ Choose the reference carefully: `[GlobalSetup]` is per class and heap randomizat
 
 **`-Short` decides nothing.** Every delta in that run sat inside its own error band. Use it to check that a filter selects what you expect, never to judge a change.
 
-**Watch the timer floor.** Sub-nanosecond rows swing wildly because of the measurement, not the code. Benchmarks built for such paths amortize with `OperationsPerInvoke`, as `RegistryBenchmark.ReadParents` does over 256 calls, and those are meaningful; distrust an unamortized one.
+**Watch the timer floor.** Sub-nanosecond rows swing wildly because of the measurement, not the code. Benchmarks built for such paths amortize with `OperationsPerInvoke`, as both `ParentLookupBenchmark` rows do over 256 calls, and those are meaningful; distrust an unamortized one.
 
 ## When a benchmark cannot answer
 
@@ -72,7 +96,8 @@ Both arms, full job, `-LaunchCount 3`, from one machine, for scoping only:
 
 | Scope | Both arms |
 |---|---|
-| `*RegistryBenchmark*` | about 30 minutes |
+| `*ChildIndexRefreshBenchmark*` | about 45 minutes |
+| Targeted relationship command above | about 75 minutes |
 | Whole suite | about 6 hours |
 
 `SubjectSourceBenchmark` measures in milliseconds per operation, and `ConstructThreeLevel` earns a `MultimodalDistribution` warning and so runs to its hundred iteration ceiling rather than the default fifteen, every launch. Between them they dominate a full run. Judge `ConstructThreeLevel` by allocations, its timing carrying a standard deviation around a quarter of its mean.

@@ -44,6 +44,63 @@ var frontPressureProperty = car.TryGetRegisteredProperty(c => c.Tires[0].Pressur
 
 Member-access hops resolve through the registry; index and dictionary segments evaluate against the object graph. The lookup is null-safe either way: if a subject along the path is null or not tracked by the registry, the method returns `null` instead of throwing.
 
+### Structural child relationships
+
+A property which holds subjects exposes its outgoing relationships as `Children`. Each entry carries the child subject and the `Index` of that exact occurrence: a position for a collection, a key for a dictionary, or `null` for a direct subject reference.
+
+```csharp
+var tiresProperty = car.TryGetRegisteredProperty(c => c.Tires)!;
+
+foreach (var child in tiresProperty.Children)
+{
+    Console.WriteLine($"{child.Index}: {child.Subject}");
+}
+```
+
+Relationships preserve occurrences rather than distinct subjects. If the same subject appears under two dictionary keys or at two collection positions, `Children` contains two entries. The child's `RegisteredSubject.Parents` and tracking `GetParents()` results likewise contain both incoming relationships. Removing one occurrence removes only its relationship. The child loses its membership in that property only when the final occurrence is removed.
+
+The exact outgoing order is the source enumeration order:
+
+- A direct subject produces one relationship with `Index == null`.
+- An `IDictionary` produces subject-valued entries with the exact keys returned by its enumerator. Reconciliation treats those keys as opaque metadata and does not call their equality or hash implementations.
+- A declared read-only dictionary shape uses the keys from its enumerated `KeyValuePair<,>` values.
+- Other supported collections and enumerables use zero-based enumeration positions. Positions occupied by non-subject values still count, although those values do not produce relationships.
+- `null`, strings, non-subject values, and unsupported values produce no relationship.
+
+Within one parent property, incoming `Parents` and `GetParents()` entries retain that same occurrence order. Parent-property groups retain their attachment order, so reconciling one property does not reorder relationships contributed by other properties.
+
+### Membership and reference counts
+
+Relationship occurrences and lifecycle membership are deliberately different. `GetReferenceCount()` and `RegisteredSubject.ReferenceCount` count parent-property lifecycle references, not `Children` or `Parents` entries. Within one lifecycle interceptor, repeated occurrences of the same child in one property contribute one reference. The first occurrence creates the membership and the final removal removes it. Different parent properties each contribute their own reference. When a context resolves several lifecycle interceptors, each interceptor can contribute once for the same membership.
+
+Code that needs a distinct membership count must therefore group relationships by parent property and child subject using subject reference identity. `Children.Length`, `Parents.Length`, and `GetParents().Length` are occurrence counts.
+
+### Reconciliation and in-place mutation
+
+Assigning a structural property reconciles it from one complete enumeration of its current backing value. Assigning the same non-string enumerable instance is an explicit structural refresh. When value-equality tracking suppresses that equal assignment, the backing setter is not called and normal value-change, derived-change, transaction, and connector-write notifications remain suppressed, but structural relationships are still reconciled. Without value-equality tracking, the normal setter runs and lifecycle processing still reconciles the structure.
+
+An in-place mutation with no intercepted property assignment remains invisible. Reassign the same container instance, or preferably assign an immutable replacement, to publish the new structure. Detach uses the last successfully reconciled state, so an invisible mutation cannot change which memberships are detached. The library also cannot make a user collection safe when another thread mutates it during enumeration. Applications must synchronize such access or use immutable replacements.
+
+If enumeration fails, the exception propagates and relationship metadata remains at its previous coherent generation. A later successful assignment can retry reconciliation.
+
+### Snapshots, paths, and concurrency
+
+`RegisteredSubjectProperty.Children`, `RegisteredSubject.Parents`, and `GetParents()` return immutable point-in-time snapshots. A previously returned array never changes after a later reorder, re-key, attach, or detach. Read the property again to obtain the current generation.
+
+The terminal backing write runs outside each lifecycle authority's structural lock. Each `LifecycleInterceptor` serializes its own re-read, enumeration, membership transitions, and processed relationship publication. Contexts with several lifecycle interceptors therefore have several independent reconciliation locks rather than one global writer lock.
+
+Relationship views are published as coherent immutable generations. A reader overlapping reconciliation can observe the previous generation or a newer generation, but never a partially initialized array or new indices combined with an old order. The different child and parent views are not one graph-wide transaction and may briefly show different generations during reconciliation.
+
+After intercepted writes, attach operations, and detach operations finish, shared Registry and parent views converge to the last successfully enumerated structure when all contributing lifecycle authorities agree on the property's attachment state. The current lifecycle callback contract does not identify which authority produced a contribution. Removing one of several independently contributing authorities can therefore clear shared Registry and parent views while another authority remains attached and retains its own lifecycle reference. This preserves the existing last-callback ownership limitation. Shared views do not promise relationship agreement again until the contributing lifecycle callbacks agree on attachment state.
+
+Within that boundary, the guarantee is quiescent consistency. It assumes no structural operation is still in progress and no unassigned in-place mutation has occurred since the last successful reconciliation.
+
+Singular Registry path APIs are deterministic when a subject has several incoming relationships. Without an explicit root, `TryGetPath()` follows the first current parent relationship. With an explicit root, it performs a depth-first search and returns the first relationship sequence that reaches that root. Duplicate occurrences within one property are considered in current source enumeration order, so the first occurrence wins. The Registry does not provide an API that returns every possible path.
+
+### Relationship handler API
+
+`IPropertyLifecycleHandler` now handles property attach and detach only. Its former `RefreshCollectionProperty(PropertyReference, object?)` method has been removed. Custom consumers of structural relationships should implement `IPropertyRelationshipHandler.ReconcileChildRelationships`. Each successful reconciliation supplies the complete ordered sequence of immutable `SubjectPropertyRelationship` occurrences, and property detach supplies an empty sequence. Consumers should replace their property group from that sequence rather than treating the callback as an incremental index update.
+
 ## Enumerate property attributes
 
 The registry makes it easy to find metadata associated with properties:
@@ -117,7 +174,7 @@ Derived properties automatically participate in change tracking and will update 
 
 ### Lifecycle tracking for dynamic properties
 
-Dynamic properties (including derived) fully participate in lifecycle tracking when `WithLifecycle()` or `WithFullPropertyTracking()` is enabled. If a dynamic property holds a reference to another subject, that subject is automatically attached to the lifecycle graph with proper reference counting. For example, a `AddDerivedProperty<Tire>("FirstTire", ...)` that returns the first tire from a collection would give that tire a reference count of 2 — one from the collection property and one from the derived property.
+Dynamic properties (including derived) fully participate in lifecycle tracking when `WithLifecycle()` or `WithFullPropertyTracking()` is enabled. If a dynamic property holds a reference to another subject, that subject is automatically attached to the lifecycle graph with proper reference counting. For example, a `AddDerivedProperty<Tire>("FirstTire", ...)` that returns the first tire from a collection would give that tire a reference count of 2: one from the collection property and one from the derived property.
 
 When the underlying data changes, derived properties are re-evaluated and lifecycle tracking reconciles the old and new subjects automatically (attaching new subjects, detaching removed ones).
 
@@ -255,4 +312,4 @@ Subject IDs are automatically managed during the subject lifecycle:
 
 ### Without a registry
 
-Subject IDs also work without a registry configured — IDs are stored directly in the subject's `Data` dictionary. However, the reverse index lookup (`TryGetSubjectById`) requires a registry.
+Subject IDs also work without a registry configured. IDs are stored directly in the subject's `Data` dictionary. However, the reverse index lookup (`TryGetSubjectById`) requires a registry.
