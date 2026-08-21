@@ -15,50 +15,6 @@ public class ChangeQueueProcessor : IDisposable
 {
     internal static readonly TimeSpan TeardownFlushBound = TimeSpan.FromSeconds(5);
 
-    private sealed class ProcessingCancellationState(
-        CancellationTokenSource processingTokenSource,
-        CancellationTokenSource dequeueStopTokenSource) : IDisposable
-    {
-        private readonly object _gate = new();
-        private Task? _processingCancellationTask;
-
-        public void RequestCancellation()
-        {
-            try
-            {
-                dequeueStopTokenSource.Cancel();
-            }
-            catch (ObjectDisposedException)
-            {
-                // Unregister can race a callback that was already queued.
-            }
-
-            _ = GetProcessingCancellationTask();
-        }
-
-        public Task GetProcessingCancellationTask()
-        {
-            lock (_gate)
-            {
-                if (_processingCancellationTask is not null)
-                {
-                    return _processingCancellationTask;
-                }
-
-                try
-                {
-                    return _processingCancellationTask = processingTokenSource.CancelAsync();
-                }
-                catch (Exception exception)
-                {
-                    return _processingCancellationTask = Task.FromException(exception);
-                }
-            }
-        }
-
-        public void Dispose() => processingTokenSource.Dispose();
-    }
-
     private readonly Func<PropertyReference, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
     private readonly object? _source;
@@ -694,5 +650,49 @@ public class ChangeQueueProcessor : IDisposable
                 Volatile.Write(ref _flushGate, 0);
             }
         }
+    }
+
+    private sealed class ProcessingCancellationState(
+        CancellationTokenSource processingTokenSource,
+        CancellationTokenSource dequeueStopTokenSource) : IDisposable
+    {
+        private readonly object _gate = new();
+        private Task? _processingCancellationTask;
+
+        public void RequestCancellation()
+        {
+            try
+            {
+                dequeueStopTokenSource.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Unregister can race a callback that was already queued.
+            }
+
+            _ = GetProcessingCancellationTask();
+        }
+
+        public Task GetProcessingCancellationTask()
+        {
+            lock (_gate)
+            {
+                if (_processingCancellationTask is not null)
+                {
+                    return _processingCancellationTask;
+                }
+
+                try
+                {
+                    return _processingCancellationTask = processingTokenSource.CancelAsync();
+                }
+                catch (Exception exception)
+                {
+                    return _processingCancellationTask = Task.FromException(exception);
+                }
+            }
+        }
+
+        public void Dispose() => processingTokenSource.Dispose();
     }
 }
