@@ -14,7 +14,16 @@
 
 Four independent verification passes checked this plan against the code. Findings and evidence are in `docs/spike/SPIKE-FINDINGS.md`. The corrections below take precedence wherever they disagree with a task.
 
-**Ordering.** The original Tasks 3 and 4 are merged into one commit, and consumer migration to the nullable context accessor moves into it. Task 4 removed `AddFallbackContext`/`RemoveFallbackContext` while six production callers outside its file list still used them, so the tree did not compile from Task 4 through Task 9 and Task 9's own cross-project gate was unreachable. The Task 3 shim could not bridge the gap either, because `Context => Executor.GetContext()` throws on unattached subjects and the canonical attach idiom is `subject.Context.AddFallbackContext(ctx)` on an unattached subject, 108 occurrences across 29 files. Subsequent task numbers shift down by one.
+**Ordering.** The original Tasks 3 and 4 cannot be executed as written. Task 4 removed `AddFallbackContext`/`RemoveFallbackContext` while six production callers outside its file list still used them, so the tree did not compile from Task 4 through Task 9 and Task 9's own cross-project gate was unreachable. The Task 3 shim could not bridge the gap either, because `Context => Executor.GetContext()` throws on unattached subjects while the canonical attach idiom is `subject.Context.AddFallbackContext(ctx)` on an unattached subject, 108 occurrences across 29 files.
+
+There is no source-compatible shim for `subject.Context` once the executor stops being a context, because an unattached subject then has nothing to return. Naively that forces one atomic commit across all 124 affected files. It is avoidable, and the avoidance is the single most useful structural change to this plan: **keep `InterceptorExecutor : InterceptorSubjectContext` until the very end**. The old fallback path and the new exact-context state then coexist, and the cutover stages cleanly:
+
+- **3a. Mechanism, additive.** Add `IInterceptorSubject.Executor` as an explicit interface implementation, the nullable exact-context field, the explicit and provisional anchor bits, the attachment revision, the `GetContext`/`TryGetContext`/`AttachToContext`/`DetachFromContext` extensions, `SetStructuralPropertyValue` with its own terminal cache, and the fail-closed generator classification. The executor is still a context, fallbacks still work, every existing path is untouched. The tree compiles and the whole suite passes.
+- **3b. Authority switch.** Point the built-in lifecycle at the new exact-context state instead of fallback composition. Behaviour changes here; the fallback APIs still exist but the lifecycle no longer drives them.
+- **3c. Consumer migration.** Move all 124 files to `GetContext`/`TryGetContext`/`Executor`. Still compiling at every step because the old members remain.
+- **3d. Removal.** Delete the fallback APIs, `InterceptorExecutor : InterceptorSubjectContext`, `Context`, and `SyncRoot`. This commit is large but purely subtractive, so a compile error in it is a missed call site rather than a design problem.
+
+Subsequent task numbers shift accordingly.
 
 **C1. `GetParents()` must not take the lifecycle lock.** It reads an immutable per-subject snapshot published by the lifecycle. `SourceMonitor` holds its own lock across a graph walk that calls `GetParents()`, and is also called from inside the lifecycle lock, so a locking `GetParents()` deadlocks. Occurrence-stable indices are new work with new tests, not a carry-over.
 
