@@ -86,17 +86,7 @@ public sealed class ConnectorTesterHost
             configuration.Clients[i].Index = i + 1;
         }
 
-        // There are four mutable value properties on TestNode, so participantIndex % 4 is disjoint
-        // only for at most four participants. A fifth would silently collide with an earlier
-        // participant's property, and the write-durability oracle would then report violations
-        // that are not losses.
-        var participantCount = configuration.Clients.Count + 1;
-        if (configuration.DisjointProperties && participantCount > 4)
-        {
-            throw new InvalidOperationException(
-                $"DisjointProperties requires at most 4 participants, one per mutable property on TestNode, but {participantCount} are configured. " +
-                "The write-durability oracle is unsound with more, because two participants would write the same property.");
-        }
+        configuration.ValidateDisjointProperties();
 
         configuration.Server.Chaos?.Validate();
         foreach (var client in configuration.Clients)

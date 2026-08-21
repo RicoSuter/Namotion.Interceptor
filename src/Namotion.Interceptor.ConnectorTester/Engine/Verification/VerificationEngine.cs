@@ -219,8 +219,9 @@ public class VerificationEngine : BackgroundService
 
         foreach (var engine in _mutationEngines)
         {
-            _logger.LogInformation("  {Name}: {Rate} value mutations/sec, {StructuralRate} structural mutations/sec",
-                engine.Name, engine.ValueMutationRate, engine.StructuralMutationRate);
+            _logger.LogInformation("  {Name}: {Rate} value mutations/sec, {StructuralRate} structural mutations/sec{Transactions}",
+                engine.Name, engine.ValueMutationRate, engine.StructuralMutationRate,
+                engine.UseTransactions ? ", transactions" : "");
         }
 
         _logger.LogInformation(_configuration.DisjointProperties

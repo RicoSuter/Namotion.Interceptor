@@ -26,9 +26,11 @@ public sealed class MutationEngine : BackgroundService
 
     public string Name { get; }
     public int ValueMutationRate { get; }
+    public bool UseTransactions { get; }
     public int StructuralMutationRate => _structuralMutationRate;
     public long ValueMutationCount => _counters.ValueMutationCount;
     public long StructuralMutationCount => _counters.StructuralMutationCount;
+    public long FailedCommitCount => _counters.FailedCommitCount;
 
     public void ResetCounters() => _counters.Reset();
 
@@ -72,6 +74,7 @@ public sealed class MutationEngine : BackgroundService
         _logger = logger;
         Name = participantConfiguration.Name;
         ValueMutationRate = participantConfiguration.ValueMutationRate;
+        UseTransactions = participantConfiguration.UseTransactions;
         _structuralMutationRate = participantConfiguration.StructuralMutationRate;
     }
 

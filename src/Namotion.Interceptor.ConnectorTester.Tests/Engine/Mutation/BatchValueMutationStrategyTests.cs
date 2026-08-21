@@ -6,6 +6,8 @@ using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.ConnectorTester.Tests.Engine.Mutation;
 
@@ -18,6 +20,18 @@ public class BatchValueMutationStrategyTests
             .WithRegistry()
             .WithParents()
             .WithLifecycle();
+
+    /// <summary>Reports every commit as failed, without applying anything.</summary>
+    private sealed class FailingTransactionWriter : ITransactionWriter
+    {
+        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            Memory<SubjectPropertyChange> changes, TransactionRequirement requirement, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("Transport is down.");
+
+        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written, object? revertState, CancellationToken cancellationToken)
+            => new(new SourceRevertResult([], []));
+    }
 
     [Fact]
     public async Task WhenNodeCountIsZero_ThenStrategyReturnsImmediately()
@@ -97,5 +111,34 @@ public class BatchValueMutationStrategyTests
         {
             SubjectChangeContext.GetTimestampFunction = originalGetter;
         }
+    }
+
+    [Fact]
+    public async Task WhenCommitFailsUnderTransactions_ThenStrategyKeepsRunningAndCountsTheFailure()
+    {
+        // Arrange: every commit fails, as a dying transport would under BestEffort.
+        var context = CreateContext().WithTransactions();
+        context.AddService<ITransactionWriter>(new FailingTransactionWriter());
+        var root = new TestNode(context);
+        var graph = new KnownNodeGraph();
+        graph.Rebuild(root);
+        var counters = new MutationCounters();
+        var coordinator = new TestCycleCoordinator();
+
+        var strategy = new BatchValueMutationStrategy(
+            graph, coordinator, context, counters,
+            new ParticipantConfiguration { Name = "test", ValueMutationRate = 100, UseTransactions = true },
+            numberOfBatches: 10,
+            participantIndex: 0,
+            new WriteDurabilityLedger());
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+
+        // Act: a failing commit must not escape the loop and kill the strategy.
+        try { await strategy.RunAsync(cts.Token); }
+        catch (OperationCanceledException) { }
+
+        // Assert
+        Assert.True(counters.FailedCommitCount > 0);
     }
 }

@@ -78,14 +78,13 @@ public sealed class RandomValueMutationStrategy : IValueMutationStrategy
                     }
                     catch (SubjectTransactionException)
                     {
-                        // Best-effort leaves the local model on the old value for the failed
-                        // properties, so recording here would assert a value that never applied.
+                        // A commit failure is legitimate under BestEffort with a dying transport: the
+                        // failed properties never applied locally either, so model and peer still agree.
+                        _counters.IncrementFailedCommit();
                         foreach (var (node, property, _) in batch)
                         {
                             _ledger.Forget(node, property);
                         }
-
-                        throw;
                     }
                 }
                 else

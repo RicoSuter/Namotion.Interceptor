@@ -50,4 +50,23 @@ public class ConnectorTesterConfiguration
     public List<ParticipantConfiguration> Clients { get; set; } = [];
 
     public List<ChaosProfileConfiguration> ChaosProfiles { get; set; } = [];
+
+    /// <summary>TestNode has this many mutable value properties, one per DisjointProperties participant.</summary>
+    private const int MutablePropertyCount = 4;
+
+    /// <summary>
+    /// Throws when DisjointProperties cannot assign every configured participant a property of its
+    /// own. Above <see cref="MutablePropertyCount"/> participants, two would share a property, and the
+    /// write-durability oracle would then report their legitimate overwrites as if they were losses.
+    /// </summary>
+    public void ValidateDisjointProperties()
+    {
+        var participantCount = Clients.Count + 1;
+        if (DisjointProperties && participantCount > MutablePropertyCount)
+        {
+            throw new InvalidOperationException(
+                $"DisjointProperties requires at most {MutablePropertyCount} participants, one per mutable property on TestNode, but {participantCount} are configured. " +
+                "The write-durability oracle is unsound with more, because two participants would write the same property.");
+        }
+    }
 }

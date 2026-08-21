@@ -27,6 +27,14 @@
     "websocket-load": {
       "commandName": "Project",
       "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket-load" }
+    },
+    "websocket-durability": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket-durability" }
+    },
+    "websocket-transactions": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket-transactions" }
     }
   }
 }
