@@ -40,10 +40,11 @@ fallback behavior remains unchanged until PR 2 lands the complete semantic chang
 - Keep public composition and ownership-route relationships independently removable when they
   target the same context.
 - Prevent a stale clear from removing a later same-target route generation.
-- Preserve delegation, repeated-path deduplication, cycle termination, deep-graph safety, and
+- Preserve delegation, reference-identity service deduplication, cycle termination, deep-graph safety, and
   downstream invalidation.
 - Keep existing route-free context objects and states at their current instance size.
-- Add no public API and change no production behavior.
+- Add no public API and change no lifecycle or route behavior. Correct service deduplication to use
+  exact reference identity so distinct instances cannot erase each other through `Equals`.
 
 ## Non-goals
 
@@ -136,9 +137,11 @@ For every entered context, service traversal remains depth-first and gathers in 
 2. public fallback contexts in insertion order;
 3. the ownership-route target, when present.
 
-The existing visited set deduplicates contexts reached through repeated paths. If a public fallback
-and the ownership route target the same context, its services appear once at the public fallback's
-earlier position.
+The existing visited set deduplicates contexts reached through repeated paths. Service materialization
+deduplicates by reference identity, never `Equals`: repeated discovery of the same exact instance
+collapses to its first ordered occurrence, while distinct instances remain distinct in order even when
+either instance reports value equality. If a public fallback and the ownership route target the same
+context, its services appear once at the public fallback's earlier position.
 
 Ordering attributes continue to reorder the gathered services by declared dependencies. Route
 order breaks only otherwise unconstrained ties.
@@ -205,8 +208,10 @@ stale and is therefore forbidden.
 ## Public and Consumer Behavior
 
 PR 1 adds no public type, member, or capability. `IInterceptorSubjectContext`, generated code,
-`InterceptorExecutor`, and all feature packages behave as on `master` because no production path
-creates an ownership route.
+`InterceptorExecutor`, and all feature packages retain their lifecycle and route behavior from
+`master` because no production path creates an ownership route. Service gathering deliberately
+changes only for distinct instances that compare equal: both instances now remain in the ordered
+materialized service set instead of one erasing the other.
 
 Public API snapshots must remain unchanged. Existing binaries and generated model assemblies do not
 need rebuilding specifically for PR 1.
@@ -241,6 +246,8 @@ Core tests cover:
 - local, fallback, then route ordering;
 - ordering attributes across all routes;
 - repeated target deduplication when fallback and route share a target;
+- reference-identical service deduplication across repeated paths, distinct `Equals`-equal services,
+  and an equality-colliding service that must not erase another interceptor or handler;
 - independent removal in both orders when fallback and route share a target;
 - downstream cache invalidation after service mutation through the relationship that remains;
 - route transfer and exact-descriptor stale-clear rejection;
@@ -266,9 +273,11 @@ cross-references it from affected feature pages.
 
 ## Release Boundary
 
-PR 1 is independently releasable and behavior-neutral for consumers. Its diff is limited to Core
-context state and traversal, focused Core tests, the internal design document, and the roadmap. It
-does not touch source generation, Tracking, Registry, Hosting, connectors, OPC UA, or HomeBlaze.
+PR 1 is independently releasable. It is lifecycle- and route-behavior-neutral for consumers; its one
+intentional service-resolution correction preserves distinct service instances that compare equal.
+Its diff is limited to Core context state and traversal, focused Core tests, the internal design
+document, and the roadmap. It does not touch source generation, Tracking, Registry, Hosting,
+connectors, OPC UA, or HomeBlaze.
 
 PR 2 can use the internal descriptor and transition without replacing them. PR 3 adds authority
 validation around the established ownership route. PR 4 consumes the resulting ownership and

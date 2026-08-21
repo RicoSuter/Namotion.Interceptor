@@ -22,8 +22,9 @@ pull request and receives its production lifecycle owner in the following attach
 - A query pins one immutable state and takes no context mutation lock.
 - Resolution visits local services, public fallbacks in insertion order, then one ownership route.
 - Ordering attributes override route order only where they declare a dependency.
-- Repeated contexts and service instances are returned once according to the existing visited and
-  distinct rules.
+- Repeated contexts are visited once. Service materialization deduplicates by reference identity:
+  the same exact instance is returned once at its first occurrence, while distinct instances remain
+  distinct even when `Equals` reports equality.
 - Services, fallbacks, the ownership route, delegation, and caches belong to one published state.
 - A route change compares the exact previous descriptor instance before it publishes.
 - Reverse dependency registration remains while either a fallback or ownership route uses a target.
@@ -46,6 +47,11 @@ use one volatile state read.
 The service walk is depth-first. Each entered context contributes local services, then each public
 fallback, then its ownership route. The existing visited set cuts cycles and gives the earliest
 route to a repeated context precedence.
+
+The gathered service sequence uses reference identity for deduplication, never object equality.
+Repeated discovery of the same instance through several paths collapses to its first ordered
+occurrence. Distinct instances remain separate chain or handler entries even when either instance
+reports value equality.
 
 An empty context delegates directly when it has one distinct target: one fallback, one ownership
 route, or both relationships to the same target. Different fallback and ownership targets require
