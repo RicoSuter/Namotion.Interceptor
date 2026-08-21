@@ -635,9 +635,12 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             {
                 // Reserved before the send, not assigned after it: see ReserveSendOrdinal's remarks for why.
                 var sendOrdinal = ReserveSendOrdinal();
-                BeforeReservedSendAttempt?.Invoke();
                 try
                 {
+                    // A no-op in production; a test can throw from this seam to force the send to fail
+                    // without touching the transport, exercising the same catch below that a genuine
+                    // send failure would.
+                    BeforeReservedSendAttempt?.Invoke();
                     await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception) when (!cancellationToken.IsCancellationRequested)
@@ -654,7 +657,6 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                     // the teardown flush, must not abort a healthy socket, since aborting skips the close
                     // handshake and downgrades a graceful stop into one.
                     webSocket.Abort();
-                    AfterReservedSendAbort?.Invoke();
                     throw;
                 }
                 catch (Exception)
@@ -1252,18 +1254,11 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
     /// <summary>
     /// Fires in <see cref="WriteChangesAsync"/> right after an ordinal is reserved for the send that is
-    /// about to happen, before the send is attempted, so a test can force that specific send to fail
-    /// without depending on whatever a real transport happens to do when a send fails.
+    /// about to happen, inside the same try that guards the send itself, so a test can throw from this
+    /// seam to force that specific send to fail without depending on whatever a real transport happens
+    /// to do when a send fails, and without touching the socket directly.
     /// </summary>
     internal Action? BeforeReservedSendAttempt { get; set; }
-
-    /// <summary>
-    /// Fires in <see cref="WriteChangesAsync"/> right after a failed reserved send aborts the
-    /// connection, so a test can pin that this specific abort ran rather than merely inferring it from
-    /// effects, such as a reconnect, that a socket the test aborted directly to force the failure would
-    /// also produce on its own with this abort deleted.
-    /// </summary>
-    internal Action? AfterReservedSendAbort { get; set; }
 
     /// <summary>Number of writes that reached the socket on the current connection but are not yet retired.</summary>
     internal int InFlightCount

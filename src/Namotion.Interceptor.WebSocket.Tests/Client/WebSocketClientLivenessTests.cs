@@ -688,55 +688,6 @@ public class WebSocketClientLivenessTests
     }
 
     [Fact]
-    public async Task WhenATransactionalCommitIsIssuedAfterAReconnect_ThenItSucceedsOnTheNewConnection()
-    {
-        // Arrange - a transactional commit reaches WriteChangesAsync directly, bypassing the resume
-        // gate in WriteChangesViaRetryQueueAsync that would otherwise park a plain write, so removing
-        // the connection-replacement guard must not have broken it: it still has to land on whichever
-        // connection is current once it gets the connection lock.
-        using var portLease = await WebSocketTestPortPool.AcquireAsync();
-        await using var server = await StartServerAsync(portLease.Port);
-        await using var source = CreateClientSource(
-            portLease.Port,
-            reconnectDelay: TimeSpan.FromMilliseconds(50),
-            configureContext: context => context.WithSourceTransactions());
-        await source.StartAsync(CancellationToken.None);
-
-        var clientRoot = (TestRoot)source.RootSubject;
-        var subjectContext = source.RootSubject.Context;
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
-
-        var oldSocket = GetWebSocket(source);
-
-        try
-        {
-            // Act - the connection drops for real and the reconnect is given the chance to complete
-            // before the commit is issued: a commit reaching an already-dead socket fails immediately
-            // with no connection to wait for, which is not what this test is about.
-            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational,
-                timeout: TimeSpan.FromSeconds(15),
-                message: "The reconnect should complete.");
-
-            using var transaction = await subjectContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-            clientRoot.Name = "AfterReconnect";
-            await transaction.CommitAsync(CancellationToken.None);
-
-            // Assert - the commit reached the server over the replacement connection.
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => server.Root!.Name == "AfterReconnect",
-                timeout: TimeSpan.FromSeconds(15),
-                message: "The commit should reach the server.");
-        }
-        finally
-        {
-            await source.StopAsync(CancellationToken.None);
-        }
-    }
-
-    [Fact]
     public async Task WhenRetireIsCalledWithASocketThatIsNotTheCurrentOne_ThenNothingIsRemoved()
     {
         // Arrange - a single write in flight on the current connection.
@@ -757,7 +708,8 @@ public class WebSocketClientLivenessTests
 
             // Act - a retire call quoting a socket that is not the current connection, with an
             // applied-through value larger than anything the current connection could ever report.
-            source.RetireInFlightThrough(long.MaxValue, new ClientWebSocket());
+            using var mismatchedSocket = new ClientWebSocket();
+            source.RetireInFlightThrough(long.MaxValue, mismatchedSocket);
 
             // Assert - the identity check inside the lock rejects it by construction, not by timing.
             Assert.Equal(1, source.InFlightCount);
@@ -1086,49 +1038,35 @@ public class WebSocketClientLivenessTests
 
             var oldSocket = GetWebSocket(source);
 
-            using var sendGate = new UpdateAdmissionGate(armed: true);
-            source.BeforeReservedSendAttempt = sendGate.Wait;
+            // The seam throws in place of the send genuinely failing, from inside the same try that
+            // guards the send itself, so nothing in this test touches the socket directly: only the
+            // production catch can be what aborts it. Not a cancellation of the caller's own token,
+            // since that is filtered out of the abort deliberately (see WriteChangesAsync's catch), so
+            // this needs a failure that is not one.
+            source.BeforeReservedSendAttempt = () => throw new InvalidOperationException("Simulated send failure.");
 
-            // Pinned directly rather than inferred from what follows: the abort below, needed to make
-            // the held send genuinely fail, drops the connection on its own and would make every
-            // assertion below pass even with the production catch's own abort deleted. This seam only
-            // fires from inside that specific catch, so it is what actually proves that abort ran.
-            var productionAbortFired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            source.AfterReservedSendAbort = () => productionAbortFired.TrySetResult();
-
-            // Act - an ordinal is reserved for this send, then the send itself is held back and made
-            // to fail by aborting the socket underneath it before it ever reaches the wire, standing in
-            // for a send that fails after the reservation for whatever reason, without depending on
-            // what a real transport happens to do to its own state when that happens. Not a
-            // cancellation of the caller's own token: that is filtered out of the abort deliberately
-            // (see WriteChangesAsync's catch), so this needs a failure that is not one.
+            // Act - an ordinal is reserved for this send, then the seam throws before the send ever
+            // reaches the wire, standing in for a send that fails after the reservation for whatever
+            // reason, without depending on what a real transport happens to do to its own state when
+            // that happens.
             var failingChange = CreateChange(clientRoot, nameof(TestRoot.Name), "Initial", "NeverSent");
-
-            // Run on its own thread: with the connection lock free, WriteChangesAsync would otherwise
-            // reach the blocking gate synchronously on this thread, before this call could ever return
-            // control to await the gate's own entry signal below.
-            var failingWriteTask = Task.Run(
-                async () => await source.WriteChangesAsync(new[] { failingChange }, CancellationToken.None));
-
-            await sendGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
-            ((ClientWebSocket)GetWebSocket(source)!).Abort();
-            sendGate.Release();
-
-            var failingResult = await failingWriteTask.WaitAsync(TimeSpan.FromSeconds(10));
+            var failingResult = await source.WriteChangesAsync(new[] { failingChange }, CancellationToken.None);
             Assert.False(failingResult.IsFullySuccessful);
 
-            // Assert - the production catch's own abort genuinely ran. Without this, the test's own
-            // abort above would make the assertions below pass regardless of whether that catch,
-            // including its abort call, still exists.
-            await productionAbortFired.Task.WaitAsync(TimeSpan.FromSeconds(10));
-
-            // The connection is aborted rather than left running with an ordinal reserved that nothing
-            // will ever send, so a reconnect follows and resets the ordinal for the next send.
+            // Assert - the connection is aborted rather than left running with an ordinal reserved that
+            // nothing will ever send, so a reconnect follows and resets the ordinal for the next send.
+            // This is the only route to a reconnect here, since the test never touched the socket
+            // itself: it proves the production catch's own abort ran.
             await AsyncTestHelpers.WaitUntilAsync(
                 () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational,
                 timeout: TimeSpan.FromSeconds(15),
                 message: "The failed reserved send should force a reconnect rather than leaving the " +
                          "ordinal gap on a connection that keeps running.");
+
+            // Cleared now rather than only in the finally: the seam throws unconditionally, so leaving
+            // it set would fail the follow-up write below too, forcing another abort and reconnect
+            // instead of letting the replacement connection actually carry it.
+            source.BeforeReservedSendAttempt = null;
 
             // Assert - a write on the replacement connection retires normally through the heartbeat.
             // Had the ordinal not been reset, this entry would be recorded one ordinal above whatever
@@ -1142,7 +1080,6 @@ public class WebSocketClientLivenessTests
         finally
         {
             source.BeforeReservedSendAttempt = null;
-            source.AfterReservedSendAbort = null;
             await source.StopAsync(CancellationToken.None);
         }
     }

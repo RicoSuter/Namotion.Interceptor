@@ -1,5 +1,12 @@
+using System;
+using System.Collections.Generic;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Connectors.Updates;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.WebSocket.Server;
+using Namotion.Interceptor.WebSocket.Tests.Integration;
 using Xunit;
 
 namespace Namotion.Interceptor.WebSocket.Tests.Server;
@@ -51,5 +58,54 @@ public class WebSocketClientConnectionAppliedThroughTests
 
         // Assert
         Assert.Equal(second, connection.AppliedThrough);
+    }
+
+    [Fact]
+    public void WhenAnUnresolvableSubjectIsDropped_ThenTheWarningIdentifiesTheConnection()
+    {
+        // Arrange: the applier logs the origin it was given, and this connection's only contribution
+        // to that log line is its ToString override, which renders as ConnectionId. Nothing else here
+        // touches the network, so this is the whole of the documented promise that a dropped inbound
+        // update is logged with the connection id, exercised directly.
+        var connection = new WebSocketClientConnection(new CapturingWebSocket(), NullLogger.Instance);
+        var recordingLogger = new RecordingLogger();
+        var root = new TestRoot(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry());
+        var update = new SubjectUpdate
+        {
+            Root = null,
+            Subjects = new()
+            {
+                ["ghost-subject"] = new()
+                {
+                    [nameof(TestRoot.Name)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "Ghost" }
+                }
+            }
+        };
+
+        // Act
+        root.ApplySubjectUpdate(update, null, ChangeOrigin.FromSource(connection), logger: recordingLogger);
+
+        // Assert
+        var warning = Assert.Single(recordingLogger.Warnings);
+        Assert.Contains(connection.ConnectionId, warning);
+    }
+
+    private sealed class RecordingLogger : ILogger
+    {
+        public List<string> Warnings { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning)
+            {
+                Warnings.Add(formatter(state, exception));
+            }
+        }
     }
 }

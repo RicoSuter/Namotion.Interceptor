@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -585,6 +586,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             return;
         }
 
+        // Resolved once rather than per change: the branch below that needs it is most of the
+        // subscription, on a drain that runs at every connect, reconnect and teardown.
+        var registry = _context.TryGetService<ISubjectRegistry>();
+
         List<SubjectPropertyChange>? owned = null;
         var detachedDiscards = 0;
         while (subscription.TryDequeueImmediate(out var change))
@@ -603,7 +608,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                 // subscription, so only the detached case is reported: a subject that left the graph
                 // between capture and drain had its source cleared, which is indistinguishable from
                 // never having been owned unless the subject itself is checked.
-                if (change.Property.Subject.TryGetRegisteredSubject() is null)
+                if (registry?.TryGetRegisteredSubject(change.Property.Subject) is null)
                 {
                     detachedDiscards++;
                 }

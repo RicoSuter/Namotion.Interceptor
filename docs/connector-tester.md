@@ -102,6 +102,8 @@ The ledger is sound only where each property has exactly one writer. With overla
 
 `DisjointProperties` is off by default, so most profiles run only the agreement check. It is on in the `websocket-durability` and `websocket-transactions` profiles, and the startup log reports "Write-durability oracle: enabled" when it is active, "disabled" otherwise. Because it requires disjoint writers, the oracle cannot see the multi-client cases where two clients legitimately race to write the same property: those stay agreement-only, checked by `SnapshotComparer` alone.
 
+`websocket-durability` and `websocket-transactions` are near-verbatim copies of `websocket-chaos`, differing by one and four lines respectively: `appsettings.{name}.json` has no way to layer one profile's settings on top of another, so each has to restate the whole configuration to add its own setting. Keeping all three still buys real coverage, not just belt and braces: with `DisjointProperties` on, each participant is fixed to one property, so `websocket-chaos` is the only profile left that exercises properties more than one participant writes.
+
 ### Chaos via IFaultInjectable
 
 Each connector implements `IFaultInjectable` (separate from the production `ISubjectConnector` interface) with a single `InjectFaultAsync(FaultType, CancellationToken)` method supporting two chaos modes:

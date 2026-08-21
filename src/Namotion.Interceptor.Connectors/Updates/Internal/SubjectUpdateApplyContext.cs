@@ -14,8 +14,7 @@ internal sealed class SubjectUpdateApplyContext
     private readonly Dictionary<string, IInterceptorSubject> _preResolvedSubjects = [];
     private readonly Dictionary<string, IInterceptorSubject> _boundSubjects = [];
     private readonly List<(IInterceptorSubject Subject, Dictionary<string, SubjectPropertyUpdate> Properties)> _deferredAttributeUpdates = [];
-    private List<string>? _droppedSubjectIds;
-    private HashSet<string>? _droppedSubjectIdSet;
+    private HashSet<string>? _droppedSubjectIds;
 
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = null!;
     public ISubjectFactory SubjectFactory { get; private set; } = null!;
@@ -166,7 +165,7 @@ internal sealed class SubjectUpdateApplyContext
     /// The subject IDs this apply could not resolve. Distinct, because one logically missing subject
     /// is reached from more than one site and a caller wants the subjects, not the site count.
     /// </summary>
-    public IReadOnlyList<string>? DroppedSubjectIds => _droppedSubjectIds;
+    public IReadOnlyCollection<string>? DroppedSubjectIds => _droppedSubjectIds;
 
     /// <summary>
     /// Records that <paramref name="subjectId"/> could not be resolved and its update was dropped.
@@ -175,11 +174,7 @@ internal sealed class SubjectUpdateApplyContext
     {
         var id = subjectId ?? "(no id)";
         _droppedSubjectIds ??= [];
-        _droppedSubjectIdSet ??= [];
-        if (_droppedSubjectIdSet.Add(id))
-        {
-            _droppedSubjectIds.Add(id);
-        }
+        _droppedSubjectIds.Add(id);
     }
 
     /// <summary>
@@ -207,7 +202,6 @@ internal sealed class SubjectUpdateApplyContext
         _boundSubjects.Clear();
         _deferredAttributeUpdates.Clear();
         _droppedSubjectIds?.Clear();
-        _droppedSubjectIdSet?.Clear();
         _completeSubjectIds = null;
         Subjects = null!;
         SubjectFactory = null!;

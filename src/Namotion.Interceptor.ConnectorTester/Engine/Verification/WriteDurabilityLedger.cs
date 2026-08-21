@@ -1,3 +1,4 @@
+using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Model;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine.Verification;
@@ -68,12 +69,31 @@ public sealed class WriteDurabilityLedger
         return violations;
     }
 
-    private static object? ReadProperty(TestNode node, int property) => property switch
+    /// <summary>
+    /// One reader per mutable property on <see cref="TestNode"/>, in the same index order both
+    /// mutation strategies assign by. Sized from itself rather than from a repeated count, so the
+    /// static constructor below is what actually keeps this in step with
+    /// <see cref="ConnectorTesterConfiguration.MutablePropertyCount"/>.
+    /// </summary>
+    private static readonly Func<TestNode, object?>[] PropertyReaders =
+    [
+        node => node.StringValue,
+        node => node.DecimalValue,
+        node => node.IntValue,
+        node => node.LongValue
+    ];
+
+    static WriteDurabilityLedger()
     {
-        0 => node.StringValue,
-        1 => node.DecimalValue,
-        2 => node.IntValue,
-        3 => node.LongValue,
-        _ => null
-    };
+        if (PropertyReaders.Length != ConnectorTesterConfiguration.MutablePropertyCount)
+        {
+            throw new InvalidOperationException(
+                $"WriteDurabilityLedger has {PropertyReaders.Length} property reader(s) but " +
+                $"ConnectorTesterConfiguration.MutablePropertyCount is {ConnectorTesterConfiguration.MutablePropertyCount}. " +
+                "Update both together, or the two mutation strategies and this ledger will drift apart.");
+        }
+    }
+
+    private static object? ReadProperty(TestNode node, int property) =>
+        property >= 0 && property < PropertyReaders.Length ? PropertyReaders[property](node) : null;
 }

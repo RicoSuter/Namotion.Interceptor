@@ -39,6 +39,15 @@ public class ConnectorTesterConfiguration
     /// exactly one writer. Required by the write-durability oracle, which cannot tell a lost write from
     /// a legitimate overwrite when two participants write the same property. Default false.
     /// </summary>
+    /// <remarks>
+    /// Governs <see cref="Namotion.Interceptor.ConnectorTester.Engine.Mutation.RandomValueMutationStrategy"/>
+    /// only. When <see cref="NumberOfBatches"/> is greater than zero,
+    /// <see cref="Namotion.Interceptor.ConnectorTester.Engine.Mutation.BatchValueMutationStrategy"/> runs
+    /// instead, and it fixes each participant to one property unconditionally, for a reason unrelated to
+    /// this option: see its own remarks. That happens to satisfy this option's requirement too, provided
+    /// the participant count does not exceed <see cref="MutablePropertyCount"/>, which
+    /// <see cref="ValidateDisjointProperties"/> checks regardless of which strategy is active.
+    /// </remarks>
     public bool DisjointProperties { get; set; }
 
     public ParticipantConfiguration Server { get; set; } = new()
@@ -51,8 +60,16 @@ public class ConnectorTesterConfiguration
 
     public List<ChaosProfileConfiguration> ChaosProfiles { get; set; } = [];
 
-    /// <summary>TestNode has this many mutable value properties, one per DisjointProperties participant.</summary>
-    private const int MutablePropertyCount = 4;
+    /// <summary>
+    /// TestNode has this many mutable value properties, one per DisjointProperties participant. Shared
+    /// by both mutation strategies and by
+    /// <see cref="Namotion.Interceptor.ConnectorTester.Engine.Verification.WriteDurabilityLedger"/>'s
+    /// property reader, so the property count cannot drift between them. Public rather than internal
+    /// because the tests that pin the strategies' disjointness against this count live in a separate
+    /// test project, and this project is a standalone tool (not packed, no tracked public API), so
+    /// widening it costs nothing.
+    /// </summary>
+    public const int MutablePropertyCount = 4;
 
     /// <summary>
     /// Throws when DisjointProperties cannot assign every configured participant a property of its

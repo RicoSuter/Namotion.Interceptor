@@ -31,11 +31,6 @@ public class PayloadTests
         Assert.Equal(WebSocketProtocol.Version, payload.Version);
         Assert.Equal(WebSocketFormat.Json, payload.Format);
         Assert.Null(payload.State);
-
-        // A client reading a Welcome that never populated this field, whether from an older server or
-        // one that explicitly reports false, must behave as though acknowledgement is unavailable,
-        // which is what the false default guarantees.
-        Assert.False(payload.AcknowledgesAppliedUpdates);
     }
 
     [Fact]

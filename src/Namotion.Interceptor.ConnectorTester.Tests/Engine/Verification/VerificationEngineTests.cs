@@ -8,22 +8,12 @@ using Namotion.Interceptor.ConnectorTester.Engine.Chaos;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Model;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
-using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.ConnectorTester.Tests.Engine.Verification;
 
 public class VerificationEngineTests
 {
-    private static IInterceptorSubjectContext CreateContext()
-        => InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithRegistry()
-            .WithParents()
-            .WithLifecycle();
-
     private sealed class FakeApplicationLifetime : IHostApplicationLifetime
     {
         public CancellationToken ApplicationStarted => CancellationToken.None;
@@ -44,18 +34,16 @@ public class VerificationEngineTests
         return (List<string>)method!.Invoke(verificationEngine, null)!;
     }
 
-    [Fact]
-    public async Task WhenDisjointPropertiesOff_ThenCollectDurabilityViolationsIgnoresARealLedgerDivergence()
+    /// <summary>
+    /// Produces a real ledger divergence: participantIndex 0 with DisjointProperties on fixes every
+    /// write to property 0 (StringValue) on this single-node graph, so a random mutation engine is
+    /// started, runs until it has committed at least one value mutation, is stopped, and then the
+    /// model is reverted behind the ledger's back, as a reconnect's complete-state load would after a
+    /// write reached the participant's own model but never durably reached the server.
+    /// </summary>
+    private static async Task<(TestNode Root, TestCycleCoordinator Coordinator, MutationEngine Engine)> CreateEngineWithARealLedgerDivergenceAsync()
     {
-        // The oracle's soundness rests entirely on this gate: with overlapping writers
-        // (DisjointProperties off) a real recorded divergence must never surface as a
-        // violation, because it could be a legitimate last-writer-wins overwrite instead of
-        // a loss. This proves the gate holds even when the ledger genuinely has one.
-
-        // Arrange: produce a real ledger divergence the same way as the detection test
-        // (MutationEngineTests), then wire that engine into a VerificationEngine whose
-        // configuration has DisjointProperties off.
-        var context = CreateContext();
+        var context = EngineTestContextFactory.Create();
         var root = new TestNode(context);
         var coordinator = new TestCycleCoordinator();
         var participantConfiguration = new ParticipantConfiguration
@@ -73,6 +61,20 @@ public class VerificationEngineTests
         await engine.StopAsync(CancellationToken.None);
 
         root.StringValue = "reverted-by-lost-write";
+
+        return (root, coordinator, engine);
+    }
+
+    [Fact]
+    public async Task WhenDisjointPropertiesOff_ThenCollectDurabilityViolationsIgnoresARealLedgerDivergence()
+    {
+        // The oracle's soundness rests entirely on this gate: with overlapping writers
+        // (DisjointProperties off) a real recorded divergence must never surface as a
+        // violation, because it could be a legitimate last-writer-wins overwrite instead of
+        // a loss. This proves the gate holds even when the ledger genuinely has one.
+
+        // Arrange
+        var (root, coordinator, engine) = await CreateEngineWithARealLedgerDivergenceAsync();
 
         // Confirm the divergence is real before checking that the gate hides it.
         Assert.NotEmpty(engine.VerifyWriteDurability());
@@ -103,24 +105,7 @@ public class VerificationEngineTests
         // reported, prefixed by the participant name.
 
         // Arrange
-        var context = CreateContext();
-        var root = new TestNode(context);
-        var coordinator = new TestCycleCoordinator();
-        var participantConfiguration = new ParticipantConfiguration
-        {
-            Name = "test",
-            ValueMutationRate = 200,
-            StructuralMutationRate = 0
-        };
-        var engine = MutationEngine.CreateRandom(root, participantConfiguration, coordinator, NullLogger.Instance, disjointProperties: true);
-
-        await engine.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => engine.ValueMutationCount > 0,
-            timeout: TimeSpan.FromSeconds(5),
-            pollInterval: TimeSpan.FromMilliseconds(20));
-        await engine.StopAsync(CancellationToken.None);
-
-        root.StringValue = "reverted-by-lost-write";
+        var (root, coordinator, engine) = await CreateEngineWithARealLedgerDivergenceAsync();
 
         var configuration = new ConnectorTesterConfiguration { DisjointProperties = true };
         var verificationEngine = new VerificationEngine(

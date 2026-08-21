@@ -114,7 +114,9 @@ public sealed class RandomValueMutationStrategy : IValueMutationStrategy
             node = _graph.KnownNodes[_random.Next(_graph.KnownNodes.Count)];
         }
 
-        var property = _disjointProperties ? _participantIndex % 4 : _random.Next(4);
+        var property = _disjointProperties
+            ? _participantIndex % ConnectorTesterConfiguration.MutablePropertyCount
+            : _random.Next(ConnectorTesterConfiguration.MutablePropertyCount);
         var counter = GlobalMutationCounter.Next();
         object value;
 

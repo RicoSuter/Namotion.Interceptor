@@ -11,11 +11,21 @@ namespace Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 /// Used for load profiles (NumberOfBatches > 0).
 /// Mutates ValueMutationRate nodes per second, spread across NumberOfBatches
 /// batches with even distribution via a PeriodicTimer at 110% tick rate.
-/// Each participant mutates a single fixed property (participantIndex % 4)
+/// Each participant mutates a single fixed property (participantIndex % MutablePropertyCount)
 /// to avoid OPC UA subscription coalescing.
 /// When UseTransactions is enabled, each batch is wrapped in a transaction
 /// (sequential, since transactions are not thread-safe with Parallel.For).
 /// </summary>
+/// <remarks>
+/// This fixed-property-per-participant assignment is unconditional: unlike
+/// <see cref="RandomValueMutationStrategy"/>, this strategy does not take
+/// <see cref="ConnectorTesterConfiguration.DisjointProperties"/> and cannot pick properties any other
+/// way. It happens to satisfy that option's requirement whenever it is combined with it, since every
+/// participant still writes only its own property, but that is a side effect of the OPC UA reasoning
+/// above, not a deliberate implementation of the option. If this strategy is ever changed to pick
+/// properties less predictably, the write-durability oracle silently stops being sound for it, since
+/// nothing here checks or enforces that outcome.
+/// </remarks>
 public sealed class BatchValueMutationStrategy : IValueMutationStrategy
 {
     private readonly KnownNodeGraph _graph;
@@ -69,7 +79,7 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
         var nodeIndex = 0;
         var mutationsThisSecond = 0;
         var cycleStart = Stopwatch.GetTimestamp();
-        var property = _participantIndex % 4;
+        var property = _participantIndex % ConnectorTesterConfiguration.MutablePropertyCount;
 
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
