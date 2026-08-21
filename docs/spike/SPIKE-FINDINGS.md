@@ -275,7 +275,13 @@ Two decisions taken during implementation that the design did not specify:
 - The structural terminal holds the attachment monitor **through the commit**, not merely for the check. A check-then-release would leave open exactly the race the route exists to close, an attach landing between the validation and the write it validated. Lock order is `SyncRoot`, then the attachment monitor, never the reverse.
 - If the transitional fallback call throws after the new-model transition has been applied, the transition is **not** rolled back. A compensating swap could race a concurrent transition and detach state another thread had already built on, and the old idiom's own partial-failure behaviour is closer to "attached" than to "unattached".
 
-One review finding was sent back rather than accepted: the attachment getters each took the private monitor, so `TryGetContext()` cost an uncontended monitor enter and exit per call. That is the predicate the design migrates all ownership checks onto, and Registry's two hot lookups reach roughly 398 call sites through it, so it must be a lock-free volatile read with a separate locked snapshot method for compare-and-swap callers.
+One review finding was sent back rather than accepted, and it turned out to be more than a performance point. The attachment getters each took the private monitor, so `TryGetContext()` cost an uncontended monitor enter and exit per call. That is the predicate the design migrates all ownership checks onto, and Registry's two hot lookups reach roughly 398 call sites through it.
+
+Fixing it produced the most useful empirical result of the spike so far. A test was written that blocks a structural write inside the terminal, so the attachment monitor is provably held, and then reads the attachment state from another thread that already holds a lock of its own. **Against the locked getters that test blocked for its full ten-second window.** Against lock-free reads it returns instantly. That is blocker B1's failure mode reproduced in miniature and caught by a test: a parent-or-context query that takes a lifecycle-adjacent lock deadlocks against a consumer that queries it from inside its own lock. It is direct evidence that C1 is required, not merely prudent, and it generalises: **every query the design routes through lifecycle state must be a lock-free snapshot read.**
+
+The fix stores the context and anchor first as volatile writes and the revision last through `Interlocked.Exchange`, so a reader pairing a revision with subsequently read fields can only ever see fields newer than that revision, which the compare-and-swap then rejects. `AttachmentRevision` uses `Interlocked.Read` because .NET Standard 2.0 also targets 32-bit runtimes where a plain 64-bit load can tear.
+
+State after `e5f12994`: build clean, 26 projects, 3338 passed, 0 failed.
 
 ---
 
