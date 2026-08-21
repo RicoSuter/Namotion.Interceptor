@@ -641,9 +641,9 @@ public class WebSocketClientLivenessTests
         // the gate this attempt opened.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = await StartServerAsync(portLease.Port);
-        var throwOnce = new ThrowOnceInterceptor();
+        var loadFailed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var source = CreateClientSource(
-            portLease.Port, reconnectDelay: TimeSpan.FromMilliseconds(50), writeInterceptor: throwOnce);
+            portLease.Port, reconnectDelay: TimeSpan.FromMilliseconds(50));
         await source.StartAsync(CancellationToken.None);
 
         var clientRoot = (TestRoot)source.RootSubject;
@@ -654,9 +654,18 @@ public class WebSocketClientLivenessTests
         {
             // Act - a real disconnect and reconnect, with the load failing on the reconnect's own
             // Welcome apply.
-            throwOnce.Arm();
+            // Thrown from the seam that fires once the reconnect holds a live connection and before it
+            // loads, which is inside the window the gate covers: the gate is up, the connect succeeded,
+            // and the failure lands in the same catch that has to clear it.
+            source.BeforeReconnectInitialStateLoad = () =>
+            {
+                source.BeforeReconnectInitialStateLoad = null;
+                loadFailed.TrySetResult();
+                throw new InvalidOperationException("Injected load failure.");
+            };
+
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
-            await throwOnce.Threw.WaitAsync(TimeSpan.FromSeconds(10));
+            await loadFailed.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
             clientRoot.Name = "AfterFailedLoad";
 
@@ -739,34 +748,6 @@ public class WebSocketClientLivenessTests
         }
 
         public void Release() => _release.TrySetResult();
-    }
-
-    /// <summary>
-    /// Throws exactly once, on the write it is armed for, and behaves normally afterwards. Stands in
-    /// for a reconnect whose load throws after the socket is already open and the receive loop is
-    /// already running.
-    /// </summary>
-    private sealed class ThrowOnceInterceptor : IWriteInterceptor
-    {
-        private int _armed;
-        private readonly TaskCompletionSource _threw =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        /// <summary>Completes once the armed throw has actually happened.</summary>
-        public Task Threw => _threw.Task;
-
-        public void Arm() => Volatile.Write(ref _armed, 1);
-
-        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
-        {
-            if (Interlocked.CompareExchange(ref _armed, 0, 1) == 1)
-            {
-                _threw.TrySetResult();
-                throw new InvalidOperationException("Simulated failure applying the reconnect's Welcome.");
-            }
-
-            next(ref context);
-        }
     }
 
     private sealed class ReconnectReloadGate : IWriteInterceptor
