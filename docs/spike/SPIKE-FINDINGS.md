@@ -473,6 +473,34 @@ Rows are the matched pair plus the batch. `base` is patched master, `current` is
 
 Allocation improved across the board and is worth noting separately: every variant allocates 48 bytes on the pair against master's 320, and 608 bytes on the batch against master's 3008. That is the occurrence-aware edge model paying off, independent of the reachability strategy.
 
+### RegistryBenchmark across the variants: the ranking reverses
+
+The synthetic rows above are a worst case built to stress one path. `RegistryBenchmark` is the representative workload, and measuring the variants on it changes the answer.
+
+| Row | base | current (full scan) | V1 backward | V3 incremental |
+|---|---:|---:|---:|---:|
+| `ChangeAllTires` | 14,756 ns | 16,651 ns | 17,244 ns | **63,285 ns** |
+| `AddLotsOfPreviousCars` | 57.01 ms | 64.44 ms | 64.80 ms | **82.00 ms** |
+| `Write` | 1003.9 ns | 1062.8 ns | 1058.3 ns | 1071.8 ns |
+| `GetOrAddSubjectId` | 28.84 ns | 33.91 ns | 33.23 ns | 33.28 ns |
+| `ReadParents` | 0.3342 ns | 0.3346 ns | 0.3422 ns | 0.3343 ns |
+
+**V3 is 4.3 times slower than master on `ChangeAllTires` and 3.8 times slower than the implementation it was meant to improve.** It also adds 28 percent to `AddLotsOfPreviousCars`. The cause is exactly the tradeoff its own report described, with the magnitude badly misjudged: incremental maintenance runs on **every** edge mutation, including the tree-shaped removals that the `count == 0` short circuit previously made free. Its report called that "a small constant on trees for the removal of the O(graph) term". Measured, the small constant is a factor of four on the most representative removal row in the suite.
+
+V1 costs 3.6 percent over the current implementation on `ChangeAllTires` and is flat on everything else, while still collapsing the shared-removal case from 163 microseconds to 1.877.
+
+**This is the clearest methodological lesson of the whole spike.** V3 won every synthetic row and lost the workload that resembles production. Had the choice been made on the purpose-built benchmark alone, the worst option would have been selected on the strength of the best numbers. The synthetic rows were necessary to find the problem and insufficient to choose the fix.
+
+### `GetOrAddSubjectId`, and a hypothesis that did not survive
+
+Every branch arm sits at 33.2 to 33.9 nanoseconds against master's 28.8, consistently and independently of the reachability strategy, so the regression is real and belongs to the ownership model rather than to any variant.
+
+The proposed mechanism was that parent membership, now intrinsic to the lifecycle rather than opt-in through `WithParents()`, adds an entry to every subject's `Data` dictionary, which is the dictionary `GetOrAddSubjectId`'s fast path reads. That would have made review finding P16 concrete.
+
+**It is false.** A direct probe of the `Data` keys returns the same set on both arms: the root holds one write-state entry and the child holds one reference-count entry, with no parents entry on either side in this configuration. The extra dictionary entry does not exist.
+
+What remains is most likely heap and code layout shifted by the larger per-subject ownership state, which is precisely the case the repository's own benchmarking guidance says to settle by disassembly rather than by more runs. It is recorded as unexplained. This is the third mechanism this session that was plausible, load-bearing, and wrong once tested, after the A2 deadlock and the two invalid comparison runs.
+
 ### Choosing
 
 Against the criteria fixed before the results were known: correctness first, then measured cost, then code volume and difficulty of reasoning.
@@ -483,7 +511,7 @@ Cost eliminates V2 and ranks V3 above V1 by 12 percent on the large context and 
 
 Code volume and reasoning strongly favour V1: 228 lines against 603, three hooked methods against eight, zero per-subject memory against 8 bytes, and an invariant that lives in one walk rather than a forward-closure argument its own author says "is not visible in any one function".
 
-**Recommendation: V1.** It captures 87 of the available 99 times improvement for 38 percent of the code, with no per-subject memory and a third of the integration surface. V3's remaining 12 to 21 percent does not justify 375 extra lines and a standing invariant spread across eight call sites, in an area that has already produced one silent blocker that 3347 tests failed to catch. If profiling of a real connector workload later shows batch shared-edge removal is hot, V3 is a known, measured, already-implemented upgrade sitting on a branch.
+**Recommendation: V1, and the Registry measurement makes it decisive rather than a judgement call.** V1 captures 87 of the available 99 times improvement for 38 percent of the code, with no per-subject memory and a third of the integration surface. V3's advantage on the synthetic rows evaporates on the representative workload, where it is four times slower than master on tree-shaped removal. V2 does not solve the problem at all. V1 is the only variant that fixes the shared-removal blowup without regressing anything else.
 
 Two caveats on the numbers. The V1 against V3 gap is single-run and in the 12 to 21 percent band where this suite is known to move between identical runs, so it should be repeated before being treated as settled; the 100 times differences are beyond any doubt. And all variants remain roughly 30 to 50 percent slower than master on the small shared removal, which is the cost of the ownership model itself rather than of any reachability strategy.
 
