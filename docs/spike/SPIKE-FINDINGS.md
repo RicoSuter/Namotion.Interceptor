@@ -342,6 +342,24 @@ State after `e5f12994`: build clean, 26 projects, 3338 passed, 0 failed.
 
 ---
 
+# Unrelated bugs found
+
+Pre-existing defects on `master` that this work surfaced but did not cause. Each is independent of whether the single-context design proceeds, and each is worth its own issue.
+
+**U1. `GetParents()` leaks a parent entry permanently when a duplicated collection entry is removed.** *Measured.* `root.Children = [a, a, b]` then `root.Children = [b]` leaves `a` fully detached, with reference count 0 and absent from `KnownSubjects`, while `a.GetParents()` still reports `Children@0`. The cause is an index mismatch: attach recorded occurrence 0, and removal iterates the collection in reverse and therefore recorded occurrence 1, so `RemoveParent(property, 1)` never matches `SubjectParent(property, 0)`. The entry is unreachable garbage that also keeps the parent subject alive through the child's `Data` dictionary. Severity is raised by the fact that `GetParents()` is what `SourceScope.SearchGraph` walks, so a stale entry can make a detached subject look in-scope to source monitoring.
+
+**U2. `GetParents()` reports stale indices after any collection reorder.** *Measured.* `root.Children = [a, b]` then `[b, a]` leaves `a.GetParents()` reporting `Index = 0` both times. `ParentTrackingHandler` implements only `ILifecycleHandler`, not `IPropertyLifecycleHandler`, so it never observes `RefreshCollectionProperty`. Registry does refresh, so Registry and `GetParents()` disagree after every reorder. Anything that pairs a parent entry with a collection position is wrong from that point on.
+
+**U3. Orphaned cycles leak, including self-cycles.** The multi-node case is known and snapshot-pinned as a documented limitation (`Registry.Tests/GraphBehavior/CycleTests`). The self-cycle case is not: *measured*, `a.Father = a` then `root.Mother = a` then `root.Mother = null` leaves `a` registered with reference count 1 forever. No test covers it.
+
+**U4. `RootManager`'s attach is dead code.** `HomeBlaze.Services/RootManager.cs:85` calls `Root.Context.AddFallbackContext(_context)`, which always returns `false` because the root was already attached by its context-taking constructor: the context is a dependency-injection singleton and `ActivatorUtilities` selects that constructor. The line has never done anything. It is harmless today and becomes a startup crash under any design that makes repeated explicit attachment throw.
+
+**U5. MQTT never caches property mappings for its own root subject.** `Mqtt/Server/MqttSubjectServer.cs:492,522` and `Mqtt/Client/MqttSubjectClientSource.cs:611,640` guard a cache insert with `RegisteredSubject.ReferenceCount <= 0`, intending to catch a subject that detached during resolution. But *measured*, a root attached through the constructor has reference count 0 permanently, because `AttachToContext` never increments it. So every cache entry for a property on the connector's own root subject is evicted immediately and re-resolved on every single message. This is a live performance bug on the hot message path, not a theoretical one.
+
+**U6. `ContextInheritanceHandler` overrides `Equals` without `GetHashCode`.** `Tracking/Lifecycle/ContextInheritanceHandler.cs:30-33`, with `#pragma warning disable CS0659`. The override is dead: the only dedup path that could use it is a `HashSet<object>`, which consults `GetHashCode` first. Harmless, but it implies a dedup guarantee that does not exist.
+
+**U7. Tooling trap: `dotnet test --no-build` can silently reduce the set of assemblies that run.** A baseline run reported 3003 tests across 21 projects; the true figure is 3299 across 26. Five `Namotion.Devices.*` projects were skipped because their binaries had not been built, and the summary output looked entirely normal. This is distinct from the better-known "runs a stale binary" trap and is more dangerous, because the missing coverage is invisible unless project lines are counted rather than totals.
+
 # Benchmarks
 
 ## Comparison base
