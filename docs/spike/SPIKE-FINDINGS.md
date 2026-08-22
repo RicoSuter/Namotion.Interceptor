@@ -453,6 +453,39 @@ pwsh -Command "& ./scripts/benchmark.ps1 -Filter '*LifecycleOwnershipBenchmark*'
 
 Estimated cost is roughly 15 to 20 minutes per arm for the lifecycle rows plus about 15 minutes per arm for the registry rows, so about an hour and a quarter for the pair. `-Short` decides nothing and must not be used for this.
 
+## CORRECTION: the first two comparison runs were invalid
+
+Both earlier comparison runs, `069b9bcc` against `04fab84a` and `3201a081` against `bench/master-patched`, are **void**. Their HEAD arm served stale binaries, so both reports compared the base against itself. They were internally consistent, complete, and entirely wrong, and the conclusion drawn from them ("no regression on 23 rows") was wrong with them.
+
+Nothing in the tooling reported a problem. What exposed it was a physical impossibility: the large-context shared-child row claimed 1.268 microseconds while an instrumented probe showed the same operation traversing 2003 graph nodes. Those cannot both be true.
+
+**The binary-hash check performed earlier did not validate anything.** It compared builds produced *after* the run, in a different worktree, not the binaries the run actually executed. It gave a false sense of rigour. The only method that proved trustworthy was running each arm directly with `dotnet run -c Release` and cross-checking against a mechanism measured independently.
+
+Practical consequence for anyone repeating this: do not trust a benchmark comparison whose arms agree closely on a row where the change is known to alter the algorithm. Agreement there is evidence of a broken harness, not of a neutral change.
+
+## Results, measured directly per arm
+
+Method: each arm run separately with `dotnet run --project src/Namotion.Interceptor.Benchmark -c Release`, no comparison script. CPU pinned at 3.6 GHz, turbo off, machine quiet.
+
+### The reachability scan, priced
+
+| Row | Patched master | Spike branch | Delta |
+|---|---:|---:|---|
+| `RemoveOneParentOfSharedChild`, small context | 1.274 us | 1.717 us | +35 percent |
+| `RemoveOneParentOfSharedChildInLargeContext`, 2000 retained subjects | 1.262 us | 170.1 us | about 135 times |
+
+Master's two rows are statistically identical, which is the control working: removal cost there is independent of context size. On the branch the same single-edge removal scales with the whole context.
+
+The instrumented probe explains it exactly. Over 1000 toggles of the large-context row the lifecycle performed **1000 reachability recomputes visiting 2,003,000 nodes**, that is a full 2003-node mark per single removed edge. The mark cache never helps, because the removal bumps the graph version immediately before the query, which is finding A8 confirmed by measurement rather than by reading.
+
+### What this settles
+
+The specification hedged: "Removal operations initially pay a complete context-local reachability scan. Benchmarks determine whether an affected-component index is justified." That question is now answered. The complete scan is affordable only for exclusive ownership, where the `count == 0` short circuit means it never runs at all. For any shared, DAG or cyclic removal it is O(owned + edges) per removed edge, and a batch of k such removals is O(k times the graph).
+
+An affected-component or incrementally maintained reachability index is therefore **required**, not a deferred optimisation. The alternative is to accept that any application with shared subjects degrades quadratically as its graph grows, which for this library's industrial connector workloads is not acceptable.
+
+The `count == 0` short circuit is worth keeping regardless: it is what makes tree-shaped ownership free, and it is why the entire original scaffold measured nothing.
+
 ## Results
 
 Run of 2026-08-22, `069b9bcc` against `04fab84a`, `-LaunchCount 3`, memory randomization on, 23 rows, 24 minutes per pair. CPU verified pinned in sysfs before the run: governor `performance`, `scaling_min_freq` and `scaling_max_freq` both 3600000, `no_turbo` 1. The two arms' BenchmarkDotNet headers reported different maxima (1.88 GHz and 0.80 GHz), which is the known unreliability of that header rather than a drifting pin.
