@@ -455,6 +455,38 @@ All three implemented independently, each with the forward mark retained as a `[
 | Batch of k | O(k x closure) | one mark, then O(1) per retained answer | pending |
 | Tests | 3364, per-project reconciled | 3371, per-project reconciled, +7 new | pending |
 
+### Measured, all five arms, same machine, sequential, pinned and quiet
+
+Rows are the matched pair plus the batch. `base` is patched master, `current` is the branch with the complete forward scan.
+
+| Row | base | current | V1 backward | V2 invalidation | V3 incremental |
+|---|---:|---:|---:|---:|---:|
+| shared child, small context | 1.257 us / 320 B | 1.827 us / 48 B | 1.822 us / 48 B | 1.906 us / 48 B | **1.674 us / 48 B** |
+| shared child, 2000 retained | 1.276 us / 320 B | **163.06 us** / 88 B | **1.877 us** / 48 B | **158.30 us** / 88 B | **1.646 us** / 48 B |
+| eight shared edges in one batch | 4.407 us / 3008 B | 12.00 us / 608 B | 7.012 us / 608 B | 6.299 us / 608 B | **5.561 us** / 608 B |
+
+**V2 does not solve the problem it was built for.** 158.3 microseconds against the current 163.1 is no improvement at all on the case that matters. Its own report predicted exactly this and it was easy to miss among the wins: "cross-parent shared children still cost one mark per severing removal". The matched-pair row severs a marked parent's edge to a non-exempt target on every invocation, which is precisely the classified invalidation, so the cache never gets to hit. V2 genuinely improves the batch case, 6.3 against 12.0, because there the first query's mark is reused by the remaining seven. But the single shared removal, which is the common shape, is untouched. **Rejected on its primary objective.**
+
+**V1 and V3 both collapse the large-context case back to the small-context cost**, which is the whole point: 1.877 and 1.646 microseconds against 163. The 2000 retained subjects stop mattering, exactly as they do not matter on master.
+
+**V3 is fastest on every row**, including the small context where it beats even the current implementation, because its query is O(1) rather than a walk. It is also the only variant to bring the batch within 26 percent of master rather than 59 percent.
+
+Allocation improved across the board and is worth noting separately: every variant allocates 48 bytes on the pair against master's 320, and 608 bytes on the batch against master's 3008. That is the occurrence-aware edge model paying off, independent of the reachability strategy.
+
+### Choosing
+
+Against the criteria fixed before the results were known: correctness first, then measured cost, then code volume and difficulty of reasoning.
+
+Correctness does not separate them. No oracle fired in any variant, across full suites and each author's own scratch cases.
+
+Cost eliminates V2 and ranks V3 above V1 by 12 percent on the large context and 21 percent on the batch.
+
+Code volume and reasoning strongly favour V1: 228 lines against 603, three hooked methods against eight, zero per-subject memory against 8 bytes, and an invariant that lives in one walk rather than a forward-closure argument its own author says "is not visible in any one function".
+
+**Recommendation: V1.** It captures 87 of the available 99 times improvement for 38 percent of the code, with no per-subject memory and a third of the integration surface. V3's remaining 12 to 21 percent does not justify 375 extra lines and a standing invariant spread across eight call sites, in an area that has already produced one silent blocker that 3347 tests failed to catch. If profiling of a real connector workload later shows batch shared-edge removal is hot, V3 is a known, measured, already-implemented upgrade sitting on a branch.
+
+Two caveats on the numbers. The V1 against V3 gap is single-run and in the 12 to 21 percent band where this suite is known to move between identical runs, so it should be repeated before being treated as settled; the 100 times differences are beyond any doubt. And all variants remain roughly 30 to 50 percent slower than master on the small shared removal, which is the cost of the ownership model itself rather than of any reachability strategy.
+
 ### The structural surprise
 
 Keeping the forward mark and merely fixing its invalidation cost **more code than replacing the algorithm outright**: 244 lines of production change against V1's 228, plus 211 lines of tests that V1 did not need. That is the opposite of what "just fix the cache" suggests, and it has a cause worth recording.
