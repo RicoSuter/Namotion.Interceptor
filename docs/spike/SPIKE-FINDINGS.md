@@ -501,6 +501,24 @@ The proposed mechanism was that parent membership, now intrinsic to the lifecycl
 
 What remains is most likely heap and code layout shifted by the larger per-subject ownership state, which is precisely the case the repository's own benchmarking guidance says to settle by disassembly rather than by more runs. It is recorded as unexplained. This is the third mechanism this session that was plausible, load-bearing, and wrong once tested, after the A2 deadlock and the two invalid comparison runs.
 
+### The handler merge made the representative rows worse, not better
+
+Prediction: removing the dual-model overhead would recover part of the 14 to 17 percent. Measured, it did the opposite on the rows that matter.
+
+| Row | base | V1, dual model | after handler merge |
+|---|---:|---:|---:|
+| `ChangeAllTires` | 14,756 ns / 14,112 B | 17,244 ns / 14,608 B | **18,856 ns / 16,048 B** |
+| `AddLotsOfPreviousCars` | 57.01 ms / 19.63 MB | 64.80 ms / 21.14 MB | **70.17 ms / 22.94 MB** |
+| `Write` | 1003.9 ns | 1058.3 ns | **1025.3 ns** |
+| `GetOrAddSubjectId` | 28.84 ns | 33.23 ns | 33.28 ns |
+| `ReadParents` | 0.3342 ns | 0.3422 ns | 0.3343 ns |
+
+The merge did remove the duplicate O(subtree) work: `Write` improved from 1058 to 1025 nanoseconds, consistent with one fewer handler in the chain. But it also made **parent tracking unconditional**, and on these rows that costs more than the duplication it removed. `RegistryBenchmark` uses `WithFullPropertyTracking().WithRegistry()`, neither of which registered `ParentTrackingHandler` before, so every structural edge now additionally pays a `Data.GetOrAdd` and a `ParentsSet` mutation. `ChangeAllTires` is up 9.3 percent and `AddLotsOfPreviousCars` up 8.3 percent in time and 1.8 megabytes per operation in allocation.
+
+**This is a design cost, not an implementation defect.** Folding `WithParents()` into `WithLifecycle()` was a deliberate simplification, and its price is now measured: roughly 9 percent on structural removal and 8.5 percent more allocation for every consumer that previously did not opt in. The design should either accept that explicitly or publish parent snapshots lazily, on first `GetParents()` read, rather than eagerly on every edge change. Lazy publication looks straightforward and would recover most of it, since the projection is only consumed by source-scope walks and path resolution.
+
+**A second falsification of my own hypothesis, this time clean.** I had proposed that unconditional parent tracking would slow `GetOrAddSubjectId` by adding an entry to the `Data` dictionary its fast path reads, then falsified it by probing `Data` keys. Parent tracking is now genuinely unconditional, so the entry exists, and `GetOrAddSubjectId` did not move at all: 33.23 to 33.28 nanoseconds. The hypothesis is dead on its own terms. That regression remains unexplained and belongs to the ownership model rather than to parent tracking.
+
 ### Choosing
 
 Against the criteria fixed before the results were known: correctness first, then measured cost, then code volume and difficulty of reasoning.
