@@ -424,6 +424,28 @@ The cause is a genuine semantic of the new design. `ConcurrentStructuralWriteLea
 
 Two things follow. First, **racing structural writes throwing is now user-visible behaviour**, and any consumer doing concurrent structural work on a subject that may be attaching has to expect it. That belongs in the migration notes, not just in a test fix. Second, and more general: on this repository a green `dotnet test` summary is not sufficient evidence that the suite ran. Per-project counts have to be reconciled against a known baseline, because two independent mechanisms have now been observed to reduce coverage while reporting success.
 
+# Reachability index: variant experiment
+
+The measured 135 times regression on shared removals is the one finding that could invalidate the design, so rather than pick a replacement algorithm by argument, three variants are being implemented independently and compared on complexity, code volume and measured cost. Each has its own branch off `bc4316ea` and its own worktree, and none of them benchmarks itself: parallel BenchmarkDotNet runs would poison each other, so all three are measured sequentially afterwards on the same matched pair.
+
+| Variant | Branch | Idea |
+|---|---|---|
+| V1 backward search | `spike/reach-v1-backward` | Walk upward over committed incoming edges from the questioned subject until an anchored ancestor is found. Cost is the ancestor closure rather than the graph. |
+| V2 precisely invalidated mark | `spike/reach-v2-cachedmark` | Keep the forward mark but fix the invalidation so a batch of k removals costs roughly one mark instead of k. |
+| V3 incremental maintenance | `spike/reach-v3-incremental` | Maintain per-subject reachability as edges change, so the common removal is O(1) and only ambiguous cases search. This is what the earlier roadmap called an affected-component planner, which this design deleted as unnecessary complexity. |
+
+Common constraints, so the three are comparable: change only the reachability strategy, keep the existing forward mark as a `[Conditional("DEBUG")]` oracle that cross-checks every answer, keep the full suite green, and reconcile per-project test counts rather than trusting the summary.
+
+**Why V1 is the leading candidate before any measurement.** The question the code actually asks is never "what is the reachable set", it is only ever "is this one subject still reachable". The forward mark answers a much larger question than needed. The file already contains an upward ancestor walk, `EdgeProvidesIndependentSupport`, written for the provisional-anchor rule, which is nearly the same query. So the cheapest correct answer may already be present in the codebase and simply not reused. Backward search is also sound under cycles, which is the case that motivated the scan: a subject inside an orphaned cycle has ancestors but none anchored, and a visited-set walk terminates and correctly answers false.
+
+**What each variant risks.** V1 risks nothing structurally but could degenerate on a graph with very wide ancestor closures. V2's danger is that invalidation correctness is subtle, and a stale mark either retains garbage or, far worse, releases a live subject. V3 risks a cycle supporting itself into believing it is reachable, which is why the witness it maintains must not be satisfiable by a cycle alone, and it is the variant most likely to cost real memory per subject.
+
+**Selection criteria, fixed before the results are known** so the choice is not rationalised afterwards: correctness first, judged by whether the debug oracle ever disagreed; then measured cost on the matched pair and on the batch row; then code volume and how hard the result is to reason about. A variant that is faster but that no one can convince themselves is correct loses to one that is merely fast enough.
+
+## Results
+
+_pending_
+
 # Unrelated bugs found
 
 Pre-existing defects on `master` that this work surfaced but did not cause. Each is independent of whether the single-context design proceeds.
