@@ -392,6 +392,26 @@ This is not a regression against master, which leaks constructor-attached subjec
 
 **A8, confirmed design consequence rather than a defect.** The mark cache never hits on the removal path: the removal bumps the version for the incoming change, and the scan traverses anchored roots and outgoing edges, so every removed occurrence forces a full recompute including an O(owned) anchor pre-pass. Removing k children from a graph of n subjects and e edges costs O(k · (n + e)). This is commented as a deliberate correctness-over-reuse tradeoff, and it is exactly what the new shared-parent benchmark rows exist to price.
 
+### Defect fixes, and what fixing them revealed (`128f6f36`)
+
+All three fixed, suite at 3355 passed and 0 failed. Each was driven by a test that failed first.
+
+**A1** is fixed by having reconcile additions bypass the already-present check entirely, through an explicit "this is a known new occurrence" path. Reconcile already knows how many occurrences it intends to add, so consulting a set that still holds stale indices was never necessary. A `[Conditional("DEBUG")]` invariant now asserts, on every reconcile, that each owned subject's per-property incoming edge count equals the committed occurrence count. It ran across all 3355 tests without firing.
+
+**The `RemoveIncoming` first-edge fallback was kept, with evidence.** The question was whether it masked bugs. It does not: a reachable case was constructed where a release descent triggered reentrantly from a removal callback drains committed edges whose refreshed index the target has not adopted yet. Making it throw would leak the edge and keep a child attached to a released parent. Constructing that case also exposed a **sibling defect that was fixed**: parent-entry removal was exact-match only, so the same interleaving left a stale parent entry on a released subject, reproducing U1's shape inside the new code.
+
+**A3** is fixed by claiming every unowned candidate and its entire subtree before any mutation, making the executor attachment the cross-context arbiter so a competing context fails at its own claim step rather than after committing. Claims that the completed operation did not adopt, including vetoed and normalised-away writes, are released, and a rejected attach rolls back the raw registration.
+
+**A4** is guarded, though honestly reported: after the A1 fix no end-to-end route to it survives, because additions always re-attach a new-value subject before the refresh runs. The guard is kept as a cheap invariant rather than a demonstrated fix.
+
+Three further issues were found while fixing and deliberately not fixed:
+
+- Writes on unattached subjects are entirely unintercepted, so a foreign reference can only be detected at attach or assign time. This is what forces the subtree claim walk and is inherent to the design rather than to this implementation.
+- A subject that appears both deep inside a removed subtree and in the new collection value is fully detached and then re-attached within one reconcile. The final state is correct, but observers see a spurious detach and attach pair.
+- With several lifecycle interceptors on one context, which the current registration API cannot construct, the fallback rollback would not unwind interceptors that had already completed their attach.
+
+One interaction worth recording for anyone touching rollback: a first, broader rollback tripped five seeds of `ContextConcurrencyFuzzTests`, because that model relies on a registration surviving when service resolution itself raises on a delegation cycle. The rollback had to be scoped to attach failures only.
+
 ### What the audit checked and found sound
 
 Recorded so it is not re-audited: the inline-to-list promotion and demotion arithmetic in `SubjectOwnership`; termination and correctness of the independent-support anchor rule on two-node and three-node provisional cycles in both construction orders; release-order and cycle-drain termination, including the two-node orphan cycle end to end; the reentrant-release guards in reconcile; pooled collection discipline on every path including exceptional ones; the property-baseline ledger; mark-cache invalidation apart from A6; the anchored-roots subset invariant; the Core attachment seam's publication ordering; and non-colliding collection reorders and shrinks.
