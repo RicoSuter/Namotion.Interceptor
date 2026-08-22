@@ -344,7 +344,21 @@ State after `e5f12994`: build clean, 26 projects, 3338 passed, 0 failed.
 
 # Unrelated bugs found
 
-Pre-existing defects on `master` that this work surfaced but did not cause. Each is independent of whether the single-context design proceeds, and each is worth its own issue.
+Pre-existing defects on `master` that this work surfaced but did not cause. Each is independent of whether the single-context design proceeds.
+
+**Disposition policy:** fix anything the migration already modifies, and record that the fix happened; document the rest so they can be picked up separately. Applied per bug below.
+
+| Bug | Touched by this change? | Disposition |
+|---|---|---|
+| U1 parent entry leak on duplicate removal | yes, parent tracking is rewritten | **fixed** by occurrence-stable edge identity |
+| U2 stale parent indices after reorder | yes, same rewrite | **fixed** by index refresh on collection reconcile |
+| U3 orphaned cycle and self-cycle leak | yes, release path is rewritten | **fixed** by reachability release; the pinned limitation snapshot was replaced |
+| U4 dead `RootManager` attach | yes, consumer migration rewrites that line | fix during consumer migration |
+| U5 MQTT never caches root property mappings | yes, the plan replaces those exact guards | fix during consumer migration, but treat as a behaviour change: it enables caching that has never been on, so it needs MQTT integration verification rather than being waved through |
+| U6 `Equals` without `GetHashCode` | yes, the class is deleted | resolved by deletion |
+| U7 `--no-build` skipped five projects | tooling, not code | documented only; the corrected baseline is recorded above |
+
+Details follow.
 
 **U1. `GetParents()` leaks a parent entry permanently when a duplicated collection entry is removed.** *Measured.* `root.Children = [a, a, b]` then `root.Children = [b]` leaves `a` fully detached, with reference count 0 and absent from `KnownSubjects`, while `a.GetParents()` still reports `Children@0`. The cause is an index mismatch: attach recorded occurrence 0, and removal iterates the collection in reverse and therefore recorded occurrence 1, so `RemoveParent(property, 1)` never matches `SubjectParent(property, 0)`. The entry is unreachable garbage that also keeps the parent subject alive through the child's `Data` dictionary. Severity is raised by the fact that `GetParents()` is what `SourceScope.SearchGraph` walks, so a stale entry can make a detached subject look in-scope to source monitoring.
 
