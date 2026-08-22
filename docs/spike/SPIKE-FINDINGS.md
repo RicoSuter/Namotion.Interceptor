@@ -296,7 +296,18 @@ P14 identified the multi-`SourceMonitor` paths. The rewrite found more: `PerProp
 
 ### Where the reachability scan actually runs
 
-This corrects the expectation recorded earlier in this document. The scan is **skipped** for add-only writes, for anchored targets, and for targets left with zero edges and no children. Tree-shaped detach cascades therefore never scan, which includes `RegistryBenchmark.ChangeAllTires`, because each tire has exactly one parent. The scan runs only when a node with remaining incoming edges is questioned, that is for shared, DAG and cycle-suspect removals.
+The gate is one short-circuit in `LifecycleInterceptor.cs:566`:
+
+```csharp
+var retained = ownership.Anchor != SubjectAnchorKind.None ||
+               (count > 0 && IsReachableFromRoots(subject));
+```
+
+`count` is the subject's remaining incoming edges after the removal, and `&&` short-circuits, so the scan never runs when `count` reaches zero. That is a logical shortcut rather than a heuristic: an unanchored subject that nothing points at is unreachable by definition, so no proof is required. The scan exists only for the genuinely undecidable case, where remaining edges may all originate from subjects that are themselves dying, which is a cycle or a shared node losing its other parents.
+
+The practical consequence is that **exclusive ownership never pays for the scan**. `AddLotsOfPreviousCars` replaces a thousand cars, each holding exactly one incoming edge; every removal takes the count to zero, releases immediately, and descends into four tires that are each also singly referenced. Five thousand subjects leave the graph with zero scans, doing the same work master's reference-count teardown did. `ChangeAllTires` behaves the same way.
+
+This corrects an expectation recorded earlier in this document, which predicted that every removal row would regress. It also corrects a second slip: an earlier note gave the skip condition as "zero edges and no children", but children never enter the decision, the release simply descends into them.
 
 That is better than the design implied, and it moves where the cost lands. The remaining exposure is that the mark result is cached but invalidated by any graph mutation, so a batch removing k shared or cyclic edges recomputes up to k times: DAG-heavy graphs pay O(k · graph) where master paid O(1) per edge.
 
@@ -405,7 +416,7 @@ The control moved +0.4 percent, so the +1.2 to +3.8 percent movements sit in the
 
 `RegistryBenchmark` does **not** change. That contradicts the prediction recorded earlier in this document, and the prediction was wrong for a specific and useful reason.
 
-The reachability scan is skipped for add-only writes, for anchored targets, and for targets left with zero edges and no children. Every removal in `RegistryBenchmark` is tree-shaped: a tire has exactly one parent, so `ChangeAllTires` releases four leaves and never scans. The same is true of `IncrementDerivedAverage` and `AddLotsOfPreviousCars`. The design's cost does not land where the earlier reasoning put it.
+The reachability scan is skipped for add-only writes, for anchored targets, and for targets left with zero remaining incoming edges. Every removal in `RegistryBenchmark` is tree-shaped: a tire has exactly one parent, so `ChangeAllTires` releases four leaves and never scans. The same is true of `IncrementDerivedAverage` and `AddLotsOfPreviousCars`. The design's cost does not land where the earlier reasoning put it.
 
 `ReleaseSmallSubtreeFromLargeContext` is the direct proof. It removes one edge in a context holding 2000 extra retained subjects and it stays within noise of `ReplaceSingleChildReference`, which removes one edge in a small context, on both arms. The 2000-subject bulk costs nothing after the change, because the scan never runs for that shape.
 
