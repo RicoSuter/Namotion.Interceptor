@@ -264,6 +264,52 @@ Landed clean. 266 insertions across five files, no existing test touched, Public
 
 One semantic wrinkle worth knowing, inherent to the existing reentrancy contract rather than new: when a reentrant `TryAddService` factory publishes a service that then conflicts with the factory's own product, the outer call throws but the reentrant registration stays published. Singleton validation makes that asymmetry observable for the first time.
 
+## Task 4, lifecycle ownership rewrite (`069b9bcc`)
+
+Landed with the full suite green: 26 projects, **3347 passed, 0 failed**, build clean. 28 files, +1850 and -580. `PropertyReferenceSet` and its tests are gone, replaced by `SubjectOwnership` plus occurrence-aware edges.
+
+### The most important finding of the spike: correction C3 was itself unsound
+
+C3 said a provisional anchor is cleared by the first inherited structural edge. That is wrong, and it destroys ordinary object graphs.
+
+The failing shape is the everyday back-reference. `child.Parent = root` gives the root an incoming edge. Under the rule as written, that edge clears the root's constructor anchor. The root now has no anchor and nothing else anchors it, so the next removal anywhere in the graph finds it unreachable and releases the entire tree. `root.Self = root` fails the same way. This was not a theoretical objection: it was reproduced with a probe and then caught independently by an existing production-shaped test, `SubjectUpdateCycleTests.WhenModelHasRefsCollectionsDictionariesWithCycles_ThenCreatePartialUpdateSucceeds`.
+
+The refinement that works: **a provisional anchor is consumed only by an edge that provides independent support**, meaning the edge's parent has an anchored ancestor other than the subject itself. That is computed by walking committed incoming edges, which is exact, because reachability from a root means some root lies in the ancestor closure. A self-edge, or a back-edge from the subject's own subtree, fails the test and therefore never consumes the anchor. Cost is the parent's ancestor closure, typically tree depth, with an O(1) fast path when the assigning parent is itself anchored, which is the HomeBlaze adoption shape.
+
+One consequence needs design sign-off: a constructor-attached subject in a mutually referencing pair keeps its anchor forever, because no edge ever provides independent support. `CycleTests.WhenBreakingCycle_ThenBothDetach` changes accordingly and was renamed.
+
+The lesson generalises beyond this rule. C3 was introduced to fix a blocker that the review had proven with evidence, and it was still wrong, because it was reasoned about rather than executed. Only implementing it surfaced the back-reference case. That is the argument for the spike existing at all.
+
+### Detach order on master is an artifact, and changing it moves hosted-service stop order
+
+The detach order that post-descent handlers actually observe on master does not come from `DetachFromProperty`'s descent. It comes from `ContextInheritanceHandler` re-entering `DetachSubjectFromContext`, which re-reads the **backing store**, so handlers behind the descent slot (the testing helper, `SourceMonitor`, `HostedServiceHandler`) see children before parents. The deterministic top-down release traversal required by D15 makes the order uniform, which flips it for those handlers. Six Registry snapshots changed for this reason alone.
+
+The operational consequence is worth flagging separately: **hosted-service stop order on subtree detach flips from children-first to parent-first.** That is not a snapshot detail, and it should be reviewed on its own merits before this design is taken further.
+
+### The transitional promote path silently bypassed the lifecycle
+
+Two related hazards, both fixed and pinned by new tests. `AttachToContext` on a subject whose fallback already exists dedups the `AddFallbackContext` call, so the explicit anchor landed on the executor but never reached the lifecycle. Separately, `ContextInheritanceHandler`'s reference-count-zero fallback removal re-enters `DetachSubjectFromContext`, which was stripping explicit anchors from retained subjects. Both are artifacts of running the old and new models side by side. They are the sharpest argument for the final cutover making attach and detach talk to the lifecycle directly rather than through fallbacks.
+
+### Multi-context aggregation was load-bearing in more places than the review found
+
+P14 identified the multi-`SourceMonitor` paths. The rewrite found more: `PerPropertySubscriptionLifecycleTests`, `SubjectTransactionTests`, six `SourceWaitResultTests`, and `SourceMonitorTests` all relied on one subject participating in two full-tracking contexts, which exact-context authority forbids. All were convertible to single-lifecycle arrangements that preserve each test's pinned intent, but the pattern is more widespread than the blast-radius table suggested.
+
+### Where the reachability scan actually runs
+
+This corrects the expectation recorded earlier in this document. The scan is **skipped** for add-only writes, for anchored targets, and for targets left with zero edges and no children. Tree-shaped detach cascades therefore never scan, which includes `RegistryBenchmark.ChangeAllTires`, because each tire has exactly one parent. The scan runs only when a node with remaining incoming edges is questioned, that is for shared, DAG and cycle-suspect removals.
+
+That is better than the design implied, and it moves where the cost lands. The remaining exposure is that the mark result is cached but invalidated by any graph mutation, so a batch removing k shared or cyclic edges recomputes up to k times: DAG-heavy graphs pay O(k · graph) where master paid O(1) per edge.
+
+### Contract change: interceptors downstream of lifecycle now run inside its lock
+
+The lifecycle gate is taken before `next` for structural writes only, scalar writes untouched, and held across the terminal commit and reconciliation. This is what retires the concurrent-baseline repair, exactly as B4 required. The measured consequence is that `ValidationInterceptor`, when registered without transactions, and any third-party interceptor ordered downstream now execute inside the lifecycle lock. That is a documented contract change and it compounds D10.
+
+### Known gaps left open, deliberately
+
+- Foreign-subject rejection during a root-attach descent throws mid-descent, leaving earlier children attached.
+- A released subject keeps running the interceptor chain while its stale constructor fallback survives. Transitional, resolved by the final cutover.
+- Garbage islands created by add-only writes persist until an edge removal touches them, which follows from releasing only from the removed edge's target.
+
 ## Task 3a, additive attachment mechanism (`5737d0a6`)
 
 The staged approach worked. 1124 insertions, one deletion, and the whole suite stayed green, which the original plan's ordering could not have achieved.
