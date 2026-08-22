@@ -10,6 +10,44 @@
 
 **Design reference:** `docs/superpowers/specs/2026-08-21-single-context-lifecycle-simplification-design.md`
 
+## Plan rewritten after the implementation spike (2026-08-23)
+
+A full spike was executed against the previous plan. What follows replaces its task sequence. The spike branch is `spike/single-context-lifecycle` and its findings are in `docs/spike/SPIKE-FINDINGS.md`; the reachability variants are parked on `spike/reach-v1-backward`, `spike/reach-v2-cachedmark` and `spike/reach-v3-incremental`.
+
+**Reuse rather than rewrite.** The spike produced working, tested code for the hardest parts: the occurrence-aware lifecycle rewrite, the backward-search reachability, three fixed defects, and the benchmark scaffold with rows that actually exercise the scan. Those are the starting point. What is redone is the sequencing, the three under-specified areas, and the transitional scaffolding the spike carried.
+
+### Sequence
+
+Each stage must leave the tree building with zero warnings and the full unit suite green, verified by **per-project** counts diffed against a recorded baseline, never by the summary line alone.
+
+1. **Benchmark base.** Cut a branch from master carrying only `LifecycleOwnershipBenchmark`, so both arms share benchmark source. The spike's fourteen rows already include the shared-parent matched pair and the batch row that the original scaffold lacked. Record the hash.
+2. **Singleton context service contracts.** Landed cleanly in the spike, 266 lines, no behaviour change. Take as-is.
+3. **Read path: stop running user code under the subject monitor.** This is now a prerequisite rather than an afterthought, because it is what makes the lifecycle gate safe to hold across the terminal write. Doing it first means the write protocol never has to be built twice.
+4. **Attachment mechanism, additive.** Exact context, anchors, attachment revision, lock-free reads, and the structural write route with its own terminal cache. The structural setter publishes an executor even when unattached, so the guard always runs. Keep the executor inheriting the context for now: that is what lets every later stage stay green.
+5. **Lifecycle ownership.** Occurrence-aware edges, anchors, deterministic release traversal, and backward-search reachability from the outset rather than a scan to be replaced later. Parent snapshots publish lazily. Carry the spike's debug oracle.
+6. **Concurrency contracts.** Attachment monitor taken before chain resolution and held through the terminal, so transient races order rather than throw. Persistent cross-context conflicts throw. Callback reentrancy rules.
+7. **Generator and Dynamic routing.** Fail-closed classification: scalar route only for provably subject-free declared types. Expect the base-contract change and its diagnostic for every base assembly built by the released generator; that is unavoidable and belongs in the breaking-changes list.
+8. **`AddProperties` atomicity.**
+9. **Handler merge.** Delete the inheritance and parent-tracking handlers, remove their configuration extensions, migrate the three ordering attributes. The merged lifecycle must implement the handler interface or those attributes will not bind.
+10. **Singleton authorities**, and delete the multi-instance machinery that becomes unreachable.
+11. **Consumer migration**, roughly 124 files. The largest stage. Categories and per-project counts are in the findings.
+12. **Removal.** Fallback APIs, executor-as-context, `Context`, `SyncRoot`, subtree-scoped services. Purely subtractive, so a compile error here is a missed call site rather than a design problem.
+13. **Docs and snapshots.** Sixteen generator snapshots and eight public API snapshots.
+14. **Verification.** Full suite, agreed connector and integration scope, and a benchmark comparison run per arm directly rather than through the comparison script.
+
+### Standing rules for every stage
+
+- Reconcile per-project test counts against a recorded baseline. Two separate mechanisms have been observed reporting success while coverage shrank.
+- Never pipe a long test run through `tail`; capture to a file and grep it.
+- Any risky replacement carries a `[Conditional("DEBUG")]` oracle that recomputes the previous answer and asserts agreement.
+- Do not trust a benchmark comparison whose arms agree on a row where the algorithm changed. Validate against an independently measured mechanism.
+- Any algorithm reading incoming edges must validate candidates against committed outgoing edges, because reconcile commits outgoing first.
+- Delete what the stage made dead before committing it.
+
+### Effort
+
+The spike reached stage 9 of 14 and consumed a full working session with parallel agents throughout. Stages 11 and 12 are the bulk of the remaining volume, and stage 14's connector verification does not run in CI and takes hours by itself. Plan accordingly; the previous estimate was wrong because it assumed the ownership nucleus could be replaced without touching the surrounding machinery, and every stage above touches it.
+
 ## Corrections after implementation review (authoritative, override the task text below)
 
 Four independent verification passes checked this plan against the code. Findings and evidence are in `docs/spike/SPIKE-FINDINGS.md`. The corrections below take precedence wherever they disagree with a task.
