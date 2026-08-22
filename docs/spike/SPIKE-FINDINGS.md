@@ -478,6 +478,35 @@ Master's two rows are statistically identical, which is the control working: rem
 
 The instrumented probe explains it exactly. Over 1000 toggles of the large-context row the lifecycle performed **1000 reachability recomputes visiting 2,003,000 nodes**, that is a full 2003-node mark per single removed edge. The mark cache never helps, because the removal bumps the graph version immediately before the query, which is finding A8 confirmed by measurement rather than by reading.
 
+### RegistryBenchmark, measured directly per arm
+
+| Row | Patched master | Spike branch | Delta |
+|---|---:|---:|---|
+| `AddLotsOfPreviousCars` | 57.27 ms / 19,632,857 B | 59.03 ms / 20,608,482 B | +3.1 percent time, **+975 KB per operation** |
+| `IncrementDerivedAverage` | 5001.7 ns | 4742.0 ns | -5.2 percent |
+| `WriteNoOp` | 364.5 ns | 349.5 ns | -4.1 percent |
+| `Write` | 1018.1 ns | 1029.3 ns | +1.1 percent |
+| `WriteWithTimestampScope` | 940.6 ns | 930.4 ns | -1.1 percent |
+| `Read` | 377.2 ns | 371.5 ns | -1.5 percent |
+| `DerivedAverage` | 245.4 ns | 251.5 ns | +2.5 percent |
+| `ChangeAllTires` | 15060.0 ns / 14112 B | 16041.1 ns / 14360 B | **+6.5 percent, +248 B** |
+| `GetOrAddSubjectId` | 28.85 ns | 33.29 ns | **+15.4 percent** |
+| `GenerateSubjectId` | 1028.8 ns | 1026.4 ns | flat |
+| `KnownSubjectsSnapshot` | 0.2847 ns | 0.2863 ns | flat |
+| `ReadParents` | 0.3342 ns | 0.3343 ns | flat |
+
+So the earlier claim that Registry is unchanged was wrong twice over: it came from a void run, and the real answer is that Registry does change, modestly. Three effects are worth naming.
+
+`GetOrAddSubjectId` costs 15 percent more. The error bars are 0.027 and 0.064 nanoseconds against a 4.4 nanosecond difference, so this is not measurement noise within either run.
+
+`ChangeAllTires` costs 6.5 percent more and allocates 248 bytes more, despite being a pure tree-shaped removal that never scans. The extra is edge bookkeeping, not reachability.
+
+`AddLotsOfPreviousCars` allocates about 975 kilobytes more per operation, roughly 5 percent. Against 5000 subjects that is about 195 bytes per subject of new per-subject ownership state, which is the occurrence-aware edge structure. Time barely moves, so this is a memory cost rather than a throughput cost, but it is the kind that compounds through GC pressure across a host.
+
+Scalar and read paths are neutral to slightly faster, and `ReadParents` is exactly flat, which confirms the lock-free published parent snapshot did not cost anything on the read side.
+
+**Caveat on the small deltas.** These are single-launch runs. The 135 times scan regression is beyond any doubt, but the 1 to 15 percent movements need a repeat at `-LaunchCount 3` before being treated as real, because this suite is known to swing several percent between identical runs. The allocation columns are deterministic and can be trusted as they stand.
+
 ### What this settles
 
 The specification hedged: "Removal operations initially pay a complete context-local reachability scan. Benchmarks determine whether an affected-component index is justified." That question is now answered. The complete scan is affordable only for exclusive ownership, where the `count == 0` short circuit means it never runs at all. For any shared, DAG or cyclic removal it is O(owned + edges) per removed edge, and a batch of k such removals is O(k times the graph).
