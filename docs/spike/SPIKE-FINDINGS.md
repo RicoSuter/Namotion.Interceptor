@@ -370,7 +370,56 @@ Estimated cost is roughly 15 to 20 minutes per arm for the lifecycle rows plus a
 
 ## Results
 
-_pending the lifecycle rewrite_
+Run of 2026-08-22, `069b9bcc` against `04fab84a`, `-LaunchCount 3`, memory randomization on, 23 rows, 24 minutes per pair. CPU verified pinned in sysfs before the run: governor `performance`, `scaling_min_freq` and `scaling_max_freq` both 3600000, `no_turbo` 1. The two arms' BenchmarkDotNet headers reported different maxima (1.88 GHz and 0.80 GHz), which is the known unreliability of that header rather than a drifting pin.
+
+**Arm validity was verified rather than assumed**, because near-identical arms are exactly what a broken comparison looks like. At the base the lifecycle is 551 lines and `Namotion.Interceptor.Tracking.dll` is 104,448 bytes with md5 `eb458d79e8dfb609e657d432f87fa420`; at HEAD it is 1224 lines and 113,152 bytes with md5 `ba0197d6209e6a2c4272816ad6510678`. The script drives each arm through `dotnet run -c Release`, which builds, so both arms compiled and ran their own code.
+
+### Headline
+
+**No regression on any of the 23 rows, and allocations are byte-identical on every structural row.**
+
+| Row | Base | Branch | Delta |
+|---|---:|---:|---|
+| `SetScalarUnattached` | 2.920 ns | 2.928 ns | flat, 0 B both |
+| `SetStructuralUnattached` | 4.549 ns | 4.501 ns | flat, 0 B both |
+| `SetScalarAttached` | 168.9 ns | 167.2 ns | flat |
+| `ReplaceSingleChildReference` | 2607 ns | 2680 ns | +2.8 percent, 488 B both |
+| `ReplaceCollectionUniqueChildren` | 8992 ns | 8986 ns | flat, 2248 B both |
+| `ReplaceCollectionDuplicateChildren` | 4946 ns | 4951 ns | flat, 1224 B both |
+| `ReorderCollection` | 854 ns | 860 ns | flat, 296 B both |
+| `ReplaceCyclicChildGraph` | 875 ns | 872 ns | flat, 320 B both |
+| `AttachAndReleaseSubtree` | 34155 ns | 34065 ns | flat, 9001 B both |
+| `ReleaseSmallSubtreeFromLargeContext` | 2588 ns | 2619 ns | +1.2 percent, 488 B both |
+| `RegistryBenchmark.ChangeAllTires` | 14700 ns | 14681 ns | flat, 14112 B both |
+| `RegistryBenchmark.AddLotsOfPreviousCars` | 56.44 ms | 56.45 ms | flat |
+| `RegistryBenchmark.IncrementDerivedAverage` | 5043 ns | 5002 ns | flat |
+| `RegistryBenchmark.Write` | 1034 ns | 1031 ns | flat |
+| `RegistryBenchmark.WriteNoOp` | 342 ns | 355 ns | +3.8 percent, no allocation change |
+| `RegistryBenchmark.Read` | 369.6 ns | 378.1 ns | +2.3 percent |
+| `RegistryBenchmark.ReadParents` | 0.339 ns | 0.342 ns | flat |
+| `ServiceOrderResolverBenchmark.LinearChain` (control) | 1760 ns | 1768 ns | +0.4 percent |
+
+The control moved +0.4 percent, so the +1.2 to +3.8 percent movements sit in the same band as unchanged code and none of them clears the noise floor. Nothing here is a real delta.
+
+### The Registry question, answered
+
+`RegistryBenchmark` does **not** change. That contradicts the prediction recorded earlier in this document, and the prediction was wrong for a specific and useful reason.
+
+The reachability scan is skipped for add-only writes, for anchored targets, and for targets left with zero edges and no children. Every removal in `RegistryBenchmark` is tree-shaped: a tire has exactly one parent, so `ChangeAllTires` releases four leaves and never scans. The same is true of `IncrementDerivedAverage` and `AddLotsOfPreviousCars`. The design's cost does not land where the earlier reasoning put it.
+
+`ReleaseSmallSubtreeFromLargeContext` is the direct proof. It removes one edge in a context holding 2000 extra retained subjects and it stays within noise of `ReplaceSingleChildReference`, which removes one edge in a small context, on both arms. The 2000-subject bulk costs nothing after the change, because the scan never runs for that shape.
+
+### What this run does NOT establish
+
+Two gaps, both mine, both worth fixing before anyone treats this as a green light.
+
+**The scan is still unmeasured.** Every row in the scaffold is tree-shaped or a full replacement, which is exactly the family the implementation skips the scan for. The scan runs when a node with remaining incoming edges is questioned, that is on shared, DAG and cycle removals, and the mark result is invalidated by any graph mutation, so a batch removing k shared edges recomputes up to k times: O(k · graph) where master paid O(1) per edge. **No row exercises that.** A DAG-removal row is needed, and because both arms must share benchmark source, adding it means re-cutting `LIFECYCLE_BENCHMARK_BASE` and re-running.
+
+**`SetStructuralUnattached` is not yet meaningful.** It reads 0 B on both arms because the generator has not been changed to route structural properties to `SetStructuralPropertyValue`; that stage was deferred. The row measures the old scalar path on both sides. The allocation regression it was built to catch (D6, executor publication forced on unattached structural writes) remains unmeasured until the generator routing lands.
+
+### What it does establish
+
+The scalar, read, write and tree-shaped structural paths carry the ownership rewrite for free, in CPU and in allocations, against a genuinely different binary. Byte-identical allocation on every structural row is the strongest single signal: the occurrence-aware edge state kept the single-edge case inline, so ordinary one-parent subjects allocate exactly what they did before. That was a design requirement and it held.
 
 ## Environment notes
 
