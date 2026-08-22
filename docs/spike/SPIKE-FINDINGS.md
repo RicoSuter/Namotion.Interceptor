@@ -416,6 +416,14 @@ One interaction worth recording for anyone touching rollback: a first, broader r
 
 Recorded so it is not re-audited: the inline-to-list promotion and demotion arithmetic in `SubjectOwnership`; termination and correctness of the independent-support anchor rule on two-node and three-node provisional cycles in both construction orders; release-order and cycle-drain termination, including the two-node orphan cycle end to end; the reentrant-release guards in reconcile; pooled collection discipline on every path including exceptional ones; the property-baseline ledger; mark-cache invalidation apart from A6; the anchored-roots subset invariant; the Core attachment seam's publication ordering; and non-colliding collection reorders and shrinks.
 
+# A second silent-tooling failure worth naming
+
+`dotnet test` reported **0 failed while a test project aborted mid-run**. On the generator stage, `Namotion.Interceptor.Registry.Tests` stopped at 106 of 154 tests and the summary still printed a clean result. It was caught only by reconciling per-project counts against a baseline run, exactly the technique that had already been needed once for U7.
+
+The cause is a genuine semantic of the new design. `ConcurrentStructuralWriteLeakTests` performs structural writes on subjects whose attachment another raw thread is transitioning. Those writes now hit the attachment guard's documented `InvalidOperationException`, and an unhandled exception on a raw `Thread` terminates the host process rather than failing a test.
+
+Two things follow. First, **racing structural writes throwing is now user-visible behaviour**, and any consumer doing concurrent structural work on a subject that may be attaching has to expect it. That belongs in the migration notes, not just in a test fix. Second, and more general: on this repository a green `dotnet test` summary is not sufficient evidence that the suite ran. Per-project counts have to be reconciled against a known baseline, because two independent mechanisms have now been observed to reduce coverage while reporting success.
+
 # Unrelated bugs found
 
 Pre-existing defects on `master` that this work surfaced but did not cause. Each is independent of whether the single-context design proceeds.
@@ -509,6 +517,31 @@ Method: each arm run separately with `dotnet run --project src/Namotion.Intercep
 Master's two rows are statistically identical, which is the control working: removal cost there is independent of context size. On the branch the same single-edge removal scales with the whole context.
 
 The instrumented probe explains it exactly. Over 1000 toggles of the large-context row the lifecycle performed **1000 reachability recomputes visiting 2,003,000 nodes**, that is a full 2003-node mark per single removed edge. The mark cache never helps, because the removal bumps the graph version immediately before the query, which is finding A8 confirmed by measurement rather than by reading.
+
+### D6 closed: the unattached structural write allocates nothing, because the guard was left off that path
+
+Measured directly per arm, after generated setters began routing subject-capable properties to the structural entry point.
+
+| Row | Patched master | Spike branch |
+|---|---:|---:|
+| `SetScalarUnattached` | 3.026 ns, 0 B | 2.907 ns, 0 B |
+| `SetStructuralUnattached` | 6.732 ns, 0 B | 4.745 ns, 0 B |
+
+The feared allocation regression did not happen, and the reason matters more than the number. The emitted structural helper keeps the existing no-executor short circuit:
+
+```csharp
+if (_context is null)
+{
+    setValue(this, newValue);
+    return true;
+}
+```
+
+So a structural write on a never-attached subject still writes the backing field directly, allocates nothing, and **never reaches the attachment guard**. D6 posed this as a choice between allocating an executor on every structural write of every subject, or leaving a hole on exactly the path the guard exists for. The implementation took the second option without stating it.
+
+That hole is the race the structural route was introduced to close: one thread reads the null executor and writes the field directly while another attaches the subject concurrently, so the write lands without the lifecycle ever seeing it. Master has the identical hole, so this is not a regression, but it is an unmet goal, and the specification currently reads as though the guard covers this case. It does not.
+
+The timing movement in the favourable direction, 6.73 to 4.75 nanoseconds for identical work on both arms, should not be believed from timings. Both helpers reduce to the same two statements when the executor is null, so a 29 percent difference on a sub-ten-nanosecond path is the shape this repository's benchmarking guidance says to attribute by disassembly rather than by more runs. It is recorded because it is favourable and therefore threatens nothing, not because it is understood.
 
 ### RegistryBenchmark, measured directly per arm
 
