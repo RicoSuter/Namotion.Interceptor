@@ -342,6 +342,48 @@ State after `e5f12994`: build clean, 26 projects, 3338 passed, 0 failed.
 
 ---
 
+# Defects found by auditing the new code
+
+A read-only audit of the lifecycle rewrite, run after the suite was already green, so none of this is caught by existing tests. Two items are serious.
+
+**A1. BLOCKER: a duplicate occurrence is silently dropped when its new position collides with the subject's stale index, and a later write then detaches a live child.**
+
+`LifecycleInterceptor.cs:465` (`HasIncomingEdge` early return in `AttachEdge`) against the addition marking at `:390-398`. Reconcile marks additions as the last excess occurrences *before* retained edges have their indices refreshed at `:420-434`, so an addition is attached with its new index while the subject still carries its old one. When the two coincide the occurrence is dropped: no `IncomingCount` increment, no `IsPropertyReferenceAdded`.
+
+```csharp
+parent.Children = [b, a];   // a holds incoming (Children, 1)
+parent.Children = [a, a];   // addition marked at position 1, HasIncomingEdge(Children, 1) hits, dropped
+                            // a.GetReferenceCount() == 1, but outgoing says [(a,0),(a,1)]
+parent.Children = [a];      // removal of occurrence 1 falls back to "first edge of the property"
+                            // and drops it: IncomingCount reaches 0 and a detaches
+                            // while parent.Children still contains a
+```
+
+Incoming and outgoing accounting diverge at step 2 and the divergence detaches a still-referenced subject at step 3. `RefreshCollectionParents` then republishes a parent entry on the detached subject. It generalises to any write where an added occurrence lands on a position the subject already occupied, such as `[A,B,A]` to `[A,A,A]`. Existing tests only cover duplicate shrink and duplicate creation from scratch, neither of which collides.
+
+**A2. MAJOR: holding the lifecycle gate across the terminal write creates a lock cycle with the read path, and correction C4 is what introduced it.**
+
+The rewrite takes `_gate` before `next` (`LifecycleInterceptor.cs:219`) and the structural terminal then takes `subject.SyncRoot` (`Cache/StructuralWriteInterceptorFactory.cs:24,62`), giving gate then SyncRoot. The opposite order already exists and is master's: `Cache/ReadInterceptorFactory.cs:19-22` holds `SyncRoot` across the user's getter body, and a derived getter with a graph side effect reaches the lifecycle and blocks on the gate.
+
+- Thread 1: structural write holds the gate, waits for `SyncRoot` in the terminal.
+- Thread 2: reads a derived property, holds `SyncRoot` in the read terminal, its getter reparents a subject, waits for the gate.
+
+This is not speculative. `Change/DerivedPropertyChangeHandler.cs:202-207` and `:249-251` document exactly this hazard and evaluate getters outside the lock specifically "to prevent deadlock with lock(_attachedSubjects) in LifecycleInterceptor when getters have side effects that write to subject-typed properties". That mitigation was built for master's ordering, where `next` ran before the lock. Holding the gate across `next` reintroduces the cycle through `SyncRoot` rather than through `data`.
+
+This matters beyond the bug, because **C4 is mine.** B4 correctly established that lock scope, not terminal ordering, is what retires the concurrent-baseline repair. What the review did not establish is that the required lock scope is reachable at all while the read terminal runs user code under `SyncRoot`. The options are all real changes: stop running getters under `SyncRoot` on the read path, or keep `next` outside the gate and keep the repair, or narrow what the structural terminal locks. This needs a decision before the design can claim the repair is removable.
+
+**A3. MAJOR: a foreign-subject claim can throw after the backing store has already committed.** `ThrowIfForeignSubject` at `:232-233` is the stated "rejected before any backing mutation" guarantee, but it samples `AttachedContext` once, and another context's lifecycle holds a different gate and can claim the subject between that check and `ClaimUnownedSubject` at `:802-824`. By then `next` has run, edges and baselines are committed, and the exception escapes the setter with some children attached and some not. `AttachSubjectToContext` at `:114-118` has no pre-pass at all, so a context-taking constructor over a foreign child leaves a half-built graph plus a registered fallback.
+
+**A4. MAJOR: `RefreshCollectionParents` republishes parent entries for subjects released earlier in the same reconcile.** `:436-443`. The index-refresh loop at `:430` guards with `_ownedSubjects.TryGetValue`; the parent refresh does not, and rewrites entries for every subject found in the raw new value. A subject released during this reconcile gets a fresh parent entry after its detach callbacks ran, so `GetParents()` reports a parent for a subject whose `TryGetContext()` is null, which feeds path resolution in `SubjectPathResolver` and the OPC UA and MQTT path builders.
+
+**A5 to A7, minor and partly unverified.** Reusing the pre-`next` edge parse is unsound if an inner interceptor replaces `context.NewValue` with a different instance (no in-repo interceptor does this today). Clearing outgoing edges at `:190-192` mutates graph shape without bumping the version, currently masked because every reachable path bumps it earlier. Re-entering `AttachSubjectToContext` for an already-owned subject re-seeds outgoing edges without diffing, which leaks incoming edges if the collection was mutated in place.
+
+**A8, confirmed design consequence rather than a defect.** The mark cache never hits on the removal path: the removal bumps the version for the incoming change, and the scan traverses anchored roots and outgoing edges, so every removed occurrence forces a full recompute including an O(owned) anchor pre-pass. Removing k children from a graph of n subjects and e edges costs O(k · (n + e)). This is commented as a deliberate correctness-over-reuse tradeoff, and it is exactly what the new shared-parent benchmark rows exist to price.
+
+### What the audit checked and found sound
+
+Recorded so it is not re-audited: the inline-to-list promotion and demotion arithmetic in `SubjectOwnership`; termination and correctness of the independent-support anchor rule on two-node and three-node provisional cycles in both construction orders; release-order and cycle-drain termination, including the two-node orphan cycle end to end; the reentrant-release guards in reconcile; pooled collection discipline on every path including exceptional ones; the property-baseline ledger; mark-cache invalidation apart from A6; the anchored-roots subset invariant; the Core attachment seam's publication ordering; and non-colliding collection reorders and shrinks.
+
 # Unrelated bugs found
 
 Pre-existing defects on `master` that this work surfaced but did not cause. Each is independent of whether the single-context design proceeds.
