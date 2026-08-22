@@ -444,7 +444,33 @@ Common constraints, so the three are comparable: change only the reachability st
 
 ## Results
 
-_pending_
+All three implemented independently, each with the forward mark retained as a `[Conditional("DEBUG")]` oracle asserting agreement on every query. **No oracle fired in any variant**, across full suite runs plus each variant's own scratch cases.
+
+| | V1 backward search | V2 precise invalidation | V3 incremental |
+|---|---|---|---|
+| Commit | `0f183c40` | `fc79ecde` | `7202d580` |
+| Lines | +228 / -31, 1 file | +455 / -30, 2 files (244 production, 211 tests) | +603 / -62, 2 files |
+| Per-subject memory | none, and Release drops the resident mark set | none, two counters replaced by one bool, slightly negative | pending |
+| Single removal | O(ancestor closure) | O(V+E) worst case, O(1) on a cache hit | pending |
+| Batch of k | O(k x closure) | one mark, then O(1) per retained answer | pending |
+| Tests | 3364, per-project reconciled | 3371, per-project reconciled, +7 new | pending |
+
+### The structural surprise
+
+Keeping the forward mark and merely fixing its invalidation cost **more code than replacing the algorithm outright**: 244 lines of production change against V1's 228, plus 211 lines of tests that V1 did not need. That is the opposite of what "just fix the cache" suggests, and it has a cause worth recording.
+
+Correct invalidation is not one rule, it is a per-mutation-site classification. Every mutation of a mark input has to be proved to be a no-op, an in-place grow, or an invalidation, and incoming-edge mutations have to be proved not to be inputs at all. On top of that, V2 needed an asymmetric query protocol: a cached positive can be returned directly because unbumped drift is provably grow-only, but a cached negative must first re-scan executor anchors, because a promote through the fallback dedup path can bypass the lifecycle entirely. That anchor rescan is O(owned) and exists solely to preserve today's lazy-anchor visibility.
+
+Both V1 and V2 independently hit the same wall from opposite sides: **reconcile commits outgoing edges before updating incoming records**, so incoming state lags mid-batch. V1 had to add two in-flight bookkeeping lists to see momentarily-invisible parents; V2 had to abandon incremental mark repair entirely, because rescue-by-incoming-edges is unsound in exactly that window. That ordering is the single most load-bearing implementation detail in this whole area, and neither the design specification nor the plan mentions it.
+
+### Honest liabilities each variant carries
+
+V1 couples its correctness to the mutation ordering inside three specific methods, guarded only by the debug oracle, and carries a drain snapshot for a pathological reentrant case that the suite probably never exercises. Its author flagged that it will look deletable and that deleting it would be wrong.
+
+V2 carries two defensive guards protecting windows its author believed unreachable but could not prove unreachable under reentrant callbacks, which are untestable dead code until someone changes callback ordering, at which point they become load-bearing. Its cascade win also depends on the invariant that queries precede releases; a future path that releases a still-marked subject degrades silently to per-release recomputes, correct but slow.
+
+Both liabilities are the same shape: a correctness argument that lives in a comment rather than in a test, because the case cannot currently be reached. That is worth weighing against raw numbers when choosing.
+
 
 # Unrelated bugs found
 
