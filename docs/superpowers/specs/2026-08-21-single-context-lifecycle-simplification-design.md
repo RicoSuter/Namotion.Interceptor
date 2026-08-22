@@ -6,6 +6,39 @@
 
 **Primary baseline:** `master` at `0418410c`
 
+## Revision after implementation spike (2026-08-23)
+
+A full implementation spike was run against this specification. Its findings are in `docs/spike/SPIKE-FINDINGS.md`, and the corrections below are authoritative wherever they disagree with the text further down. The ownership model survived the spike. The cost model, three under-specified areas, and the framing did not.
+
+### Decisions taken
+
+1. **Scope stays the full design**, with an honest estimate. This is not "a narrow replacement of the ownership nucleus inside the existing lifecycle machinery". That framing is what produced the under-scoping, and it is withdrawn.
+
+2. **A reachability index is required, not deferred.** The complete context-local scan was measured at 135 times slower than master on a single shared-parent removal in a 2000-subject context, and an instrumented probe confirmed a full 2003-node mark per removed edge. Three replacements were implemented and measured. The chosen algorithm is a **backward search from the questioned subject up its committed incoming edges to the nearest anchored ancestor**, which restores the large-context case to 1.877 microseconds against master's 1.276 and costs 228 lines. A forward mark with precise invalidation was rejected because cross-parent removals always invalidate, so it never helps the common shape. Incrementally maintained reachability was rejected because it pays maintenance on every edge mutation including tree-shaped removals that the zero-remaining-edges short circuit makes free, measuring four times slower than master on `ChangeAllTires`.
+
+3. **User code must not execute while the subject monitor is held.** The read terminal currently invokes user-supplied getters under `SyncRoot`, which is what makes holding the lifecycle gate across the terminal write unsafe. The read path changes so getters run outside the monitor; only then may the gate span the terminal, which is what actually retires the concurrent-baseline repair. Terminal ordering alone never did.
+
+4. **Parent snapshots publish lazily.** Folding parent tracking into `WithLifecycle()` made it unconditional and was measured at roughly 9 percent on structural removal plus 1.8 megabytes per operation on bulk assignment, paid by every consumer that previously did not opt in. The lifecycle remains the sole writer of parent state, but materialises a subject's snapshot on first `GetParents()` read rather than eagerly per edge. Only source-scope walks and path resolution consume it.
+
+5. **Transient races block; only persistent conflicts throw.** The original text conflates the two, and the implementation threw for both. A subject genuinely owned by another context is a programming error and throws. A concurrent attach arriving while a structural write is in flight is a timing detail, not a caller error, and must not surface as an exception. The structural write therefore takes the executor's attachment monitor **before** resolving the interceptor chain and holds it through the terminal, so the window does not exist. Ordering is preferred over retry, which can livelock under sustained attach churn. This also removes a failure mode observed in the spike, where an unhandled rejection on a raw thread terminated the host process.
+
+6. **The unattached structural write hole is closed.** Structural setters publish an executor even when the subject has never been attached, so the attachment guard always runs. This costs one executor allocation per subject that ever takes a structural write, including during deserialization and bulk construction, and that cost is accepted rather than left as an unstated gap. The specification previously read as though the guard covered this case; it did not.
+
+7. **Subtree-scoped subject-local services are removed**, deliberately and as a named breaking change rather than as collateral. Preserving them would require retaining the executor-as-context relationship, the fallback graph, delegation resolution, cycle detection and cross-context invalidation, measured at about 670 of the 1088 lines of `InterceptorSubjectContext.cs`, which is the entire simplification. If subtree scoping is wanted later it returns through the separately designed mechanism already listed under deferred extensions.
+
+8. **Hosted-service stop order is out of scope.** Making release order deterministic flips subtree detach from children-first to parent-first. That interaction is handed to the hosting work rather than solved here, and is recorded as something that work must check.
+
+### Constraints discovered by implementing, which the original text does not state
+
+- **`Reconcile` commits outgoing edges before updating incoming records.** Incoming and outgoing state legitimately disagree mid-operation, in three windows: reconcile commit, attach-time seeding, and cycle drain. Three independent implementations hit this and worked around it three different ways. Any algorithm that reads incoming edges must validate candidates against committed outgoing edges. This is the single most load-bearing undocumented detail in the area and belongs in the design, not in a comment.
+- **Release order is observable and must be deterministic.** Master releases through a recursive descent, so detach callbacks arrive top-down. A mark-and-sweep yields an unordered set, and releasing by iterating the owned-subject dictionary is nondeterministic. Release must traverse from the removed edge over committed outgoing edges, visiting only unreachable subjects, in first-visit order.
+- **Ordering attributes fail silently in two ways.** `ServiceOrderResolver` sorts First, Middle and Last groups independently and drops any constraint naming a type in another group without error. Separately, services are filtered by the requested interface before ordering, so an ordering attribute binds only when both parties implement the interface being resolved. A merged lifecycle must implement `ILifecycleHandler` for migrated attributes to bind at all.
+- **Writes on unattached subjects are entirely unintercepted**, so a foreign reference is only detectable at attach or assign time. This is why claiming must walk the whole prospective subtree before mutating anything.
+
+### Verification practices this design requires
+
+The spike produced two independent instances of tooling reporting success while coverage shrank, and two complete, internally consistent, invalid benchmark comparisons. Implementation of this design must therefore reconcile **per-project** test counts against a recorded baseline rather than trusting a summary, and must validate benchmark arms against an independently measured mechanism rather than trusting the comparison harness. Every risky replacement should carry a `[Conditional("DEBUG")]` oracle that recomputes the previous answer and asserts agreement; that technique caught nothing in three variants, which is precisely why it was worth having.
+
 ## Purpose
 
 This design simplifies subject context ownership around one permanent rule: a subject is either unattached or attached to exactly one `IInterceptorSubjectContext`. Explicit roots and inherited graph membership decide whether that one attachment remains active. Arbitrary object graphs, including shared DAGs and cycles, remain supported.
