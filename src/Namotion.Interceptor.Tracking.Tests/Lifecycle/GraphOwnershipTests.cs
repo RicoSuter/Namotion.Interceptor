@@ -480,15 +480,13 @@ public class GraphOwnershipTests
         Assert.Null(b.TryGetContext());
     }
 
-#if DEBUG
     [Fact]
-    public void WhenLifecycleCallbackWritesStructuralProperty_ThenTheDebugGuardRejectsIt()
+    public void WhenLifecycleCallbackWritesStructuralProperty_ThenTheGuardRejectsIt()
     {
         // Arrange: a handler reacting to b's removal writes another structural property of the
-        // same graph. That used to release the writing parent mid-reconcile and relied on an
-        // inexact incoming-edge fallback to drain edges whose stored index lagged the committed
-        // value; both accommodations are deleted, and the write is a contract violation that the
-        // debug guard rejects before its backing writer runs.
+        // same graph. Subject lifecycle callbacks must not write structural properties, and the
+        // guard is live in every build, so the write is rejected before its backing writer runs
+        // rather than re-entering the reconciler on half-updated state.
         var callbackObserved = false;
         Exception? callbackException = null;
         Person? root = null;
@@ -526,21 +524,6 @@ public class GraphOwnershipTests
         Assert.Equal(0, b.GetReferenceCount());
         Assert.Null(b.TryGetContext());
     }
-#endif
-
-    /// <summary>Runs a delegate on every property detach, for tests that react from inside a
-    /// property lifecycle callback, which is exempt from the callback write contract.</summary>
-    private sealed class DelegatePropertyDetachHandler(Action<SubjectPropertyLifecycleChange> onDetach) : IPropertyLifecycleHandler
-    {
-        public void AttachProperty(SubjectPropertyLifecycleChange change)
-        {
-        }
-
-        public void DetachProperty(SubjectPropertyLifecycleChange change)
-        {
-            onDetach(change);
-        }
-    }
 
     [Fact]
     public void WhenParentIsReleasedReentrantlyDuringCollectionWrite_ThenCommittedChildIsReleasedWithIt()
@@ -549,10 +532,9 @@ public class GraphOwnershipTests
         // parent's release descends its already-committed new edges while a's stored incoming
         // edge still carries its pre-write index. The inexact-index removal in the ownership
         // state must still drain that edge, or a would stay attached to a released parent, and
-        // the reconciler must stop publishing for the released parent. Routed through a property
-        // lifecycle callback, which is exempt from the debug callback-write guard, so this
-        // settled-graph behavior is exercised in Debug and Release alike; in Release a subject
-        // lifecycle callback takes the same path because the guard compiles out.
+        // the reconciler must stop publishing for the released parent. Routed through a detach
+        // property lifecycle callback, which is the documented exemption from the callback write
+        // contract, so this settled-graph behavior holds in every build.
         var released = false;
         Person? root = null;
         Person? b = null;
@@ -584,47 +566,6 @@ public class GraphOwnershipTests
         Assert.Empty(a.GetParents());
         Assert.Null(b.TryGetContext());
     }
-
-#if !DEBUG
-    [Fact]
-    public void WhenSubjectCallbackWritesStructuralPropertyInRelease_ThenCommittedChildIsReleasedWithIt()
-    {
-        // Arrange: the original arrangement of the settled-graph test above, through a subject
-        // lifecycle callback. In Debug that write is rejected by the callback guard (see the
-        // Debug-only contract test); in Release the guard compiles out, so the write must take
-        // the same accommodated path as the property-callback variant and settle identically.
-        var released = false;
-        Person? root = null;
-        Person? b = null;
-        var context = CreateContext()
-            .WithService(() => new DelegateLifecycleHandler(change =>
-            {
-                if (!released && change.IsContextDetach && ReferenceEquals(change.Subject, b))
-                {
-                    released = true;
-                    root!.Father = null;
-                }
-            }), _ => false);
-
-        root = new Person(context) { FirstName = "R" };
-        var parent = new Person { FirstName = "P" };
-        b = new Person { FirstName = "B" };
-        var a = new Person { FirstName = "A" };
-        root.Father = parent;
-        parent.Children = [b, a];
-
-        // Act
-        parent.Children = [a];
-
-        // Assert: the whole former subtree is fully released.
-        Assert.True(released);
-        Assert.Null(parent.TryGetContext());
-        Assert.Null(a.TryGetContext());
-        Assert.Equal(0, a.GetReferenceCount());
-        Assert.Empty(a.GetParents());
-        Assert.Null(b.TryGetContext());
-    }
-#endif
 
     [Fact]
     public void WhenLifecycleCallbackWritesScalarProperty_ThenTheWriteIsAllowed()

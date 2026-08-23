@@ -11,9 +11,10 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// entry points within reach of code running while the topology lock is held; what those classes are
 /// allowed to do is then a property of a constructor signature rather than of three class bodies.
 ///
-/// Every publication marks the thread through <see cref="CallbackReentrancyGuard"/>, which is what
-/// lets the structural write protocol detect a callback that writes a structural property. The
-/// guard calls compile out in Release, and the JIT removes the then-empty finally blocks.
+/// Every publication marks the thread through <see cref="CallbackReentrancyGuard.EnterScope"/>,
+/// which is what lets the structural write protocol reject a callback that writes a structural
+/// property. The guard is live in every build, so the exception regions the scopes produce are
+/// deliberate, not leftovers.
 /// </remarks>
 internal sealed class LifecycleNotifier(IInterceptorSubjectContext context)
 {
@@ -23,28 +24,14 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context)
 
     public void RaiseSubjectAttached(SubjectLifecycleChange change)
     {
-        CallbackReentrancyGuard.EnterCallback();
-        try
-        {
-            SubjectAttached?.Invoke(change);
-        }
-        finally
-        {
-            CallbackReentrancyGuard.ExitCallback();
-        }
+        using var scope = CallbackReentrancyGuard.EnterScope();
+        SubjectAttached?.Invoke(change);
     }
 
     public void RaiseSubjectDetaching(SubjectLifecycleChange change)
     {
-        CallbackReentrancyGuard.EnterCallback();
-        try
-        {
-            SubjectDetaching?.Invoke(change);
-        }
-        finally
-        {
-            CallbackReentrancyGuard.ExitCallback();
-        }
+        using var scope = CallbackReentrancyGuard.EnterScope();
+        SubjectDetaching?.Invoke(change);
     }
 
     /// <summary>Publishes an edge removal that did not release the subject.</summary>
@@ -62,62 +49,41 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context)
 
     public void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, SubjectLifecycleChange change)
     {
-        CallbackReentrancyGuard.EnterCallback();
-        try
+        using var scope = CallbackReentrancyGuard.EnterScope();
+        var handlers = context.GetServices<ILifecycleHandler>();
+        for (var index = 0; index < handlers.Length; index++)
         {
-            var handlers = context.GetServices<ILifecycleHandler>();
-            for (var index = 0; index < handlers.Length; index++)
-            {
-                handlers[index].HandleLifecycleChange(change);
-            }
-
-            if (subject is ILifecycleHandler subjectHandler)
-            {
-                subjectHandler.HandleLifecycleChange(change);
-            }
+            handlers[index].HandleLifecycleChange(change);
         }
-        finally
+
+        if (subject is ILifecycleHandler subjectHandler)
         {
-            CallbackReentrancyGuard.ExitCallback();
+            subjectHandler.HandleLifecycleChange(change);
         }
     }
 
     public void InvokeRemovedLifecycleHandlers(IInterceptorSubject subject, SubjectLifecycleChange change)
     {
-        CallbackReentrancyGuard.EnterCallback();
-        try
+        using var scope = CallbackReentrancyGuard.EnterScope();
+        if (subject is ILifecycleHandler subjectHandler)
         {
-            if (subject is ILifecycleHandler subjectHandler)
-            {
-                subjectHandler.HandleLifecycleChange(change);
-            }
-
-            var handlers = context.GetServices<ILifecycleHandler>();
-            for (var index = 0; index < handlers.Length; index++)
-            {
-                handlers[index].HandleLifecycleChange(change);
-            }
+            subjectHandler.HandleLifecycleChange(change);
         }
-        finally
+
+        var handlers = context.GetServices<ILifecycleHandler>();
+        for (var index = 0; index < handlers.Length; index++)
         {
-            CallbackReentrancyGuard.ExitCallback();
+            handlers[index].HandleLifecycleChange(change);
         }
     }
 
     public void RefreshCollectionProperty(PropertyReference property, object? value)
     {
-        CallbackReentrancyGuard.EnterCallback();
-        try
+        using var scope = CallbackReentrancyGuard.EnterScope();
+        var handlers = context.GetServices<IPropertyLifecycleHandler>();
+        for (var index = 0; index < handlers.Length; index++)
         {
-            var handlers = context.GetServices<IPropertyLifecycleHandler>();
-            for (var index = 0; index < handlers.Length; index++)
-            {
-                handlers[index].RefreshCollectionProperty(property, value);
-            }
-        }
-        finally
-        {
-            CallbackReentrancyGuard.ExitCallback();
+            handlers[index].RefreshCollectionProperty(property, value);
         }
     }
 }

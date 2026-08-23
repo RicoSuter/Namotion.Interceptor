@@ -16,8 +16,8 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// would cap that at the price of reallocating on every large operation; that trade has not been
 /// measured, so the high-water mark is retained.
 ///
-/// Subject-keyed sets and maps use reference equality explicitly, because graph membership is
-/// identity and a hand-written subject may override Equals/GetHashCode.
+/// Subject-keyed sets and maps use reference equality; see <see cref="OwnershipGraph"/> for why
+/// graph membership is identity.
 /// </summary>
 internal static class LifecycleScratch
 {

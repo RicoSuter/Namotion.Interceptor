@@ -19,7 +19,6 @@ namespace Namotion.Interceptor.Registry.Tests;
 /// </summary>
 public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
 {
-
     /// <summary>
     /// Multiple threads rapidly replace the same ObjectRef property.
     /// After all threads finish and the property is set to a known final value,

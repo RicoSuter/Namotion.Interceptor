@@ -12,7 +12,7 @@ public static class ParentsHandlerExtensions
     public static TRoot? TryGetFirstParent<TRoot>(this IInterceptorSubject subject)
         where TRoot : class
     {
-        // Reference equality: graph walks use identity, like the lifecycle's own state.
+        // Reference equality; see OwnershipGraph for why graph membership is identity.
         var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
         var queue = new Queue<IInterceptorSubject>();
         queue.Enqueue(subject);

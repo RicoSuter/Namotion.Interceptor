@@ -18,6 +18,11 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// of bugs where the two disagree, and it is what makes the release descent and the reachability
 /// walk read the same relation.
 ///
+/// The claim primitives (claiming, releasing and re-anchoring executors) take the executor's
+/// attachment monitor through <c>TryGetAttachment</c> and <c>TryUpdateAttachment</c>, so they
+/// require the topology gate to already be held; see the lock order note on the executor's
+/// attachment monitor.
+///
 /// The owned map is a <see cref="ConcurrentDictionary{TKey,TValue}"/> with exactly one writer (the
 /// lifecycle, under its topology lock). It is concurrent for the readers:
 /// <c>GetParents</c> and

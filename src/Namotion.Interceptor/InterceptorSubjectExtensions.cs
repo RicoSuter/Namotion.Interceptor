@@ -43,8 +43,6 @@ public static class InterceptorSubjectExtensions
     /// this context, or the subject or part of its component is attached to a different context.</exception>
     public static void AttachToContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
-        GetterWriteGuard.ThrowIfInsideGetter();
-
         var lifecycle = context.TryGetService<ILifecycleInterceptor>();
         if (lifecycle is not null)
         {
@@ -67,8 +65,6 @@ public static class InterceptorSubjectExtensions
     /// explicit anchor is on a different context.</exception>
     public static void DetachFromContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
-        GetterWriteGuard.ThrowIfInsideGetter();
-
         var lifecycle = context.TryGetService<ILifecycleInterceptor>();
         if (lifecycle is not null)
         {

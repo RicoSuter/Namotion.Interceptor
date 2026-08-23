@@ -5,8 +5,9 @@ namespace Namotion.Interceptor.Tests;
 public class StructuralWriteTests
 {
     /// <summary>
-    /// Performs an attachment transition through the raw seam from inside the write chain, after the
-    /// structural entry captured its attachment revision but before the terminal re-checks it.
+    /// Performs an attachment transition through the raw seam from inside the write chain, while
+    /// the executor holds the attachment monitor. The monitor is reentrant on the writing thread,
+    /// so this is the one shape that can transition the attachment mid-write.
     /// </summary>
     private sealed class AttachmentTransitionInterceptor : IWriteInterceptor
     {
@@ -120,7 +121,9 @@ public class StructuralWriteTests
         // Assert
         Assert.True(written);
         Assert.True(backingWritten);
-        Assert.Equal(1, ((InterceptorExecutor)executor).Revision);
+        var property = new PropertyReference((IInterceptorSubject)subject, "Speed");
+        Assert.True(property.TryGetWriteState(true, out var commitRevision, out _));
+        Assert.Equal(1, commitRevision);
     }
 
     [Fact]
@@ -150,11 +153,14 @@ public class StructuralWriteTests
             }
         });
 
+        var attachStarting = new ManualResetEventSlim(false);
         var attachCompleted = new ManualResetEventSlim(false);
         var attacher = new Thread(() =>
         {
+            var revision = executor.AttachmentRevision;
+            attachStarting.Set();
             executor.TryUpdateAttachment(
-                executor.AttachmentRevision, InterceptorSubjectContext.Create(), SubjectAnchorKind.None, out _);
+                revision, InterceptorSubjectContext.Create(), SubjectAnchorKind.None, out _);
             attachCompleted.Set();
         });
 
@@ -163,8 +169,11 @@ public class StructuralWriteTests
         Assert.True(gate.ReachedChain.Wait(TimeSpan.FromSeconds(30)));
         attacher.Start();
 
-        // The attach must not complete while the write holds the attachment monitor.
-        Assert.False(attachCompleted.Wait(TimeSpan.FromMilliseconds(250)));
+        // The attach must not complete while the write holds the attachment monitor. Waiting for
+        // the attacher to reach the transition first keeps the negative wait from passing
+        // vacuously on a thread that never got scheduled.
+        Assert.True(attachStarting.Wait(TimeSpan.FromSeconds(30)));
+        Assert.False(attachCompleted.Wait(TimeSpan.FromMilliseconds(100)));
 
         gate.ResumeWrite.Set();
         Assert.True(writer.Join(TimeSpan.FromSeconds(30)), "the structural write did not complete");
@@ -233,7 +242,6 @@ public class StructuralWriteTests
         Assert.True(new PropertyReference(holder, nameof(StructuralHolder.Child)).TryGetWriteState(true, out var revision, out _));
         Assert.Equal(1, revision);
     }
-
 }
 
 [Attributes.InterceptorSubject]

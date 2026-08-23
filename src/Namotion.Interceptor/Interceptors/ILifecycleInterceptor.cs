@@ -17,17 +17,20 @@ public interface ILifecycleInterceptor :
 {
     /// <summary>
     /// Enters the synchronization gate a structural write must hold before the subject's
-    /// attachment monitor and before the write chain is resolved and executed. This is the
-    /// pre-chain seam that makes the structural lock order a total order: lifecycle gate, then
-    /// attachment monitor, then the subject's <see cref="IInterceptorSubject.SyncRoot"/>. Entering
-    /// the attachment monitor first deadlocks against a removal that holds this gate and releases
-    /// the subject's claim through that same monitor.
+    /// attachment monitor and before the write chain is resolved and executed. The gate is the
+    /// outermost lock of the structural write order; the protocol is documented on
+    /// <see cref="IInterceptorExecutor.SetStructuralPropertyValue{TProperty}"/>.
     /// </summary>
     /// <remarks>
     /// The gate must support reentrant acquisition on one thread (the lifecycle re-enters it from
     /// inside the write chain). The built-in lifecycle enters its per-context topology lock. An
     /// enter/exit pair rather than an exposed lock object, so a consumer cannot take the gate with
     /// an idiomatic-looking <c>lock</c> statement and hang the process against a structural write.
+    ///
+    /// Who enters it is a fixed convention: Core enters the gate around chain-executing
+    /// operations (the structural write seam), while the lifecycle enters it itself inside its
+    /// own entry points (attach, detach, composition). A new lifecycle entry point follows the
+    /// second form; a new chain-executing operation the first.
     /// </remarks>
     void EnterStructuralWriteGate();
 

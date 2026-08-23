@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Diagnostics;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -86,11 +85,11 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             release.RemoveEdge(occurrence.Subject, property, occurrence.Index);
             if (!graph.IsOwned(parent))
             {
-                // A reentrant descent entered from a callback (a sanctioned property lifecycle
-                // callback, or any callback in Release where the debug guard compiles out)
-                // released the writing parent; the remaining edges belong to a subject that is
-                // no longer in the graph, so publishing them would claim on behalf of a released
-                // owner.
+                // A reentrant descent released the writing parent mid-publication, entered from
+                // an exempt attach or detach property callback, or from a third-party write
+                // interceptor running downstream of the lifecycle. The remaining edges belong to
+                // a subject that is no longer in the graph, so publishing them would claim on
+                // behalf of a released owner.
                 return;
             }
         }
@@ -109,7 +108,10 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             }
         }
 
-        AssertWritingParentStillOwned(parent);
+        if (!graph.IsOwned(parent))
+        {
+            return;
+        }
 
         // Keys are stable identities, so no index is rewritten here, but property handlers still
         // resynchronize their own collection projections against the committed value.
@@ -190,7 +192,11 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
                 }
             }
 
-            AssertWritingParentStillOwned(parent);
+            if (!graph.IsOwned(parent))
+            {
+                return;
+            }
+
             RefreshRetainedIndices(property, newValue, oldOccurrences, newOccurrences, newCounts);
         }
         finally
@@ -269,24 +275,6 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
         }
 
         notifier.RefreshCollectionProperty(property, newValue);
-    }
-
-    /// <summary>
-    /// Debug oracle backing the early exits above: reaching this point means no per-notification
-    /// check observed a release, so the writing parent must still be owned. A violation means a
-    /// reentrant callback descent released the parent in a window the exits do not cover, and the
-    /// refresh below would republish indices for a released subject.
-    /// </summary>
-    [Conditional("DEBUG")]
-    private void AssertWritingParentStillOwned(IInterceptorSubject parent)
-    {
-        if (!graph.IsOwned(parent))
-        {
-            throw new InvalidOperationException(
-                "The writing parent was released while its own structural write was being " +
-                "reconciled, in a window the reconciler's per-notification ownership checks " +
-                "do not cover.");
-        }
     }
 
     private static bool IsAppendOnly(List<SubjectOccurrence> oldOccurrences, List<SubjectOccurrence> newOccurrences)

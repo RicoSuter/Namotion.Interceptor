@@ -30,10 +30,11 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     private readonly LifecycleNotifier _notifier;
 
     // One reentrant topology lock per lifecycle, which is one per context because the lifecycle is a
-    // singleton contract. Reentrancy is required: the structural write protocol enters the gate in
-    // Core (through EnterStructuralWriteGate, before the chain is resolved) and this interceptor enters
-    // it again from inside the chain, and an attach descent re-enters it through
-    // ContextInheritanceHandler composing a child's context mid-callback.
+    // singleton contract, and the outermost lock of the structural write order (see the executor's
+    // _attachmentLock note for the full order). Reentrancy is required: the structural write
+    // protocol enters the gate in Core (through EnterStructuralWriteGate, before the chain is
+    // resolved) and this interceptor enters it again from inside the chain, and an attach descent
+    // re-enters it through ContextInheritanceHandler composing a child's context mid-callback.
     private readonly object _gate = new();
 
     /// <summary>
@@ -136,11 +137,8 @@ public class LifecycleInterceptor : ILifecycleInterceptor
             }
             finally
             {
-                // A terminal or getter exception, or a normalizing setter that stored a different
-                // graph than the one validated, leaves claims that never became ownership. So does
-                // a third-party write interceptor that registered without ordering, sorted after
-                // the lifecycle, and suppressed the continuation; first-party interceptors all
-                // order before it, but only by their own [RunsBefore] declarations.
+                // Claims that never became ownership are handed back; see
+                // OwnershipGraph.ReleaseUnusedClaims for what leaves them behind.
                 _graph.ReleaseUnusedClaims(claimed);
                 LifecycleScratch.Return(claimed);
             }

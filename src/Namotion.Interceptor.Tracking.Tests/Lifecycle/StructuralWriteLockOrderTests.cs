@@ -10,17 +10,29 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// monitor before the topology gate waits for the gate, while a parent removal that holds the gate
 /// reaches the child's release and waits for that same monitor. The stress tests below drive both
 /// directions concurrently; a wrong order shows up as a hang, so every join is bounded and fails
-/// the test rather than hanging the suite.
+/// the test rather than hanging the suite, and the failure message carries each thread's progress
+/// so a timeout distinguishes a deadlock from slow progress.
 /// </summary>
 public class StructuralWriteLockOrderTests
 {
-    private static readonly TimeSpan JoinTimeout = TimeSpan.FromSeconds(120);
+    private static readonly TimeSpan JoinTimeout = TimeSpan.FromSeconds(20);
 
     private static IInterceptorSubjectContext CreateContext()
     {
         return InterceptorSubjectContext
             .Create()
             .WithContextInheritance();
+    }
+
+    private static void ThrowIfAny(List<Exception> exceptions)
+    {
+        lock (exceptions)
+        {
+            if (exceptions.Count > 0)
+            {
+                throw new AggregateException("a concurrent structural operation threw", exceptions);
+            }
+        }
     }
 
     [Fact]
@@ -37,6 +49,8 @@ public class StructuralWriteLockOrderTests
 
         const int iterations = 3000;
         var exceptions = new List<Exception>();
+        var writerProgress = 0;
+        var removerProgress = 0;
         var barrier = new Barrier(2);
 
         var childWriter = new Thread(() =>
@@ -56,6 +70,8 @@ public class StructuralWriteLockOrderTests
                         exceptions.Add(exception);
                     }
                 }
+
+                Volatile.Write(ref writerProgress, i + 1);
             }
         });
         childWriter.IsBackground = true;
@@ -77,6 +93,8 @@ public class StructuralWriteLockOrderTests
                         exceptions.Add(exception);
                     }
                 }
+
+                Volatile.Write(ref removerProgress, i + 1);
             }
         });
         parentRemover.IsBackground = true;
@@ -88,9 +106,10 @@ public class StructuralWriteLockOrderTests
         var parentRemoverCompleted = childWriterCompleted && parentRemover.Join(JoinTimeout);
 
         // Assert: completion first, so a lock order defect fails as a timeout instead of hanging.
-        Assert.True(childWriterCompleted, "the child writer did not complete: probable lock order deadlock");
-        Assert.True(parentRemoverCompleted, "the parent remover did not complete: probable lock order deadlock");
-        Assert.Empty(exceptions);
+        Assert.True(childWriterCompleted && parentRemoverCompleted,
+            $"probable lock order deadlock: child writer at {Volatile.Read(ref writerProgress)}/{iterations}, " +
+            $"parent remover at {Volatile.Read(ref removerProgress)}/{iterations}");
+        ThrowIfAny(exceptions);
 
         // The settled graph is consistent: transient races ordered instead of throwing.
         root.Mother = child;
@@ -111,6 +130,8 @@ public class StructuralWriteLockOrderTests
 
         const int iterations = 3000;
         var exceptions = new List<Exception>();
+        var writerProgress = 0;
+        var transitionerProgress = 0;
         var barrier = new Barrier(2);
 
         var writer = new Thread(() =>
@@ -130,6 +151,8 @@ public class StructuralWriteLockOrderTests
                         exceptions.Add(exception);
                     }
                 }
+
+                Volatile.Write(ref writerProgress, i + 1);
             }
         });
         writer.IsBackground = true;
@@ -151,6 +174,8 @@ public class StructuralWriteLockOrderTests
                         exceptions.Add(exception);
                     }
                 }
+
+                Volatile.Write(ref transitionerProgress, i + 1);
             }
         });
         transitioner.IsBackground = true;
@@ -162,9 +187,21 @@ public class StructuralWriteLockOrderTests
         var transitionerCompleted = writerCompleted && transitioner.Join(JoinTimeout);
 
         // Assert
-        Assert.True(writerCompleted, "the structural writer did not complete: probable lock order deadlock");
-        Assert.True(transitionerCompleted, "the attach/detach thread did not complete: probable lock order deadlock");
-        Assert.Empty(exceptions);
+        Assert.True(writerCompleted && transitionerCompleted,
+            $"probable lock order deadlock: writer at {Volatile.Read(ref writerProgress)}/{iterations}, " +
+            $"attach/detach at {Volatile.Read(ref transitionerProgress)}/{iterations}");
+        ThrowIfAny(exceptions);
+        Assert.Equal(iterations, writerProgress);
+        Assert.Equal(iterations, transitionerProgress);
+
+        // The settled graph still tracks writes: the write path did not degrade into a silent
+        // no-op under the churn.
+        subject.AttachToContext(context);
+        var father = new Person { FirstName = "Settled" };
+        subject.Father = father;
+        Assert.Same(context, subject.TryGetContext());
+        Assert.Same(context, father.TryGetContext());
+        Assert.Equal(1, father.GetReferenceCount());
     }
 
     [Fact]

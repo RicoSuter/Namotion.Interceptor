@@ -30,11 +30,15 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     // The exact attachment state. Writes are serialized by a private monitor rather than SyncRoot
     // so that transitioning the attachment never contends with ordinary property writes; reads are
     // lock-free (the context read is the ownership predicate across the codebase, so it must cost
-    // a volatile load, not a monitor). Lock order: the structural write protocol is lifecycle
-    // gate, then _attachmentLock, then SyncRoot; see SetStructuralPropertyValue. The attachment
-    // transitions (TryUpdateAttachment, TryGetAttachment) take _attachmentLock alone and run no
-    // foreign code while holding it, so they are leaf acquisitions, and nothing enters
-    // _attachmentLock while holding a SyncRoot.
+    // a volatile load, not a monitor).
+    //
+    // Lock order, stated once here and cross-referenced everywhere else: the structural write
+    // protocol is lifecycle gate, then _attachmentLock, then SyncRoot (the terminal). The gate
+    // must come first: a write that entered this monitor before the gate deadlocks against a
+    // removal that holds the gate and releases this subject's claim through this same monitor.
+    // The attachment transitions (TryUpdateAttachment, TryGetAttachment) take _attachmentLock
+    // alone and run no foreign code while holding it, so they are leaf acquisitions, and nothing
+    // enters _attachmentLock while holding a SyncRoot.
     //
     // Publication ordering, which the lock-free readers depend on: a transition stores the context
     // and the anchor first (volatile, so release) and the revision last with an atomic release
@@ -150,14 +154,10 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
 
     public bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue)
     {
-        GetterWriteGuard.ThrowIfInsideGetter();
-
-        // The structural lock order is lifecycle gate, then attachment monitor, then SyncRoot
-        // (taken by the terminal). The gate must come first: a structural write that entered the
-        // attachment monitor before the gate deadlocks against a removal that holds the gate and
-        // releases this subject's claim through this same monitor. Holding the monitor from before
-        // chain resolution through the terminal is what turns a racing attachment transition into
-        // ordering: the transition waits on the monitor instead of invalidating an in-flight write.
+        // Lock order and why the gate comes first: see the note on _attachmentLock. Holding the
+        // monitor from before chain resolution through the terminal is what turns a racing
+        // attachment transition into ordering: the transition waits on the monitor instead of
+        // invalidating an in-flight write.
         while (true)
         {
             var attachedContext = _attachedContext;
