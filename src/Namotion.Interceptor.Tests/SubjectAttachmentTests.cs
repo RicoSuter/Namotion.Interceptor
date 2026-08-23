@@ -9,6 +9,8 @@ public class SubjectAttachmentTests
         public int AttachCount;
         public int DetachCount;
 
+        public object StructuralWriteGate { get; } = new();
+
         public void OnContextComposed(IInterceptorSubject subject) => AttachCount++;
 
         public void OnContextDecomposed(IInterceptorSubject subject) => DetachCount++;

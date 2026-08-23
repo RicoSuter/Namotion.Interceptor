@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Namotion.Interceptor.Tracking.Parent;
 
@@ -37,7 +38,12 @@ internal sealed class SubjectOwnership
     private PropertyReference _firstProperty;
     private object? _firstIndex;
     private List<IncomingEdge>? _additionalEdges;
-    private int _incomingCount;
+
+    // Volatile because GetReferenceCount reads it lock-free from outside the per-subject monitor
+    // (consumers call it from inside their own locks and from lifecycle callbacks, so it must not
+    // take one). The volatile store publishes the count with release semantics; an Interlocked
+    // read would only prevent tearing, which a 32-bit int cannot suffer anyway.
+    private volatile int _incomingCount;
 
     // Published parent snapshot, or null while parents were never asked for on this subject. Read
     // without any lock by GetParents; written only under this instance's monitor.
@@ -88,9 +94,12 @@ internal sealed class SubjectOwnership
     /// <remarks>
     /// The inexact case is reachable and must not fail. A reconcile commits the property's new
     /// value before it refreshes the retained edges' stored indices, so a release descent entered
-    /// reentrantly from a removal callback drains committed edges whose new index this subject has
-    /// not adopted yet. Only the per-property occurrence count is authoritative in that window;
-    /// refusing to remove would leak the edge and leave the subject attached to a released parent.
+    /// reentrantly from a lifecycle callback drains committed edges whose new index this subject
+    /// has not adopted yet. Property lifecycle callbacks are exempt from the callback write
+    /// contract (see <see cref="CallbackReentrancyGuard"/>), and in Release that guard compiles
+    /// out entirely, so the window stays reachable in every build. Only the per-property
+    /// occurrence count is authoritative in that window; refusing to remove would leak the edge
+    /// and leave the subject attached to a released parent.
     /// </remarks>
     public bool RemoveIncoming(PropertyReference property, object? index)
     {
@@ -149,7 +158,39 @@ internal sealed class SubjectOwnership
                 return true;
             }
 
+            AssertRemovedFallbackWouldAlsoMiss(property);
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Debug oracle on the miss path: reaching it means both the exact match and the inexact
+    /// same-property fallback found nothing, so no occurrence of the property may remain. A
+    /// surviving occurrence would mean the fallback search above skipped an edge it was supposed
+    /// to take, silently leaking it.
+    /// </summary>
+    [Conditional("DEBUG")]
+    private void AssertRemovedFallbackWouldAlsoMiss(PropertyReference property)
+    {
+        var fallbackExists = _incomingCount > 0 && _firstProperty.Equals(property);
+        if (!fallbackExists && _additionalEdges is not null)
+        {
+            for (var i = 0; i < _additionalEdges.Count; i++)
+            {
+                if (_additionalEdges[i].Property.Equals(property))
+                {
+                    fallbackExists = true;
+                    break;
+                }
+            }
+        }
+
+        if (fallbackExists)
+        {
+            throw new InvalidOperationException(
+                "An incoming edge removal missed its exact index and the inexact same-property " +
+                "fallback still left an occurrence of that property behind, which means the " +
+                "fallback search skipped an edge it was supposed to drain.");
         }
     }
 

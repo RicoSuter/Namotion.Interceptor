@@ -123,6 +123,8 @@ public class InterceptorTests
         private readonly string _name;
         private readonly List<string> _logs;
 
+        public object StructuralWriteGate { get; } = new();
+
         public TestLifecycleInterceptor(string name, List<string> logs)
         {
             _name = name;

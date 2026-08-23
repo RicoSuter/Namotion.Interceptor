@@ -480,13 +480,119 @@ public class GraphOwnershipTests
         Assert.Null(b.TryGetContext());
     }
 
+#if DEBUG
+    [Fact]
+    public void WhenLifecycleCallbackWritesStructuralProperty_ThenTheDebugGuardRejectsIt()
+    {
+        // Arrange: a handler reacting to b's removal writes another structural property of the
+        // same graph. That used to release the writing parent mid-reconcile and relied on an
+        // inexact incoming-edge fallback to drain edges whose stored index lagged the committed
+        // value; both accommodations are deleted, and the write is a contract violation that the
+        // debug guard rejects before its backing writer runs.
+        var callbackObserved = false;
+        Exception? callbackException = null;
+        Person? root = null;
+        Person? b = null;
+        var context = CreateContext()
+            .WithService(() => new DelegateLifecycleHandler(change =>
+            {
+                if (callbackObserved || !change.IsPropertyReferenceRemoved || !ReferenceEquals(change.Subject, b))
+                {
+                    return;
+                }
+
+                callbackObserved = true;
+                callbackException = Record.Exception(() => root!.Father = null);
+            }), _ => false);
+
+        root = new Person(context) { FirstName = "R" };
+        var parent = new Person { FirstName = "P" };
+        b = new Person { FirstName = "B" };
+        var a = new Person { FirstName = "A" };
+        root.Father = parent;
+        parent.Children = [b, a];
+
+        // Act: the removal of b publishes the callback; the callback's write is rejected, so the
+        // outer write itself completes normally.
+        parent.Children = [a];
+
+        // Assert
+        Assert.True(callbackObserved);
+        Assert.IsType<InvalidOperationException>(callbackException);
+        Assert.Contains("lifecycle callback must not write a structural", callbackException.Message);
+        Assert.Same(context, root.TryGetContext());
+        Assert.Same(context, parent.TryGetContext());
+        Assert.Equal(1, a.GetReferenceCount());
+        Assert.Equal(0, b.GetReferenceCount());
+        Assert.Null(b.TryGetContext());
+    }
+#endif
+
+    /// <summary>Runs a delegate on every property detach, for tests that react from inside a
+    /// property lifecycle callback, which is exempt from the callback write contract.</summary>
+    private sealed class DelegatePropertyDetachHandler(Action<SubjectPropertyLifecycleChange> onDetach) : IPropertyLifecycleHandler
+    {
+        public void AttachProperty(SubjectPropertyLifecycleChange change)
+        {
+        }
+
+        public void DetachProperty(SubjectPropertyLifecycleChange change)
+        {
+            onDetach(change);
+        }
+    }
+
     [Fact]
     public void WhenParentIsReleasedReentrantlyDuringCollectionWrite_ThenCommittedChildIsReleasedWithIt()
     {
-        // Arrange: a handler reacting to b's removal detaches the writing parent itself, so the
+        // Arrange: a callback reacting to b's release detaches the writing parent itself, so the
         // parent's release descends its already-committed new edges while a's stored incoming
         // edge still carries its pre-write index. The inexact-index removal in the ownership
-        // state must still drain that edge, or a would stay attached to a released parent.
+        // state must still drain that edge, or a would stay attached to a released parent, and
+        // the reconciler must stop publishing for the released parent. Routed through a property
+        // lifecycle callback, which is exempt from the debug callback-write guard, so this
+        // settled-graph behavior is exercised in Debug and Release alike; in Release a subject
+        // lifecycle callback takes the same path because the guard compiles out.
+        var released = false;
+        Person? root = null;
+        Person? b = null;
+        var context = CreateContext()
+            .WithService(() => new DelegatePropertyDetachHandler(change =>
+            {
+                if (!released && ReferenceEquals(change.Subject, b))
+                {
+                    released = true;
+                    root!.Father = null;
+                }
+            }), _ => false);
+
+        root = new Person(context) { FirstName = "R" };
+        var parent = new Person { FirstName = "P" };
+        b = new Person { FirstName = "B" };
+        var a = new Person { FirstName = "A" };
+        root.Father = parent;
+        parent.Children = [b, a];
+
+        // Act
+        parent.Children = [a];
+
+        // Assert: the whole former subtree is fully released.
+        Assert.True(released);
+        Assert.Null(parent.TryGetContext());
+        Assert.Null(a.TryGetContext());
+        Assert.Equal(0, a.GetReferenceCount());
+        Assert.Empty(a.GetParents());
+        Assert.Null(b.TryGetContext());
+    }
+
+#if !DEBUG
+    [Fact]
+    public void WhenSubjectCallbackWritesStructuralPropertyInRelease_ThenCommittedChildIsReleasedWithIt()
+    {
+        // Arrange: the original arrangement of the settled-graph test above, through a subject
+        // lifecycle callback. In Debug that write is rejected by the callback guard (see the
+        // Debug-only contract test); in Release the guard compiles out, so the write must take
+        // the same accommodated path as the property-callback variant and settle identically.
         var released = false;
         Person? root = null;
         Person? b = null;
@@ -517,6 +623,32 @@ public class GraphOwnershipTests
         Assert.Equal(0, a.GetReferenceCount());
         Assert.Empty(a.GetParents());
         Assert.Null(b.TryGetContext());
+    }
+#endif
+
+    [Fact]
+    public void WhenLifecycleCallbackWritesScalarProperty_ThenTheWriteIsAllowed()
+    {
+        // Arrange: scalar writes from callbacks stay supported; only structural writes are the
+        // contract violation.
+        Person? root = null;
+        var context = CreateContext()
+            .WithService(() => new DelegateLifecycleHandler(change =>
+            {
+                // The root's own construction-time attach fires before the local is assigned.
+                if (change.IsContextAttach && root is not null)
+                {
+                    root.LastName = "attached";
+                }
+            }), _ => false);
+
+        root = new Person(context) { FirstName = "R" };
+
+        // Act
+        root.Father = new Person { FirstName = "F" };
+
+        // Assert
+        Assert.Equal("attached", root.LastName);
     }
 
     [Fact]

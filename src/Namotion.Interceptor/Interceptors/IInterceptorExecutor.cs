@@ -81,19 +81,19 @@ public interface IInterceptorExecutor : IInterceptorSubjectContext
     bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue);
 
     /// <summary>
-    /// Sets a structural (subject-referencing) property value through the interceptor chain.
-    /// Identical to <see cref="SetPropertyValue{TProperty}"/> except that it captures
-    /// <see cref="AttachmentRevision"/> before resolving the interceptor chain and the terminal
-    /// write re-checks it, so a structural write cannot commit through a chain that was picked for
-    /// a different attachment.
+    /// Sets a structural (subject-referencing) property value. When the subject is attached to a
+    /// context with an <see cref="ILifecycleInterceptor"/>, the write enters that lifecycle's
+    /// <see cref="ILifecycleInterceptor.StructuralWriteGate"/> and then the subject's attachment
+    /// monitor before the interceptor chain is resolved, holds both through the terminal, and
+    /// revalidates the attachment under the locks (releasing and retrying when it moved). An
+    /// unattached subject enters only the attachment monitor and writes without a lifecycle. A
+    /// racing attachment transition therefore orders against the write instead of failing it.
     /// </summary>
     /// <param name="propertyName">The name of the property to write.</param>
     /// <param name="newValue">The new value to set.</param>
     /// <param name="currentValue">The current value of the property.</param>
     /// <param name="writeValue">A delegate that writes the new value to the backing field.</param>
     /// <returns>True if the value was written; false if the write was suppressed by an interceptor.</returns>
-    /// <exception cref="InvalidOperationException">The attachment changed between entry and the
-    /// terminal write; the backing field was not written.</exception>
     bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue);
 
     /// <summary>

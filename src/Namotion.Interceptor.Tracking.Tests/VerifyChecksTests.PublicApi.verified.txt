@@ -168,6 +168,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
     public class LifecycleInterceptor : Namotion.Interceptor.ISingletonContextService<Namotion.Interceptor.Interceptors.ILifecycleInterceptor>, Namotion.Interceptor.Interceptors.ILifecycleInterceptor, Namotion.Interceptor.Interceptors.IWriteInterceptor
     {
         public LifecycleInterceptor(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public object StructuralWriteGate { get; }
         public event System.Action<Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange>? SubjectAttached;
         public event System.Action<Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange>? SubjectDetaching;
         public void AttachSubjectToContext(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context, Namotion.Interceptor.SubjectAnchorKind anchor) { }

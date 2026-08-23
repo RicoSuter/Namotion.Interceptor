@@ -26,7 +26,10 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// </remarks>
 internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
 {
-    private readonly ConcurrentDictionary<IInterceptorSubject, SubjectOwnership> _owned = new();
+    // Reference equality, explicitly: graph membership is identity, and a hand-written subject
+    // may override Equals/GetHashCode, which under default equality could merge distinct nodes or
+    // strand a subject whose hash mutates while it is owned.
+    private readonly ConcurrentDictionary<IInterceptorSubject, SubjectOwnership> _owned = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<PropertyReference, object?> _baselines = new(PropertyReference.Comparer);
 
     public IInterceptorSubjectContext Context { get; } = context;
@@ -463,9 +466,12 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     }
 
     /// <summary>
-    /// Hands back every claim that did not end up carrying ownership, which happens when the write
-    /// was suppressed downstream or the authoritative getter returned a different graph than the
-    /// one that was validated.
+    /// Hands back every claim that did not end up carrying ownership, which happens when the
+    /// terminal or the authoritative getter reread throws, or a normalizing setter stores a
+    /// different graph than the one that was validated. First-party interceptors all order before
+    /// the lifecycle, but that rests on their [RunsBefore] declarations: a third-party write
+    /// interceptor registered without ordering can run downstream and suppress the continuation,
+    /// which this release then also covers.
     /// </summary>
     public void ReleaseUnusedClaims(List<IInterceptorSubject> claimed)
     {

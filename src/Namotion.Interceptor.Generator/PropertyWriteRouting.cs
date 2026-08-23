@@ -3,7 +3,7 @@ using Microsoft.CodeAnalysis;
 namespace Namotion.Interceptor.Generator;
 
 /// <summary>
-/// Decides at generation time whether a property setter routes through the attachment-guarded
+/// Decides at generation time whether a property setter routes through the synchronized
 /// structural accessor helper or the plain scalar one.
 /// </summary>
 /// <remarks>
@@ -14,9 +14,9 @@ namespace Namotion.Interceptor.Generator;
 /// not carry the interface; dynamic, unresolved types and multi-dimensional arrays diverge from
 /// their runtime classification as well. The asymmetry is what makes failing closed correct: a
 /// false structural positive costs one predictable branch on an uncommon property, while a false
-/// scalar negative silently skips the attachment-revision guard on exactly the path the guard
-/// exists for, even though the lifecycle still does structural work because it classifies from
-/// runtime metadata.
+/// scalar negative silently skips the pre-chain synchronization (lifecycle gate, then attachment
+/// monitor) on exactly the path it exists for, even though the lifecycle still does structural
+/// work because it classifies from runtime metadata.
 /// </remarks>
 internal static class PropertyWriteRouting
 {

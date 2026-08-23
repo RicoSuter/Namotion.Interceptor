@@ -30,10 +30,11 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     // The exact attachment state. Writes are serialized by a private monitor rather than SyncRoot
     // so that transitioning the attachment never contends with ordinary property writes; reads are
     // lock-free (the context read is the ownership predicate across the codebase, so it must cost
-    // a volatile load, not a monitor). Lock order: a thread already holding the subject's SyncRoot
-    // may enter _attachmentLock (the structural terminal does, via EnterAttachmentGuard), never
-    // the reverse. Everything else takes _attachmentLock alone and runs no foreign code while
-    // holding it, so no cycle is possible.
+    // a volatile load, not a monitor). Lock order: the structural write protocol is lifecycle
+    // gate, then _attachmentLock, then SyncRoot; see SetStructuralPropertyValue. The attachment
+    // transitions (TryUpdateAttachment, TryGetAttachment) take _attachmentLock alone and run no
+    // foreign code while holding it, so they are leaf acquisitions, and nothing enters
+    // _attachmentLock while holding a SyncRoot.
     //
     // Publication ordering, which the lock-free readers depend on: a transition stores the context
     // and the anchor first (volatile, so release) and the revision last with an atomic release
@@ -101,31 +102,6 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     }
 
     /// <summary>
-    /// Enters the attachment monitor and verifies the attachment revision still matches what the
-    /// structural write captured at entry. On success the monitor stays held, so no attachment
-    /// transition can land between the check and the commit it validated; pair with
-    /// <see cref="ExitAttachmentGuard"/> in a finally block. On a mismatch the monitor is released
-    /// and the write is rejected before it reaches the backing field. Called with the subject's
-    /// SyncRoot held; see the lock order note on <see cref="_attachmentLock"/>.
-    /// </summary>
-    internal void EnterAttachmentGuard(long attachmentRevisionAtEntry)
-    {
-        Monitor.Enter(_attachmentLock);
-        if (_attachmentRevision != attachmentRevisionAtEntry)
-        {
-            Monitor.Exit(_attachmentLock);
-            throw new InvalidOperationException(
-                "The subject's context attachment changed while a structural write was in flight, " +
-                "so the write was rejected before reaching the backing field.");
-        }
-    }
-
-    internal void ExitAttachmentGuard()
-    {
-        Monitor.Exit(_attachmentLock);
-    }
-
-    /// <summary>
     /// Returns the subject's executor, publishing one on first access. Call it from the subject's
     /// <see cref="IInterceptorSubject.Context"/> accessor, passing that subject's own backing field.
     /// Public because the source generator emits the call into the consumer's assembly.
@@ -172,20 +148,79 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
         return context.IsWritten;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue)
     {
-        // The attachment revision is captured before the interceptor chain is resolved, so the
-        // structural terminal can reject a commit through a chain that was picked for a
-        // different attachment.
+        GetterWriteGuard.ThrowIfInsideGetter();
+
+        // The structural lock order is lifecycle gate, then attachment monitor, then SyncRoot
+        // (taken by the terminal). The gate must come first: a structural write that entered the
+        // attachment monitor before the gate deadlocks against a removal that holds the gate and
+        // releases this subject's claim through this same monitor. Holding the monitor from before
+        // chain resolution through the terminal is what turns a racing attachment transition into
+        // ordering: the transition waits on the monitor instead of invalidating an in-flight write.
+        while (true)
+        {
+            var attachedContext = _attachedContext;
+            var gate = attachedContext?.TryGetService<ILifecycleInterceptor>()?.StructuralWriteGate;
+            if (gate is null)
+            {
+                // No lifecycle to order against: either the subject is unattached, or its context
+                // has no lifecycle, so nothing downstream takes a topology gate for it. Two
+                // assumptions, stated: interceptors resolved through a lifecycle-free context must
+                // not take another context's lifecycle gate inside this chain, and a lifecycle
+                // registered on the attached context after the gate was read above is not seen by
+                // this write, because the gate comes from that one read (contexts are configured
+                // before subjects attach to them).
+                lock (_attachmentLock)
+                {
+                    if (ReferenceEquals(_attachedContext, attachedContext))
+                    {
+                        return WriteStructuralValue(propertyName, newValue, currentValue, writeValue);
+                    }
+                }
+            }
+            else
+            {
+                lock (gate)
+                {
+                    lock (_attachmentLock)
+                    {
+                        // Revalidate under both locks: the attachment may have moved between the
+                        // lock-free read above and the acquisitions. Falling out of the lock scopes
+                        // releases both and retries against the fresh attachment.
+                        if (ReferenceEquals(_attachedContext, attachedContext))
+                        {
+                            return WriteStructuralValue(propertyName, newValue, currentValue, writeValue);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Commits a structural write while the caller holds the attachment monitor (and the lifecycle
+    /// gate when the subject is attached to a context with a lifecycle).
+    /// </summary>
+    private bool WriteStructuralValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue)
+    {
+        if (_attachedContext is null && HasEmptyState)
+        {
+            // Unattached and nothing composed: nothing intercepts this subject, so the write is a
+            // plain backing store, as cheap as the pre-executor short circuit in the generated
+            // helper. It still runs under the attachment monitor, so a concurrent attach either
+            // sees the committed value when it seeds or waits until this write is done.
+            writeValue(_subject, newValue);
+            return true;
+        }
+
         var context = new PropertyWriteContext<TProperty>(
-            AttachmentRevision,
             this,
             new PropertyReference(_subject, propertyName),
             currentValue,
             newValue);
 
-        ExecuteInterceptedStructuralWrite(ref context, writeValue);
+        ExecuteInterceptedWrite(ref context, writeValue);
         return context.IsWritten;
     }
 

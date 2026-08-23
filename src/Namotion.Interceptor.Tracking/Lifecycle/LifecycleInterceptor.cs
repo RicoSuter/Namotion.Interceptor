@@ -30,8 +30,10 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     private readonly LifecycleNotifier _notifier;
 
     // One reentrant topology lock per lifecycle, which is one per context because the lifecycle is a
-    // singleton contract. A lifecycle callback may write another structural property of the same
-    // graph, which re-enters this lock on the same thread.
+    // singleton contract. Reentrancy is required: the structural write protocol enters the gate in
+    // Core (through StructuralWriteGate, before the chain is resolved) and this interceptor enters
+    // it again from inside the chain, and an attach descent re-enters it through
+    // ContextInheritanceHandler composing a child's context mid-callback.
     private readonly object _gate = new();
 
     /// <summary>
@@ -74,6 +76,9 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     #region Structural writes
 
     /// <inheritdoc />
+    public object StructuralWriteGate => _gate;
+
+    /// <inheritdoc />
     /// <remarks>
     /// Scalar properties never take the topology lock. A structural property validates and claims the
     /// whole component the proposed value opens up before the backing writer runs, so a write that
@@ -88,6 +93,8 @@ public class LifecycleInterceptor : ILifecycleInterceptor
             next(ref context);
             return;
         }
+
+        CallbackReentrancyGuard.ThrowIfInsideCallback();
 
         var subject = property.Subject;
         if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
@@ -120,8 +127,11 @@ public class LifecycleInterceptor : ILifecycleInterceptor
             }
             finally
             {
-                // A write suppressed downstream, or a setter that stored something else, leaves
-                // claims that never became ownership.
+                // A terminal or getter exception, or a normalizing setter that stored a different
+                // graph than the one validated, leaves claims that never became ownership. So does
+                // a third-party write interceptor that registered without ordering, sorted after
+                // the lifecycle, and suppressed the continuation; first-party interceptors all
+                // order before it, but only by their own [RunsBefore] declarations.
                 _graph.ReleaseUnusedClaims(claimed);
                 LifecycleScratch.Return(claimed);
             }

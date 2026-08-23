@@ -4,14 +4,20 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
 /// Thread-static scratch pools for the lifecycle's traversals. Every graph operation needs a handful
-/// of short-lived lists, sets and stacks, and reentrancy (a callback that writes another structural
-/// property) means several can be live on one thread at once, so they are pooled rather than held
-/// as fields.
+/// of short-lived lists, sets and stacks, and reentrancy (an attach descent re-entered through a
+/// callback composing a child's context) means several can be live on one thread at once, so they
+/// are pooled rather than held as fields.
 ///
-/// The pools are unbounded and never trimmed, so a thread retains buffers sized to the deepest
-/// graph operation it ever performed. That high-water mark is the retention bound: one set of small
-/// collections per thread that has touched the lifecycle, which is bounded by the widest single
-/// structural value rather than by the size of the graph.
+/// The pools are unbounded and never trimmed, so a thread retains buffers sized to the largest
+/// graph operation it ever performed. Occurrence and index buffers are bounded by the widest single
+/// structural value, but discovery, release and reachability state is not: a component discovery
+/// visits every newly reachable subject, and a reachability walk visits an ancestor closure, so
+/// those buffers can reach the size of a whole component. Discarding oversized buffers on return
+/// would cap that at the price of reallocating on every large operation; that trade has not been
+/// measured, so the high-water mark is retained.
+///
+/// Subject-keyed sets and maps use reference equality explicitly, because graph membership is
+/// identity and a hand-written subject may override Equals/GetHashCode.
 /// </summary>
 internal static class LifecycleScratch
 {
@@ -106,7 +112,7 @@ internal static class LifecycleScratch
     public static HashSet<IInterceptorSubject> RentSubjectSet()
     {
         _subjectSets ??= new Stack<HashSet<IInterceptorSubject>>();
-        return _subjectSets.Count > 0 ? _subjectSets.Pop() : new HashSet<IInterceptorSubject>(8);
+        return _subjectSets.Count > 0 ? _subjectSets.Pop() : new HashSet<IInterceptorSubject>(8, ReferenceEqualityComparer.Instance);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -136,7 +142,7 @@ internal static class LifecycleScratch
     public static Dictionary<IInterceptorSubject, int> RentSubjectCounter()
     {
         _subjectCounters ??= new Stack<Dictionary<IInterceptorSubject, int>>();
-        return _subjectCounters.Count > 0 ? _subjectCounters.Pop() : new Dictionary<IInterceptorSubject, int>(8);
+        return _subjectCounters.Count > 0 ? _subjectCounters.Pop() : new Dictionary<IInterceptorSubject, int>(8, ReferenceEqualityComparer.Instance);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -151,7 +157,7 @@ internal static class LifecycleScratch
     public static Dictionary<IInterceptorSubject, List<object?>> RentIndexGroups()
     {
         _indexGroups ??= new Stack<Dictionary<IInterceptorSubject, List<object?>>>();
-        return _indexGroups.Count > 0 ? _indexGroups.Pop() : new Dictionary<IInterceptorSubject, List<object?>>(8);
+        return _indexGroups.Count > 0 ? _indexGroups.Pop() : new Dictionary<IInterceptorSubject, List<object?>>(8, ReferenceEqualityComparer.Instance);
     }
 
     /// <summary>Returns the group map and every index list it handed out.</summary>

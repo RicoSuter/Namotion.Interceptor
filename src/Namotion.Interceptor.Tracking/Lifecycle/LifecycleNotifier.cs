@@ -10,6 +10,10 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// interceptor would make the dependency circular and would put the write protocol and both attach
 /// entry points within reach of code running while the topology lock is held; what those classes are
 /// allowed to do is then a property of a constructor signature rather than of three class bodies.
+///
+/// Every publication marks the thread through <see cref="CallbackReentrancyGuard"/>, which is what
+/// lets the structural write protocol detect a callback that writes a structural property. The
+/// guard calls compile out in Release, and the JIT removes the then-empty finally blocks.
 /// </remarks>
 internal sealed class LifecycleNotifier(IInterceptorSubjectContext context)
 {
@@ -19,12 +23,28 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context)
 
     public void RaiseSubjectAttached(SubjectLifecycleChange change)
     {
-        SubjectAttached?.Invoke(change);
+        CallbackReentrancyGuard.EnterCallback();
+        try
+        {
+            SubjectAttached?.Invoke(change);
+        }
+        finally
+        {
+            CallbackReentrancyGuard.ExitCallback();
+        }
     }
 
     public void RaiseSubjectDetaching(SubjectLifecycleChange change)
     {
-        SubjectDetaching?.Invoke(change);
+        CallbackReentrancyGuard.EnterCallback();
+        try
+        {
+            SubjectDetaching?.Invoke(change);
+        }
+        finally
+        {
+            CallbackReentrancyGuard.ExitCallback();
+        }
     }
 
     /// <summary>Publishes an edge removal that did not release the subject.</summary>
@@ -42,38 +62,62 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context)
 
     public void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, SubjectLifecycleChange change)
     {
-        var handlers = context.GetServices<ILifecycleHandler>();
-        for (var index = 0; index < handlers.Length; index++)
+        CallbackReentrancyGuard.EnterCallback();
+        try
         {
-            handlers[index].HandleLifecycleChange(change);
-        }
+            var handlers = context.GetServices<ILifecycleHandler>();
+            for (var index = 0; index < handlers.Length; index++)
+            {
+                handlers[index].HandleLifecycleChange(change);
+            }
 
-        if (subject is ILifecycleHandler subjectHandler)
+            if (subject is ILifecycleHandler subjectHandler)
+            {
+                subjectHandler.HandleLifecycleChange(change);
+            }
+        }
+        finally
         {
-            subjectHandler.HandleLifecycleChange(change);
+            CallbackReentrancyGuard.ExitCallback();
         }
     }
 
     public void InvokeRemovedLifecycleHandlers(IInterceptorSubject subject, SubjectLifecycleChange change)
     {
-        if (subject is ILifecycleHandler subjectHandler)
+        CallbackReentrancyGuard.EnterCallback();
+        try
         {
-            subjectHandler.HandleLifecycleChange(change);
-        }
+            if (subject is ILifecycleHandler subjectHandler)
+            {
+                subjectHandler.HandleLifecycleChange(change);
+            }
 
-        var handlers = context.GetServices<ILifecycleHandler>();
-        for (var index = 0; index < handlers.Length; index++)
+            var handlers = context.GetServices<ILifecycleHandler>();
+            for (var index = 0; index < handlers.Length; index++)
+            {
+                handlers[index].HandleLifecycleChange(change);
+            }
+        }
+        finally
         {
-            handlers[index].HandleLifecycleChange(change);
+            CallbackReentrancyGuard.ExitCallback();
         }
     }
 
     public void RefreshCollectionProperty(PropertyReference property, object? value)
     {
-        var handlers = context.GetServices<IPropertyLifecycleHandler>();
-        for (var index = 0; index < handlers.Length; index++)
+        CallbackReentrancyGuard.EnterCallback();
+        try
         {
-            handlers[index].RefreshCollectionProperty(property, value);
+            var handlers = context.GetServices<IPropertyLifecycleHandler>();
+            for (var index = 0; index < handlers.Length; index++)
+            {
+                handlers[index].RefreshCollectionProperty(property, value);
+            }
+        }
+        finally
+        {
+            CallbackReentrancyGuard.ExitCallback();
         }
     }
 }

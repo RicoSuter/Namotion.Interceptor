@@ -99,10 +99,12 @@ public class StructuralWriteTests
     }
 
     [Fact]
-    public void WhenAttachmentChangesBetweenEntryAndTerminal_ThenStructuralWriteThrowsBeforeTheBackingWrite()
+    public void WhenAttachmentChangesBetweenEntryAndTerminal_ThenStructuralWriteStillCommits()
     {
         // Arrange: the interceptor transitions the attachment mid-chain, deterministically on the
-        // writing thread itself.
+        // writing thread itself. The attachment monitor is reentrant on that thread, so this is
+        // the one shape that can move the attachment inside the protocol; it must order rather
+        // than fail, because the write was validated for the attachment it entered with.
         var transitioning = new AttachmentTransitionInterceptor();
         var context = InterceptorSubjectContext.Create();
         context.AddService(transitioning);
@@ -112,29 +114,29 @@ public class StructuralWriteTests
         transitioning.ContextToAttach = InterceptorSubjectContext.Create();
         var backingWritten = false;
 
-        // Act & Assert
-        Assert.Throws<InvalidOperationException>(
-            () => executor.SetStructuralPropertyValue("Speed", 42, 0, (_, _) => backingWritten = true));
-        Assert.False(backingWritten);
+        // Act
+        var written = executor.SetStructuralPropertyValue("Speed", 42, 0, (_, _) => backingWritten = true);
 
-        // The terminal aborted before committing anything: no commit revision was consumed and no
-        // write state was stamped.
-        Assert.Equal(0, ((InterceptorExecutor)executor).Revision);
-        var property = new PropertyReference((IInterceptorSubject)subject, "Speed");
-        Assert.False(property.TryGetWriteState(true, out _, out _));
+        // Assert
+        Assert.True(written);
+        Assert.True(backingWritten);
+        Assert.Equal(1, ((InterceptorExecutor)executor).Revision);
     }
 
     [Fact]
-    public void WhenConcurrentAttachLandsWhileStructuralWriteIsInFlight_ThenTheWriteThrowsBeforeTheBackingWrite()
+    public void WhenConcurrentAttachRacesAStructuralWrite_ThenTheAttachWaitsAndBothComplete()
     {
-        // Arrange
+        // Arrange: the writer pauses inside the chain while it holds the attachment monitor, so a
+        // concurrent attachment transition must queue on that monitor instead of invalidating the
+        // in-flight write. This is the ordering the deleted attachment-revision guard used to turn
+        // into an exception.
         var gate = new GatingWriteInterceptor();
         var context = InterceptorSubjectContext.Create();
         context.AddService(gate);
         var subject = new Car(context);
         var executor = GetExecutor(subject);
         var backingWritten = false;
-        Exception? thrown = null;
+        Exception? writerException = null;
 
         var writer = new Thread(() =>
         {
@@ -144,21 +146,35 @@ public class StructuralWriteTests
             }
             catch (Exception exception)
             {
-                thrown = exception;
+                writerException = exception;
             }
         });
 
-        // Act: transition the attachment while the writer is paused between entry and terminal.
+        var attachCompleted = new ManualResetEventSlim(false);
+        var attacher = new Thread(() =>
+        {
+            executor.TryUpdateAttachment(
+                executor.AttachmentRevision, InterceptorSubjectContext.Create(), SubjectAnchorKind.None, out _);
+            attachCompleted.Set();
+        });
+
+        // Act: start the attach while the writer is provably between entry and terminal.
         writer.Start();
         Assert.True(gate.ReachedChain.Wait(TimeSpan.FromSeconds(30)));
-        Assert.True(executor.TryUpdateAttachment(
-            executor.AttachmentRevision, InterceptorSubjectContext.Create(), SubjectAnchorKind.None, out _));
-        gate.ResumeWrite.Set();
-        writer.Join();
+        attacher.Start();
 
-        // Assert
-        Assert.IsType<InvalidOperationException>(thrown);
-        Assert.False(backingWritten);
+        // The attach must not complete while the write holds the attachment monitor.
+        Assert.False(attachCompleted.Wait(TimeSpan.FromMilliseconds(250)));
+
+        gate.ResumeWrite.Set();
+        Assert.True(writer.Join(TimeSpan.FromSeconds(30)), "the structural write did not complete");
+        Assert.True(attacher.Join(TimeSpan.FromSeconds(30)), "the attachment transition did not complete");
+
+        // Assert: the write committed and the attach landed after it.
+        Assert.Null(writerException);
+        Assert.True(backingWritten);
+        Assert.True(attachCompleted.IsSet);
+        Assert.NotNull(executor.AttachedContext);
     }
 
     [Fact]
@@ -203,10 +219,10 @@ public class StructuralWriteTests
     }
 
     [Fact]
-    public void WhenAttachedSubjectTakesAStructuralWrite_ThenItRunsThroughTheGuardedTerminal()
+    public void WhenComposedSubjectTakesAStructuralWrite_ThenItRunsTheChainUnderTheAttachmentMonitor()
     {
-        // Arrange: the same write once a context exists takes the guarded route, which is what the
-        // attachment revision protects.
+        // Arrange: once a context is composed the write runs the ordinary chain inside the
+        // attachment monitor, so it consumes a commit revision and stamps write state.
         var holder = new StructuralHolder(InterceptorSubjectContext.Create());
 
         // Act

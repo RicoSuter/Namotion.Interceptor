@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Tests.Models;
 using Namotion.Interceptor.Tracking;
@@ -10,64 +9,16 @@ namespace Namotion.Interceptor.Registry.Tests;
 /// Tests that verify no registry memory leaks occur during concurrent structural
 /// property writes in LifecycleInterceptor.WriteProperty.
 ///
-/// The concurrency model: a structural write takes the lifecycle's topology lock, validates and
-/// claims every subject the proposed value reaches, calls next to commit the backing store, and
-/// reconciles the committed value against the property's baseline, all under that one lock. Two
-/// structural writes on the same graph therefore serialize against each other.
-///
-/// The race window that remains is ahead of the lock: the write captures the writing subject's
-/// attachment revision before the interceptor chain is resolved, and another thread can detach that
-/// subject before the lock is taken. The reconcile detects the parent leaving mid-publication and
-/// stops, and a released subject drops its baselines, so no orphaned subjects remain once the
-/// concurrent writes settle.
-///
-/// A structural write racing an attachment transition of the writing subject itself has a second
-/// legal outcome since generated setters route through the attachment guard: rejection with the
-/// documented InvalidOperationException instead of a commit. See
-/// <see cref="WriteToleratingAttachmentGuardRejection"/>.
+/// The concurrency model: a structural write enters the lifecycle's topology gate and the writing
+/// subject's attachment monitor before the chain is resolved and holds both through the terminal,
+/// then validates and claims every subject the proposed value reaches, calls next to commit the
+/// backing store, and reconciles the committed value against the property's baseline. Two
+/// structural writes on the same graph therefore serialize against each other, and a write racing
+/// an attachment transition of the writing subject orders against it instead of throwing, so
+/// every write below is expected to commit or reconcile cleanly; any exception is a defect.
 /// </summary>
 public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
 {
-    /// <summary>
-    /// Performs a structural write on a subject whose own attachment another thread is
-    /// concurrently transitioning. Generated setters route structural writes through the
-    /// attachment guard, so such a write can be rejected with the documented
-    /// InvalidOperationException instead of committing; a raw thread would turn that into a
-    /// process crash. Which outcome an iteration takes does not matter to these tests: their
-    /// assertions are about the settled graph after the threads join. Writes on subjects whose
-    /// attachment is stable (an anchored root, or any post-join cleanup) stay unwrapped so an
-    /// unexpected rejection there still fails loudly.
-    /// </summary>
-    /// <remarks>
-    /// Matched on the guard's own message rather than on the exception type. A single-context graph
-    /// has several other reasons to throw InvalidOperationException, all of them genuine defects
-    /// here (a subject owned by another context, a competing claim, an illegal attachment
-    /// transition), and swallowing those would make these tests pass over exactly what they exist to
-    /// catch. When the concurrency stage turns the rejection into ordering, this method and its call
-    /// sites are what it deletes, and nothing else.
-    /// </remarks>
-    private const string AttachmentGuardRejection = "attachment changed while a structural write was in flight";
-
-    /// <remarks>
-    /// <paramref name="committed"/> counts the writes that actually landed, so the settled-graph
-    /// assertions cannot be satisfied vacuously: a graph in which every contended write was rejected
-    /// is also consistent, so without it a regression that rejected all of them would leave the
-    /// whole suite green.
-    /// </remarks>
-    private static void WriteToleratingAttachmentGuardRejection(Action write, StrongBox<int>? committed = null)
-    {
-        try
-        {
-            write();
-            if (committed is not null)
-            {
-                Interlocked.Increment(ref committed.Value);
-            }
-        }
-        catch (InvalidOperationException exception) when (exception.Message.Contains(AttachmentGuardRejection))
-        {
-        }
-    }
 
     /// <summary>
     /// Multiple threads rapidly replace the same ObjectRef property.
@@ -233,7 +184,6 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             var registry = context.GetService<ISubjectRegistry>();
             var grandparent = new Person(context) { FirstName = "Grandparent" };
 
-            var committed = new StrongBox<int>();
             var barrier = new Barrier(2);
             var child = new Person { FirstName = "Child" };
 
@@ -257,8 +207,8 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 for (var iteration = 0; iteration < iterationsPerThread; iteration++)
                 {
                     var grandchildName = $"Grandchild_{iteration}";
-                    WriteToleratingAttachmentGuardRejection(() => child.Mother = new Person { FirstName = grandchildName }, committed);
-                    WriteToleratingAttachmentGuardRejection(() => child.Mother = null, committed);
+                    child.Mother = new Person { FirstName = grandchildName };
+                    child.Mother = null;
                 }
             });
             childWriteThread.IsBackground = true;
@@ -267,10 +217,6 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             childWriteThread.Start();
             detachThread.Join();
             childWriteThread.Join();
-
-            // Not vacuous: a run in which every contended write was rejected would satisfy every
-            // settled-graph assertion below.
-            Assert.True(committed.Value > 0, "no contended structural write committed");
 
             // Final state: ensure clean detach
             grandparent.Mother = null;
@@ -410,7 +356,6 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             child.Mother = grandchild;
             grandparent.Mother = child;
 
-            var committed = new StrongBox<int>();
             var barrier = new Barrier(2);
 
             // Act:
@@ -433,8 +378,8 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 for (var iteration = 0; iteration < iterationsPerThread; iteration++)
                 {
                     var greatGrandchildName = $"GreatGrandchild_{iteration}";
-                    WriteToleratingAttachmentGuardRejection(() => grandchild.Mother = new Person { FirstName = greatGrandchildName }, committed);
-                    WriteToleratingAttachmentGuardRejection(() => grandchild.Mother = null, committed);
+                    grandchild.Mother = new Person { FirstName = greatGrandchildName };
+                    grandchild.Mother = null;
                 }
             });
             deepWriteThread.IsBackground = true;
@@ -443,10 +388,6 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             deepWriteThread.Start();
             detachThread.Join();
             deepWriteThread.Join();
-
-            // Not vacuous: a run in which every contended write was rejected would satisfy every
-            // settled-graph assertion below.
-            Assert.True(committed.Value > 0, "no contended structural write committed");
 
             // Final state: ensure clean detach of the entire subtree
             grandchild.Mother = null;
@@ -770,7 +711,6 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
 
             grandparent.Mother = parent;
 
-            var committed = new StrongBox<int>();
             var barrier = new Barrier(2);
 
             // Thread 1: rapidly replaces parent's Children (dictionary-like structural property)
@@ -780,7 +720,7 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 for (var i = 0; i < iterationsPerThread; i++)
                 {
                     var child = new Person { FirstName = $"Child_{i}" };
-                    WriteToleratingAttachmentGuardRejection(() => parent.Mother = child, committed);
+                    parent.Mother = child;
                 }
             });
             dictWriteThread.IsBackground = true;
@@ -801,10 +741,6 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             detachThread.Start();
             dictWriteThread.Join();
             detachThread.Join();
-
-            // Not vacuous: a run in which every contended write was rejected would satisfy every
-            // settled-graph assertion below.
-            Assert.True(committed.Value > 0, "no contended structural write committed");
 
             // Set final known state
             var finalChild = new Person { FirstName = "FinalChild" };
@@ -879,7 +815,6 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             var grandparent = new Person(context) { FirstName = "Grandparent" };
             var child = new Person { FirstName = "Child" };
 
-            var committed = new StrongBox<int>();
             var barrier = new Barrier(3);
 
             // Thread A: rapidly attaches/detaches child from grandparent
@@ -901,8 +836,8 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 for (var i = 0; i < iterationsPerThread; i++)
                 {
                     var grandchildName = $"GrandchildM_{i}";
-                    WriteToleratingAttachmentGuardRejection(() => child.Mother = new Person { FirstName = grandchildName }, committed);
-                    WriteToleratingAttachmentGuardRejection(() => child.Mother = null, committed);
+                    child.Mother = new Person { FirstName = grandchildName };
+                    child.Mother = null;
                 }
             });
             attachThread1.IsBackground = true;
@@ -915,8 +850,8 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 for (var i = 0; i < iterationsPerThread; i++)
                 {
                     var grandchildName = $"GrandchildF_{i}";
-                    WriteToleratingAttachmentGuardRejection(() => child.Father = new Person { FirstName = grandchildName }, committed);
-                    WriteToleratingAttachmentGuardRejection(() => child.Father = null, committed);
+                    child.Father = new Person { FirstName = grandchildName };
+                    child.Father = null;
                 }
             });
             attachThread2.IsBackground = true;
@@ -927,10 +862,6 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             detachThread.Join();
             attachThread1.Join();
             attachThread2.Join();
-
-            // Not vacuous: a run in which every contended write was rejected would satisfy every
-            // settled-graph assertion below.
-            Assert.True(committed.Value > 0, "no contended structural write committed");
 
             // Clean up
             grandparent.Mother = null;

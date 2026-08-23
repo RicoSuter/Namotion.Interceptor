@@ -166,6 +166,8 @@ public class DynamicSubjectTests
 
     public class TestLifecycleInterceptor(string name, List<string> logs) : ILifecycleInterceptor
     {
+        public object StructuralWriteGate { get; } = new();
+
         public void OnContextComposed(IInterceptorSubject subject) => logs.Add($"{name}: Attached");
 
         public void OnContextDecomposed(IInterceptorSubject subject) => logs.Add($"{name}: Detached");
