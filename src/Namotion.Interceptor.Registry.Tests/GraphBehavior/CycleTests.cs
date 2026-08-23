@@ -4,7 +4,7 @@ using Namotion.Interceptor.Testing;
 namespace Namotion.Interceptor.Registry.Tests.GraphBehavior;
 
 /// <summary>
-/// Tests for cyclic graph scenarios. Documents both supported behavior and limitations.
+/// Tests for cyclic graph scenarios, including release of orphaned cycles.
 /// </summary>
 public class CycleTests
 {
@@ -48,7 +48,7 @@ public class CycleTests
     }
 
     [Fact]
-    public Task WhenBreakingCycle_ThenBothDetach()
+    public Task WhenBreakingCycle_ThenAdoptedSubjectDetachesAndConstructorRootStays()
     {
         // Arrange
         var helper = new TestLifecycleHandler();
@@ -68,7 +68,9 @@ public class CycleTests
         // Act - Break the cycle
         alice.Mother = null;
 
-        // Assert - Both detach (cascade: Alice loses Bob, Bob's ref to Alice becomes orphaned)
+        // Assert - Bob detaches (his only support was Alice's edge). Alice keeps her
+        // constructor anchor: Bob's back-reference had no independent support, so it never
+        // consumed her provisional root status, and losing it cannot detach her.
         return Verify(helper.GetEvents());
     }
 
@@ -104,7 +106,7 @@ public class CycleTests
     }
 
     [Fact]
-    public Task WhenInternalCycleOrphaned_ThenCycleStaysAttached_Limitation()
+    public Task WhenInternalCycleOrphaned_ThenCycleIsReleased()
     {
         // Arrange
         var helper = new TestLifecycleHandler();
@@ -131,8 +133,8 @@ public class CycleTests
         // Act - Remove A from root (orphans the B <-> C cycle)
         root.Father = null;
 
-        // Assert - A detaches, but B and C stay attached (they keep each other alive)
-        // This documents the reference counting limitation with cycles
+        // Assert - A detaches and the orphaned B <-> C cycle is released as well: the
+        // reachability scan proves the cycle unreachable from any root
         return Verify(helper.GetEvents());
     }
 }

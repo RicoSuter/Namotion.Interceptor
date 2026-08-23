@@ -332,11 +332,15 @@ public class SourceWaitResultTests
             .WithFullPropertyTracking()
             .WithLifecycle()
             .WithSourceMonitoring();
-        var child = InterceptorSubjectContext.Create().WithSourceMonitoring();
+        // The child context contributes a second monitor but no lifecycle: a subject belongs to
+        // exactly one context's graph, so only the parent may own one.
+        var child = InterceptorSubjectContext.Create();
+        var childMonitor = new SourceMonitor();
+        child.AddService(childMonitor);
+        child.AddService<ILifecycleHandler>(childMonitor);
         child.AddFallbackContext(parent);
 
         var parentMonitor = parent.GetSourceMonitor();
-        var childMonitor = child.GetServices<SourceMonitor>()[0];
 
         var root = new Person(child);
         var healthy = new TestStateSource(root);
@@ -385,11 +389,15 @@ public class SourceWaitResultTests
             .WithFullPropertyTracking()
             .WithLifecycle()
             .WithSourceMonitoring();
-        var child = InterceptorSubjectContext.Create().WithSourceMonitoring();
+        // The child context contributes a second monitor but no lifecycle: a subject belongs to
+        // exactly one context's graph, so only the parent may own one.
+        var child = InterceptorSubjectContext.Create();
+        var childMonitor = new SourceMonitor();
+        child.AddService(childMonitor);
+        child.AddService<ILifecycleHandler>(childMonitor);
         child.AddFallbackContext(parent);
 
         var parentMonitor = parent.GetSourceMonitor();
-        var childMonitor = child.GetServices<SourceMonitor>()[0];
 
         var root = new Person(child);
         var slow = new TestStateSource(root);

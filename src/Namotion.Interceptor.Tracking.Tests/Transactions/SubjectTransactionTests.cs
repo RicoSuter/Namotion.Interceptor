@@ -86,12 +86,13 @@ public class SubjectTransactionTests
     [Fact]
     public async Task WhenTheBoundTransactionInterceptorIsInheritedAndSecond_ThenTheWriteIsCapturedInsteadOfThrowing()
     {
-        // Arrange: context inheritance adds another context as a fallback on attach, so a subject built on
-        // one transaction-enabled context and attached into a graph rooted on another resolves two. The
-        // subject's own interceptor is first and the fallback's interceptor is second, so binding must scan
-        // all resolved instances by reference rather than accepting only the first one.
+        // Arrange: a subject can resolve two transaction interceptors when its context aggregates
+        // a second context that also enables transactions. The subject's own interceptor is first
+        // and the fallback's interceptor is second, so binding must scan all resolved instances by
+        // reference rather than accepting only the first one. The fallback carries no lifecycle:
+        // under exact-context ownership a subject enters exactly one context's graph.
         var context = CreateTransactionContext();
-        var fallbackContext = CreateTransactionContext();
+        var fallbackContext = InterceptorSubjectContext.Create().WithTransactions();
 
         var person = new Person(context);
         ((IInterceptorSubject)person).Context.AddFallbackContext(fallbackContext);

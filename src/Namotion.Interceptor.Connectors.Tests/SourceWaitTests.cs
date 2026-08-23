@@ -885,14 +885,15 @@ internal sealed class RecordingLoggerFactory(RecordingLogger logger) : ILoggerFa
 }
 
 /// <summary>
-/// A subject whose <see cref="Data"/> getter throws, so any parent walk that reaches it fails.
+/// A subject whose <see cref="Data"/> and executor getters throw, so any parent walk that reaches it
+/// fails.
 /// </summary>
 /// <remarks>
 /// Used as a wait anchor to make one wait's re-evaluation throw on every pass while leaving every
-/// other wait unaffected. GetParents() reads Data, and SourceScope's walk starts from the anchor, so
-/// the throw lands inside that wait's own IsBranchSynchronized and nowhere else. A throwing source would not
-/// work here: IsBranchSynchronized iterates the shared source list for every wait, so one poison source makes
-/// every wait's evaluation throw.
+/// other wait unaffected. GetParents() reads the subject's attachment, and SourceScope's walk starts
+/// from the anchor, so the throw lands inside that wait's own IsBranchSynchronized and nowhere else.
+/// A throwing source would not work here: IsBranchSynchronized iterates the shared source list for
+/// every wait, so one poison source makes every wait's evaluation throw.
 /// </remarks>
 internal sealed class PoisonAnchor(IInterceptorSubjectContext context) : IInterceptorSubject
 {
@@ -901,7 +902,7 @@ internal sealed class PoisonAnchor(IInterceptorSubjectContext context) : IInterc
     public IInterceptorSubjectContext Context { get; } = context;
 
     Namotion.Interceptor.Interceptors.IInterceptorExecutor IInterceptorSubject.Executor =>
-        throw new NotSupportedException();
+        throw new InvalidOperationException("scope walk is broken");
 
     public ConcurrentDictionary<(string? property, string key), object?> Data =>
         throw new InvalidOperationException("scope walk is broken");

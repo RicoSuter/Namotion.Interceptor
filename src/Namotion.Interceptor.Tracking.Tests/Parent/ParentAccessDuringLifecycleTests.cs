@@ -87,9 +87,11 @@ public class ParentAccessDuringLifecycleTests
     }
 
     [Fact]
-    public void WhenParentsCalledWithoutParentTracking_ThenReturnsEmptySet()
+    public void WhenLifecycleIsConfiguredWithoutParentTracking_ThenParentsAreStillPopulated()
     {
-        // Arrange: Create context WITHOUT parent tracking
+        // Arrange: parent state is owned by the lifecycle rather than by an opt-in handler, so
+        // WithParents() no longer decides whether GetParents() answers. This is a deliberate
+        // behavior change: on master the same configuration returned empty.
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle();
@@ -100,10 +102,10 @@ public class ParentAccessDuringLifecycleTests
         // Act
         simulation.Component = component;
 
-        // Assert: GetParents returns empty because ParentTrackingHandler is not registered
+        // Assert
         Assert.NotNull(component.ParentsFoundDuringAttach);
-        Assert.Empty(component.ParentsFoundDuringAttach);
-        Assert.Null(component.RootFoundDuringAttach);
+        Assert.NotEmpty(component.ParentsFoundDuringAttach);
+        Assert.Same(simulation, component.RootFoundDuringAttach);
     }
 
     [Fact]

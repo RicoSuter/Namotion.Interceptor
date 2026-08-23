@@ -42,7 +42,7 @@ public class SourceOwnershipManagerTests
     public void ClaimSource_WhenOwnedByDifferentSource_ReturnsFalse()
     {
         // Arrange
-        var lifecycleInterceptor = new LifecycleInterceptor();
+        var lifecycleInterceptor = new LifecycleInterceptor(InterceptorSubjectContext.Create());
         var (_, manager1) = CreateSourceWithManager(lifecycleInterceptor);
         var (_, manager2) = CreateSourceWithManager(lifecycleInterceptor);
         var property = CreatePropertyReference();
@@ -197,7 +197,7 @@ public class SourceOwnershipManagerTests
     public void SetSource_AfterRelease_AllowsNewClaim()
     {
         // Arrange
-        var lifecycleInterceptor = new LifecycleInterceptor();
+        var lifecycleInterceptor = new LifecycleInterceptor(InterceptorSubjectContext.Create());
         var (_, manager1) = CreateSourceWithManager(lifecycleInterceptor);
         var (_, manager2) = CreateSourceWithManager(lifecycleInterceptor);
         var property = CreatePropertyReference();
@@ -221,7 +221,7 @@ public class SourceOwnershipManagerTests
         Action<PropertyReference>? onReleasing = null,
         Action<IInterceptorSubject>? onSubjectDetaching = null)
     {
-        lifecycleInterceptor ??= new LifecycleInterceptor();
+        lifecycleInterceptor ??= new LifecycleInterceptor(InterceptorSubjectContext.Create());
 
         var subjectMock = new Mock<IInterceptorSubject>();
         var contextMock = new Mock<IInterceptorSubjectContext>();

@@ -33,86 +33,132 @@ public static class InterceptorSubjectExtensions
     }
 
     /// <summary>
-    /// Attaches the subject to <paramref name="context"/> with an explicit anchor. Attaching an
-    /// unattached subject sets the context; attaching a subject already attached to the same
-    /// context promotes its anchor to <see cref="SubjectAnchorKind.Explicit"/>. An explicit anchor
-    /// is never set twice and a subject never moves directly between contexts; both throw before
-    /// any state change.
+    /// Attaches the subject to <paramref name="context"/> with an explicit anchor, together with
+    /// every subject its structural properties reach. Attaching a subject that is already attached
+    /// to the same context promotes its anchor to <see cref="SubjectAnchorKind.Explicit"/> without
+    /// repeating its attach callbacks. An explicit anchor is never set twice and a subject never
+    /// moves directly between contexts; both throw before any state change.
     /// </summary>
     /// <exception cref="InvalidOperationException">The subject is already explicitly attached to
-    /// this context, or is attached to a different context.</exception>
+    /// this context, or the subject or part of its component is attached to a different context.</exception>
     public static void AttachToContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
+        var lifecycle = context.TryGetService<ILifecycleInterceptor>();
+        if (lifecycle is not null)
+        {
+            lifecycle.AttachSubjectToContext(subject, context, SubjectAnchorKind.Explicit);
+            return;
+        }
+
+        ApplyRootAnchor(subject, context, SubjectAnchorKind.Explicit);
+
+        // Without a lifecycle the attach is root-only, but the context still has to become
+        // resolvable from the subject.
+        subject.Context.AddFallbackContext(context);
+    }
+
+    /// <summary>
+    /// Clears the subject's explicit anchor on <paramref name="context"/>. The subject stays
+    /// attached while a structural edge still holds it, and is released once nothing does.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The subject carries no explicit anchor, or its
+    /// explicit anchor is on a different context.</exception>
+    public static void DetachFromContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
+    {
+        var lifecycle = context.TryGetService<ILifecycleInterceptor>();
+        if (lifecycle is not null)
+        {
+            lifecycle.DetachSubjectFromContext(subject, context);
+            return;
+        }
+
         var executor = GetExecutor(subject);
         while (true)
         {
             // One coherent snapshot; a transition interleaved between it and the update fails the
             // compare-and-swap below and retries against the fresh state.
             executor.TryGetAttachment(out var attachedContext, out var anchor, out var revision);
+            ValidateExplicitDetach(attachedContext, anchor, context);
 
-            if (attachedContext is not null)
-            {
-                if (!ReferenceEquals(attachedContext, context))
-                {
-                    throw new InvalidOperationException(
-                        "The subject is already attached to a different context. Detach it from that context first.");
-                }
-
-                if (anchor == SubjectAnchorKind.Explicit)
-                {
-                    throw new InvalidOperationException(
-                        "The subject is already explicitly attached to this context.");
-                }
-            }
-
-            if (executor.TryUpdateAttachment(revision, context, SubjectAnchorKind.Explicit, out _))
+            if (executor.TryUpdateAttachment(revision, null, SubjectAnchorKind.None, out _))
             {
                 break;
             }
         }
 
-        // TODO(single-context-cutover): remove the fallback half once the exact attachment is
-        // authoritative. Until then it keeps this extension driving the existing lifecycle
-        // machinery exactly like the old AddFallbackContext idiom; a false return means the
-        // fallback was already present (the promote case), which needs no lifecycle re-run.
-        subject.Context.AddFallbackContext(context);
+        subject.Context.RemoveFallbackContext(context);
     }
 
     /// <summary>
-    /// Clears the subject's explicit anchor on <paramref name="context"/>. Only the anchor is
-    /// cleared in this stage; the attached context itself is released once structural attachment
-    /// is authoritative.
+    /// Applies a root anchor to an unattached subject, or promotes the anchor of a subject already
+    /// attached to the same context. Shared by the lifecycle-free attach path and by lifecycle
+    /// implementations that need the same strict rules.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The subject carries no explicit anchor, or its
-    /// explicit anchor is on a different context.</exception>
-    public static void DetachFromContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
+    internal static void ApplyRootAnchor(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
     {
         var executor = GetExecutor(subject);
         while (true)
         {
-            // One coherent snapshot; see AttachToContext.
-            executor.TryGetAttachment(out var attachedContext, out var anchor, out var revision);
+            executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out var revision);
+            ValidateRootAnchor(attachedContext, currentAnchor, context, anchor);
 
-            if (anchor != SubjectAnchorKind.Explicit)
+            // A provisional anchor is a construction-time default and only ever applies to a fresh
+            // subject: applying it to an attached one would demote an explicit root or turn an
+            // inherited subject into a root that nothing ever releases.
+            if (anchor == SubjectAnchorKind.Provisional && attachedContext is not null)
             {
-                throw new InvalidOperationException("The subject has no explicit context anchor to detach.");
+                return;
             }
 
-            if (!ReferenceEquals(attachedContext, context))
+            if (executor.TryUpdateAttachment(revision, context, anchor, out _))
             {
-                throw new InvalidOperationException("The subject's explicit anchor is on a different context.");
-            }
-
-            if (executor.TryUpdateAttachment(revision, attachedContext, SubjectAnchorKind.None, out _))
-            {
-                break;
+                return;
             }
         }
+    }
 
-        // TODO(single-context-cutover): remove the fallback half once the exact attachment is
-        // authoritative. Until then it drives the existing detach lifecycle exactly like the old
-        // RemoveFallbackContext idiom.
-        subject.Context.RemoveFallbackContext(context);
+    /// <summary>
+    /// Rejects a root anchor that would move a subject between contexts or set a second explicit
+    /// anchor. A provisional anchor requested for an already anchored subject is left alone: the
+    /// constructor route must not demote an explicit root.
+    /// </summary>
+    internal static void ValidateRootAnchor(
+        IInterceptorSubjectContext? attachedContext,
+        SubjectAnchorKind currentAnchor,
+        IInterceptorSubjectContext context,
+        SubjectAnchorKind anchor)
+    {
+        if (attachedContext is not null && !ReferenceEquals(attachedContext, context))
+        {
+            throw new InvalidOperationException(
+                "The subject is already attached to a different context. Detach it from that context first.");
+        }
+
+        if (anchor == SubjectAnchorKind.Explicit && currentAnchor == SubjectAnchorKind.Explicit)
+        {
+            throw new InvalidOperationException(
+                "The subject is already explicitly attached to this context.");
+        }
+    }
+
+    /// <summary>
+    /// Rejects an explicit detach that has no explicit anchor to clear, or clears one on another
+    /// context.
+    /// </summary>
+    internal static void ValidateExplicitDetach(
+        IInterceptorSubjectContext? attachedContext,
+        SubjectAnchorKind anchor,
+        IInterceptorSubjectContext context)
+    {
+        if (anchor != SubjectAnchorKind.Explicit)
+        {
+            throw new InvalidOperationException("The subject has no explicit context anchor to detach.");
+        }
+
+        if (!ReferenceEquals(attachedContext, context))
+        {
+            throw new InvalidOperationException("The subject's explicit anchor is on a different context.");
+        }
     }
 
     public static void SetData(this IInterceptorSubject subject, string key, object? value)

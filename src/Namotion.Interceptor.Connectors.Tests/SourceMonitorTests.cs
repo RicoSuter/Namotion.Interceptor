@@ -545,15 +545,14 @@ public class SourceMonitorTests
         var shared = new Person();
         firstRoot.Mother = shared;
 
-        // Act
-        secondRoot.Mother = shared;
+        // Act & Assert
+        // A subject belongs to exactly one context, so the second tree cannot adopt it at all: the
+        // assignment is rejected before the backing property changes rather than producing a subject
+        // that is half visible to two monitors.
+        Assert.Throws<InvalidOperationException>(() => secondRoot.Mother = shared);
+        Assert.Null(secondRoot.Mother);
+        Assert.Same(firstTree, ((IInterceptorSubject)shared).TryGetContext());
 
-        // Assert
-        // Characterization, not aspiration: ContextInheritanceHandler adds a parent fallback only on
-        // the FIRST attach ({ ReferenceCount: 1, IsContextAttach: true }), so the second tree's
-        // monitor never becomes reachable and this design claims no multi-tree coverage. If context
-        // inheritance ever starts tracking every parent, this test fails and the limitation, the
-        // topology-aware CurrentState, and the docs all need revisiting together.
         var reachable = ((IInterceptorSubject)shared).Context.GetServices<SourceMonitor>();
         Assert.Single(reachable);
         Assert.Same(firstTree.GetSourceMonitor(), reachable[0]);

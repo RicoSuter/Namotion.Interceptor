@@ -14,13 +14,15 @@ public class ContextInheritanceHandler : ILifecycleHandler
     {
         if (change.Property.HasValue)
         {
-            // Only add fallback when subject first enters the graph via property reference
-            // (IsContextAttach ensures we don't add fallback for subjects already in graph via context)
-            if (change is { ReferenceCount: 1, IsContextAttach: true })
+            // Composed when the subject enters the graph through this edge, and decomposed when it
+            // leaves. The removal keys off the leaving transition rather than a zero reference count:
+            // an anchored root sits at zero references while still owned, and stripping its composed
+            // context would leave an attached subject whose own writes are no longer intercepted.
+            if (change.IsContextAttach)
             {
                 change.Subject.Context.AddFallbackContext(change.Property.Value.Subject.Context);
             }
-            else if (change is { ReferenceCount: 0, IsPropertyReferenceRemoved: true })
+            else if (change is { IsContextDetach: true, IsPropertyReferenceRemoved: true })
             {
                 change.Subject.Context.RemoveFallbackContext(change.Property.Value.Subject.Context);
             }

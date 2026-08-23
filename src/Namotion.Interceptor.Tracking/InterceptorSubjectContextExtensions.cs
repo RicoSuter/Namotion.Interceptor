@@ -159,8 +159,10 @@ public static class InterceptorSubjectContextExtensions
     /// <returns>The collection.</returns>
     public static IInterceptorSubjectContext WithLifecycle(this IInterceptorSubjectContext context)
     {
+        // The lifecycle captures the context it is registered on: that context is the one exact
+        // context it claims subjects for.
         return context
-            .WithService(() => new LifecycleInterceptor());
+            .WithService(() => new LifecycleInterceptor(context));
     }
     
     /// <summary>

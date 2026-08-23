@@ -1,25 +1,10 @@
 using System.Collections.Immutable;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Tracking.Parent;
 
 public static class ParentsHandlerExtensions
 {
-    private const string ParentsKey = "Namotion.Interceptor.Tracking.Parents";
-
-    internal static void AddParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
-    {
-        var parentsSet = (ParentsSet)subject.Data.GetOrAdd((null, ParentsKey), _ => new ParentsSet())!;
-        parentsSet.Add(new SubjectParent(parent, index));
-    }
-
-    internal static void RemoveParent(this IInterceptorSubject subject, PropertyReference parent, object? index)
-    {
-        if (subject.Data.TryGetValue((null, ParentsKey), out var existing))
-        {
-            ((ParentsSet)existing!).Remove(new SubjectParent(parent, index));
-        }
-    }
-
     /// <summary>
     /// Tries to find the first parent of the specified type by traversing the parent hierarchy.
     /// Returns null if not found instead of throwing.
@@ -58,80 +43,22 @@ public static class ParentsHandlerExtensions
     }
 
     /// <summary>
-    /// Gets the parents of the subject as an immutable array.
-    /// This is the preferred method for accessing parents with zero-allocation enumeration.
+    /// Gets the occurrence-aware parents of the subject: one entry per structural edge that
+    /// references it, carrying the referencing property and the collection index or dictionary key
+    /// of that occurrence. A subject listed twice in one collection therefore has two entries.
     /// </summary>
+    /// <remarks>
+    /// The result is an immutable snapshot published by the built-in lifecycle, which is its single
+    /// writer. Reading it takes no lock, which is required rather than an optimization: source scope
+    /// walks call this while holding their own lock and are themselves called from inside the
+    /// lifecycle lock.
+    ///
+    /// The first call on a subject activates parent publication for it, so a consumer that never
+    /// asks pays nothing. An unattached subject, and a subject in a context using another lifecycle
+    /// implementation, return empty.
+    /// </remarks>
     public static ImmutableArray<SubjectParent> GetParents(this IInterceptorSubject subject)
     {
-        if (subject.Data.TryGetValue((null, ParentsKey), out var parents))
-        {
-            return ((ParentsSet)parents!).ToImmutableArray();
-        }
-        return [];
-    }
-
-    /// <summary>
-    /// Thread-safe collection with O(1) writes and zero-allocation reads via cached ImmutableArray.
-    /// </summary>
-    private sealed class ParentsSet
-    {
-        private readonly Lock _lock = new();
-        private readonly HashSet<SubjectParent> _set = [];
-        private volatile ImmutableArray<SubjectParent>[]? _cache; // Box in array for volatile
-
-        public bool Add(SubjectParent parent)
-        {
-            lock (_lock)
-            {
-                if (_set.Add(parent))
-                {
-                    _cache = null; // Invalidate cache
-                    return true;
-                }
-                return false;
-            }
-        }
-
-        public bool Remove(SubjectParent parent)
-        {
-            lock (_lock)
-            {
-                if (_set.Remove(parent))
-                {
-                    _cache = null; // Invalidate cache
-                    return true;
-                }
-                return false;
-            }
-        }
-
-        public ImmutableArray<SubjectParent> ToImmutableArray()
-        {
-            var cached = _cache;
-            if (cached is not null)
-            {
-                return cached[0];
-            }
-
-            lock (_lock)
-            {
-                cached = _cache;
-                if (cached is not null)
-                {
-                    return cached[0];
-                }
-
-                // Fast path: avoid allocation for empty set
-                if (_set.Count == 0)
-                {
-                    _cache = [ImmutableArray<SubjectParent>.Empty];
-                    return ImmutableArray<SubjectParent>.Empty;
-                }
-
-                ImmutableArray<SubjectParent> array = [.. _set];
-                _cache = [array];
-                return array;
-            }
-        }
+        return subject.TryGetContext()?.TryGetLifecycleInterceptor()?.GetParents(subject) ?? [];
     }
 }

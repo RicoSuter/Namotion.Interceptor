@@ -1,20 +1,38 @@
-using System.Collections;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
+using System.Collections.Immutable;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
-public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
+/// <summary>
+/// Owns structural graph membership for one context: which subjects it holds, through which
+/// occurrence-aware edges, and when a subject that lost its last support leaves.
+/// </summary>
+/// <remarks>
+/// A subject is attached to exactly one context. It is held either by a root anchor (an explicit
+/// attach, or the provisional anchor a context-taking constructor leaves) or by a path of structural
+/// edges from an anchored root. The provisional anchor is consumed by the first edge that supports
+/// the subject independently of that anchor, so construction-time attachment does not create roots
+/// that nothing ever releases; an explicit anchor is only ever cleared explicitly.
+///
+/// All topology changes are serialized by one private reentrant lock. Parent and reference-count
+/// reads deliberately do not take it: they read published per-subject state, because consumers call
+/// them from inside their own locks and from inside lifecycle callbacks.
+/// </remarks>
+public class LifecycleInterceptor : ILifecycleInterceptor
 {
-    private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = [];
-    private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
+    private readonly IInterceptorSubjectContext _context;
+    private readonly OwnershipGraph _graph;
+    private readonly ReachabilityWalk _reachability;
+    private readonly ReleaseTraversal _release;
+    private readonly StructuralReconciler _reconciler;
+    private readonly AttachTraversal _attach;
+    private readonly ParentProjection _parents;
 
-    [ThreadStatic]
-    private static Stack<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
-
-    [ThreadStatic]
-    private static Stack<HashSet<IInterceptorSubject>>? _subjectHashSetPool;
+    // One reentrant topology lock per lifecycle, which is one per context because the lifecycle is a
+    // singleton contract. A lifecycle callback may write another structural property of the same
+    // graph, which re-enters this lock on the same thread.
+    private readonly object _gate = new();
 
     /// <summary>
     /// Raised when a subject is attached to the object graph.
@@ -30,521 +48,358 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// </summary>
     public event Action<SubjectLifecycleChange>? SubjectDetaching;
 
-    public void AttachSubjectToContext(IInterceptorSubject subject)
+    /// <summary>
+    /// Creates the lifecycle for one context. That context is the single exact context this
+    /// interceptor claims subjects for.
+    /// </summary>
+    public LifecycleInterceptor(IInterceptorSubjectContext context)
     {
-        var collectedSubjects = GetList();
+        _context = context;
+        _graph = new OwnershipGraph(context);
+        _reachability = new ReachabilityWalk(_graph);
+        _attach = new AttachTraversal(this, _graph, _reachability);
+        _release = new ReleaseTraversal(this, _graph, _reachability);
+        _reconciler = new StructuralReconciler(this, _graph, _attach, _release);
+        _parents = new ParentProjection(_graph);
+    }
+
+    #region Structural writes
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Scalar properties never take the topology lock. A structural property validates and claims the
+    /// whole component the proposed value opens up before the backing writer runs, so a write that
+    /// would pull in a subject of another context fails before the property changes.
+    /// </remarks>
+    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    {
+        var property = context.Property;
+        var metadata = property.Metadata;
+        if (!metadata.Type.CanContainSubjects<TProperty>())
+        {
+            next(ref context);
+            return;
+        }
+
+        var subject = property.Subject;
+        if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
+        {
+            // Not this lifecycle's subject: either unattached, or owned by another context whose own
+            // lifecycle reconciles this write.
+            next(ref context);
+            return;
+        }
+
+        lock (_gate)
+        {
+            if (!_graph.IsOwned(subject))
+            {
+                next(ref context);
+                return;
+            }
+
+            var claimed = LifecycleScratch.RentSubjectList();
+            try
+            {
+                ClaimProposedComponent(property, context.NewValue, claimed);
+
+                next(ref context);
+
+                // The authoritative getter output rather than the proposed value: a normalizing or
+                // derived setter may store a different graph than the caller passed.
+                var getValue = metadata.GetValue;
+                _reconciler.Reconcile(property, getValue is not null ? getValue(subject) : context.NewValue);
+            }
+            finally
+            {
+                // A write suppressed downstream, or a setter that stored something else, leaves
+                // claims that never became ownership.
+                _graph.ReleaseUnusedClaims(claimed);
+                LifecycleScratch.Return(claimed);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Validates every subject the proposed value reaches against this context and claims the
+    /// unattached ones, before the backing writer runs.
+    /// </summary>
+    private void ClaimProposedComponent(PropertyReference property, object? proposedValue, List<IInterceptorSubject> claimed)
+    {
+        if (proposedValue is null)
+        {
+            return;
+        }
+
+        var visited = LifecycleScratch.RentSubjectSet();
         try
         {
-            lock (_attachedSubjects)
-            {
-                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
-
-                foreach (var child in collectedSubjects)
-                {
-                    AttachToProperty(child.subject, subject.Context, child.property, child.index);
-                }
-
-                if (!_attachedSubjects.ContainsKey(subject))
-                {
-                    AttachToContext(subject, subject.Context);
-                }
-            }
+            _graph.DiscoverComponent(property, proposedValue, visited, claimed);
         }
         finally
         {
-            ReturnList(collectedSubjects);
+            LifecycleScratch.Return(visited);
+        }
+
+        if (!_graph.TryClaimDiscovered(claimed, null, SubjectAnchorKind.None))
+        {
+            claimed.Clear();
+            throw new InvalidOperationException(
+                "Another context claimed a subject of the assigned graph while this write was validating it. " +
+                "The write was rejected before reaching the backing field.");
         }
     }
 
-    public void DetachSubjectFromContext(IInterceptorSubject subject)
-    {
-        var collectedSubjects = GetList();
-        try
-        {
-            lock (_attachedSubjects)
-            {
-                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
+    #endregion
 
-                foreach (var child in collectedSubjects)
+    #region Explicit attach and detach
+
+    /// <inheritdoc />
+    public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
+    {
+        if (!ReferenceEquals(context, _context))
+        {
+            throw new InvalidOperationException("The subject cannot be attached through the lifecycle of another context.");
+        }
+
+        if (anchor == SubjectAnchorKind.None)
+        {
+            throw new InvalidOperationException("An attach without a root anchor would be released by the next reachability decision.");
+        }
+
+        lock (_gate)
+        {
+            var executor = subject.Executor;
+            executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out _);
+            InterceptorSubjectExtensions.ValidateRootAnchor(attachedContext, currentAnchor, context, anchor);
+
+            if (attachedContext is not null)
+            {
+                // Already in this context: promote the anchor without repeating attach callbacks. A
+                // provisional request never promotes, it is only a construction-time default.
+                if (anchor != SubjectAnchorKind.Provisional)
                 {
-                    DetachFromProperty(child.subject, subject.Context, child.property, child.index);
+                    _graph.SetAnchor(subject, anchor);
                 }
 
-                DetachFromContext(subject, subject.Context);
+                return;
             }
-        }
-        finally
-        {
-            ReturnList(collectedSubjects);
-        }
-    }
 
-    /// <summary>
-    /// Attaches a subject directly to a context (root subject, no property reference).
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AttachToContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
-    {
-        var isFirstAttach = _attachedSubjects.TryAdd(subject, default);
-        if (!isFirstAttach)
-        {
-            return;
-        }
+            ClaimComponentForRoot(subject, anchor);
 
-        var count = subject.GetReferenceCount();
-        var change = new SubjectLifecycleChange
-        {
-            Subject = subject,
-            ReferenceCount = count,
-            IsContextAttach = true
-        };
-
-        var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlers(subject, context, change);
-
-        SubjectAttached?.Invoke(change);
-        foreach (var propertyName in properties)
-        {
-            subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
-        }
-    }
-
-    /// <summary>
-    /// Attaches a subject via a property reference.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AttachToProperty(IInterceptorSubject subject, IInterceptorSubjectContext context,
-        PropertyReference property, object? index)
-    {
-        ref var set = ref CollectionsMarshal.GetValueRefOrAddDefault(_attachedSubjects, subject, out var existed);
-        var isFirstAttach = !existed;
-        if (!set.Add(property))
-        {
-            return;
-        }
-
-        var count = subject.IncrementReferenceCount();
-        var change = new SubjectLifecycleChange
-        {
-            Subject = subject,
-            Property = property,
-            Index = index,
-            ReferenceCount = count,
-            IsContextAttach = isFirstAttach,
-            IsPropertyReferenceAdded = true
-        };
-
-        var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlers(subject, context, change);
-
-        if (isFirstAttach)
-        {
-            SubjectAttached?.Invoke(change);
-
-            foreach (var propertyName in properties)
+            // Composing the context onto the executor is what makes the graph resolve its services,
+            // and it is the transitional entry point that seeds and publishes the attach.
+            if (!subject.Context.AddFallbackContext(_context))
             {
-                subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
+                AttachSubjectToContext(subject);
             }
-        }
-    }
-    
-    private static void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
-    {
-        var array = context.GetServices<ILifecycleHandler>();
-        for (var index = 0; index < array.Length; index++)
-        {
-            var handler = array[index];
-            handler.HandleLifecycleChange(change);
-        }
-
-        if (subject is ILifecycleHandler subjectHandler)
-        {
-            subjectHandler.HandleLifecycleChange(change);
-        }
-    }
-
-    /// <summary>
-    /// Detaches a subject from a context (root subject, no property reference).
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void DetachFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
-    {
-        if (!_attachedSubjects.Remove(subject))
-        {
-            return;
-        }
-        
-        foreach (var entry in subject.Properties)
-        {
-            var property = new PropertyReference(subject, entry.Key);
-            if (entry.Value is { IsIntercepted: true } && entry.Value.Type.CanContainSubjects())
-                _lastProcessedValues.Remove(property);
-
-            subject.DetachSubjectProperty(property);
-        }
-
-        var count = subject.GetReferenceCount();
-        var change = new SubjectLifecycleChange
-        {
-            Subject = subject,
-            ReferenceCount = count,
-            IsContextDetach = true
-        };
-
-        SubjectDetaching?.Invoke(change);
-        InvokeRemovedLifecycleHandlers(subject, context, change);
-    }
-
-    /// <summary>
-    /// Detaches a subject from a property reference.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void DetachFromProperty(
-        IInterceptorSubject subject, IInterceptorSubjectContext context,
-        PropertyReference property, object? index)
-    {
-        ref var set = ref CollectionsMarshal.GetValueRefOrNullRef(_attachedSubjects, subject);
-        if (Unsafe.IsNullRef(ref set) || !set.Remove(property))
-        {
-            return;
-        }
-
-        var isLastDetach = set.IsEmpty;
-
-        // Collect children and clean up in a single pass over properties
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
-        if (isLastDetach)
-        {
-            _attachedSubjects.Remove(subject);
-
-            foreach (var entry in subject.Properties)
-            {
-                var subjectProperty = new PropertyReference(subject, entry.Key);
-
-                var metadata = entry.Value;
-                if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
-                {
-                    // Use _lastProcessedValues (what was actually attached) instead of the backing
-                    // store, which may contain unattached children from a concurrent next() call.
-                    if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
-                    {
-                        children ??= GetList();
-                        FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
-                    }
-
-                    _lastProcessedValues.Remove(subjectProperty);
-                }
-
-                subject.DetachSubjectProperty(subjectProperty);
-            }
-        }
-
-        var count = subject.DecrementReferenceCount();
-        var change = new SubjectLifecycleChange
-        {
-            Subject = subject,
-            Property = property,
-            Index = index,
-            ReferenceCount = count,
-            IsPropertyReferenceRemoved = true,
-            IsContextDetach = isLastDetach
-        };
-
-        if (isLastDetach)
-        {
-            SubjectDetaching?.Invoke(change);
-        }
-
-        InvokeRemovedLifecycleHandlers(subject, context, change);
-
-        if (children is not null)
-        {
-            foreach (var child in children)
-            {
-                DetachFromProperty(child.subject, context, child.property, child.index);
-            }
-
-            ReturnList(children);
-        }
-    }
-
-    private static void InvokeRemovedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
-    {
-        if (subject is ILifecycleHandler subjectHandler)
-        {
-            subjectHandler.HandleLifecycleChange(change);
-        }
-
-        var array = context.GetServices<ILifecycleHandler>();
-        for (var index = 0; index < array.Length; index++)
-        {
-            var handler = array[index];
-            handler.HandleLifecycleChange(change);
         }
     }
 
     /// <inheritdoc />
-    /// <remarks>
-    /// Re-entrant for different properties (lock is re-entrant, each property has its own
-    /// <c>_lastProcessedValues</c> entry). Handlers must NOT write to the same property
-    /// that is currently being reconciled, because this would corrupt the reconciliation baseline.
-    /// </remarks>
-    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
-        next(ref context);
-
-        var metadata = context.Property.Metadata;
-        if (!metadata.Type.CanContainSubjects<TProperty>())
+        if (!ReferenceEquals(context, _context))
         {
-            return;
+            throw new InvalidOperationException("The subject cannot be detached through the lifecycle of another context.");
         }
 
-        lock (_attachedSubjects)
+        lock (_gate)
         {
-            var lastProcessed = _lastProcessedValues.GetValueOrDefault(context.Property);
+            var executor = subject.Executor;
+            executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
+            InterceptorSubjectExtensions.ValidateExplicitDetach(attachedContext, anchor, context);
 
-            // Read the actual backing store value to handle concurrent writes correctly.
-            // context.NewValue may differ from the backing store if another thread
-            // overwrote the property between our next() call and lock acquisition.
-            var getValue = metadata.GetValue;
-            var newValue = getValue is not null
-                ? getValue(context.Property.Subject)
-                : context.NewValue;
+            _graph.SetAnchor(subject, SubjectAnchorKind.None);
 
-            if (ReferenceEquals(lastProcessed, newValue))
+            var ownership = _graph.TryGetOwnership(subject);
+            if (ownership is null)
             {
+                _graph.ReleaseClaim(subject);
+                subject.Context.RemoveFallbackContext(_context);
                 return;
             }
 
-            if ((lastProcessed is not (null or IInterceptorSubject or IEnumerable) || lastProcessed is string) &&
-                (newValue is not (null or IInterceptorSubject or IEnumerable) || newValue is string))
+            if (ownership.IncomingCount == 0 || !_reachability.HasAnchoredAncestor(subject, null))
             {
-                return;
-            }
+                _release.ReleaseRoot(subject);
 
-            var oldCollectedSubjects = GetList();
-            var newCollectedSubjects = GetList();
-            var oldTouchedSubjects = GetSubjectHashSet();
-            var newTouchedSubjects = GetSubjectHashSet();
-
-            try
-            {
-                FindSubjectsInProperty(context.Property, lastProcessed, oldCollectedSubjects, oldTouchedSubjects);
-                FindSubjectsInProperty(context.Property, newValue, newCollectedSubjects, newTouchedSubjects);
-
-                // Detach in reverse order so that collection children are removed from the end first.
-                // RemoveChild searches backwards to match this order for O(1) per removal.
-                for (var i = oldCollectedSubjects.Count - 1; i >= 0; i--)
-                {
-                    var (subject, property, index) = oldCollectedSubjects[i];
-                    if (!newTouchedSubjects.Contains(subject))
-                    {
-                        DetachFromProperty(subject, context.Property.Subject.Context, property, index);
-                    }
-                }
-
-                for (var i = 0; i < newCollectedSubjects.Count; i++)
-                {
-                    var (subject, property, index) = newCollectedSubjects[i];
-                    if (!oldTouchedSubjects.Contains(subject))
-                    {
-                        AttachToProperty(subject, context.Property.Subject.Context, property, index);
-                    }
-                }
-
-                _lastProcessedValues[context.Property] = newValue;
-
-                // Parent was concurrently detached between next() and lock acquisition.
-                // Undo: remove dangling _lastProcessedValues and detach orphaned children.
-                if (!_attachedSubjects.ContainsKey(context.Property.Subject))
-                {
-                    _lastProcessedValues.Remove(context.Property);
-                    for (var i = 0; i < newCollectedSubjects.Count; i++)
-                    {
-                        var (subject, property, index) = newCollectedSubjects[i];
-                        if (!oldTouchedSubjects.Contains(subject))
-                        {
-                            DetachFromProperty(subject, context.Property.Subject.Context, property, index);
-                        }
-                    }
-
-                    return;
-                }
-
-                // Refresh child index metadata for retained subjects whose
-                // positions may have shifted in the new collection.
-                if (newValue is IEnumerable && oldTouchedSubjects.Overlaps(newTouchedSubjects))
-                {
-                    var handlers = context.Property.Subject.Context.GetServices<IPropertyLifecycleHandler>();
-                    for (var i = 0; i < handlers.Length; i++)
-                    {
-                        handlers[i].RefreshCollectionProperty(context.Property, newValue);
-                    }
-                }
-            }
-            finally
-            {
-                ReturnList(oldCollectedSubjects);
-                ReturnList(newCollectedSubjects);
-                ReturnSubjectHashSet(oldTouchedSubjects);
-                ReturnSubjectHashSet(newTouchedSubjects);
+                // Symmetric with the attach that composed it; a subject the edges still hold keeps
+                // resolving the context it is still in.
+                subject.Context.RemoveFallbackContext(_context);
             }
         }
     }
 
-    private enum LastProcessedValuesMode
+    /// <inheritdoc />
+    public void AttachSubjectToContext(IInterceptorSubject subject)
     {
-        /// <summary>Read property values from the backing store (default).</summary>
-        None,
-
-        /// <summary>Read from backing store and seed _lastProcessedValues (used during attach).</summary>
-        Seed,
-
-        /// <summary>Read from _lastProcessedValues instead of backing store (used during detach).</summary>
-        Use
-    }
-
-    private void FindSubjectsInProperties(IInterceptorSubject subject,
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
-        HashSet<IInterceptorSubject>? touchedSubjects,
-        LastProcessedValuesMode lastProcessedValuesMode = LastProcessedValuesMode.None)
-    {
-        foreach (var property in subject.Properties)
+        lock (_gate)
         {
-            var metadata = property.Value;
-            if (!metadata.IsIntercepted ||
-                !metadata.Type.CanContainSubjects())
+            if (_graph.IsOwned(subject))
             {
-                continue;
+                // The recursive descent: the subject already carries its incoming edge, so only its
+                // own structural properties still have to be seeded and published.
+                _attach.SeedChildrenIfNeeded(subject);
+                return;
             }
 
-            var propertyReference = new PropertyReference(subject, property.Key);
-            var propertyValue = lastProcessedValuesMode == LastProcessedValuesMode.Use && _lastProcessedValues.TryGetValue(propertyReference, out var lastProcessed)
-                ? lastProcessed
-                : metadata.GetValue?.Invoke(subject);
-
-            if (lastProcessedValuesMode == LastProcessedValuesMode.Seed)
+            if (subject.Executor.AttachedContext is null)
             {
-                _lastProcessedValues[propertyReference] = propertyValue;
+                ClaimComponentForRoot(subject, SubjectAnchorKind.Provisional);
+            }
+            else if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
+            {
+                throw new InvalidOperationException(
+                    "The subject is owned by a different context and cannot join this graph. Detach it from that context first.");
             }
 
-            if (propertyValue is not null)
+            _attach.SeedAndAttachChildren(subject);
+
+            // A back edge inside the seeded component can attach the subject before this point, in
+            // which case it already published its context attach through that edge.
+            if (!_graph.IsOwned(subject))
             {
-                FindSubjectsInProperty(propertyReference, propertyValue, collectedSubjects, touchedSubjects);
+                _attach.AttachRoot(subject);
             }
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void FindSubjectsInProperty(PropertyReference property,
-        object? value,
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
-        HashSet<IInterceptorSubject>? touchedSubjects)
+    /// <inheritdoc />
+    public void DetachSubjectFromContext(IInterceptorSubject subject)
     {
-        // Hot paths (IDictionary, ICollection) come before string/IEnumerable so common
-        // writes don't pay extra type checks. The IEnumerable case at the end handles read-only
-        // types that implement neither ICollection nor IDictionary (e.g. custom IReadOnlyList /
-        // IReadOnlyDictionary wrappers that opt out of the non-generic container interfaces).
-        switch (value)
+        lock (_gate)
         {
-            case null:
-                return;
-
-            case IInterceptorSubject subject:
-                touchedSubjects?.Add(subject);
-                collectedSubjects.Add((subject, property, null));
-                return;
-
-            case IDictionary dictionary:
-                foreach (DictionaryEntry entry in dictionary)
-                {
-                    if (entry.Value is IInterceptorSubject subjectItem)
-                    {
-                        touchedSubjects?.Add(subjectItem);
-                        collectedSubjects.Add((subjectItem, property, entry.Key));
-                    }
-                }
-                return;
-
-            case ICollection collection:
+            var ownership = _graph.TryGetOwnership(subject);
+            if (ownership is null)
             {
-                var i = 0;
-                foreach (var item in collection)
-                {
-                    if (item is IInterceptorSubject subjectItem)
-                    {
-                        touchedSubjects?.Add(subjectItem);
-                        collectedSubjects.Add((subjectItem, property, i));
-                    }
-                    i++;
-                }
                 return;
             }
 
-            case string:
+            // Decomposing the context that made the subject a provisional root gives that anchor up,
+            // which is the inverse of what composing it did. An explicit anchor is only ever cleared
+            // explicitly, and a subject an edge still holds stays.
+            _graph.ClearProvisionalAnchor(subject);
+            if (_graph.IsAnchored(subject) ||
+                (ownership.IncomingCount > 0 && _reachability.HasAnchoredAncestor(subject, null)))
+            {
                 return;
+            }
 
-            case IEnumerable enumerable:
-                // Read-only types (no ICollection): dispatch on declared property shape.
-                if (property.Metadata.Type.IsSubjectDictionaryType())
-                {
-                    foreach (var item in enumerable)
-                    {
-                        if (item is null) continue;
-                        if (SubjectLookup.TryGetSubjectFromKeyValuePair(item, out var key, out var subjectItem))
-                        {
-                            touchedSubjects?.Add(subjectItem);
-                            collectedSubjects.Add((subjectItem, property, key));
-                        }
-                    }
-                }
-                else
-                {
-                    var i = 0;
-                    foreach (var item in enumerable)
-                    {
-                        if (item is IInterceptorSubject subjectItem)
-                        {
-                            touchedSubjects?.Add(subjectItem);
-                            collectedSubjects.Add((subjectItem, property, i));
-                        }
-                        i++;
-                    }
-                }
-                return;
+            _release.ReleaseRoot(subject);
         }
     }
 
-    #region  Performance
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static List<(IInterceptorSubject subject, PropertyReference property, object? index)> GetList()
+    /// <summary>
+    /// Validates the component the subject opens up and claims every unattached subject in it, with
+    /// the requested anchor on the root. Nothing is published, so a rejection leaves no residue.
+    /// </summary>
+    private void ClaimComponentForRoot(IInterceptorSubject subject, SubjectAnchorKind anchor)
     {
-        _listPool ??= new Stack<List<(IInterceptorSubject, PropertyReference, object?)>>();
-        return _listPool.Count > 0 ? _listPool.Pop() : new List<(IInterceptorSubject, PropertyReference, object?)>(8);
+        var visited = LifecycleScratch.RentSubjectSet();
+        var unattached = LifecycleScratch.RentSubjectList();
+        try
+        {
+            _graph.DiscoverComponent(subject, visited, unattached);
+            if (!_graph.TryClaimDiscovered(unattached, subject, anchor))
+            {
+                throw new InvalidOperationException(
+                    "Another context claimed a subject of this graph while the attach was validating it.");
+            }
+        }
+        finally
+        {
+            LifecycleScratch.Return(visited);
+            LifecycleScratch.Return(unattached);
+        }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static HashSet<IInterceptorSubject> GetSubjectHashSet()
+    #endregion
+
+    #region Notification
+
+    /// <summary>Publishes an edge removal that did not release the subject.</summary>
+    internal void PublishEdgeRemoved(IInterceptorSubject subject, PropertyReference property, object? index, int referenceCount)
     {
-        _subjectHashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
-        return _subjectHashSetPool.Count > 0 ? _subjectHashSetPool.Pop() : new HashSet<IInterceptorSubject>(8);
+        InvokeRemovedLifecycleHandlers(subject, new SubjectLifecycleChange
+        {
+            Subject = subject,
+            Property = property,
+            Index = index,
+            ReferenceCount = referenceCount,
+            IsPropertyReferenceRemoved = true
+        });
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ReturnList(List<(IInterceptorSubject, PropertyReference, object?)> list)
+    internal void RaiseSubjectAttached(SubjectLifecycleChange change)
     {
-        list.Clear();
-        _listPool ??= new Stack<List<(IInterceptorSubject, PropertyReference, object?)>>();
-        _listPool.Push(list);
+        SubjectAttached?.Invoke(change);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ReturnSubjectHashSet(HashSet<IInterceptorSubject> hashSet)
+    internal void RaiseSubjectDetaching(SubjectLifecycleChange change)
     {
-        hashSet.Clear();
-        _subjectHashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
-        _subjectHashSetPool.Push(hashSet);
+        SubjectDetaching?.Invoke(change);
+    }
+
+    internal void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, SubjectLifecycleChange change)
+    {
+        var handlers = _context.GetServices<ILifecycleHandler>();
+        for (var index = 0; index < handlers.Length; index++)
+        {
+            handlers[index].HandleLifecycleChange(change);
+        }
+
+        if (subject is ILifecycleHandler subjectHandler)
+        {
+            subjectHandler.HandleLifecycleChange(change);
+        }
+    }
+
+    internal void InvokeRemovedLifecycleHandlers(IInterceptorSubject subject, SubjectLifecycleChange change)
+    {
+        if (subject is ILifecycleHandler subjectHandler)
+        {
+            subjectHandler.HandleLifecycleChange(change);
+        }
+
+        var handlers = _context.GetServices<ILifecycleHandler>();
+        for (var index = 0; index < handlers.Length; index++)
+        {
+            handlers[index].HandleLifecycleChange(change);
+        }
+    }
+
+    internal void RefreshCollectionProperty(PropertyReference property, object? value)
+    {
+        var handlers = _context.GetServices<IPropertyLifecycleHandler>();
+        for (var index = 0; index < handlers.Length; index++)
+        {
+            handlers[index].RefreshCollectionProperty(property, value);
+        }
+    }
+
+    #endregion
+
+    #region Committed state queries
+
+    /// <summary>
+    /// Gets the number of committed incoming edge occurrences, which is the subject's reference
+    /// count. An anchored root with no edge reports zero, so this is not an attachment predicate.
+    /// </summary>
+    /// <remarks>Takes no lock: consumers call it from inside lifecycle callbacks and their own locks.</remarks>
+    public int GetReferenceCount(IInterceptorSubject subject)
+    {
+        return _graph.TryGetOwnership(subject)?.IncomingCount ?? 0;
+    }
+
+    /// <summary>
+    /// Gets the subject's occurrence-aware parents. The first call on a subject activates parent
+    /// publication for it; a subject nobody asks about never allocates a snapshot.
+    /// </summary>
+    /// <remarks>Takes no lock; see <see cref="ParentProjection"/> for why that is required.</remarks>
+    public ImmutableArray<SubjectParent> GetParents(IInterceptorSubject subject)
+    {
+        return _parents.GetParents(subject);
     }
 
     #endregion

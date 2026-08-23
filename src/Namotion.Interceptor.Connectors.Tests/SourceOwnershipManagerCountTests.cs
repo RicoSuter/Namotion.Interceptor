@@ -70,7 +70,7 @@ public class SourceOwnershipManagerCountTests
 
     private static (LifecycleInterceptor Lifecycle, SourceOwnershipManager Manager) CreateSourceWithManager()
     {
-        var lifecycleInterceptor = new LifecycleInterceptor();
+        var lifecycleInterceptor = new LifecycleInterceptor(InterceptorSubjectContext.Create());
 
         var subjectMock = new Mock<IInterceptorSubject>();
         var contextMock = new Mock<IInterceptorSubjectContext>();

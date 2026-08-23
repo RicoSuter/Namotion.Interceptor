@@ -12,6 +12,29 @@ public class SubjectAttachmentTests
         public void AttachSubjectToContext(IInterceptorSubject subject) => AttachCount++;
 
         public void DetachSubjectFromContext(IInterceptorSubject subject) => DetachCount++;
+
+        // A minimal faithful lifecycle: it applies the documented root-anchor rules through Core's
+        // own helpers and lets the fallback composition drive the counted attach and detach, which
+        // is what a real implementation does with its own graph work in between.
+        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
+        {
+            InterceptorSubjectExtensions.ApplyRootAnchor(subject, context, anchor);
+            subject.Context.AddFallbackContext(context);
+        }
+
+        public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
+        {
+            var executor = subject.Executor;
+            executor.TryGetAttachment(out var attachedContext, out var anchor, out var revision);
+            InterceptorSubjectExtensions.ValidateExplicitDetach(attachedContext, anchor, context);
+            executor.TryUpdateAttachment(revision, attachedContext, SubjectAnchorKind.None, out _);
+            subject.Context.RemoveFallbackContext(context);
+        }
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+        }
     }
 
     private static IInterceptorExecutor GetExecutor(IInterceptorSubject subject)

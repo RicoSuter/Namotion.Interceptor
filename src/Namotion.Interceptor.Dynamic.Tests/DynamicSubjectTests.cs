@@ -69,8 +69,11 @@ public class DynamicSubjectTests
         // Act
         var logs = new List<string>();
         
+        // Two read/write interceptors pin the nesting order; the lifecycle is registered once,
+        // because a second one would be a competing ownership authority on the same context.
         var context = InterceptorSubjectContext
             .Create()
+            .WithService(() => new TestLifecycleInterceptor("lifecycle", logs), _ => false)
             .WithService(() => new TestInterceptor("a", logs), _ => false)
             .WithService(() => new TestInterceptor("b", logs), _ => false);
 
@@ -161,7 +164,29 @@ public class DynamicSubjectTests
         Assert.Same(subject.Context, subject.Executor);
     }
 
-    public class TestInterceptor : IReadInterceptor, IWriteInterceptor, ILifecycleInterceptor
+    public class TestLifecycleInterceptor(string name, List<string> logs) : ILifecycleInterceptor
+    {
+        public void AttachSubjectToContext(IInterceptorSubject subject) => logs.Add($"{name}: Attached");
+
+        public void DetachSubjectFromContext(IInterceptorSubject subject) => logs.Add($"{name}: Detached");
+
+        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
+        {
+            AttachSubjectToContext(subject);
+        }
+
+        public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
+        {
+            DetachSubjectFromContext(subject);
+        }
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+        }
+    }
+
+    public class TestInterceptor : IReadInterceptor, IWriteInterceptor
     {
         private readonly string _name;
         private readonly List<string> _logs;
@@ -188,14 +213,5 @@ public class DynamicSubjectTests
             _logs.Add($"{_name}: After write {context.Property.Name}");
         }
 
-        public void AttachSubjectToContext(IInterceptorSubject subject)
-        {
-            _logs.Add($"{_name}: Attached");
-        }
-
-        public void DetachSubjectFromContext(IInterceptorSubject subject)
-        {
-            _logs.Add($"{_name}: Detached");
-        }
     }
 }

@@ -109,9 +109,12 @@ public class PerPropertySubscriptionLifecycleTests
     [Fact]
     public void WhenTwoAggregatedInterceptors_ThenListenerDeliversExactlyOnce()
     {
-        // Arrange: a subject whose context aggregates two full-tracking contexts.
+        // Arrange: a subject whose context aggregates two contexts that each register a change
+        // interceptor. Only the parent registers the lifecycle: a subject can only enter one
+        // context's graph under the exact-context ownership model, so aggregating two
+        // full-tracking contexts is no longer possible.
         var parent = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        var childCtx = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var childCtx = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         childCtx.AddFallbackContext(parent);
         var person = new Person(childCtx);
         var hits = 0;
@@ -164,7 +167,10 @@ public class PerPropertySubscriptionLifecycleTests
         // PropertyChangeInterceptor aggregates to two (one per context). This pins the target-side
         // [RunsAfter] ordering across aggregated change interceptors: neither aggregated instance leaks a
         // staged write to a per-property listener during capture, and commit replay delivers exactly once.
-        var child = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        // The child context contributes only a change interceptor: under the exact-context
+        // ownership model the subject enters one context's graph, so only the parent registers
+        // the lifecycle.
+        var child = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var parent = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithTransactions();
         child.AddFallbackContext(parent);
         var person = new Person(child);
@@ -448,10 +454,11 @@ public class PerPropertySubscriptionLifecycleTests
     [Fact]
     public void WhenAggregatedContextsAssignSubject_ThenNewChildIsAttachedAtCallbackTime()
     {
-        // Arrange: the ordering edge must bind to every LifecycleInterceptor instance, not just
-        // one, when a context aggregates a fallback context that also registers tracking.
+        // Arrange: the ordering edge must hold when a context aggregates a fallback context, so
+        // change interceptors resolve from more than one context. Only the parent registers the
+        // lifecycle: a subject enters exactly one context's graph under exact-context ownership.
         var parentContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var childContext = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var childContext = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         childContext.AddFallbackContext(parentContext);
         var root = new Person(childContext);
         var child = new Person();

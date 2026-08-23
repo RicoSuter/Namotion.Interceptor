@@ -21,9 +21,35 @@ namespace Namotion.Interceptor.Registry.Tests;
 /// modifying _attachedSubjects and _lastProcessedValues. The parent-dead check
 /// (which undoes attachments to concurrently detached parents) and _lastProcessedValues
 /// seeding ensure no orphaned subjects remain after all concurrent writes settle.
+///
+/// A structural write racing an attachment transition of the writing subject itself has a second
+/// legal outcome since generated setters route through the attachment guard: rejection with the
+/// documented InvalidOperationException instead of a commit. See
+/// <see cref="WriteToleratingAttachmentGuardRejection"/>.
 /// </summary>
 public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
 {
+    /// <summary>
+    /// Performs a structural write on a subject whose own attachment another thread is
+    /// concurrently transitioning. Generated setters route structural writes through the
+    /// attachment guard, so such a write can be rejected with the documented
+    /// InvalidOperationException instead of committing; a raw thread would turn that into a
+    /// process crash. Which outcome an iteration takes does not matter to these tests: their
+    /// assertions are about the settled graph after the threads join. Writes on subjects whose
+    /// attachment is stable (an anchored root, or any post-join cleanup) stay unwrapped so an
+    /// unexpected rejection there still fails loudly.
+    /// </summary>
+    private static void WriteToleratingAttachmentGuardRejection(Action write)
+    {
+        try
+        {
+            write();
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
     /// <summary>
     /// Multiple threads rapidly replace the same ObjectRef property.
     /// After all threads finish and the property is set to a known final value,
@@ -210,8 +236,9 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 barrier.SignalAndWait();
                 for (var iteration = 0; iteration < iterationsPerThread; iteration++)
                 {
-                    child.Mother = new Person { FirstName = $"Grandchild_{iteration}" };
-                    child.Mother = null;
+                    var grandchildName = $"Grandchild_{iteration}";
+                    WriteToleratingAttachmentGuardRejection(() => child.Mother = new Person { FirstName = grandchildName });
+                    WriteToleratingAttachmentGuardRejection(() => child.Mother = null);
                 }
             });
             childWriteThread.IsBackground = true;
@@ -380,8 +407,9 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 barrier.SignalAndWait();
                 for (var iteration = 0; iteration < iterationsPerThread; iteration++)
                 {
-                    grandchild.Mother = new Person { FirstName = $"GreatGrandchild_{iteration}" };
-                    grandchild.Mother = null;
+                    var greatGrandchildName = $"GreatGrandchild_{iteration}";
+                    WriteToleratingAttachmentGuardRejection(() => grandchild.Mother = new Person { FirstName = greatGrandchildName });
+                    WriteToleratingAttachmentGuardRejection(() => grandchild.Mother = null);
                 }
             });
             deepWriteThread.IsBackground = true;
@@ -722,7 +750,7 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 for (var i = 0; i < iterationsPerThread; i++)
                 {
                     var child = new Person { FirstName = $"Child_{i}" };
-                    parent.Mother = child;
+                    WriteToleratingAttachmentGuardRejection(() => parent.Mother = child);
                 }
             });
             dictWriteThread.IsBackground = true;
@@ -837,8 +865,9 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 barrier.SignalAndWait();
                 for (var i = 0; i < iterationsPerThread; i++)
                 {
-                    child.Mother = new Person { FirstName = $"GrandchildM_{i}" };
-                    child.Mother = null;
+                    var grandchildName = $"GrandchildM_{i}";
+                    WriteToleratingAttachmentGuardRejection(() => child.Mother = new Person { FirstName = grandchildName });
+                    WriteToleratingAttachmentGuardRejection(() => child.Mother = null);
                 }
             });
             attachThread1.IsBackground = true;
@@ -850,8 +879,9 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 barrier.SignalAndWait();
                 for (var i = 0; i < iterationsPerThread; i++)
                 {
-                    child.Father = new Person { FirstName = $"GrandchildF_{i}" };
-                    child.Father = null;
+                    var grandchildName = $"GrandchildF_{i}";
+                    WriteToleratingAttachmentGuardRejection(() => child.Father = new Person { FirstName = grandchildName });
+                    WriteToleratingAttachmentGuardRejection(() => child.Father = null);
                 }
             });
             attachThread2.IsBackground = true;

@@ -233,11 +233,11 @@ public class RecursiveAttachTests
     }
 
     // ──────────────────────────────────────────────
-    // WithLifecycle() alone: only direct children tracked
+    // WithLifecycle() alone: the whole component is still discovered
     // ──────────────────────────────────────────────
 
     [Fact]
-    public void WhenUsingLifecycleWithoutContextInheritance_ThenOnlyDirectChildrenAreAttached()
+    public void WhenUsingLifecycleWithoutContextInheritance_ThenTheWholeComponentIsAttached()
     {
         // Arrange — WithLifecycle() alone, no context inheritance
         var context = InterceptorSubjectContext
@@ -256,22 +256,21 @@ public class RecursiveAttachTests
         // Act
         parent.Mother = mother;
 
-        // Assert — only direct child is attached, grandchild is NOT
-        // (grandmother has no context, lifecycle can't observe her)
+        // Assert — a subject entering the graph brings its own structural component with it. The
+        // descent no longer depends on the context-inheritance handler being registered: leaving
+        // the grandchild out would make an attached subject reference a subject of no context.
         Assert.Contains(mother, attached);
-        Assert.DoesNotContain(grandmother, attached);
+        Assert.Contains(grandmother, attached);
     }
 
     // ──────────────────────────────────────────────
-    // Null fallback: re-attached child without re-seeding
+    // Re-attach re-seeds the subject's own component
     // ──────────────────────────────────────────────
 
     [Fact]
-    public void WhenReattachedChildWritesSameValue_ThenGrandchildIsRediscovered()
+    public void WhenChildIsReattached_ThenItsGrandchildIsRediscovered()
     {
         // Arrange — WithLifecycle() only (no context inheritance, no equality check).
-        // Child has context from constructor, so its property writes go through
-        // the lifecycle interceptor.
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle();
@@ -286,32 +285,23 @@ public class RecursiveAttachTests
         child.Mother = grandmother;
         parent.Mother = child;
 
-        // Detach child → isLastDetach → _lastProcessedValues entries removed,
-        // grandmother detached via cascade
+        // Release the child, which takes its baselines and the grandmother with it.
         parent.Mother = null;
-
-        // Re-attach child — no ContextInheritanceHandler, so no AttachSubjectToContext,
-        // no re-seeding of _lastProcessedValues for child's properties
-        parent.Mother = child;
-
-        // At this point: child.Mother backing store = grandmother, but
-        // _lastProcessedValues[child.Mother] doesn't exist (removed during detach).
-        // grandmother was detached and is NOT currently tracked.
+        Assert.Null(child.TryGetContext());
+        Assert.Null(grandmother.TryGetContext());
 
         var attached = new List<IInterceptorSubject>();
         lifecycleInterceptor.SubjectAttached += change => attached.Add(change.Subject);
 
-        // Act — re-write the same value to child.Mother (no equality interceptor to block it).
-        // This triggers WriteProperty with no _lastProcessedValues entry → fallback fires.
-        //
-        // With context.CurrentValue fallback: old = grandmother, new = grandmother
-        //   → ReferenceEquals → early return → grandmother NOT re-attached (BUG)
-        //
-        // With null fallback: old = null, new = grandmother
-        //   → diff → attach grandmother (CORRECT)
-        child.Mother = grandmother;
+        // Act — re-attach the child. Its backing store still holds the grandmother, and an attach
+        // discovers the subject's current structural properties through their getters, so the
+        // grandmother comes back with it rather than waiting for another write.
+        parent.Mother = child;
 
         // Assert
+        Assert.Contains(child, attached);
         Assert.Contains(grandmother, attached);
+        Assert.Same(context, grandmother.TryGetContext());
+        Assert.Equal(1, grandmother.GetReferenceCount());
     }
 }
