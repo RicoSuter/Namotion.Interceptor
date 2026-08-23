@@ -1,6 +1,7 @@
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using Xunit.Sdk;
 
 namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 
@@ -41,26 +42,7 @@ public class OwnershipOracleTests
         RunSeed(seed);
     }
 
-    /// <summary>
-    /// A truncated run is a silent loss of coverage: the theory case still passes, having exercised
-    /// however few steps preceded the cycle, and a divergence later in that seed becomes unreachable.
-    /// This pins that none of the committed seeds is truncated, so the skip stays free.
-    /// </summary>
-    [Fact]
-    public void WhenTheCommittedSeedsRun_ThenNoneIsTruncatedByThePreExistingFallbackCycle()
-    {
-        // Arrange & Act
-        var truncated = CommittedSeeds.Where(seed => !new OwnershipOracleTests().RunSeed(seed)).ToArray();
-
-        // Assert
-        Assert.Empty(truncated);
-    }
-
-    /// <summary>
-    /// Runs one seed. Returns false when the pre-existing fallback delegation cycle cut it short, so
-    /// a caller can tell a completed run from a truncated one.
-    /// </summary>
-    public bool RunSeed(int seed)
+    private void RunSeed(int seed)
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -86,31 +68,14 @@ public class OwnershipOracleTests
             try
             {
                 log.Add(Mutate(context, universe, random));
-
-                // Inside the same guard as the mutation: the oracle's own reads go through the
-                // interceptor chain too, so a cycle can surface here rather than there.
                 AssertOwnershipMatchesOracle(context, universe, log);
             }
-            catch (InvalidOperationException exception) when (exception.Message.Contains("delegation cycle"))
-            {
-                // Pre-existing and unrelated to ownership: the context-inheritance handler composes
-                // each subject onto the executor of the parent that first pulled it in, so two
-                // subjects that each become the other's first parent compose a fallback cycle and
-                // every later property read on them throws. It reproduces identically without any of
-                // the ownership state, and the whole composed fallback graph is removed by the
-                // transitional-API removal stage. Measured over 700 seeds it cuts 21 of them short,
-                // 3.0 percent, costing 0.9 percent of the planned steps, and none of the committed
-                // seeds; the fact above is what keeps that true.
-                return false;
-            }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is not XunitException)
             {
                 throw new InvalidOperationException(
                     $"step {step} threw: {exception.Message}\nafter\n{string.Join("\n", log)}", exception);
             }
         }
-
-        return true;
     }
 
     /// <summary>Applies one random mutation and returns it, so a failure reports how to get there.</summary>

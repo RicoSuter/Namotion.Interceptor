@@ -123,18 +123,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     public virtual bool AddFallbackContext(IInterceptorSubjectContext context)
     {
-        return ComposeFallbackContext(context);
-    }
-
-    /// <summary>
-    /// Composes a fallback context and nothing else. <see cref="AddFallbackContext"/> is the same
-    /// operation plus whatever a derived context notifies on top of it, which for a subject executor
-    /// is a lifecycle attach. A caller that is repairing the composition of a subject the lifecycle
-    /// already owns needs the composition without that notification, because an attach published
-    /// from a removal is not a transition that happened.
-    /// </summary>
-    internal bool ComposeFallbackContext(IInterceptorSubjectContext context)
-    {
         var contextImpl = (InterceptorSubjectContext)context;
 
         lock (_mutationLock)

@@ -140,7 +140,7 @@ public class ContextInheritanceHandlerTests
     }
     
     [Fact]
-    public void WhenAddingInterceptorToChild_ThenServiceFallbackAndScopeWorks()
+    public void WhenAddingServiceToChild_ThenItAppliesToThatSubjectOnly()
     {
         // Arrange
         var service1 = 1;
@@ -167,7 +167,10 @@ public class ContextInheritanceHandlerTests
         ((IInterceptorSubject)person.Mother).Context
             .WithService(() => service2, x => x == 2);
 
-        // Assert
+        // Assert: every subject in the graph resolves the context's own service, and the service
+        // registered on one subject reaches that subject and nothing else. It used to reach the
+        // subjects below it as well, because they resolved through it; they now resolve through the
+        // context they are attached to.
         Assert.Contains(1, person.GetServices<int>());
         Assert.DoesNotContain(2, person.GetServices<int>());
         Assert.Single(person.GetServices<ContextInheritanceHandler>());
@@ -176,7 +179,7 @@ public class ContextInheritanceHandlerTests
         Assert.Contains(2, person.Mother.GetServices<int>());
 
         Assert.Contains(1, person.Mother.Mother.GetServices<int>());
-        Assert.Contains(2, person.Mother.Mother.GetServices<int>());
+        Assert.DoesNotContain(2, person.Mother.Mother.GetServices<int>());
         Assert.Single(person.Mother.Mother.GetServices<ContextInheritanceHandler>());
     }
 }

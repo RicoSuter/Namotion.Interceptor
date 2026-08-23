@@ -61,7 +61,9 @@ childContext.AddFallbackContext(parentContext);
 // childContext now has access to all services from parentContext
 ```
 
-This is used internally by `WithContextInheritance()` to automatically assign the parent's context to child subjects.
+This is used internally by `WithContextInheritance()` to compose the context a subject is attached to onto that subject, so every subject in a graph resolves the same services.
+
+A service registered on a subject applies to that subject alone. Subjects it references resolve through the context they are attached to, not through it, so such a service does not reach them. Scoping a service to a subject's whole subtree is not supported: a subject belongs to exactly one context, and that is what it resolves through.
 
 **Resolution order:**
 1. Services registered directly on the context

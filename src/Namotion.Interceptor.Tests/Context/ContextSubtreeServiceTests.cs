@@ -5,22 +5,20 @@ using Namotion.Interceptor.Tracking;
 namespace Namotion.Interceptor.Tests.Context;
 
 /// <summary>
-/// A subject may register services of its own, and they apply to that subject and everything below
-/// it without reaching anything else in the graph. That is what lets one component bring its own
-/// interceptors into a shared object graph without touching subjects it does not own, and it is the
-/// reason a subject resolves through the context of its parent rather than straight through the
-/// context the graph was created with.
+/// A subject may register services of its own. They apply to that subject and nothing else: a
+/// subject resolves through the one context it is attached to, not through the subject that
+/// referenced it, so a service registered on one subject never reaches another.
 ///
-/// It falls out of the resolution rules rather than being implemented anywhere: a subject that
-/// registers a service stops delegating and becomes a context that answers, so its own services
-/// come first and the services of the context it was attached to follow. Its children then resolve
-/// through it, which is what scopes it to the subtree, and nothing outside reaches it because
-/// resolution only ever walks toward the root.
+/// Scoping such a service to the subject's whole subtree used to fall out of the resolution rules,
+/// because a subject resolved through the context of the parent that first referenced it. That is
+/// removed together with exact-context ownership: the parent chain it depended on could be taken
+/// apart while the subject was still attached, was as deep as the graph, and closed a resolution
+/// loop whenever two subjects each became the other's first parent.
 /// </summary>
 public class ContextSubtreeServiceTests
 {
     [Fact]
-    public void WhenSubjectRegistersOwnInterceptor_ThenItAppliesToItselfAndItsChildrenOnly()
+    public void WhenSubjectRegistersOwnInterceptor_ThenItAppliesToThatSubjectOnly()
     {
         // Arrange: two independent subtrees under one shared root, only one of which brings its own
         // interceptor.
@@ -48,17 +46,18 @@ public class ContextSubtreeServiceTests
         ownedSensor.Value = 1;
         ownedChild.Value = 2;
 
-        // Assert: the subject that registered it and its child are both intercepted.
-        Assert.Equal(2, ownedInterceptor.WriteCount);
+        // Assert: only the subject that registered it. Its child resolves through the context the
+        // graph is attached to, not through its parent subject.
+        Assert.Equal(1, ownedInterceptor.WriteCount);
 
-        // Act: a sibling subtree of the same root, which the interceptor must not reach.
+        // Act: a sibling subtree of the same root, which the interceptor must not reach either.
         rootSensor.Child = foreignSensor;
         foreignSensor.Child = foreignChild;
         foreignSensor.Value = 3;
         foreignChild.Value = 4;
 
         // Assert
-        Assert.Equal(2, ownedInterceptor.WriteCount);
+        Assert.Equal(1, ownedInterceptor.WriteCount);
         Assert.Equal(3, foreignSensor.Value);
         Assert.Equal(4, foreignChild.Value);
     }
@@ -89,14 +88,14 @@ public class ContextSubtreeServiceTests
     }
 
     /// <summary>
-    /// Registering a service turns a subject that only delegated into one that answers, so the
-    /// resolution of everything below it has to notice.
+    /// Registering a service turns a subject that only delegated into one that answers. Its own
+    /// resolution has to notice; a subject it merely references does not, because that subject
+    /// resolves through the context rather than through it.
     /// </summary>
     [Fact]
-    public void WhenSubjectRegistersOwnInterceptorAfterItsChildrenResolved_ThenTheChildrenSeeIt()
+    public void WhenSubjectRegistersOwnInterceptorAfterResolving_ThenOnlyItsOwnResolutionNotices()
     {
-        // Arrange: the child only inherits the context of its parent when the graph tracks
-        // attachments, which is what makes it resolve through the parent at all.
+        // Arrange
         var rootContext = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking();
@@ -106,12 +105,14 @@ public class ContextSubtreeServiceTests
         parent.Child = child;
 
         // Resolves and caches the chain of both subjects while neither has services.
+        parent.Value = 1;
         child.Value = 1;
 
         var interceptor = new CountingWriteInterceptor();
 
         // Act
         ((IInterceptorSubject)parent).Context.AddService<IWriteInterceptor>(interceptor);
+        parent.Value = 2;
         child.Value = 2;
 
         // Assert

@@ -495,23 +495,25 @@ Root
 ```
 
 Removing A reduces Shared's refs to 1 - it stays attached via B.
-Removing B after A detaches Shared (refs: 0).
+Removing B after A detaches Shared (refs: 0), in either removal order, and a detached subject stops
+resolving the graph's services.
 
-**Cycles (Limitation)**
+**Cycles**
 
-Nodes that only reference each other stay attached due to reference counting:
+Nodes that only reference each other are released together once nothing outside the cycle reaches
+them:
 
 ```
 Root → A → B ↔ C (internal cycle)
 ```
 
 If `Root.A = null`:
-- A detaches (lost reference from Root)
-- B and C **stay attached** (they keep each other alive with refs: 1 each)
+- A detaches (lost its reference from Root)
+- B and C detach as well, because the only thing keeping them attached is each other
 
-This is the classic reference counting limitation. **Workarounds:**
-1. Call `DetachSubjectFromContext(subject)` explicitly
-2. Break all cycle references before removing the parent
+Attachment follows reachability from a root rather than a reference count, so a closed cycle with no
+way in is released like any other unreachable subgraph. A subject that was explicitly attached stays
+until it is explicitly detached.
 
 ## Parent-Child Relationship Tracking
 
