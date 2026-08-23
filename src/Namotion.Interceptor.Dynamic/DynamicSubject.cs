@@ -30,6 +30,13 @@ public class DynamicSubject : IInterceptorSubject
     [JsonIgnore]
     IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
 
+    // Explicit implementation, like Context/Data/SyncRoot above: DynamicSubjectFactory reflects
+    // over GetProperties(Instance | Public | NonPublic) and turns every unknown property into an
+    // intercepted subject property, so a public or protected Executor would become a phantom
+    // property on every Castle-proxied subject.
+    [JsonIgnore]
+    IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
+
     [JsonIgnore] ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
 
     [JsonIgnore] IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;

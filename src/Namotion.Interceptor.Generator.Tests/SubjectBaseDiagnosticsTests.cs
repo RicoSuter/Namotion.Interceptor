@@ -54,6 +54,7 @@ public class SubjectBaseDiagnosticsTests
                     = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
 
                 IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
                 object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
@@ -89,6 +90,7 @@ public class SubjectBaseDiagnosticsTests
                     = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
 
                 IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
                 object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
@@ -131,6 +133,7 @@ public class SubjectBaseDiagnosticsTests
                 protected int GetInstanceProperties(int unused) => unused;
 
                 IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
                 object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
@@ -172,6 +175,7 @@ public class SubjectBaseDiagnosticsTests
                 protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;
 
                 IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
                 object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
@@ -211,6 +215,7 @@ public class SubjectBaseDiagnosticsTests
                     = new List<SubjectPropertyMetadata>();
 
                 IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
                 object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
@@ -250,6 +255,7 @@ public class SubjectBaseDiagnosticsTests
                     = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
 
                 IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
                 object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
@@ -292,6 +298,7 @@ public class SubjectBaseDiagnosticsTests
                     => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
                 IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
                 object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;
@@ -318,6 +325,17 @@ public class SubjectBaseDiagnosticsTests
                     }
 
                     _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                }
+
+                protected bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                {
+                    if (_context is null)
+                    {
+                        setValue(this, newValue);
+                        return true;
+                    }
+
+                    return _context.SetStructuralPropertyValue(propertyName, newValue, currentValue, setValue);
                 }
 
                 protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
@@ -355,6 +373,7 @@ public class SubjectBaseDiagnosticsTests
                     => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
                 IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
                 object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;
@@ -381,6 +400,17 @@ public class SubjectBaseDiagnosticsTests
                     }
 
                     return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                }
+
+                protected bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                {
+                    if (_context is null)
+                    {
+                        setValue(this, newValue);
+                        return true;
+                    }
+
+                    return _context.SetStructuralPropertyValue(propertyName, newValue, currentValue, setValue);
                 }
 
                 protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
@@ -439,6 +469,7 @@ public class SubjectBaseDiagnosticsTests
                     => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
                 IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
                 object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
@@ -465,6 +496,17 @@ public class SubjectBaseDiagnosticsTests
                     }
 
                     return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                }
+
+                protected bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                {
+                    if (_context is null)
+                    {
+                        setValue(this, newValue);
+                        return true;
+                    }
+
+                    return _context.SetStructuralPropertyValue(propertyName, newValue, currentValue, setValue);
                 }
 
                 protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
@@ -501,6 +543,7 @@ public class SubjectBaseDiagnosticsTests
                     => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
                 public IInterceptorSubjectContext Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                public IInterceptorExecutor Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
                 public object SyncRoot { get; } = new object();
                 public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => GetInstanceProperties() ?? DefaultProperties;
@@ -527,6 +570,17 @@ public class SubjectBaseDiagnosticsTests
                     }
 
                     return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                }
+
+                protected bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                {
+                    if (_context is null)
+                    {
+                        setValue(this, newValue);
+                        return true;
+                    }
+
+                    return _context.SetStructuralPropertyValue(propertyName, newValue, currentValue, setValue);
                 }
 
                 protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
@@ -854,6 +908,7 @@ public class SubjectBaseDiagnosticsTests
                         = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
 
                     IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                    IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                     ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
                     object IInterceptorSubject.SyncRoot { get; } = new object();
                     IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties
@@ -950,6 +1005,7 @@ public class SubjectBaseDiagnosticsTests
                     public static int DefaultProperties { get; } = 0;
 
                     IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                    IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                     ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
                     object IInterceptorSubject.SyncRoot { get; } = new object();
                     IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties

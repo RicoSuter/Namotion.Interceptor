@@ -179,6 +179,13 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("        [JsonIgnore]");
         builder.AppendLine("        IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);");
         builder.AppendLine();
+        // Explicit implementation for the same reason GetInstanceProperties is a method rather
+        // than a property (see EmitHelperMethods): DynamicSubjectFactory turns every reflected
+        // public or protected instance property into an intercepted subject property, so a
+        // non-explicit Executor would become a phantom property on every Castle-proxied subject.
+        builder.AppendLine("        [JsonIgnore]");
+        builder.AppendLine("        IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);");
+        builder.AppendLine();
         builder.AppendLine("        [JsonIgnore]");
         builder.AppendLine("        ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();");
         builder.AppendLine();
@@ -364,12 +371,18 @@ internal static class SubjectCodeGenerator
                         ? $"((IRaisePropertyChanged)this).RaisePropertyChanged(nameof({property.Name}))"
                         : $"RaisePropertyChanged(nameof({property.Name}))";
 
+            // Routing is decided here, at generation time, so the scalar route gains no branch and
+            // no declared-type lookup at runtime; see PropertyWriteRouting for the classification.
+            var setterHelperName = property.UsesStructuralSetter
+                ? MemberNames.SetStructuralPropertyValue
+                : MemberNames.SetPropertyValue;
+
             builder.AppendLine($"            {setterModifiers}{accessorText}");
             builder.AppendLine("            {");
             builder.AppendLine("                var newValue = value;");
             builder.AppendLine("                var cancel = false;");
             builder.AppendLine($"                On{property.Name}Changing(ref newValue, ref cancel);");
-            builder.AppendLine($"                if (!cancel && SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v))");
+            builder.AppendLine($"                if (!cancel && {setterHelperName}(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v))");
             builder.AppendLine("                {");
             builder.AppendLine($"                    On{property.Name}Changed(_{property.Name});");
             builder.AppendLine($"                    {raisePropertyChangedCall};");
@@ -458,6 +471,18 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("            {");
         builder.AppendLine("                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);");
         builder.AppendLine("            }");
+        builder.AppendLine("        }");
+        builder.AppendLine();
+        builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
+        builder.AppendLine($"        {HidingModifier(metadata, MemberNames.SetStructuralPropertyValue)}{modifier} bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)");
+        builder.AppendLine("        {");
+        builder.AppendLine("            if (_context is null)");
+        builder.AppendLine("            {");
+        builder.AppendLine("                setValue(this, newValue);");
+        builder.AppendLine("                return true;");
+        builder.AppendLine("            }");
+        builder.AppendLine();
+        builder.AppendLine("            return _context.SetStructuralPropertyValue(propertyName, newValue, currentValue, setValue);");
         builder.AppendLine("        }");
         builder.AppendLine();
         builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");

@@ -36,6 +36,9 @@ using System.Text.Json.Serialization;
         IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
 
         [JsonIgnore]
+        IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
+
+        [JsonIgnore]
         ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
 
         [JsonIgnore]
@@ -152,6 +155,18 @@ using System.Text.Json.Serialization;
             {
                 return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
             }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        protected bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+        {
+            if (_context is null)
+            {
+                setValue(this, newValue);
+                return true;
+            }
+
+            return _context.SetStructuralPropertyValue(propertyName, newValue, currentValue, setValue);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

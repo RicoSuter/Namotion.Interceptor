@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests;
@@ -187,6 +188,7 @@ public class SubjectPropertyTypeExtensionsTests
     {
         public object SyncRoot => throw new NotSupportedException();
         public IInterceptorSubjectContext Context => throw new NotSupportedException();
+        public IInterceptorExecutor Executor => throw new NotSupportedException();
         public ConcurrentDictionary<(string? property, string key), object?> Data => throw new NotSupportedException();
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => throw new NotSupportedException();
         public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) => throw new NotSupportedException();
@@ -199,6 +201,7 @@ public class SubjectPropertyTypeExtensionsTests
     {
         public object SyncRoot => throw new NotSupportedException();
         public IInterceptorSubjectContext Context => throw new NotSupportedException();
+        public IInterceptorExecutor Executor => throw new NotSupportedException();
         public ConcurrentDictionary<(string? property, string key), object?> Data => throw new NotSupportedException();
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => throw new NotSupportedException();
         public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) => throw new NotSupportedException();
@@ -213,6 +216,7 @@ public class SubjectPropertyTypeExtensionsTests
     {
         public object SyncRoot => throw new NotSupportedException();
         public IInterceptorSubjectContext Context => throw new NotSupportedException();
+        public IInterceptorExecutor Executor => throw new NotSupportedException();
         public ConcurrentDictionary<(string? property, string key), object?> Data => throw new NotSupportedException();
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => throw new NotSupportedException();
         public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) => throw new NotSupportedException();
@@ -241,6 +245,7 @@ public class SubjectPropertyTypeExtensionsTests
     {
         public object SyncRoot => throw new NotSupportedException();
         public IInterceptorSubjectContext Context => throw new NotSupportedException();
+        public IInterceptorExecutor Executor => throw new NotSupportedException();
         public ConcurrentDictionary<(string? property, string key), object?> Data => throw new NotSupportedException();
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => throw new NotSupportedException();
         public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) => throw new NotSupportedException();
@@ -267,6 +272,7 @@ public class SubjectPropertyTypeExtensionsTests
     {
         public object SyncRoot => throw new NotSupportedException();
         public IInterceptorSubjectContext Context => throw new NotSupportedException();
+        public IInterceptorExecutor Executor => throw new NotSupportedException();
         public ConcurrentDictionary<(string? property, string key), object?> Data => throw new NotSupportedException();
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => throw new NotSupportedException();
         public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) => throw new NotSupportedException();

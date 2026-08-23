@@ -242,15 +242,19 @@ public class SourceWaitTests
     public void WhenTwoMonitorsAreReachable_ThenCompleteSourceRegistrationSignalsAll()
     {
         // Arrange
+        // The child context contributes a second monitor manually: under exact-context
+        // ownership a subject enters exactly one context's graph, so the child cannot carry a
+        // second lifecycle of its own (WithSourceMonitoring would register one).
         var parent = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithLifecycle()
             .WithSourceMonitoring();
-        var child = InterceptorSubjectContext.Create().WithSourceMonitoring();
+        var child = InterceptorSubjectContext.Create();
         child.AddFallbackContext(parent);
+        var childMonitor = new SourceMonitor();
+        child.AddService<ILifecycleHandler>(childMonitor);
 
         var parentMonitor = parent.GetSourceMonitor();
-        var childMonitor = child.GetServices<SourceMonitor>()[0];
 
         // Act
         child.CompleteSourceRegistration();
@@ -264,15 +268,19 @@ public class SourceWaitTests
     public void WhenDeferWaitCompletionIsCalledWithTwoMonitors_ThenBothHoldsAreReleased()
     {
         // Arrange
+        // The child context contributes a second monitor manually: under exact-context
+        // ownership a subject enters exactly one context's graph, so the child cannot carry a
+        // second lifecycle of its own (WithSourceMonitoring would register one).
         var parent = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithLifecycle()
             .WithSourceMonitoring();
-        var child = InterceptorSubjectContext.Create().WithSourceMonitoring();
+        var child = InterceptorSubjectContext.Create();
         child.AddFallbackContext(parent);
+        var childMonitor = new SourceMonitor();
+        child.AddService<ILifecycleHandler>(childMonitor);
 
         var parentMonitor = parent.GetSourceMonitor();
-        var childMonitor = child.GetServices<SourceMonitor>()[0];
 
         parentMonitor.CompleteSourceRegistration();
         childMonitor.CompleteSourceRegistration();
@@ -782,15 +790,19 @@ public class SourceWaitTests
     public void WhenOneMonitorsReleaseThrows_ThenTheOtherMonitorIsStillReleased()
     {
         // Arrange
+        // The child context contributes a second monitor manually: under exact-context
+        // ownership a subject enters exactly one context's graph, so the child cannot carry a
+        // second lifecycle of its own (WithSourceMonitoring would register one).
         var parent = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithLifecycle()
             .WithSourceMonitoring();
-        var child = InterceptorSubjectContext.Create().WithSourceMonitoring();
+        var child = InterceptorSubjectContext.Create();
         child.AddFallbackContext(parent);
+        var childMonitor = new SourceMonitor();
+        child.AddService<ILifecycleHandler>(childMonitor);
 
         var parentMonitor = parent.GetSourceMonitor();
-        var childMonitor = child.GetServices<SourceMonitor>()[0];
 
         parentMonitor.CompleteSourceRegistration();
         childMonitor.CompleteSourceRegistration();
@@ -887,6 +899,9 @@ internal sealed class PoisonAnchor(IInterceptorSubjectContext context) : IInterc
     public object SyncRoot { get; } = new();
 
     public IInterceptorSubjectContext Context { get; } = context;
+
+    Namotion.Interceptor.Interceptors.IInterceptorExecutor IInterceptorSubject.Executor =>
+        throw new NotSupportedException();
 
     public ConcurrentDictionary<(string? property, string key), object?> Data =>
         throw new InvalidOperationException("scope walk is broken");

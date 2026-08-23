@@ -12,6 +12,7 @@ internal static class MemberNames
 {
     public const string GetPropertyValue = "GetPropertyValue";
     public const string SetPropertyValue = "SetPropertyValue";
+    public const string SetStructuralPropertyValue = "SetStructuralPropertyValue";
     public const string InvokeMethod = "InvokeMethod";
     public const string GetInstanceProperties = "GetInstanceProperties";
     public const string PropertyChanged = "PropertyChanged";
@@ -82,6 +83,10 @@ internal static class GeneratedMemberTable
             AccessorHelperReturnKind.Boolean, RequiresLeadingString: true,
             "protected bool SetPropertyValue<TProperty>(string, TProperty, TProperty, Action<IInterceptorSubject, TProperty>)"),
         new AccessorHelperShape(
+            MemberNames.SetStructuralPropertyValue, TypeParameterCount: 1, ParameterCount: 4, RequiresParameterArray: false,
+            AccessorHelperReturnKind.Boolean, RequiresLeadingString: true,
+            "protected bool SetStructuralPropertyValue<TProperty>(string, TProperty, TProperty, Action<IInterceptorSubject, TProperty>)"),
+        new AccessorHelperShape(
             MemberNames.InvokeMethod, TypeParameterCount: 0, ParameterCount: 3, RequiresParameterArray: true,
             AccessorHelperReturnKind.Object, RequiresLeadingString: true,
             "protected object? InvokeMethod(string, Func<IInterceptorSubject, object?[], object?>, params object?[])"),
@@ -96,7 +101,7 @@ internal static class GeneratedMemberTable
     // TypeInitializationException on every compilation.
 
     /// <summary>
-    /// Four of IInterceptorSubject's five members, not all of them, and not enumerated from the
+    /// Five of IInterceptorSubject's six members, not all of them, and not enumerated from the
     /// compilation for that reason. Properties is deliberately left out: every subject emits its own
     /// explicit implementation of it, which always wins, so treating it as hijackable would report
     /// every legitimate generated hierarchy. The names cannot be nameof here, because the generator
@@ -104,7 +109,7 @@ internal static class GeneratedMemberTable
     /// pins them against the interface instead.
     /// </summary>
     private static readonly string[] HijackableInterfaceMembers =
-        ["Context", "Data", "SyncRoot", "AddProperties"];
+        ["Context", "Executor", "Data", "SyncRoot", "AddProperties"];
 
     /// <summary>
     /// Derived from <see cref="AccessorHelpers"/> rather than repeated, so a fifth helper added there

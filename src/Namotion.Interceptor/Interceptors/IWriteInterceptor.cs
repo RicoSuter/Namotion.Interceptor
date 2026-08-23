@@ -66,6 +66,16 @@ public struct PropertyWriteContext<TProperty>
     internal long Revision;
 
     /// <summary>
+    /// The executor's attachment revision captured when a structural write entered the pipeline,
+    /// before the interceptor chain was resolved. Set only by the structural constructor; the
+    /// other constructors leave it 0 and the scalar terminal never reads it. The structural
+    /// terminal re-checks it against the executor so a write cannot commit through a chain that
+    /// was picked for a different attachment. The revision alone is sufficient (no context
+    /// reference is carried): it bumps on every attachment transition.
+    /// </summary>
+    internal readonly long AttachmentRevisionAtEntry;
+
+    /// <summary>
     /// Set by the cascade re-entry constructor, where <see cref="NewValue"/> is already the
     /// stabilized getter output. Stops <see cref="GetFinalValue"/> from re-invoking the getter,
     /// which would run user code at publish time and could return a value that never paired
@@ -153,6 +163,26 @@ public struct PropertyWriteContext<TProperty>
         IsWritten = false;
         FinalValueIsNewValue = true;
         _writeTimestamp = rawTimestamp;
+        PendingOrigin.TryConsume(in property, out _attempted);
+    }
+
+    /// <summary>
+    /// Structural-route constructor: seeds <see cref="AttachmentRevisionAtEntry"/> with the
+    /// attachment revision captured at entry, before chain resolution. The revision leads the
+    /// parameter list to keep the overload unambiguous against the cascade constructor, whose
+    /// trailing parameter is also a long. Like the other constructors, this consumes the
+    /// thread-static pending origin stamp for this property (see <see cref="PendingOrigin"/>)
+    /// as a side effect of construction.
+    /// </summary>
+    internal PropertyWriteContext(long attachmentRevisionAtEntry, InterceptorExecutor executor, PropertyReference property, TProperty currentValue, TProperty newValue)
+    {
+        AttachmentRevisionAtEntry = attachmentRevisionAtEntry;
+        Executor = executor;
+        Property = property;
+        CurrentValue = currentValue;
+        NewValue = newValue;
+        IsWritten = false;
+        _writeTimestamp = 0;
         PendingOrigin.TryConsume(in property, out _attempted);
     }
 

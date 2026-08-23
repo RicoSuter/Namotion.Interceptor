@@ -1,0 +1,342 @@
+using Namotion.Interceptor.Interceptors;
+
+namespace Namotion.Interceptor.Tests;
+
+public class SubjectAttachmentTests
+{
+    private sealed class LifecycleProbe : ILifecycleInterceptor
+    {
+        public int AttachCount;
+        public int DetachCount;
+
+        public void AttachSubjectToContext(IInterceptorSubject subject) => AttachCount++;
+
+        public void DetachSubjectFromContext(IInterceptorSubject subject) => DetachCount++;
+    }
+
+    private static IInterceptorExecutor GetExecutor(IInterceptorSubject subject)
+    {
+        return (IInterceptorExecutor)subject.Context;
+    }
+
+    private static InterceptorSubjectContext CreateContextWithProbe(out LifecycleProbe probe)
+    {
+        var context = InterceptorSubjectContext.Create();
+        probe = new LifecycleProbe();
+        context.AddService(probe);
+        return context;
+    }
+
+    [Fact]
+    public void WhenSubjectIsUnattached_ThenTryGetContextReturnsNull()
+    {
+        // Arrange
+        var subject = new Car();
+
+        // Act
+        var context = subject.TryGetContext();
+
+        // Assert
+        Assert.Null(context);
+    }
+
+    [Fact]
+    public void WhenSubjectIsUnattached_ThenGetContextThrows()
+    {
+        // Arrange
+        var subject = new Car();
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => subject.GetContext());
+    }
+
+    [Fact]
+    public void WhenAttachingUnattachedSubject_ThenSubjectIsExplicitlyAttachedAndLifecycleRuns()
+    {
+        // Arrange
+        var context = CreateContextWithProbe(out var probe);
+        var subject = new Car();
+        var executor = GetExecutor(subject);
+
+        // Act
+        subject.AttachToContext(context);
+
+        // Assert
+        Assert.Same(context, subject.TryGetContext());
+        Assert.Same(context, subject.GetContext());
+        Assert.Same(context, executor.AttachedContext);
+        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+        Assert.Equal(1, probe.AttachCount);
+    }
+
+    [Fact]
+    public void WhenAttachingSubjectAttachedWithNoneAnchorToSameContext_ThenAnchorIsPromotedToExplicit()
+    {
+        // Arrange
+        var context = CreateContextWithProbe(out _);
+        var subject = new Car();
+        var executor = GetExecutor(subject);
+        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, context, SubjectAnchorKind.None, out _));
+
+        // Act
+        subject.AttachToContext(context);
+
+        // Assert
+        Assert.Same(context, executor.AttachedContext);
+        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+    }
+
+    [Fact]
+    public void WhenAttachingSubjectAttachedWithProvisionalAnchorToSameContext_ThenAnchorIsPromotedToExplicit()
+    {
+        // Arrange
+        var context = CreateContextWithProbe(out _);
+        var subject = new Car();
+        var executor = GetExecutor(subject);
+        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, context, SubjectAnchorKind.Provisional, out _));
+
+        // Act
+        subject.AttachToContext(context);
+
+        // Assert
+        Assert.Same(context, executor.AttachedContext);
+        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+    }
+
+    [Fact]
+    public void WhenAttachingAlreadyExplicitlyAttachedSubjectToSameContext_ThenThrowsBeforeAnyStateChange()
+    {
+        // Arrange
+        var context = CreateContextWithProbe(out var probe);
+        var subject = new Car();
+        var executor = GetExecutor(subject);
+        subject.AttachToContext(context);
+        var revisionBefore = executor.AttachmentRevision;
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => subject.AttachToContext(context));
+        Assert.Equal(revisionBefore, executor.AttachmentRevision);
+        Assert.Same(context, executor.AttachedContext);
+        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+        Assert.Equal(1, probe.AttachCount);
+    }
+
+    [Fact]
+    public void WhenAttachingSubjectAttachedToDifferentContext_ThenThrowsBeforeAnyStateChange()
+    {
+        // Arrange
+        var firstContext = CreateContextWithProbe(out var firstProbe);
+        var secondContext = CreateContextWithProbe(out var secondProbe);
+        var subject = new Car();
+        var executor = GetExecutor(subject);
+        subject.AttachToContext(firstContext);
+        var revisionBefore = executor.AttachmentRevision;
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => subject.AttachToContext(secondContext));
+        Assert.Equal(revisionBefore, executor.AttachmentRevision);
+        Assert.Same(firstContext, executor.AttachedContext);
+        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+        Assert.Equal(1, firstProbe.AttachCount);
+        Assert.Equal(0, secondProbe.AttachCount);
+    }
+
+    [Fact]
+    public void WhenDetachingExplicitlyAttachedSubject_ThenAnchorClearsAndLifecycleDetaches()
+    {
+        // Arrange
+        var context = CreateContextWithProbe(out var probe);
+        var subject = new Car();
+        var executor = GetExecutor(subject);
+        subject.AttachToContext(context);
+        var revisionBefore = executor.AttachmentRevision;
+
+        // Act
+        subject.DetachFromContext(context);
+
+        // Assert: only the anchor clears in this stage; the exact context is cleared once
+        // structural edges become authoritative.
+        Assert.Equal(SubjectAnchorKind.None, executor.Anchor);
+        Assert.Same(context, executor.AttachedContext);
+        Assert.True(executor.AttachmentRevision > revisionBefore);
+        Assert.Equal(1, probe.DetachCount);
+    }
+
+    [Fact]
+    public void WhenDetachingUnattachedSubject_ThenThrowsBeforeAnyStateChange()
+    {
+        // Arrange
+        var context = CreateContextWithProbe(out var probe);
+        var subject = new Car();
+        var executor = GetExecutor(subject);
+        var revisionBefore = executor.AttachmentRevision;
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => subject.DetachFromContext(context));
+        Assert.Equal(revisionBefore, executor.AttachmentRevision);
+        Assert.Null(executor.AttachedContext);
+        Assert.Equal(SubjectAnchorKind.None, executor.Anchor);
+        Assert.Equal(0, probe.DetachCount);
+    }
+
+    [Fact]
+    public void WhenDetachingSubjectWithProvisionalAnchor_ThenThrowsBeforeAnyStateChange()
+    {
+        // Arrange
+        var context = CreateContextWithProbe(out var probe);
+        var subject = new Car();
+        var executor = GetExecutor(subject);
+        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, context, SubjectAnchorKind.Provisional, out _));
+        var revisionBefore = executor.AttachmentRevision;
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => subject.DetachFromContext(context));
+        Assert.Equal(revisionBefore, executor.AttachmentRevision);
+        Assert.Same(context, executor.AttachedContext);
+        Assert.Equal(SubjectAnchorKind.Provisional, executor.Anchor);
+        Assert.Equal(0, probe.DetachCount);
+    }
+
+    [Fact]
+    public void WhenDetachingExplicitlyAttachedSubjectFromDifferentContext_ThenThrowsBeforeAnyStateChange()
+    {
+        // Arrange
+        var attachedContext = CreateContextWithProbe(out var probe);
+        var otherContext = CreateContextWithProbe(out _);
+        var subject = new Car();
+        var executor = GetExecutor(subject);
+        subject.AttachToContext(attachedContext);
+        var revisionBefore = executor.AttachmentRevision;
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => subject.DetachFromContext(otherContext));
+        Assert.Equal(revisionBefore, executor.AttachmentRevision);
+        Assert.Same(attachedContext, executor.AttachedContext);
+        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+        Assert.Equal(0, probe.DetachCount);
+    }
+
+    [Fact]
+    public void WhenContextIsAddedThroughOldFallbackIdiom_ThenAttachedContextStaysNull()
+    {
+        // Arrange & Act: the constructor attaches through AddFallbackContext, the old model.
+        var context = CreateContextWithProbe(out var probe);
+        var subject = new Car(context);
+        var executor = GetExecutor(subject);
+
+        // Assert: only the new extensions and the raw seam set the exact attachment.
+        Assert.Equal(1, probe.AttachCount);
+        Assert.Null(subject.TryGetContext());
+        Assert.Null(executor.AttachedContext);
+        Assert.Equal(SubjectAnchorKind.None, executor.Anchor);
+        Assert.Equal(0, executor.AttachmentRevision);
+    }
+
+    [Fact]
+    public void WhenAttachingSubjectAlreadyAttachedThroughOldFallbackIdiom_ThenLifecycleDoesNotRunAgain()
+    {
+        // Arrange
+        var context = CreateContextWithProbe(out var probe);
+        var subject = new Car(context);
+        var executor = GetExecutor(subject);
+
+        // Act
+        subject.AttachToContext(context);
+
+        // Assert: the new state is set and the fallback half is a no-op because it is already present.
+        Assert.Same(context, executor.AttachedContext);
+        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+        Assert.Equal(1, probe.AttachCount);
+    }
+
+    [Fact]
+    public void WhenReadingTheAttachedContext_ThenNothingIsAllocated()
+    {
+        // Arrange: the context read is the ownership predicate across the codebase, so it must
+        // stay allocation-free for attached and unattached subjects alike.
+        var unattached = new Car();
+        var attached = new Car();
+        attached.AttachToContext(InterceptorSubjectContext.Create());
+        for (var i = 0; i < 100; i++)
+        {
+            unattached.TryGetContext();
+            attached.TryGetContext();
+        }
+
+        // Act
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1_000; i++)
+        {
+            unattached.TryGetContext();
+            attached.TryGetContext();
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+        // Assert
+        Assert.Equal(0, allocated);
+    }
+
+    [Fact]
+    public void WhenTheAttachmentMonitorIsHeldByACommit_ThenAttachmentReadsStillComplete()
+    {
+        // Arrange: the structural terminal holds the attachment monitor through the commit, so a
+        // backing write delegate that blocks keeps it held for as long as the test wants. The
+        // attachment reads below only complete while it is held if they take no lock, which is
+        // what lets consumers call them from inside their own locks without deadlocking.
+        var context = InterceptorSubjectContext.Create();
+        var subject = new Car(context);
+        var executor = GetExecutor(subject);
+        using var insideCommit = new ManualResetEventSlim(false);
+        using var resumeCommit = new ManualResetEventSlim(false);
+        var commitResumedInTime = false;
+
+        var writer = new Thread(() => executor.SetStructuralPropertyValue<int>("Speed", 42, 0, (_, _) =>
+        {
+            insideCommit.Set();
+            commitResumedInTime = resumeCommit.Wait(TimeSpan.FromSeconds(10));
+        }));
+        writer.Start();
+        Assert.True(insideCommit.Wait(TimeSpan.FromSeconds(10)));
+
+        // Act: read from inside a lock the caller already holds, like consumers do.
+        IInterceptorSubjectContext? attachedContext;
+        SubjectAnchorKind anchor;
+        long revision;
+        var callerLock = new object();
+        lock (callerLock)
+        {
+            attachedContext = subject.TryGetContext();
+            anchor = executor.Anchor;
+            revision = executor.AttachmentRevision;
+        }
+        resumeCommit.Set();
+        writer.Join();
+
+        // Assert: the reads completed while the monitor was held (the commit was still waiting
+        // when they finished) and observed the pre-commit state.
+        Assert.True(commitResumedInTime);
+        Assert.Null(attachedContext);
+        Assert.Equal(SubjectAnchorKind.None, anchor);
+        Assert.Equal(0, revision);
+    }
+
+    [Fact]
+    public void WhenDetachingAndReattaching_ThenLifecycleRunsAgain()
+    {
+        // Arrange
+        var context = CreateContextWithProbe(out var probe);
+        var subject = new Car();
+        var executor = GetExecutor(subject);
+
+        // Act
+        subject.AttachToContext(context);
+        subject.DetachFromContext(context);
+        subject.AttachToContext(context);
+
+        // Assert: the second attach promotes the leftover None anchor and re-adds the fallback.
+        Assert.Equal(2, probe.AttachCount);
+        Assert.Equal(1, probe.DetachCount);
+        Assert.Same(context, executor.AttachedContext);
+        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+    }
+}

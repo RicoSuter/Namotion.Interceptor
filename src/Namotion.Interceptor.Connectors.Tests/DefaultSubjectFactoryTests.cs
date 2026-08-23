@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Connectors.Tests.Models;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Connectors.Tests;
@@ -19,6 +20,8 @@ public class DefaultSubjectFactoryTests
         object IInterceptorSubject.SyncRoot { get; } = new();
 
         public IInterceptorSubjectContext Context { get; } = null!;
+
+        IInterceptorExecutor IInterceptorSubject.Executor => null!;
 
         public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = null!;
 

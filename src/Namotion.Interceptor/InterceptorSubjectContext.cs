@@ -331,6 +331,26 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         action(ref context, writeValue);
     }
 
+    /// <summary>
+    /// The structural counterpart of <see cref="ExecuteInterceptedWrite{TProperty}"/>: same chain
+    /// resolution, but the compiled function ends in the structural terminal, which re-checks the
+    /// attachment revision captured at entry. Cached separately per state so the scalar route's
+    /// terminal stays free of that check.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void ExecuteInterceptedStructuralWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
+    {
+        var state = Volatile.Read(ref _state);
+        var resolved = this;
+        if (state.DelegationTarget is not null)
+        {
+            resolved = ResolveDelegationTarget(ref state);
+        }
+
+        var action = resolved.GetStructuralWriteInterceptorFunction<TProperty>(state);
+        action(ref context, writeValue);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal object? ExecuteInterceptedInvoke(ref MethodInvocationContext context, Func<IInterceptorSubject, object?[], object?> invokeMethod)
     {
@@ -581,6 +601,26 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         var writeInterceptors = GetServicesFromState<IWriteInterceptor>(state);
         var action = WriteInterceptorFactory<TProperty>.Create(writeInterceptors);
         state.SetWriteFunction(PropertyTypeIndex<TProperty>.Value, action);
+        return action;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private WriteAction<TProperty> GetStructuralWriteInterceptorFunction<TProperty>(ContextState state)
+    {
+        var cached = state.TryGetStructuralWriteFunction(PropertyTypeIndex<TProperty>.Value);
+        if (cached is not null)
+        {
+            return (WriteAction<TProperty>)cached;
+        }
+
+        return CreateStructuralWriteInterceptorFunction<TProperty>(state);
+    }
+
+    private WriteAction<TProperty> CreateStructuralWriteInterceptorFunction<TProperty>(ContextState state)
+    {
+        var writeInterceptors = GetServicesFromState<IWriteInterceptor>(state);
+        var action = StructuralWriteInterceptorFactory<TProperty>.Create(writeInterceptors);
+        state.SetStructuralWriteFunction(PropertyTypeIndex<TProperty>.Value, action);
         return action;
     }
 
@@ -1027,9 +1067,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         private Delegate? _methodInvocationFunction;
 
         // Indexed by PropertyTypeIndex, grown by replacing the array. Only a context a chain ends
-        // on ever fills these, since everything above it resolves to that context.
+        // on ever fills these, since everything above it resolves to that context. The structural
+        // write functions are a separate cache because their terminal carries the attachment
+        // revision check, which the scalar terminal must not pay for.
         private Delegate?[]? _readFunctions;
         private Delegate?[]? _writeFunctions;
+        private Delegate?[]? _structuralWriteFunctions;
 
         // The context this state's chain ends on, or CyclicDelegationMarker when it runs in a
         // circle. Null until first walked. A context and never a state: a context's state is
@@ -1107,6 +1150,17 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         internal void SetWriteFunction(int propertyTypeIndex, Delegate function)
         {
             SetFunction(ref _writeFunctions, propertyTypeIndex, function);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal Delegate? TryGetStructuralWriteFunction(int propertyTypeIndex)
+        {
+            return TryGetFunction(ref _structuralWriteFunctions, propertyTypeIndex);
+        }
+
+        internal void SetStructuralWriteFunction(int propertyTypeIndex, Delegate function)
+        {
+            SetFunction(ref _structuralWriteFunctions, propertyTypeIndex, function);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -536,6 +536,7 @@ A class can host generated subclasses when it exposes all of the following. A ge
 | implements `IRaisePropertyChanged`, on the base class or on the subject | the subject not re-declaring `PropertyChanged` and `RaisePropertyChanged` |
 | `protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)` | generated getters |
 | `protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)` | generated setters |
+| `protected bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)` | generated setters for properties whose declared type can hold a subject |
 | `protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)` | generated method wrappers |
 | `protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties()` | the subject's own `IInterceptorSubject.Properties` |
 | `public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties` | merging the subject's properties with the base class ones |
@@ -576,6 +577,9 @@ public class TrackedEntityBase : IInterceptorSubject, INotifyPropertyChanged, IR
     IInterceptorSubjectContext IInterceptorSubject.Context
         => InterceptorExecutor.GetOrCreate(ref _context, this);
 
+    IInterceptorExecutor IInterceptorSubject.Executor
+        => InterceptorExecutor.GetOrCreate(ref _context, this);
+
     ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
 
     object IInterceptorSubject.SyncRoot { get; } = new object();
@@ -606,6 +610,18 @@ public class TrackedEntityBase : IInterceptorSubject, INotifyPropertyChanged, IR
         }
 
         return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+    }
+
+    protected bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue,
+        Action<IInterceptorSubject, TProperty> setValue)
+    {
+        if (_context is null)
+        {
+            setValue(this, newValue);
+            return true;
+        }
+
+        return _context.SetStructuralPropertyValue(propertyName, newValue, currentValue, setValue);
     }
 
     protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod,
