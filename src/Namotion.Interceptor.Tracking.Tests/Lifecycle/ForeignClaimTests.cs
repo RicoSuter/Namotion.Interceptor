@@ -103,27 +103,24 @@ public class ForeignClaimTests
         Assert.Null(subject.TryGetContext());
         Assert.Equal(0, subject.GetReferenceCount());
         Assert.Same(context2, foreign.TryGetContext());
+    }
 
-        // Act: the failed attach leaves no residue, so a later legal attach works normally.
+    [Fact]
+    public void WhenAFailedAttachIsRetriedWithoutTheForeignSubject_ThenItSucceeds()
+    {
+        // Arrange: a rejected attach must leave no residue behind on the subject it refused.
+        var context1 = CreateContext();
+        var context2 = CreateContext();
+        var foreign = new Person(context2) { FirstName = "F" };
+        var subject = new Person { FirstName = "S" };
+        subject.Father = foreign;
+        Assert.Throws<InvalidOperationException>(() => subject.AttachToContext(context1));
+
+        // Act
         subject.Father = null;
         subject.AttachToContext(context1);
 
         // Assert
         Assert.Same(context1, subject.TryGetContext());
-    }
-
-    private sealed class DelegateLifecycleHandler : ILifecycleHandler
-    {
-        private readonly Action<SubjectLifecycleChange> _onChange;
-
-        public DelegateLifecycleHandler(Action<SubjectLifecycleChange> onChange)
-        {
-            _onChange = onChange;
-        }
-
-        public void HandleLifecycleChange(SubjectLifecycleChange change)
-        {
-            _onChange(change);
-        }
     }
 }

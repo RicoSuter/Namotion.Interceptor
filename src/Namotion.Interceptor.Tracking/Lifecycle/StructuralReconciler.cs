@@ -17,9 +17,9 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// records and committed outgoing edges therefore disagree for the duration of the publication,
 /// which is exactly why every reader validates candidate edges against the baselines.
 /// </remarks>
-internal sealed class StructuralReconciler(LifecycleInterceptor lifecycle, OwnershipGraph graph, AttachTraversal attach, ReleaseTraversal release)
+internal sealed class StructuralReconciler(LifecycleNotifier notifier, OwnershipGraph graph, AttachTraversal attach, ReleaseTraversal release)
 {
-    public void Reconcile(PropertyReference property, object? newValue)
+    public void Reconcile(PropertyReference property, SubjectPropertyMetadata metadata, object? newValue)
     {
         var oldValue = graph.GetBaseline(property);
         if (ReferenceEquals(oldValue, newValue))
@@ -42,8 +42,8 @@ internal sealed class StructuralReconciler(LifecycleInterceptor lifecycle, Owner
             // Commit the outgoing edges before the incoming records are touched.
             graph.SetBaseline(property, newValue);
 
-            if (StructuralValueScanner.HasKeyedOccurrences(property, oldValue) ||
-                StructuralValueScanner.HasKeyedOccurrences(property, newValue))
+            if (StructuralValueScanner.HasKeyedOccurrences(metadata, oldValue) ||
+                StructuralValueScanner.HasKeyedOccurrences(metadata, newValue))
             {
                 ReconcileKeyed(property, oldValue, newValue, oldOccurrences, newOccurrences);
             }
@@ -107,7 +107,7 @@ internal sealed class StructuralReconciler(LifecycleInterceptor lifecycle, Owner
         // resynchronize their own collection projections against the committed value.
         if (hasRetained)
         {
-            lifecycle.RefreshCollectionProperty(property, newValue);
+            notifier.RefreshCollectionProperty(property, newValue);
         }
     }
 
@@ -249,7 +249,7 @@ internal sealed class StructuralReconciler(LifecycleInterceptor lifecycle, Owner
                     }
 
                     ownership.SetIncomingIndices(property, group.Value);
-                    ParentProjection.Publish(ownership);
+                    ownership.RepublishParents();
                 }
             }
             finally
@@ -258,7 +258,7 @@ internal sealed class StructuralReconciler(LifecycleInterceptor lifecycle, Owner
             }
         }
 
-        lifecycle.RefreshCollectionProperty(property, newValue);
+        notifier.RefreshCollectionProperty(property, newValue);
     }
 
     private static bool IsAppendOnly(List<SubjectOccurrence> oldOccurrences, List<SubjectOccurrence> newOccurrences)

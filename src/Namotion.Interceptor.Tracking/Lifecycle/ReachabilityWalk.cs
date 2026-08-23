@@ -7,10 +7,11 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// <remarks>
 /// It is a backward search over committed incoming edges rather than a forward mark from the roots.
 /// A subject is reachable from a root exactly when some root lies in its ancestor closure, so the
-/// cost is that closure instead of the whole context. A complete context-local scan was measured at
-/// 135 times master on a single shared-parent removal in a 2000-subject context; a forward mark is
-/// invalidated by every cross-parent removal, which is the common shape; and incrementally
-/// maintained reachability pays on every edge mutation including the tree-shaped removals that the
+/// cost is that closure instead of the whole context. Three alternatives were implemented and
+/// measured against it. A complete context-local scan is far slower on a large context, because it
+/// visits every subject per removed edge. A forward mark is invalidated by every cross-parent
+/// removal, which is the common shape, so it never helps. Incrementally maintained reachability pays
+/// maintenance on every edge mutation, including the tree-shaped removals that the
 /// zero-remaining-edges short circuit already answers for free.
 ///
 /// Two questions share this one walk. Release asks whether a subject that just lost an edge is still
@@ -21,7 +22,12 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// </remarks>
 internal sealed class ReachabilityWalk(OwnershipGraph graph)
 {
-    public bool HasAnchoredAncestor(IInterceptorSubject start, IInterceptorSubject? excluded)
+    /// <summary>
+    /// Whether an anchor holds <paramref name="start"/>: either its own, or one in its ancestor
+    /// closure over committed incoming edges. <paramref name="excluded"/>, when given, does not
+    /// count as an anchor anywhere in the walk, though the walk still passes through it.
+    /// </summary>
+    public bool IsAnchorReachable(IInterceptorSubject start, IInterceptorSubject? excluded)
     {
         if (!ReferenceEquals(start, excluded) && graph.IsAnchored(start))
         {

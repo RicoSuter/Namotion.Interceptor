@@ -188,16 +188,24 @@ public class GraphOwnershipTests
         Assert.Null(c.TryGetContext());
     }
 
-    [Fact]
-    public void WhenCycleIsReferencedBySecondRoot_ThenCycleIsRetained()
+    /// <summary>parent1 -> b, b &lt;-&gt; c, parent2 -> c.</summary>
+    private static (Person Parent1, Person Parent2, Person B, Person C) CreateCycleUnderTwoRoots(
+        IInterceptorSubjectContext context)
     {
-        // Arrange: parent1 -> b <-> c and parent2 -> c
-        var context = CreateContext();
         var c = new Person { FirstName = "C" };
         var b = new Person { FirstName = "B", Mother = c };
         c.Mother = b;
         var parent1 = new Person(context) { FirstName = "P1", Father = b };
         var parent2 = new Person(context) { FirstName = "P2", Father = c };
+        return (parent1, parent2, b, c);
+    }
+
+    [Fact]
+    public void WhenCycleLosesOneOfTwoRoots_ThenItIsRetained()
+    {
+        // Arrange
+        var context = CreateContext();
+        var (parent1, _, b, c) = CreateCycleUnderTwoRoots(context);
 
         // Act: parent1 lets go, parent2 still reaches the cycle through c
         parent1.Father = null;
@@ -207,8 +215,17 @@ public class GraphOwnershipTests
         Assert.NotNull(c.TryGetContext());
         Assert.Equal(1, b.GetReferenceCount());
         Assert.Equal(2, c.GetReferenceCount());
+    }
 
-        // Act: parent2 lets go as well, the cycle becomes unreachable
+    [Fact]
+    public void WhenCycleLosesBothRoots_ThenItIsReleased()
+    {
+        // Arrange
+        var context = CreateContext();
+        var (parent1, parent2, b, c) = CreateCycleUnderTwoRoots(context);
+        parent1.Father = null;
+
+        // Act
         parent2.Father = null;
 
         // Assert
@@ -218,16 +235,23 @@ public class GraphOwnershipTests
         Assert.Equal(0, c.GetReferenceCount());
     }
 
-    [Fact]
-    public void WhenSharedDagChildLosesOneParent_ThenItIsRetained()
+    /// <summary>root -> left -> shared and root -> right -> shared.</summary>
+    private static (Person Left, Person Right, Person Shared) CreateSharedDagChild(
+        IInterceptorSubjectContext context)
     {
-        // Arrange: two parents under one root share a child
-        var context = CreateContext();
         var shared = new Person { FirstName = "S" };
         var left = new Person { FirstName = "L", Father = shared };
         var right = new Person { FirstName = "R", Father = shared };
-        var root = new Person(context) { FirstName = "Root", Mother = left, Father = right };
-        Assert.Equal(2, shared.GetReferenceCount());
+        _ = new Person(context) { FirstName = "Root", Mother = left, Father = right };
+        return (left, right, shared);
+    }
+
+    [Fact]
+    public void WhenSharedDagChildLosesOneParent_ThenItIsRetained()
+    {
+        // Arrange
+        var context = CreateContext();
+        var (left, _, shared) = CreateSharedDagChild(context);
 
         // Act
         left.Father = null;
@@ -235,6 +259,15 @@ public class GraphOwnershipTests
         // Assert
         Assert.Equal(1, shared.GetReferenceCount());
         Assert.NotNull(shared.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenSharedDagChildLosesBothParents_ThenItIsReleased()
+    {
+        // Arrange
+        var context = CreateContext();
+        var (left, right, shared) = CreateSharedDagChild(context);
+        left.Father = null;
 
         // Act
         right.Father = null;
@@ -269,7 +302,6 @@ public class GraphOwnershipTests
         var context = CreateContext();
         var parent = new Person(context) { FirstName = "P" };
         var child = new Person { FirstName = "C" };
-        Assert.Null(child.TryGetContext());
 
         // Act
         parent.Father = child;
@@ -318,8 +350,9 @@ public class GraphOwnershipTests
     [Fact]
     public void WhenConstructorAttachedSubjectIsPromotedToExplicit_ThenItSurvivesEdgeRemoval()
     {
-        // Arrange: the promote path does not reach the lifecycle (the fallback context is
-        // already present), so the lifecycle must adopt the executor's anchor lazily.
+        // Arrange: promoting a subject that is already in the graph sets an explicit anchor without
+        // repeating its attach callbacks, and the explicit anchor outlives the edge that adopted it
+        // where the provisional one would not have.
         var context = CreateContext();
         var parent = new Person(context) { FirstName = "P" };
         var child = new Person(context) { FirstName = "C" };
@@ -502,26 +535,23 @@ public class GraphOwnershipTests
         // Assert
         Assert.Same(context, child.TryGetContext());
         Assert.Equal(1, child.GetReferenceCount());
+    }
 
-        // Act: the last edge goes, nothing holds the subject anymore
+    [Fact]
+    public void WhenDetachedRootLosesItsLastEdge_ThenItIsReleased()
+    {
+        // Arrange
+        var context = CreateContext();
+        var parent = new Person(context) { FirstName = "P" };
+        var child = new Person { FirstName = "C" };
+        child.AttachToContext(context);
+        parent.Father = child;
+        child.DetachFromContext(context);
+
+        // Act
         parent.Father = null;
 
         // Assert
         Assert.Null(child.TryGetContext());
-    }
-
-    private sealed class DelegateLifecycleHandler : ILifecycleHandler
-    {
-        private readonly Action<SubjectLifecycleChange> _onChange;
-
-        public DelegateLifecycleHandler(Action<SubjectLifecycleChange> onChange)
-        {
-            _onChange = onChange;
-        }
-
-        public void HandleLifecycleChange(SubjectLifecycleChange change)
-        {
-            _onChange(change);
-        }
     }
 }

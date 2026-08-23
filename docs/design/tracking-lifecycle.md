@@ -1,5 +1,15 @@
 # Lifecycle Interceptor: Internal Design
 
+> **Superseded and not yet rewritten.** Everything below describes the reference-counting lifecycle
+> as it was before the single-context ownership rewrite (`feat: own graph lifecycle in one context`
+> and the commits after it). The data structures it names are gone: `_attachedSubjects` and its
+> reference sets, the `_lastProcessedValues` field name, the lock taken on `_attachedSubjects`, and
+> `ParentTrackingHandler` as the writer of parent state. Ownership now follows reachability from an
+> anchored root over occurrence-aware edges, the topology lock is a private monitor on the
+> lifecycle, property baselines are also the committed outgoing edges, and the lifecycle is the sole
+> writer of parent state. Read the code and the single-context design document instead of this file
+> until the documentation stage rewrites it.
+
 This document describes the internal concurrency model and data structures of `LifecycleInterceptor`. For user-facing documentation, see the [Tracking](../tracking.md) documentation.
 
 ## Overview

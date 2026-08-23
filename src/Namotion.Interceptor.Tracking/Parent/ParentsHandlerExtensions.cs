@@ -56,7 +56,14 @@ public static class ParentsHandlerExtensions
     /// The first call on a subject activates parent publication for it, so a consumer that never
     /// asks pays nothing. An unattached subject, and a subject in a context using another lifecycle
     /// implementation, return empty.
+    ///
+    /// The order of the entries is unspecified and history-dependent: only the set of occurrences,
+    /// each with its property and its index or key, is meaningful.
     /// </remarks>
+    /// <exception cref="InvalidOperationException">The subject's context resolves more than one
+    /// built-in lifecycle, which happens when two contexts that each configure Tracking are
+    /// composed. A subject belongs to exactly one context's graph, so that configuration has no
+    /// answer.</exception>
     public static ImmutableArray<SubjectParent> GetParents(this IInterceptorSubject subject)
     {
         return subject.TryGetContext()?.TryGetLifecycleInterceptor()?.GetParents(subject) ?? [];

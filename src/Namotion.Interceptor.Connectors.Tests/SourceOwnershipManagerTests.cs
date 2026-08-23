@@ -250,11 +250,14 @@ internal static class LifecycleInterceptorExtensions
 {
     public static void RaiseSubjectDetaching(this LifecycleInterceptor interceptor, IInterceptorSubject subject)
     {
-        // Use reflection to raise the event since it's internal
-        var eventField = typeof(LifecycleInterceptor)
-            .GetField("SubjectDetaching", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+        // Reflection, because the event can be subscribed to but not raised from outside. Two hops:
+        // the interceptor's event forwards its add and remove to an internal notifier, so the
+        // subscriber list lives there rather than on a backing field of the interceptor itself.
+        const System.Reflection.BindingFlags flags =
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
 
-        if (eventField?.GetValue(interceptor) is Action<SubjectLifecycleChange> handler)
+        var notifier = typeof(LifecycleInterceptor).GetField("_notifier", flags)?.GetValue(interceptor);
+        if (notifier?.GetType().GetField("SubjectDetaching", flags)?.GetValue(notifier) is Action<SubjectLifecycleChange> handler)
         {
             handler.Invoke(new SubjectLifecycleChange { Subject = subject, ReferenceCount = 0 });
         }

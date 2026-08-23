@@ -19,6 +19,13 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// </remarks>
 public class OwnershipOracleTests
 {
+    /// <summary>
+    /// Stable names captured outside the graph. Reading a name back off the subject would resolve
+    /// the interceptor chain, which is work the oracle should not depend on. Per instance, so a run
+    /// does not retain every subject of every other run.
+    /// </summary>
+    private readonly Dictionary<IInterceptorSubject, string> _names = new();
+
     private static readonly int[] CommittedSeeds = [1, 2, 3, 5, 8, 13, 21, 34];
 
     public static TheoryData<int> Seeds
@@ -161,6 +168,11 @@ public class OwnershipOracleTests
             var expectedParents = occurrences
                 .Where(occurrence => ReferenceEquals(occurrence.Child, subject))
                 .Select(occurrence => (Parent: Name(occurrence.Parent), occurrence.Property, Index: occurrence.Index?.ToString()))
+                // Sorted on purpose: the order of GetParents() is unspecified. It is edge-storage
+                // order, which depends on the add and remove history rather than on the property, and
+                // the previous implementation returned hash-set order. Only the set of occurrences,
+                // each with its property and its index or key, is meaningful, and the indices carried
+                // in the entries are what this compares.
                 .OrderBy(entry => $"{entry.Parent}.{entry.Property}[{entry.Index}]")
                 .ToList();
 
@@ -236,13 +248,6 @@ public class OwnershipOracleTests
             yield return (nameof(Person.Children), i, subject.Children[i]);
         }
     }
-
-    /// <summary>
-    /// Stable names captured outside the graph. Reading a name back off the subject would resolve the
-    /// interceptor chain, and the composed fallback graph these tests build can be cyclic. Per
-    /// instance, so a run does not retain every subject of every other run.
-    /// </summary>
-    private readonly Dictionary<IInterceptorSubject, string> _names = new();
 
     private string Name(IInterceptorSubject subject)
     {

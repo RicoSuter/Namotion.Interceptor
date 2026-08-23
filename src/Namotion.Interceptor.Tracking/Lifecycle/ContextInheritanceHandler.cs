@@ -30,17 +30,20 @@ public class ContextInheritanceHandler : ILifecycleHandler
         // leaves. The removal keys off the leaving transition rather than a zero reference count:
         // an anchored root sits at zero references while still owned, and stripping its composed
         // context would leave an attached subject whose own writes are no longer intercepted.
+        // The `??` arm is the third-party path: a custom ILifecycleInterceptor need not claim
+        // subjects, so there may be no attached context to inherit and the parent's is the best
+        // available answer, which is also what this handler did before.
         var inheritedContext = change.Subject.TryGetContext() ?? change.Property.Value.Subject.Context;
         if (change.IsContextAttach)
         {
             if (!change.Subject.Context.AddFallbackContext(inheritedContext) &&
-                change.Subject.TryGetContext()?.TryGetService<ILifecycleInterceptor>() is { } lifecycle)
+                inheritedContext.TryGetService<ILifecycleInterceptor>() is { } lifecycle)
             {
                 // Composing the context is what re-enters the lifecycle and discovers the subject's
                 // own component. A composition left behind by an earlier attach makes that a no-op,
                 // so the descent has to be entered directly instead; without it an attached parent
                 // keeps referencing children that never joined the graph.
-                lifecycle.AttachSubjectToContext(change.Subject);
+                lifecycle.OnContextComposed(change.Subject);
             }
         }
         else if (change is { IsContextDetach: true, IsPropertyReferenceRemoved: true })

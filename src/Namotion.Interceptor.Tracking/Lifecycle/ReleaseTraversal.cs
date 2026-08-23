@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// makes the descent safe to re-enter from a callback: the re-entry finds the subject already gone,
 /// and a reachability walk can no longer route through it.
 /// </remarks>
-internal sealed class ReleaseTraversal(LifecycleInterceptor lifecycle, OwnershipGraph graph, ReachabilityWalk reachability)
+internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGraph graph, ReachabilityWalk reachability)
 {
     /// <summary>
     /// Removes one committed incoming edge occurrence and releases the subject, and everything below
@@ -31,11 +31,11 @@ internal sealed class ReleaseTraversal(LifecycleInterceptor lifecycle, Ownership
         }
 
         var referenceCount = ownership.IncomingCount;
-        ParentProjection.Publish(ownership);
+        ownership.RepublishParents();
 
         if (IsStillHeld(subject, ownership))
         {
-            lifecycle.PublishEdgeRemoved(subject, property, index, referenceCount);
+            notifier.PublishEdgeRemoved(subject, property, index, referenceCount);
             return;
         }
 
@@ -77,8 +77,8 @@ internal sealed class ReleaseTraversal(LifecycleInterceptor lifecycle, Ownership
             foreach (var edge in remaining)
             {
                 ownership.RemoveIncoming(edge.Property, edge.Index);
-                ParentProjection.Publish(ownership);
-                lifecycle.PublishEdgeRemoved(subject, edge.Property, edge.Index, ownership.IncomingCount);
+                ownership.RepublishParents();
+                notifier.PublishEdgeRemoved(subject, edge.Property, edge.Index, ownership.IncomingCount);
             }
         }
         finally
@@ -89,59 +89,58 @@ internal sealed class ReleaseTraversal(LifecycleInterceptor lifecycle, Ownership
 
     /// <summary>
     /// Whether anything still holds the subject: its own anchor, or a path from an anchored root.
-    /// The zero-edge short circuit is what keeps tree-shaped removals free of any walk.
     /// </summary>
     private bool IsStillHeld(IInterceptorSubject subject, SubjectOwnership ownership)
     {
-        if (graph.IsAnchored(subject))
-        {
-            return true;
-        }
-
-        return ownership.IncomingCount > 0 && reachability.HasAnchoredAncestor(subject, null);
+        // The zero-edge short circuit is what keeps tree-shaped removals free of any walk; the walk
+        // itself already answers the subject's own anchor.
+        return ownership.IncomingCount > 0
+            ? reachability.IsAnchorReachable(subject, null)
+            : graph.IsAnchored(subject);
     }
 
     private void Release(IInterceptorSubject subject, SubjectOwnership ownership, PropertyReference? property, object? index)
     {
         var children = LifecycleScratch.RentChildList();
-        graph.CollectCommittedChildren(subject, children);
-
-        // Drop the ownership record and the baselines first: from here on the subject is released as
-        // far as every other query is concerned, which is what makes the callbacks below safe to
-        // re-enter this descent from. It also means the callbacks see no parents at all rather than
-        // only the edge being removed; handlers ordered after the parent-tracking slot observed the
-        // same thing before, because that slot removed the last remaining entry ahead of them.
-        graph.RemoveOwnership(subject);
-        graph.RemoveBaselines(subject);
-
-        foreach (var entry in subject.Properties)
-        {
-            subject.DetachSubjectProperty(new PropertyReference(subject, entry.Key));
-        }
-
-        DrainRemainingEdges(subject, ownership);
-
-        var change = new SubjectLifecycleChange
-        {
-            Subject = subject,
-            Property = property,
-            Index = index,
-            ReferenceCount = 0,
-            IsPropertyReferenceRemoved = property.HasValue,
-            IsContextDetach = true
-        };
-
-        lifecycle.RaiseSubjectDetaching(change);
-        lifecycle.InvokeRemovedLifecycleHandlers(subject, change);
-
-        // Only after the subject's own teardown callbacks completed, so they still resolve the
-        // context they are being torn down from. The composed fallback contexts are left alone:
-        // while the executor is still a context, they are what keeps a released subject's own
-        // writes intercepted, and the handler that composed one is the one that removes it.
-        graph.ReleaseClaim(subject);
-
         try
         {
+            graph.CollectCommittedChildren(subject, children);
+
+            // Drop the ownership record and the baselines first: from here on the subject is
+            // released as far as every other query is concerned, which is what makes the callbacks
+            // below safe to re-enter this descent from. It also means the callbacks see no parents
+            // at all rather than only the edge being removed; handlers ordered after the
+            // parent-tracking slot observed the same thing before, because that slot removed the
+            // last remaining entry ahead of them.
+            graph.RemoveOwnership(subject);
+            graph.RemoveBaselines(subject);
+
+            foreach (var entry in subject.Properties)
+            {
+                subject.DetachSubjectProperty(new PropertyReference(subject, entry.Key));
+            }
+
+            DrainRemainingEdges(subject, ownership);
+
+            var change = new SubjectLifecycleChange
+            {
+                Subject = subject,
+                Property = property,
+                Index = index,
+                ReferenceCount = 0,
+                IsPropertyReferenceRemoved = property.HasValue,
+                IsContextDetach = true
+            };
+
+            notifier.RaiseSubjectDetaching(change);
+            notifier.InvokeRemovedLifecycleHandlers(subject, change);
+
+            // Only after the subject's own teardown callbacks completed, so they still resolve the
+            // context they are being torn down from. The composed fallback contexts are left alone:
+            // while the executor is still a context, they are what keeps a released subject's own
+            // writes intercepted, and the handler that composed one is the one that removes it.
+            graph.ReleaseClaim(subject);
+
             foreach (var (childProperty, occurrence) in children)
             {
                 RemoveEdge(occurrence.Subject, childProperty, occurrence.Index);

@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// ordered before it observe a subject top-down and handlers after it, along with the
 /// <c>SubjectAttached</c> event, observe it bottom-up.
 /// </remarks>
-internal sealed class AttachTraversal(LifecycleInterceptor lifecycle, OwnershipGraph graph, ReachabilityWalk reachability)
+internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph graph, ReachabilityWalk reachability)
 {
     /// <summary>Seeds the subject's structural properties unless an earlier descent already did.</summary>
     public void SeedChildrenIfNeeded(IInterceptorSubject subject)
@@ -44,9 +44,14 @@ internal sealed class AttachTraversal(LifecycleInterceptor lifecycle, OwnershipG
     /// </summary>
     public void AttachEdge(IInterceptorSubject subject, PropertyReference property, object? index)
     {
-        var ownership = graph.TryGetOwnership(subject);
-        var isContextAttach = ownership is null;
-        if (isContextAttach)
+        var existing = graph.TryGetOwnership(subject);
+        var isContextAttach = existing is null;
+        SubjectOwnership ownership;
+        if (existing is not null)
+        {
+            ownership = existing;
+        }
+        else
         {
             if (!graph.TryClaim(subject, SubjectAnchorKind.None))
             {
@@ -57,11 +62,11 @@ internal sealed class AttachTraversal(LifecycleInterceptor lifecycle, OwnershipG
             ownership = graph.AddOwnership(subject);
         }
 
-        ownership!.AddIncoming(property, index);
+        ownership.AddIncoming(property, index);
         var referenceCount = ownership.IncomingCount;
 
         // Authoritative parent and anchor state before the first handler observes the change.
-        ParentProjection.Publish(ownership);
+        ownership.RepublishParents();
         ConsumeProvisionalAnchor(subject, property);
 
         var change = new SubjectLifecycleChange
@@ -74,21 +79,7 @@ internal sealed class AttachTraversal(LifecycleInterceptor lifecycle, OwnershipG
             IsPropertyReferenceAdded = true
         };
 
-        // Snapshotted before the handlers run: a handler may add properties, and those are attached
-        // by that call rather than a second time here.
-        var properties = subject.Properties.Keys;
-        lifecycle.InvokeAddedLifecycleHandlers(subject, change);
-
-        if (!isContextAttach)
-        {
-            return;
-        }
-
-        lifecycle.RaiseSubjectAttached(change);
-        foreach (var propertyName in properties)
-        {
-            subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
-        }
+        Publish(subject, change, isContextAttach);
     }
 
     /// <summary>Publishes a subject entering the graph without an edge, as an anchored root.</summary>
@@ -103,10 +94,26 @@ internal sealed class AttachTraversal(LifecycleInterceptor lifecycle, OwnershipG
             IsContextAttach = true
         };
 
-        var properties = subject.Properties.Keys;
-        lifecycle.InvokeAddedLifecycleHandlers(subject, change);
+        Publish(subject, change, isContextAttach: true);
+    }
 
-        lifecycle.RaiseSubjectAttached(change);
+    /// <summary>
+    /// Invokes the ordered handlers, and for a subject entering the graph also raises the event and
+    /// attaches its properties.
+    /// </summary>
+    private void Publish(IInterceptorSubject subject, SubjectLifecycleChange change, bool isContextAttach)
+    {
+        // Snapshotted before the handlers run: a handler may add properties, and those are attached
+        // by that call rather than a second time here.
+        var properties = subject.Properties.Keys;
+        notifier.InvokeAddedLifecycleHandlers(subject, change);
+
+        if (!isContextAttach)
+        {
+            return;
+        }
+
+        notifier.RaiseSubjectAttached(change);
         foreach (var propertyName in properties)
         {
             subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
@@ -130,7 +137,7 @@ internal sealed class AttachTraversal(LifecycleInterceptor lifecycle, OwnershipG
             return;
         }
 
-        if (reachability.HasAnchoredAncestor(property.Subject, subject))
+        if (reachability.IsAnchorReachable(property.Subject, subject))
         {
             graph.ClearProvisionalAnchor(subject);
         }

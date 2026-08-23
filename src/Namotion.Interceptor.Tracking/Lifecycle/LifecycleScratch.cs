@@ -7,6 +7,11 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// of short-lived lists, sets and stacks, and reentrancy (a callback that writes another structural
 /// property) means several can be live on one thread at once, so they are pooled rather than held
 /// as fields.
+///
+/// The pools are unbounded and never trimmed, so a thread retains buffers sized to the deepest
+/// graph operation it ever performed. That high-water mark is the retention bound: one set of small
+/// collections per thread that has touched the lifecycle, which is bounded by the widest single
+/// structural value rather than by the size of the graph.
 /// </summary>
 internal static class LifecycleScratch
 {

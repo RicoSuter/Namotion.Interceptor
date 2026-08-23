@@ -25,10 +25,10 @@ internal readonly struct IncomingEdge(PropertyReference property, object? index)
 /// authority for it, so lifecycle state and attachment state cannot drift apart.
 ///
 /// Locking: the lifecycle mutates the edges while holding its topology lock, so it is the only
-/// writer. The instance itself is the monitor that additionally excludes a concurrent
-/// <see cref="ParentProjection"/> materialization, which must not take the topology lock (see the
-/// deadlock note on <see cref="ParentProjection"/>). It is a leaf lock: nothing foreign is called
-/// while it is held, and the type is internal and never handed out, so no other code can take it.
+/// writer. The instance itself is the monitor that additionally excludes a concurrent parent
+/// materialization, which must not take the topology lock (see the deadlock note on
+/// <see cref="OwnershipGraph.GetParents"/>). It is a leaf lock: nothing foreign is called while it
+/// is held, and the type is internal and never handed out, so no other code can take it.
 /// </remarks>
 internal sealed class SubjectOwnership
 {
@@ -49,13 +49,15 @@ internal sealed class SubjectOwnership
     /// allocates one.
     /// </summary>
     /// <remarks>
-    /// Volatile because the publish sites read it outside this instance's monitor to decide whether
-    /// republishing is needed at all. A missed activation would not merely delay a snapshot, it
-    /// would freeze one: <see cref="TryGetPublishedParents"/> never re-materializes once an array is
-    /// published, so a publisher that read a stale <c>false</c> would leave that array in place for
-    /// the rest of the subject's life.
+    /// Volatile because <see cref="RepublishParents"/> reads it outside this instance's monitor to
+    /// decide whether republishing is needed at all. A missed activation would not merely delay a
+    /// snapshot, it would freeze one: <see cref="TryGetPublishedParents"/> never re-materializes
+    /// once an array is published, so a publisher that read a stale <c>false</c> would leave that
+    /// array in place for the rest of the subject's life.
     /// </remarks>
-    internal volatile bool AreParentsActivated;
+    private volatile bool _areParentsActivated;
+
+    private bool AreParentsActivated => _areParentsActivated;
 
     /// <summary>The number of committed incoming edge occurrences, which is the reference count.</summary>
     public int IncomingCount => _incomingCount;
@@ -221,14 +223,23 @@ internal sealed class SubjectOwnership
     {
         lock (this)
         {
-            AreParentsActivated = true;
+            _areParentsActivated = true;
             return PublishParentsCore();
         }
     }
 
-    /// <summary>Republishes the snapshot after an edge change; a no-op until parents are activated.</summary>
+    /// <summary>
+    /// Republishes the snapshot after an edge change. A subject nobody ever asked about pays one
+    /// volatile read here and allocates nothing; the flag is re-tested under the monitor because a
+    /// first <see cref="ActivateParents"/> can land between the two.
+    /// </summary>
     public void RepublishParents()
     {
+        if (!AreParentsActivated)
+        {
+            return;
+        }
+
         lock (this)
         {
             if (!AreParentsActivated)

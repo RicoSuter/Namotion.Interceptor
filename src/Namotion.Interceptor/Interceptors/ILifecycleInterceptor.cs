@@ -47,14 +47,15 @@ public interface ILifecycleInterceptor :
     /// Transitional hook invoked when a context is composed onto a subject's executor as a fallback.
     /// It admits an unattached subject as a provisional root and seeds an already owned subject's
     /// structural properties, which is what drives the recursive attach descent while
-    /// <see cref="IInterceptorSubjectContext.AddFallbackContext"/> still exists.
+    /// <see cref="IInterceptorSubjectContext.AddFallbackContext"/> still exists. It goes with the
+    /// fallback graph.
     /// </summary>
-    void AttachSubjectToContext(IInterceptorSubject subject);
+    void OnContextComposed(IInterceptorSubject subject);
 
     /// <summary>
-    /// Transitional counterpart of <see cref="AttachSubjectToContext(IInterceptorSubject)"/>: releases
-    /// an owned subject regardless of its anchor, and does nothing for a subject this interceptor
-    /// does not own.
+    /// Transitional counterpart of <see cref="OnContextComposed"/>: gives up the provisional anchor
+    /// composing the context created, releases the subject when nothing else holds it, and does
+    /// nothing for a subject this interceptor does not own. It goes with the fallback graph.
     /// </summary>
-    void DetachSubjectFromContext(IInterceptorSubject subject);
+    void OnContextDecomposed(IInterceptorSubject subject);
 }

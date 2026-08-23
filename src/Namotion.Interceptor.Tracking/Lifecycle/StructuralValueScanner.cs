@@ -105,12 +105,23 @@ internal static class StructuralValueScanner
     /// stable identities, so a reorder never invalidates them and matching goes by key; ordinals
     /// shift on every insertion, so matching goes by occurrence count and the indices are refreshed.
     /// </summary>
-    public static bool HasKeyedOccurrences(PropertyReference property, object? value)
+    public static bool HasKeyedOccurrences(SubjectPropertyMetadata metadata, object? value)
     {
-        return value is IDictionary || (value is not (null or string or ICollection) && property.Metadata.Type.IsSubjectDictionaryType());
+        // A subject is listed with the cheap negatives on purpose: it is the scalar back-reference
+        // that dominates graph wiring, and without it every such write would fall through to the
+        // declared-type probe. Only a value that is none of these can still be a read-only
+        // dictionary wrapper, which is the one shape the declared type has to answer for.
+        return value is IDictionary ||
+               (value is not (null or string or ICollection or IInterceptorSubject) && metadata.Type.IsSubjectDictionaryType());
     }
 
     /// <summary>Whether the value still contains the subject at all, at any occurrence.</summary>
+    /// <remarks>
+    /// Deliberately not <see cref="CollectOccurrences"/> followed by a scan. This runs once per
+    /// candidate edge inside the reachability walk, where the answer is a single bool and the
+    /// occurrence indices are never used, so building a list would allocate and fill one per
+    /// candidate. It also stops at the first match rather than enumerating the whole value.
+    /// </remarks>
     public static bool Contains(PropertyReference property, object? value, IInterceptorSubject target)
     {
         switch (value)
@@ -184,6 +195,6 @@ internal static class StructuralValueScanner
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool CanHoldSubjects(object? value)
     {
-        return value is null or IInterceptorSubject or IEnumerable && value is not string;
+        return value is (null or IInterceptorSubject or IEnumerable) && value is not string;
     }
 }

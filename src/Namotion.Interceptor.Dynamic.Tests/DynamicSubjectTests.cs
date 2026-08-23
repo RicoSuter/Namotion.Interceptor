@@ -166,18 +166,18 @@ public class DynamicSubjectTests
 
     public class TestLifecycleInterceptor(string name, List<string> logs) : ILifecycleInterceptor
     {
-        public void AttachSubjectToContext(IInterceptorSubject subject) => logs.Add($"{name}: Attached");
+        public void OnContextComposed(IInterceptorSubject subject) => logs.Add($"{name}: Attached");
 
-        public void DetachSubjectFromContext(IInterceptorSubject subject) => logs.Add($"{name}: Detached");
+        public void OnContextDecomposed(IInterceptorSubject subject) => logs.Add($"{name}: Detached");
 
         public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
         {
-            AttachSubjectToContext(subject);
+            OnContextComposed(subject);
         }
 
         public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
         {
-            DetachSubjectFromContext(subject);
+            OnContextDecomposed(subject);
         }
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)

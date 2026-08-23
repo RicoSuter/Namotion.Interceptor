@@ -227,7 +227,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             for (var index = 0; index < array.Length; index++)
             {
                 var interceptor = array[index];
-                interceptor.AttachSubjectToContext(_subject);
+                interceptor.OnContextComposed(_subject);
             }
         }
 
@@ -242,7 +242,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             for (var index = 0; index < array.Length; index++)
             {
                 var interceptor = array[index];
-                interceptor.DetachSubjectFromContext(_subject);
+                interceptor.OnContextDecomposed(_subject);
             }
 
             return base.RemoveFallbackContext(context);

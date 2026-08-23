@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -29,6 +31,17 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
 
     public IInterceptorSubjectContext Context { get; } = context;
 
+    /// <summary>
+    /// Whether the property can carry graph edges: intercepted, so the lifecycle sees its writes,
+    /// and of a declared type that can contain subjects. Derived and non-intercepted properties
+    /// never establish ownership even when their value happens to contain subjects.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsStructural(SubjectPropertyMetadata metadata)
+    {
+        return metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects();
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public SubjectOwnership? TryGetOwnership(IInterceptorSubject subject)
     {
@@ -51,6 +64,32 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     public void RemoveOwnership(IInterceptorSubject subject)
     {
         _owned.TryRemove(subject, out _);
+    }
+
+    /// <summary>
+    /// Gets the subject's occurrence-aware parents. Publication is lazily activated: the first call
+    /// on a subject materializes its snapshot and marks it, and from then on every edge change
+    /// republishes it, so a consumer that never asks pays one volatile read per edge change and
+    /// allocates nothing. Making it unconditional was measured as a material cost on structural
+    /// removal and bulk assignment, charged to consumers that never opted in.
+    /// </summary>
+    /// <remarks>
+    /// This must not take the lifecycle's topology lock. <c>SourceMonitor</c> holds its own lock
+    /// across a graph walk that calls it, and is also invoked from inside the topology lock through
+    /// <c>HandleLifecycleChange</c>; a locking read would make those two orders opposite and
+    /// deadlock. The lifecycle stays the sole writer; the owned-subject map is concurrent so the
+    /// record can be found without the lock, and the per-subject monitor that guards materialization
+    /// is a leaf that the topology lock is always taken before.
+    /// </remarks>
+    public ImmutableArray<SubjectParent> GetParents(IInterceptorSubject subject)
+    {
+        var ownership = TryGetOwnership(subject);
+        if (ownership is null)
+        {
+            return [];
+        }
+
+        return ownership.TryGetPublishedParents(out var published) ? published : ownership.ActivateParents();
     }
 
     #region Property baselines, which are also the committed outgoing edges
@@ -85,33 +124,67 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     /// </summary>
     public void CollectCommittedChildren(IInterceptorSubject subject, List<(PropertyReference Property, SubjectOccurrence Occurrence)> children)
     {
-        foreach (var entry in subject.Properties)
+        CollectStructuralChildren(subject, children, seed: false);
+    }
+
+    /// <summary>
+    /// Seeds the baselines of the subject's structural properties from their current getter values
+    /// and appends the direct occurrences those values contain.
+    /// </summary>
+    public void SeedBaselines(IInterceptorSubject subject, List<(PropertyReference Property, SubjectOccurrence Occurrence)> children)
+    {
+        CollectStructuralChildren(subject, children, seed: true);
+    }
+
+    /// <summary>
+    /// Walks the subject's structural properties and appends the occurrences their values contain.
+    /// Seeding reads the current getter output and commits it as the baseline; collecting reads the
+    /// committed baseline. That one difference is why the two callers exist at all.
+    /// </summary>
+    private void CollectStructuralChildren(
+        IInterceptorSubject subject,
+        List<(PropertyReference Property, SubjectOccurrence Occurrence)> children,
+        bool seed)
+    {
+        var occurrences = LifecycleScratch.RentOccurrenceList();
+        try
         {
-            var metadata = entry.Value;
-            if (!metadata.IsIntercepted || !metadata.Type.CanContainSubjects())
+            foreach (var entry in subject.Properties)
             {
-                continue;
-            }
+                var metadata = entry.Value;
+                if (!IsStructural(metadata))
+                {
+                    continue;
+                }
 
-            var property = new PropertyReference(subject, entry.Key);
-            if (!_baselines.TryGetValue(property, out var value) || value is null)
-            {
-                continue;
-            }
+                var property = new PropertyReference(subject, entry.Key);
+                object? value;
+                if (seed)
+                {
+                    value = metadata.GetValue?.Invoke(subject);
+                    _baselines[property] = value;
+                }
+                else if (!_baselines.TryGetValue(property, out value))
+                {
+                    continue;
+                }
 
-            var occurrences = LifecycleScratch.RentOccurrenceList();
-            try
-            {
+                if (value is null)
+                {
+                    continue;
+                }
+
+                occurrences.Clear();
                 StructuralValueScanner.CollectOccurrences(property, value, occurrences);
                 foreach (var occurrence in occurrences)
                 {
                     children.Add((property, occurrence));
                 }
             }
-            finally
-            {
-                LifecycleScratch.Return(occurrences);
-            }
+        }
+        finally
+        {
+            LifecycleScratch.Return(occurrences);
         }
     }
 
@@ -120,12 +193,16 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     /// tells an attach whether the subject's own component still has to be discovered. Checking the
     /// baselines rather than a flag keeps one source of truth: seeding is exactly what writes them.
     /// </summary>
+    /// <remarks>
+    /// The first structural property answers for all of them: seeding writes every baseline of a
+    /// subject under the topology lock, so they are present or absent together. Widening this to a
+    /// full scan would cost the whole property table per attach and decide nothing extra.
+    /// </remarks>
     public bool AreBaselinesSeeded(IInterceptorSubject subject)
     {
         foreach (var entry in subject.Properties)
         {
-            var metadata = entry.Value;
-            if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
+            if (IsStructural(entry.Value))
             {
                 return _baselines.ContainsKey(new PropertyReference(subject, entry.Key));
             }
@@ -139,49 +216,9 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     {
         foreach (var entry in subject.Properties)
         {
-            var metadata = entry.Value;
-            if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
+            if (IsStructural(entry.Value))
             {
                 _baselines.Remove(new PropertyReference(subject, entry.Key));
-            }
-        }
-    }
-
-    /// <summary>
-    /// Seeds the baselines of the subject's structural properties from their current getter values
-    /// and appends the direct occurrences those values contain.
-    /// </summary>
-    public void SeedBaselines(IInterceptorSubject subject, List<(PropertyReference Property, SubjectOccurrence Occurrence)> children)
-    {
-        foreach (var entry in subject.Properties)
-        {
-            var metadata = entry.Value;
-            if (!metadata.IsIntercepted || !metadata.Type.CanContainSubjects())
-            {
-                continue;
-            }
-
-            var property = new PropertyReference(subject, entry.Key);
-            var value = metadata.GetValue?.Invoke(subject);
-            _baselines[property] = value;
-
-            if (value is null)
-            {
-                continue;
-            }
-
-            var occurrences = LifecycleScratch.RentOccurrenceList();
-            try
-            {
-                StructuralValueScanner.CollectOccurrences(property, value, occurrences);
-                foreach (var occurrence in occurrences)
-                {
-                    children.Add((property, occurrence));
-                }
-            }
-            finally
-            {
-                LifecycleScratch.Return(occurrences);
             }
         }
     }
@@ -365,13 +402,12 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
 
                 foreach (var entry in subject.Properties)
                 {
-                    var metadata = entry.Value;
-                    if (!metadata.IsIntercepted || !metadata.Type.CanContainSubjects())
+                    if (!IsStructural(entry.Value))
                     {
                         continue;
                     }
 
-                    var childValue = metadata.GetValue?.Invoke(subject);
+                    var childValue = entry.Value.GetValue?.Invoke(subject);
                     if (childValue is null)
                     {
                         continue;

@@ -27,7 +27,7 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     private readonly ReleaseTraversal _release;
     private readonly StructuralReconciler _reconciler;
     private readonly AttachTraversal _attach;
-    private readonly ParentProjection _parents;
+    private readonly LifecycleNotifier _notifier;
 
     // One reentrant topology lock per lifecycle, which is one per context because the lifecycle is a
     // singleton contract. A lifecycle callback may write another structural property of the same
@@ -38,7 +38,11 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     /// Raised when a subject is attached to the object graph.
     /// Handlers must be exception-free and fast (invoked inside lock).
     /// </summary>
-    public event Action<SubjectLifecycleChange>? SubjectAttached;
+    public event Action<SubjectLifecycleChange>? SubjectAttached
+    {
+        add => _notifier.SubjectAttached += value;
+        remove => _notifier.SubjectAttached -= value;
+    }
 
     /// <summary>
     /// Raised when a subject is about to be detached from the object graph.
@@ -46,7 +50,11 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     /// At this point, the full object graph is still accessible.
     /// Handlers must be exception-free and fast (invoked inside lock).
     /// </summary>
-    public event Action<SubjectLifecycleChange>? SubjectDetaching;
+    public event Action<SubjectLifecycleChange>? SubjectDetaching
+    {
+        add => _notifier.SubjectDetaching += value;
+        remove => _notifier.SubjectDetaching -= value;
+    }
 
     /// <summary>
     /// Creates the lifecycle for one context. That context is the single exact context this
@@ -55,12 +63,12 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     public LifecycleInterceptor(IInterceptorSubjectContext context)
     {
         _context = context;
+        _notifier = new LifecycleNotifier(context);
         _graph = new OwnershipGraph(context);
         _reachability = new ReachabilityWalk(_graph);
-        _attach = new AttachTraversal(this, _graph, _reachability);
-        _release = new ReleaseTraversal(this, _graph, _reachability);
-        _reconciler = new StructuralReconciler(this, _graph, _attach, _release);
-        _parents = new ParentProjection(_graph);
+        _attach = new AttachTraversal(_notifier, _graph, _reachability);
+        _release = new ReleaseTraversal(_notifier, _graph, _reachability);
+        _reconciler = new StructuralReconciler(_notifier, _graph, _attach, _release);
     }
 
     #region Structural writes
@@ -108,7 +116,7 @@ public class LifecycleInterceptor : ILifecycleInterceptor
                 // The authoritative getter output rather than the proposed value: a normalizing or
                 // derived setter may store a different graph than the caller passed.
                 var getValue = metadata.GetValue;
-                _reconciler.Reconcile(property, getValue is not null ? getValue(subject) : context.NewValue);
+                _reconciler.Reconcile(property, metadata, getValue is not null ? getValue(subject) : context.NewValue);
             }
             finally
             {
@@ -191,7 +199,7 @@ public class LifecycleInterceptor : ILifecycleInterceptor
             // and it is the transitional entry point that seeds and publishes the attach.
             if (!subject.Context.AddFallbackContext(_context))
             {
-                AttachSubjectToContext(subject);
+                OnContextComposed(subject);
             }
         }
     }
@@ -220,7 +228,7 @@ public class LifecycleInterceptor : ILifecycleInterceptor
                 return;
             }
 
-            if (ownership.IncomingCount == 0 || !_reachability.HasAnchoredAncestor(subject, null))
+            if (ownership.IncomingCount == 0 || !_reachability.IsAnchorReachable(subject, null))
             {
                 _release.ReleaseRoot(subject);
 
@@ -232,7 +240,7 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     }
 
     /// <inheritdoc />
-    public void AttachSubjectToContext(IInterceptorSubject subject)
+    public void OnContextComposed(IInterceptorSubject subject)
     {
         lock (_gate)
         {
@@ -266,7 +274,7 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     }
 
     /// <inheritdoc />
-    public void DetachSubjectFromContext(IInterceptorSubject subject)
+    public void OnContextDecomposed(IInterceptorSubject subject)
     {
         lock (_gate)
         {
@@ -281,7 +289,7 @@ public class LifecycleInterceptor : ILifecycleInterceptor
             // explicitly, and a subject an edge still holds stays.
             _graph.ClearProvisionalAnchor(subject);
             if (_graph.IsAnchored(subject) ||
-                (ownership.IncomingCount > 0 && _reachability.HasAnchoredAncestor(subject, null)))
+                (ownership.IncomingCount > 0 && _reachability.IsAnchorReachable(subject, null)))
             {
                 return;
             }
@@ -316,70 +324,6 @@ public class LifecycleInterceptor : ILifecycleInterceptor
 
     #endregion
 
-    #region Notification
-
-    /// <summary>Publishes an edge removal that did not release the subject.</summary>
-    internal void PublishEdgeRemoved(IInterceptorSubject subject, PropertyReference property, object? index, int referenceCount)
-    {
-        InvokeRemovedLifecycleHandlers(subject, new SubjectLifecycleChange
-        {
-            Subject = subject,
-            Property = property,
-            Index = index,
-            ReferenceCount = referenceCount,
-            IsPropertyReferenceRemoved = true
-        });
-    }
-
-    internal void RaiseSubjectAttached(SubjectLifecycleChange change)
-    {
-        SubjectAttached?.Invoke(change);
-    }
-
-    internal void RaiseSubjectDetaching(SubjectLifecycleChange change)
-    {
-        SubjectDetaching?.Invoke(change);
-    }
-
-    internal void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, SubjectLifecycleChange change)
-    {
-        var handlers = _context.GetServices<ILifecycleHandler>();
-        for (var index = 0; index < handlers.Length; index++)
-        {
-            handlers[index].HandleLifecycleChange(change);
-        }
-
-        if (subject is ILifecycleHandler subjectHandler)
-        {
-            subjectHandler.HandleLifecycleChange(change);
-        }
-    }
-
-    internal void InvokeRemovedLifecycleHandlers(IInterceptorSubject subject, SubjectLifecycleChange change)
-    {
-        if (subject is ILifecycleHandler subjectHandler)
-        {
-            subjectHandler.HandleLifecycleChange(change);
-        }
-
-        var handlers = _context.GetServices<ILifecycleHandler>();
-        for (var index = 0; index < handlers.Length; index++)
-        {
-            handlers[index].HandleLifecycleChange(change);
-        }
-    }
-
-    internal void RefreshCollectionProperty(PropertyReference property, object? value)
-    {
-        var handlers = _context.GetServices<IPropertyLifecycleHandler>();
-        for (var index = 0; index < handlers.Length; index++)
-        {
-            handlers[index].RefreshCollectionProperty(property, value);
-        }
-    }
-
-    #endregion
-
     #region Committed state queries
 
     /// <summary>
@@ -396,10 +340,10 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     /// Gets the subject's occurrence-aware parents. The first call on a subject activates parent
     /// publication for it; a subject nobody asks about never allocates a snapshot.
     /// </summary>
-    /// <remarks>Takes no lock; see <see cref="ParentProjection"/> for why that is required.</remarks>
+    /// <remarks>Takes no lock; see <see cref="OwnershipGraph.GetParents"/> for why that is required.</remarks>
     public ImmutableArray<SubjectParent> GetParents(IInterceptorSubject subject)
     {
-        return _parents.GetParents(subject);
+        return _graph.GetParents(subject);
     }
 
     #endregion

@@ -199,10 +199,10 @@ namespace Namotion.Interceptor.Interceptors
     }
     public interface ILifecycleInterceptor : Namotion.Interceptor.ISingletonContextService<Namotion.Interceptor.Interceptors.ILifecycleInterceptor>, Namotion.Interceptor.Interceptors.IWriteInterceptor
     {
-        void AttachSubjectToContext(Namotion.Interceptor.IInterceptorSubject subject);
         void AttachSubjectToContext(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context, Namotion.Interceptor.SubjectAnchorKind anchor);
-        void DetachSubjectFromContext(Namotion.Interceptor.IInterceptorSubject subject);
         void DetachSubjectFromContext(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context);
+        void OnContextComposed(Namotion.Interceptor.IInterceptorSubject subject);
+        void OnContextDecomposed(Namotion.Interceptor.IInterceptorSubject subject);
     }
     public interface IMethodInterceptor
     {

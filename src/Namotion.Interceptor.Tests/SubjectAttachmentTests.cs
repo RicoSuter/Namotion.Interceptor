@@ -9,9 +9,9 @@ public class SubjectAttachmentTests
         public int AttachCount;
         public int DetachCount;
 
-        public void AttachSubjectToContext(IInterceptorSubject subject) => AttachCount++;
+        public void OnContextComposed(IInterceptorSubject subject) => AttachCount++;
 
-        public void DetachSubjectFromContext(IInterceptorSubject subject) => DetachCount++;
+        public void OnContextDecomposed(IInterceptorSubject subject) => DetachCount++;
 
         // A minimal faithful lifecycle: it applies the documented root-anchor rules through Core's
         // own helpers and lets the fallback composition drive the counted attach and detach, which

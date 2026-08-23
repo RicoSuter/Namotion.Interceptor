@@ -129,24 +129,24 @@ public class InterceptorTests
             _logs = logs;
         }
 
-        public void AttachSubjectToContext(IInterceptorSubject subject)
+        public void OnContextComposed(IInterceptorSubject subject)
         {
             _logs.Add($"{_name}: Attached");
         }
 
-        public void DetachSubjectFromContext(IInterceptorSubject subject)
+        public void OnContextDecomposed(IInterceptorSubject subject)
         {
             _logs.Add($"{_name}: Detached");
         }
 
         public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
         {
-            AttachSubjectToContext(subject);
+            OnContextComposed(subject);
         }
 
         public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
         {
-            DetachSubjectFromContext(subject);
+            OnContextDecomposed(subject);
         }
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)

@@ -517,20 +517,27 @@ until it is explicitly detached.
 
 ## Parent-Child Relationship Tracking
 
-Tracks parent-child relationships in the subject graph, enabling upward navigation:
+Parent relationships come from the lifecycle itself, so any context with `WithLifecycle()` (included
+in `WithFullPropertyTracking()` and `WithRegistry()`) answers them. `WithParents()` is retained for
+compatibility and adds nothing:
 
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithParents();
+    .WithFullPropertyTracking();
 
 var car = new Car(context);
-var tire = new Tire(context);
+var tire = new Tire();
 
 car.Tires = [tire];
 
 var parents = tire.GetParents(); // Returns ImmutableArray with [(car, "Tires", 0)]
 ```
+
+Entries are per occurrence: a subject listed twice in one collection has two, one per index. Nothing
+is materialised for a subject until `GetParents()` is first called on it, so a consumer that never
+asks pays nothing. The order of the entries is unspecified; only the set of occurrences is
+meaningful.
 
 This enables scenarios like:
 - Finding the root object of a subject graph
