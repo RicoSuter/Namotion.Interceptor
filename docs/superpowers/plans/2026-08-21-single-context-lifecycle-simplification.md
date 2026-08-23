@@ -45,6 +45,25 @@ Each stage must leave the tree building with zero warnings and the full unit sui
 13. **Docs and snapshots.** Sixteen generator snapshots and eight public API snapshots.
 14. **Verification.** Full suite, agreed connector and integration scope, and a benchmark comparison run per arm directly rather than through the comparison script.
 
+### Simplification rounds
+
+The spike landed at roughly +2,241 production lines through stage 9, and the projected end state is about +1,700 net after the removal stages. That is a lot of code for a change whose headline is removing capabilities, and it warrants deliberate reduction rather than hoping the removal stages absorb it.
+
+Two scheduled rounds, plus a standing rule.
+
+**Round one, after the concurrency stage.** By then the write protocol, the attachment state and the reachability algorithm all exist and their interactions are known. Named candidates, each of which exists because of a decision that has since changed:
+
+- **The attachment revision may be entirely redundant.** It was designed to detect a chain resolved before an attach landed mid-write. The corrected design takes the attachment monitor before resolving the chain and holds it through the terminal, so no such window exists. If that holds, this deletes the revision field, the extra field on the write context, the enter/exit guard pair, and possibly the second per-property terminal cache, whose body is a deliberate duplicate of the scalar terminal. One mechanism instead of three.
+- **Dual anchor bookkeeping.** The per-subject anchor and the anchored-root set record the same fact in two places and are kept in sync by hand. One should derive from the other.
+- **The forward mark should not be production code.** The chosen algorithm keeps the graph version, mark cache and mark stack solely to feed a debug oracle that is compiled out in Release. Moving the oracle into the test assembly as an independent reimplementation removes that state from production and makes the oracle stronger, because it can no longer share a bug with the code it checks.
+- **In-flight edge bookkeeping.** The backward search needs auxiliary lists only because it was retrofitted onto an order that commits outgoing edges before incoming records. Designing that order deliberately may remove them.
+
+**Round two, after the removal stage.** With the fallback graph, executor-as-context and the transitional members gone, re-examine what the surrounding machinery was compensating for. In particular the context service snapshot, its caching and its invalidation were shaped by a fallback graph that no longer exists, and the delegation-era rationale comments must be rewritten rather than carried over.
+
+**Anchors get re-derived, not patched again.** The provisional anchor rule has been through three revisions and still retains mutually-referencing constructor-attached subjects forever. Before writing a fourth variant, evaluate a different framing: the context-taking constructor records the context as a hint without attaching, and attachment happens only through an explicit attach or adoption into an already-attached graph. That may remove the anchor kind distinction and the independent-support walk together. Decide by design, not by adding a case.
+
+**Standing rule.** No stage commits without deleting what it made dead, and any stage whose purpose is removal must show a net-negative production diff. Measure with `pwsh scripts/diff-composition.ps1 -PerProject`, and record the number in the stage's commit message so growth is visible as it happens rather than at the end.
+
 ### Standing rules for every stage
 
 - Reconcile per-project test counts against a recorded baseline. Two separate mechanisms have been observed reporting success while coverage shrank.
