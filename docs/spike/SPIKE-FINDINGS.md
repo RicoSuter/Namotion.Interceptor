@@ -5,6 +5,31 @@
 **Base:** `master` at `0418410c`, unchanged since the PR branch was cut (verified 2026-08-22)
 **Purpose:** review the design specification and implementation plan against the real code, correct what is wrong, then implement as a spike to surface problems, fallout, blast radius, and benchmark deltas versus master.
 
+## Where the spike lives (local only, this machine)
+
+None of the spike implementation is pushed. Only this document, the revised design and the revised plan go to the pull request. A later session on this machine can pick the work up from these:
+
+| Branch | Contains |
+|---|---|
+| `spike/single-context-lifecycle` | The full spike: 10 code commits from the benchmark scaffold through the handler merge, plus this findings record. Green at 26 projects, 3364 passed, 0 failed. |
+| `spike/reach-v1-backward` | Reachability variant 1, backward ancestor search. The chosen algorithm, `0f183c40`, also cherry-picked into the spike branch. |
+| `spike/reach-v2-cachedmark` | Variant 2, precisely invalidated forward mark. Rejected: does not fix cross-parent removals. |
+| `spike/reach-v3-incremental` | Variant 3, incremental maintenance. Rejected: four times slower than master on tree-shaped removal. |
+| `bench/master-patched` | Master plus the benchmark file only. The comparison base; both arms share benchmark source. |
+
+Worktrees existed at `/tmp/reach-v1-backward`, `/tmp/reach-v2-cachedmark`, `/tmp/reach-v3-incremental` and `/tmp/spike-bench`. Those are disposable; `git worktree list` and `git worktree prune` will show what survives a reboot. The branches are what matter.
+
+Key commits on `spike/single-context-lifecycle`:
+
+- `04fab84a` benchmark scaffold, the comparison base for everything measured here
+- `069b9bcc` the lifecycle ownership rewrite
+- `128f6f36` the three audit defect fixes, including the occurrence-collision blocker
+- `c55f46a1` generator routing for structural writes
+- `6f0b6254` backward-search reachability
+- `a85399ab` handler merge, the last stage reached
+
+Reproducing the measurements: run each arm directly with `dotnet run --project src/Namotion.Interceptor.Benchmark -c Release --filter=...` from a worktree **outside** the repository, never through `scripts/benchmark.ps1`, which produced two complete and invalid comparison reports during this work. Pin the CPU first.
+
 ## Status
 
 | Phase | State |
