@@ -35,6 +35,15 @@ internal sealed class ReleaseTraversal(LifecycleInterceptor lifecycle, Ownership
 
         if (IsStillHeld(subject, ownership))
         {
+            // The composed context a surviving subject resolves through was taken from whichever
+            // parent first pulled it into the graph, and it is decomposed only when the subject
+            // itself leaves. It therefore outlives the edge it came from: this removal can be that
+            // edge, and the parent can be released later, which would leave an owned subject whose
+            // own writes are no longer intercepted. Composing the exact context as well is
+            // idempotent, keeps the subtree services of the live parents that remain, and cannot go
+            // stale while the subject is owned.
+            subject.Context.AddFallbackContext(graph.Context);
+
             lifecycle.PublishEdgeRemoved(subject, property, index, referenceCount);
             return;
         }
@@ -108,7 +117,9 @@ internal sealed class ReleaseTraversal(LifecycleInterceptor lifecycle, Ownership
 
         // Drop the ownership record and the baselines first: from here on the subject is released as
         // far as every other query is concerned, which is what makes the callbacks below safe to
-        // re-enter this descent from.
+        // re-enter this descent from. It also means the callbacks see no parents at all rather than
+        // only the edge being removed; handlers ordered after the parent-tracking slot observed the
+        // same thing before, because that slot removed the last remaining entry ahead of them.
         graph.RemoveOwnership(subject);
         graph.RemoveBaselines(subject);
 
@@ -143,15 +154,6 @@ internal sealed class ReleaseTraversal(LifecycleInterceptor lifecycle, Ownership
             foreach (var (childProperty, occurrence) in children)
             {
                 RemoveEdge(occurrence.Subject, childProperty, occurrence.Index);
-
-                // A child that outlives this subject was resolving its services through it, because
-                // that is what the composed context chain does. Reattach it to the exact context, or
-                // it stays owned while its own writes stop being intercepted. The subtree services
-                // the released subject carried correctly stop applying to it.
-                if (graph.IsOwned(occurrence.Subject))
-                {
-                    occurrence.Subject.Context.AddFallbackContext(graph.Context);
-                }
             }
         }
         finally

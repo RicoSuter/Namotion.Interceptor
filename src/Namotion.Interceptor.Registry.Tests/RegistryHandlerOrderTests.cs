@@ -104,9 +104,13 @@ public class RegistryHandlerOrderTests
         // Act
         root.Child = null;
 
-        // Assert: detach is deliberately not the mirror of attach. Authoritative parent state is
-        // published before the first detach handler, so the edge the subject is losing is already
-        // gone, and its ancestors were processed further up the descent and are gone too. A consumer
+        // Assert: detach is deliberately not the mirror of attach. A subject leaving the graph has
+        // already given up its ownership record when the first detach handler runs, so it reports no
+        // parents at all, and its ancestors were processed further up the descent and are gone too.
+        // Handlers ordered after the parent-tracking slot, which is where SourceMonitor sits, saw the
+        // same empty result before: the previous parent writer removed the entry for the removed edge
+        // before they ran, and a final release is by definition the removal of the last edge. A
+        // subject that survives an edge removal still reports the edges that remain. A consumer
         // needing ancestor state while detaching has to capture it at attach; the edge it is being
         // detached from is on the change itself.
         Assert.Equal(0, child.ParentLinkCountDuringDetach);

@@ -48,7 +48,14 @@ internal sealed class SubjectOwnership
     /// From then on every edge change republishes the snapshot; a subject nobody asks about never
     /// allocates one.
     /// </summary>
-    internal bool AreParentsActivated;
+    /// <remarks>
+    /// Volatile because the publish sites read it outside this instance's monitor to decide whether
+    /// republishing is needed at all. A missed activation would not merely delay a snapshot, it
+    /// would freeze one: <see cref="TryGetPublishedParents"/> never re-materializes once an array is
+    /// published, so a publisher that read a stale <c>false</c> would leave that array in place for
+    /// the rest of the subject's life.
+    /// </remarks>
+    internal volatile bool AreParentsActivated;
 
     /// <summary>The number of committed incoming edge occurrences, which is the reference count.</summary>
     public int IncomingCount => _incomingCount;

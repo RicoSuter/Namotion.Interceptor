@@ -84,13 +84,6 @@ internal sealed class AttachTraversal(LifecycleInterceptor lifecycle, OwnershipG
             return;
         }
 
-        // The descent normally happens inside the handler list, where the context-inheritance
-        // handler composes the parent context and re-enters. It does not when that handler is absent,
-        // or when the composition it performs is already in place from an earlier attach, so the
-        // subject's own component is seeded here instead. Without it an attached parent could keep
-        // referencing children that never joined the graph.
-        SeedChildrenIfNeeded(subject);
-
         lifecycle.RaiseSubjectAttached(change);
         foreach (var propertyName in properties)
         {

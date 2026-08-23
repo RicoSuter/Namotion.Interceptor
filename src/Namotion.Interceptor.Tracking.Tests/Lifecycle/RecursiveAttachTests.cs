@@ -233,11 +233,11 @@ public class RecursiveAttachTests
     }
 
     // ──────────────────────────────────────────────
-    // WithLifecycle() alone: the whole component is still discovered
+    // WithLifecycle() alone: only direct children tracked
     // ──────────────────────────────────────────────
 
     [Fact]
-    public void WhenUsingLifecycleWithoutContextInheritance_ThenTheWholeComponentIsAttached()
+    public void WhenUsingLifecycleWithoutContextInheritance_ThenOnlyDirectChildrenAreAttached()
     {
         // Arrange — WithLifecycle() alone, no context inheritance
         var context = InterceptorSubjectContext
@@ -256,19 +256,18 @@ public class RecursiveAttachTests
         // Act
         parent.Mother = mother;
 
-        // Assert — a subject entering the graph brings its own structural component with it. The
-        // descent no longer depends on the context-inheritance handler being registered: leaving
-        // the grandchild out would make an attached subject reference a subject of no context.
+        // Assert — only direct child is attached, grandchild is NOT
+        // (the recursive descent is driven by the context-inheritance handler, which is not registered)
         Assert.Contains(mother, attached);
-        Assert.Contains(grandmother, attached);
+        Assert.DoesNotContain(grandmother, attached);
     }
 
     // ──────────────────────────────────────────────
-    // Re-attach re-seeds the subject's own component
+    // Null baseline: re-attached child without re-seeding
     // ──────────────────────────────────────────────
 
     [Fact]
-    public void WhenChildIsReattached_ThenItsGrandchildIsRediscovered()
+    public void WhenReattachedChildWritesSameValue_ThenGrandchildIsRediscovered()
     {
         // Arrange — WithLifecycle() only (no context inheritance, no equality check).
         var context = InterceptorSubjectContext
@@ -290,16 +289,23 @@ public class RecursiveAttachTests
         Assert.Null(child.TryGetContext());
         Assert.Null(grandmother.TryGetContext());
 
+        // Re-attach the child. There is no context-inheritance handler here, so nothing re-seeds
+        // the child's own properties: its backing store still holds the grandmother, but the
+        // lifecycle holds no baseline for child.Mother and the grandmother is not tracked.
+        parent.Mother = child;
+        Assert.Same(context, child.TryGetContext());
+        Assert.Null(grandmother.TryGetContext());
+
         var attached = new List<IInterceptorSubject>();
         lifecycleInterceptor.SubjectAttached += change => attached.Add(change.Subject);
 
-        // Act — re-attach the child. Its backing store still holds the grandmother, and an attach
-        // discovers the subject's current structural properties through their getters, so the
-        // grandmother comes back with it rather than waiting for another write.
-        parent.Mother = child;
+        // Act — re-write the same value to child.Mother (no equality interceptor to block it).
+        // The reconcile finds no committed baseline for the property, and the missing baseline has
+        // to read as null rather than as the property's current value: reading the current value
+        // would make old and new reference-equal, return early, and leave the grandmother detached.
+        child.Mother = grandmother;
 
         // Assert
-        Assert.Contains(child, attached);
         Assert.Contains(grandmother, attached);
         Assert.Same(context, grandmother.TryGetContext());
         Assert.Equal(1, grandmother.GetReferenceCount());

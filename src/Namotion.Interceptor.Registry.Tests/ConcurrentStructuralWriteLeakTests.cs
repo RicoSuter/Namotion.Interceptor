@@ -39,13 +39,23 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
     /// attachment is stable (an anchored root, or any post-join cleanup) stay unwrapped so an
     /// unexpected rejection there still fails loudly.
     /// </summary>
+    /// <remarks>
+    /// Matched on the guard's own message rather than on the exception type. A single-context graph
+    /// has several other reasons to throw InvalidOperationException, all of them genuine defects
+    /// here (a subject owned by another context, a competing claim, an illegal attachment
+    /// transition), and swallowing those would make these tests pass over exactly what they exist to
+    /// catch. When the concurrency stage turns the rejection into ordering, this method and its call
+    /// sites are what it deletes, and nothing else.
+    /// </remarks>
+    private const string AttachmentGuardRejection = "attachment changed while a structural write was in flight";
+
     private static void WriteToleratingAttachmentGuardRejection(Action write)
     {
         try
         {
             write();
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException exception) when (exception.Message.Contains(AttachmentGuardRejection))
         {
         }
     }

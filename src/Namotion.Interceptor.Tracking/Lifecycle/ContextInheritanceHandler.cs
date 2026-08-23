@@ -1,4 +1,5 @@
 ﻿using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -20,7 +21,15 @@ public class ContextInheritanceHandler : ILifecycleHandler
             // context would leave an attached subject whose own writes are no longer intercepted.
             if (change.IsContextAttach)
             {
-                change.Subject.Context.AddFallbackContext(change.Property.Value.Subject.Context);
+                if (!change.Subject.Context.AddFallbackContext(change.Property.Value.Subject.Context) &&
+                    change.Subject.TryGetContext()?.TryGetService<ILifecycleInterceptor>() is { } lifecycle)
+                {
+                    // Composing the context is what re-enters the lifecycle and discovers the
+                    // subject's own component. A composition left behind by an earlier attach makes
+                    // that a no-op, so the descent has to be entered directly instead; without it an
+                    // attached parent keeps referencing children that never joined the graph.
+                    lifecycle.AttachSubjectToContext(change.Subject);
+                }
             }
             else if (change is { IsContextDetach: true, IsPropertyReferenceRemoved: true })
             {
