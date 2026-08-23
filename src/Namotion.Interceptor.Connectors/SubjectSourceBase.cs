@@ -79,13 +79,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
         ArgumentOutOfRangeException.ThrowIfNegative(writeRetryQueueSize);
 
-        // Always constructed, so the queue's size-0 branch is the single definition of a disabled queue:
-        // count and discard, including the connect/reconnect-window writes it would otherwise reconcile.
         var writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger, metrics.OutboundRetries);
         WriteRetryQueue = writeRetryQueue;
 
-        // Never disposed: the queue lives as long as the source, and its count field stays readable
-        // after Dispose. Capacity 0 rather than null at size 0, since null reads as unbounded.
+        // Lifetime registration; capacity 0 means disabled rather than unbounded.
         _ = metrics.OutboundRetries.Register(
             () => writeRetryQueue.PendingWriteCount, capacity: writeRetryQueueSize);
 
@@ -328,8 +325,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
         finally
         {
-            // Here rather than in Dispose, which a graph detach never calls: a detached source is stopped
-            // but never disposed, and a stopped source never gets another attempt at what is queued.
+            // Detached sources stop without disposal, so retire at run end.
             WriteRetryQueue.Retire();
 
             TransitionStateTo(SourceState.Stopped);
@@ -370,9 +366,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     }
 
     /// <summary>
-    /// Parks owned writes into the retry queue at intervals while the initial state loads, so a slow
-    /// load cannot grow the subscription without bound. Collapsed per property like every other drain,
-    /// so a property written repeatedly costs one slot rather than one per write.
+    /// Periodically collapses and parks connect-window writes so a slow load cannot grow the
+    /// subscription without bound.
     /// </summary>
     private async Task DrainConnectWindowPeriodicallyAsync(
         PropertyChangeQueueSubscription subscription, CancellationToken cancellationToken)
@@ -417,11 +412,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             return;
         }
 
-        // Collapsed before parking, not only at reconcile time. The queue is a bounded ring buffer
-        // that drops its oldest entries, so parking raw changes lets a burst on one property evict
-        // other properties' window writes before the reconcile ever sees them. Collapsing first
-        // makes the space this costs proportional to the number of properties written rather than
-        // to the number of writes.
+        // Collapse first so one hot property cannot evict other properties before reconciliation.
         WriteRetryQueue.Enqueue(CollapsePerProperty(owned.ToArray()).ToArray());
     }
 

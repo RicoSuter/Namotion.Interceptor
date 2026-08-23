@@ -7,9 +7,7 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
-/// Manages a write retry queue with ring buffer semantics for buffering writes during disconnection.
-/// When the queue is full, oldest writes are dropped to make room for new ones. A queue of size 0
-/// is the disabled configuration: everything handed to it is counted as dropped and discarded.
+/// Buffers outbound writes for retry in a bounded ring. Capacity 0 counts and discards every write.
 /// </summary>
 internal sealed class WriteRetryQueue : IDisposable
 {
@@ -56,8 +54,7 @@ internal sealed class WriteRetryQueue : IDisposable
     }
 
     /// <summary>
-    /// Enqueues writes for retry. Ring buffer: oldest dropped when full.
-    /// Thread-safe via lock to ensure atomic enqueue + drop operations.
+    /// Enqueues writes for retry, evicting the oldest at capacity.
     /// </summary>
     public void Enqueue(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
@@ -72,11 +69,10 @@ internal sealed class WriteRetryQueue : IDisposable
         int droppedCount;
         lock (_lock)
         {
-            // Checked inside the lock: losing the race to Retire would park this batch where nobody reads it.
+            // Must be checked under the lock against concurrent Retire.
             retired = _retired;
             if (retired)
             {
-                // Exclusive with the ring trim below, so the batch is counted exactly once.
                 droppedCount = changes.Length;
             }
             else
@@ -96,7 +92,7 @@ internal sealed class WriteRetryQueue : IDisposable
             return;
         }
 
-        // Reported outside the lock, so an arbitrary logger cannot stall the write path or take a second lock.
+        // Log outside the lock because an arbitrary logger may block or reenter.
         _metrics.AddDropped(droppedCount);
         if (retired)
         {
@@ -114,17 +110,8 @@ internal sealed class WriteRetryQueue : IDisposable
     }
 
     /// <summary>
-    /// Retires the queue: counts and logs whatever is still pending, and makes every later enqueue
-    /// count instead of park. Idempotent.
+    /// Permanently retires the queue, counting and discarding pending and future writes. Idempotent.
     /// </summary>
-    /// <remarks>
-    /// Meant to be called when the run ends rather than only from <see cref="Dispose"/>, because a
-    /// source detached from the graph is stopped and never disposed, and a stopped source never gets
-    /// another attempt to flush. The latch is what keeps a write that settles afterwards, such as an
-    /// abandoned teardown flush, from parking into a queue nobody will read. No producer adds past it,
-    /// so the pending list stays empty and <see cref="DrainForLocalReapply"/> returns nothing.
-    /// One-way: a retired queue never parks again and cannot serve a second run.
-    /// </remarks>
     public void Retire()
     {
         int stranded;
@@ -228,8 +215,7 @@ internal sealed class WriteRetryQueue : IDisposable
 
                     _hasFlushWarnings = true;
 
-                    // FailedChanges is complete (see WriteChangesInBatchesAsync), so every failed
-                    // item is restored before ring capacity is applied to the combined queue.
+                    // Restore the complete failed set before applying capacity.
                     var droppedCount = RequeueChanges(result.FailedChanges.AsSpan());
                     _metrics.AddDropped(droppedCount);
                     Array.Clear(_scratchBuffer, 0, count);
@@ -277,7 +263,7 @@ internal sealed class WriteRetryQueue : IDisposable
         {
             if (_retired)
             {
-                // Retired while this batch was in flight: restoring it would park it in a queue with no reader.
+                // Do not restore into a queue with no future reader.
                 return changes.Length;
             }
 
@@ -303,13 +289,8 @@ internal sealed class WriteRetryQueue : IDisposable
     }
 
     /// <summary>
-    /// Disposes the write retry queue and releases resources.
+    /// Retires the queue and releases its semaphore.
     /// </summary>
-    /// <remarks>
-    /// Retires first, so a queue disposed without its run ever reaching <see cref="Retire"/> still
-    /// reports what it throws away. The two stay separate in the other direction: a retire happens
-    /// while the source is still unwinding and must leave the flush semaphore usable.
-    /// </remarks>
     public void Dispose()
     {
         Retire();

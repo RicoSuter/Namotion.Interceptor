@@ -198,15 +198,11 @@ If a transaction repair write fails, the source keeps the older value and the su
 
 ### Flushing On Stop
 
-When a connector stops, the change processor writes whatever it had buffered but not yet flushed, instead of discarding it. A source writes it through the retry queue above, so a live transport takes the batch and a dead one parks it; a server broadcasts it to the clients still connected. Without this the batch is unrecoverable rather than merely late, because it has already left the change subscription that the retry queue is fed from.
+When a connector stops, the processor drains buffered outbound changes while the transport is still live. Sources preserve retry-queue ordering; servers broadcast to connected clients. Undelivered buffered work increments `Diagnostics.OutboundChanges.TotalDropped`, while source writes still parked at run end increment `Diagnostics.OutboundRetries.TotalDropped` (see [Connector Diagnostics](#connector-diagnostics)).
 
-The drain always runs and cannot be switched off, so a stop can block on an unreachable endpoint. The processor gives its active periodic write, remaining buffered changes, and a source's final retry-queue flush one shared 5 second bound. On a hosted connector the host's shared `HostOptions.ShutdownTimeout`, 30 seconds by default, bounds the total, and that is the knob to reach for when a host runs several connectors that can hang. A connector torn down while the host keeps running, such as a source on a detached subject, has only the internal bound. A zero-buffer write handler executes inline and must return or observe the stopping token before this bounded teardown begins.
+The active periodic write, remaining buffer, and source retry flush share a fixed internal 5 second deadline. `HostOptions.ShutdownTimeout`, 30 seconds by default, caps hosted shutdown but cannot extend this deadline; detached sources have no other bound. A zero-buffer handler runs inline and must return or observe cancellation before bounded teardown begins.
 
-For a source the batch goes through the normal write handler, which flushes the retry queue first because that backlog holds older commits and must keep its place in commit order. A deep backlog can consume the shared bound on its own and park the batch; the final retry-queue flush uses whatever remains of that same bound while the transport is still up.
-
-Whatever the drain cannot deliver is counted rather than discarded silently: still buffered when the drain ends raises `Diagnostics.OutboundChanges.TotalDropped`, still parked when a source's run ends raises `Diagnostics.OutboundRetries.TotalDropped`. See [Connector Diagnostics](#connector-diagnostics).
-
-A buffered batch cancelled part-way through by the stop is re-written whole by the drain, so delivery at teardown is at least once rather than exactly once: a client that already received a value can receive it again.
+Stopping cancels an active buffered write, whose delivery may already be partial or complete. The drain retries the unconfirmed batch under its teardown deadline, providing at-least-once delivery; a receiver may therefore observe the same value again.
 
 ### Monitoring Synchronization State
 
@@ -682,7 +678,7 @@ The three buffers answer three different questions, and reading which one is gro
 - `OutboundRetries` growing means the far end is rejecting writes.
 - `InboundBuffer` growing means an initial load is still in progress.
 
-`OutboundChanges.TotalDropped` counts every change the connector accepted and then never delivered: a bounded buffer overflowing, a write that failed, and whatever a stop's drain could not hand over (see [Flushing On Stop](#flushing-on-stop)). A `null` capacity therefore does not imply a zero total.
+`OutboundChanges.TotalDropped` counts accepted changes lost to overflow, write failure, or teardown (see [Flushing On Stop](#flushing-on-stop)). A `null` capacity does not imply a zero total.
 
 `InboundBuffer.TotalDropped` is the one drop count that is not data loss: it counts buffered updates discarded when a connect attempt was abandoned before its load completed, and applying a superseded snapshot would have been wrong. It is still worth watching, because it is the only signal of how often initial loads are being superseded, which is reconnect thrash.
 
@@ -960,7 +956,9 @@ using var registration = Metrics.OutboundChanges.Register(
 await processor.ProcessAsync(stoppingToken);
 ```
 
-`Register` allows one live registration at a time and throws while one is still held, so a restart that does not dispose the previous handle fails on every attempt. Dispose a scoped registration when its processor goes away; lifetime-long providers intentionally leave their returned handle undisposed. A bounded buffer reports each drop through `AddDropped`; `ChangeQueueProcessor` invokes its optional `dropHandler` only for changes that were never delivered, which is bounded-queue overflow, a write handler that failed, a write cancelled on the immediate path, where nothing is buffered and no later drain can recover it, or changes still buffered when the teardown drain ended. Keeping drop counts in the metrics makes registration handover monotonic and exact without adding diagnostics work to successful queue operations. Skipping the registration altogether is silent for depth, while skipping drop reports leaves `TotalDropped` at 0. The `maxQueueDepth` argument of `ChangeQueueProcessor` is a bound on the buffered queue and must be either `null` for unbounded, which is what all three built-in servers pass, or positive; zero is rejected, because a bound has to leave room for at least one change. A server that wants no buffering at all passes a `bufferTime` of zero, which takes the immediate path, never fills that queue and therefore neither reads the bound nor validates it.
+`Register` permits one live provider. Dispose a scoped registration with its processor; lifetime providers intentionally keep theirs. Omitting registration hides depth, while omitting `AddDropped` leaves `TotalDropped` at 0. `ChangeQueueProcessor` reports overflow, write failure, immediate-path cancellation, and teardown loss through its `dropHandler`.
+
+`maxQueueDepth` is `null` for an unbounded buffer, as used by the built-in servers, or positive for a bound. To disable buffering, set `bufferTime` to zero; the immediate path never uses or validates the queue bound.
 
 ## Known Limitations
 
@@ -970,7 +968,7 @@ Cases where the local model and the external system can end up disagreeing, or w
 
 **A property with an `OnChanging` hook loses a connect-window write to the initial-state load.** A hook that rewrites the incoming value, which the generated `partial void OnPropertyNameChanging(ref TProperty newValue, ref bool cancel)` can do, means the stored value is not the value the source sent, so the change publishes as `Local`. The drain then treats the load's own value as an ordinary local write and it wins the per-property collapse, discarding a write the user made moments earlier. Without the hook the load's apply is skipped as an echo and the user's write is restored and sent, which is what [Write Consistency Guarantees](#write-consistency-guarantees) promises. Both ends still converge, on the loaded value; what is lost is the user's write. Tracked in the connectors epic [#442](https://github.com/RicoSuter/Namotion.Interceptor/issues/442).
 
-**Disabling the retry queue discards connect-window writes.** With `writeRetryQueueSize: 0` there is no queue to park them in, so the drain discards the owned writes captured while connecting. They are reported, counted into `Diagnostics.OutboundRetries.TotalDropped` and logged as a warning, but they are lost, which is what the configuration asks for. The same applies to a write that fails while the source is stopping: with no queue it is gone rather than merely late, so it is counted even though the stop is what killed it. In that configuration the count is still a floor rather than the whole loss, because a write the drain cannot attribute to this source is not counted (next entry).
+**Disabling the retry queue discards writes.** With `writeRetryQueueSize: 0`, owned connect-window writes and stop-time failures are warned, counted in `Diagnostics.OutboundRetries.TotalDropped`, and lost. Writes the drain cannot attribute to this source remain uncounted (next entry).
 
 **Writes to properties a source has not claimed yet are discarded.** Ownership is established inside `StartListeningAsync`, and the drain must empty the subscription to keep it bounded, so a write it cannot attribute is dropped without an error. First connection only, since ownership persists across reconnects. These discards are not counted by `Diagnostics.OutboundRetries.TotalDropped`: with no owner recorded yet, there is nothing to attribute them to.
 

@@ -39,9 +39,8 @@ public class ChangeQueueProcessor : IDisposable
     internal ChangeDeliveryRule DeliveryRule => _deliveryRule;
 
     /// <summary>
-    /// Number of changes this processor accepted but never delivered: dropped on bounded-queue overflow,
-    /// discarded because the write handler failed, discarded because it was cancelled on a path that
-    /// buffers nothing, or still buffered when the teardown drain ended.
+    /// Number of accepted changes not delivered because of overflow, write failure, cancellation on
+    /// the immediate path, or teardown.
     /// </summary>
     public long DropCount => Interlocked.Read(ref _dropCount);
 
@@ -85,9 +84,7 @@ public class ChangeQueueProcessor : IDisposable
     /// increments <see cref="DropCount"/>, so the newest change is retained. Read only on the buffered
     /// path, so a processor with a buffer time of zero never touches the queue this bounds.</param>
     /// <param name="logger">The logger.</param>
-    /// <param name="dropHandler">Optional handler invoked with the number of changes that were accepted
-    /// but never delivered; see <see cref="DropCount"/> for what counts as one. Use this to report the
-    /// count to queue diagnostics without adding work to successful enqueue or dequeue operations.</param>
+    /// <param name="dropHandler">Optional handler receiving each addition to <see cref="DropCount"/>.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
     /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
     /// the first flush, where it would end delivery for this processor's lifetime. Also thrown when
@@ -234,10 +231,8 @@ public class ChangeQueueProcessor : IDisposable
             }
             else if (cancellationToken.CanBeCanceled)
             {
-                // Do not link the processing source to the input token. Hosted services cancel their
-                // stopping source synchronously, so a blocking handler callback would otherwise also
-                // block the host before its shutdown timeout can begin. The input token's wait handle is
-                // set before callbacks execute and lets this processor request cancellation independently.
+                // Observe the wait handle so synchronous caller cancellation cannot run a blocking
+                // processing callback inline before the host starts its timeout-aware wait.
                 cancellationWait = ThreadPool.RegisterWaitForSingleObject(
                     cancellationToken.WaitHandle,
                     static (state, _) => ((ProcessingCancellationState)state!).RequestCancellation(),
@@ -360,19 +355,16 @@ public class ChangeQueueProcessor : IDisposable
     }
 
     /// <summary>
-    /// Lets the active flush settle, writes anything it left buffered, and runs the connector's final
-    /// handoff under one deadline.
+    /// Completes active work and the connector's final handoff under one deadline.
     /// </summary>
     private async Task CompleteTeardownAsync(
         Task periodicFlushTask,
         ProcessingCancellationState processingCancellationState)
     {
-        // A fresh token, not the one ProcessAsync was given: that one is already cancelled here, so
-        // writing under it would fail every change, which is the loss this exists to prevent.
+        // The caller's token is already cancelled, so the drain needs a fresh one.
         var teardownTokenSource = new CancellationTokenSource(TeardownFlushBound);
 
-        // Read once: Token throws once the task below disposes the source. Keep that disposal last: a
-        // registration taken on a disposed source is dropped silently, leaving the wait below unbounded.
+        // Capture before the worker can dispose the source; Token throws after disposal.
         var teardownToken = teardownTokenSource.Token;
 
         var cancellationTask = processingCancellationState.GetProcessingCancellationTask();
@@ -390,8 +382,7 @@ public class ChangeQueueProcessor : IDisposable
         }
         catch (OperationCanceledException)
         {
-            // The active flush may never settle, so count changes still waiting behind it now. The
-            // worker repeats this after it settles to catch a cancelled batch that gets requeued later.
+            // Count now and after active work settles, since cancellation can requeue a batch later.
             try
             {
                 CountRemainingAfterDrain();
@@ -401,8 +392,6 @@ public class ChangeQueueProcessor : IDisposable
                 _logger.LogError(exception, "Failed to count buffered changes while stopping.");
             }
 
-            // An abandoned write can still reach the wire after the caller has begun tearing the
-            // transport down; every client here rejects a write once disposed, so that fails cleanly.
             _logger.LogWarning(
                 "Gave up waiting after {Bound} for the remaining buffered changes to be written while " +
                 "stopping. A write handler that ignores cancellation may still complete it.",
@@ -424,9 +413,8 @@ public class ChangeQueueProcessor : IDisposable
                 try { await cancellationTask.ConfigureAwait(false); } catch { /* ignore */ }
                 await periodicFlushTask.ConfigureAwait(false);
 
-                // The OPC UA server writes synchronously under the SDK's node manager lock and ignores
-                // its token. Use a dedicated thread only for the drain that can run such a handler, not
-                // while waiting for cancellation callbacks or an already active periodic flush to settle.
+                // OPC UA writes synchronously under the SDK lock and ignores cancellation, so isolate
+                // only the final drain on a dedicated thread.
                 if (!teardownToken.IsCancellationRequested &&
                     (!_changes.IsEmpty || _teardownHandler is not null))
                 {
@@ -446,8 +434,7 @@ public class ChangeQueueProcessor : IDisposable
             }
             finally
             {
-                // After a timed-out wait, this runs only once the active work settles. It catches a
-                // cancelled batch that gets requeued later and keeps both token sources alive until then.
+                // After timeout, retain both token sources until active work and late requeues settle.
                 try
                 {
                     CountRemainingAfterDrain();
@@ -467,8 +454,7 @@ public class ChangeQueueProcessor : IDisposable
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            // Logged here because the waiter may have given up long before this ends. Catching exceptions
-            // also keeps an abandoned task off UnobservedTaskException.
+            // The worker can outlive its waiter, so observe and log faults here.
             _logger.LogError(exception, "Failed to write the remaining buffered changes while stopping.");
         }
     }
@@ -561,10 +547,8 @@ public class ChangeQueueProcessor : IDisposable
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    // Cancelled means never confirmed, not failed, and nothing else recovers a batch that
-                    // left the subscription. The merger resolves by commit revision, not queue position.
-                    // The drain counts raw queue entries, so requeueing the pre-merge list would report
-                    // every collapsed duplicate as a loss. Copied here: the finally releases the buffer.
+                    // Cancellation leaves the merged survivors unconfirmed. Copy them before Reset releases
+                    // the buffer; requeueing the raw input would overcount collapsed duplicates.
                     foreach (var change in mergedChanges.Span)
                     {
                         _changes.Enqueue(change);
@@ -574,8 +558,7 @@ public class ChangeQueueProcessor : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    // Counted rather than requeued: requeueing against a transport that keeps failing
-                    // would grow the queue without bound.
+                    // Requeueing a non-cancellation failure could grow the queue without bound.
                     var undelivered = mergedChanges.Length;
                     CountUndelivered(undelivered);
                     _logger.LogError(ex, "Failed to write {Count} changes, which are discarded.", undelivered);

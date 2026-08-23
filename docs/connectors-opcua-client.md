@@ -398,7 +398,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 machine.Speed = 100; // Queued if disconnected, written immediately if connected
 ```
 
-`Diagnostics.OutboundRetries` reports this queue: `Depth` is what is parked right now, `Capacity` echoes `WriteRetryQueueSize`, and `TotalDropped` counts what the queue threw away since `StartTime`. With `WriteRetryQueueSize = 0` read `TotalDropped` as a floor rather than the whole loss: it counts every write discarded because there is no queue to park it in, including the ones captured while connecting, but not a write to a property this client has not claimed yet, which the connect-window drain cannot attribute to it. See [Known Limitations](connectors.md#known-limitations).
+`Diagnostics.OutboundRetries` reports this queue's depth, configured capacity, and drops since `StartTime`. At capacity 0, owned connect-window writes are counted; writes to unclaimed properties remain unattributable and uncounted. See [Known Limitations](connectors.md#known-limitations).
 
 ### Polling Fallback for Unsupported Nodes
 
