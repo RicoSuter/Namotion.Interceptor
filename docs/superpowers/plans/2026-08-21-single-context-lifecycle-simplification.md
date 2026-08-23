@@ -32,6 +32,9 @@ Each stage must leave the tree building with zero warnings and the full unit sui
 
 1. **Benchmark base.** Cut a branch from master carrying only `LifecycleOwnershipBenchmark`, so both arms share benchmark source. The spike's fourteen rows already include the shared-parent matched pair and the batch row that the original scaffold lacked. Done: `bench/scl-base` at `7a5d2ace`, master `0418410c` plus the benchmark file only, worktree `/home/rico/GitHub/nib-scl-base`, outside the repository so BenchmarkDotNet does not abort on a second project file.
 2. **Singleton context service contracts.** Landed cleanly in the spike, 266 lines, no behaviour change. Take as-is.
+
+The work happens on `rewrite/single-context-impl`, worktree `/home/rico/GitHub/nib-single-context`, branched from `rewrite/single-context-lifecycle`. Both that worktree and the benchmark base sit outside the repository, so BenchmarkDotNet does not abort on a second project file and either can run an arm.
+
 3. **Attachment mechanism, additive.** Exact context, anchors, attachment revision, lock-free reads, and the structural write route with its own terminal cache. The structural setter publishes an executor even when unattached, so the guard always runs. Keep the executor inheriting the context for now: that is what lets every later stage stay green.
 4. **Lifecycle ownership**, decomposed from the first commit. Occurrence-aware edges, anchors, deterministic release traversal, and backward-search reachability from the outset rather than a scan to be replaced later. Parent snapshots activate lazily. One unified `HasAnchoredAncestor(start, excluded)` serves both the release decision and anchor consumption; the forward mark does not exist in production and the oracle lives in the test assembly. The decomposition is fixed before any code lands, see below.
 5. **Concurrency contracts.** Attachment monitor taken before chain resolution and held through the terminal, so transient races order rather than throw. Persistent cross-context conflicts throw. Lock order is gate before `SyncRoot`, a total order given the getter contract. Callback reentrancy rules, with a `[Conditional("DEBUG")]` guard for the two contract violations (a getter that writes a subject-typed property, and a structural write from a lifecycle callback) so Release pays nothing.
@@ -59,6 +62,11 @@ The spike reached 1748 lines in one file against master's 551, which is what the
 | `ParentProjection` | lazy-activated parent snapshots behind `GetParents()` | 150-250 |
 
 A class that exceeds 500 lines is a signal to split it further, not to accept it.
+
+### Two cost questions stage 4 has to answer, not defer
+
+- **`GetOrAddSubjectId` was measured 15.4 percent slower** on the spike, consistently and identically across all three reachability variants, so it belongs to the ownership model rather than to any algorithm choice. The error bars were 0.027 and 0.064 nanoseconds against a 4.4 nanosecond difference, so it is not within-run noise, and the one proposed mechanism (an extra `Data` entry from unconditional parent tracking) was probed and falsified twice. This repository's guidance says a movement of that size with no known mechanism gets settled by diffing JIT output rather than by more runs. Do that while the ownership state is still being shaped, not at the end when the layout is fixed.
+- **Per-subject ownership state was measured at roughly 195 bytes**, about 975 kilobytes per operation across the 5000 subjects of `AddLotsOfPreviousCars`. The working decision is to accept it, keep `SubjectOwnership` as compact as correctness allows without contorting the design, and report the figure measured on the re-derived code rather than carrying the spike's forward. The spike's number includes transitional dual-model state that the re-derivation does not have, so the real figure should be lower. If it is not, that is the point to revisit, with a number rather than a budget guess.
 
 ### Benchmark rows this plan adds
 
