@@ -37,7 +37,7 @@ The work happens on `rewrite/single-context-impl`, worktree `/home/rico/GitHub/n
 
 3. **Attachment mechanism, additive.** Exact context, anchors, attachment revision, lock-free reads, and the structural write route with its own terminal cache. The structural setter keeps the unattached short circuit here and gains the guard in stage 5; see design decision 6 for why closing that hole in this stage costs the whole construction path and buys no correctness while the exact context is not yet authoritative. Keep the executor inheriting the context for now: that is what lets every later stage stay green.
 4. **Lifecycle ownership**, decomposed from the first commit. Occurrence-aware edges, anchors, deterministic release traversal, and backward-search reachability from the outset rather than a scan to be replaced later. Parent snapshots activate lazily. One unified `HasAnchoredAncestor(start, excluded)` serves both the release decision and anchor consumption; the forward mark does not exist in production and the oracle lives in the test assembly. The decomposition is fixed before any code lands, see below.
-5. **Concurrency contracts.** Attachment monitor taken before chain resolution and held through the terminal, so transient races order rather than throw. Persistent cross-context conflicts throw. The same monitor closes the unattached structural write hole carried over from stage 3: short circuit inside the monitor when there is no attached context, so a concurrent attach cannot interleave and the unattached path stays as cheap as master's. Lock order is gate before `SyncRoot`, a total order given the getter contract. Callback reentrancy rules, with a `[Conditional("DEBUG")]` guard for the two contract violations (a getter that writes a subject-typed property, and a structural write from a lifecycle callback) so Release pays nothing.
+5. **Concurrency contracts.** Lock order is **lifecycle gate, then attachment monitor, then `SyncRoot`**, and stage 5 is production-negative. See "Stage 5 lock ordering, corrected" below; the earlier wording said the attachment monitor is taken before chain resolution, which is true but must not be read as before the gate. Persistent cross-context conflicts throw, transient races order. The unattached fast path enters the attachment monitor alone, rechecks that the subject is still unattached, and writes directly. Callback reentrancy rules, with a `[Conditional("DEBUG")]` guard for the two contract violations (a getter that writes a subject-typed property, and a structural write from a lifecycle callback) so Release pays nothing.
 6. **Generator and Dynamic routing.** Absorbed into stage 3 and done there, because correction 3a lists the fail-closed classification among the additive mechanism and the structural helper cannot be emitted without it. Landed: scalar route only for provably subject-free declared types, `Executor` as an explicit implementation on generated and Dynamic subjects, and the enlarged base contract with its diagnostic for every base assembly built by the released generator. That last one belongs in the breaking-changes list.
 7. **`AddProperties` atomicity.**
 8. **Handler merge.** Delete the inheritance and parent-tracking handlers, remove their configuration extensions, migrate the three ordering attributes. The merged lifecycle takes the descent's place as the public ordering seam, so `[RunsBefore(typeof(ContextInheritanceHandler))]` becomes `[RunsBefore(typeof(LifecycleInterceptor))]` and both handler positions keep their current meaning and their measured orders. The merged lifecycle must implement `ILifecycleHandler` or those attributes will not bind.
@@ -46,6 +46,41 @@ The work happens on `rewrite/single-context-impl`, worktree `/home/rico/GitHub/n
 11. **Removal.** Fallback APIs, executor-as-context, `Context`, `SyncRoot`. Purely subtractive, so a compile error here is a missed call site rather than a design problem. Subtree-scoped services are no longer part of this stage: they were removed in stage 4, because the composition that produced them is the same mechanism that leaked a detached subject's context, deepened resolution linearly with the graph, and closed a resolution loop on mutual references. See the composition-target commit for the measurements.
 12. **Docs and snapshots.** Sixteen generator snapshots and eight public API snapshots, plus the ordering section of `docs/design/tracking-lifecycle.md`, which is written entirely in terms of the deleted descent handler.
 13. **Verification, full.** Every integration suite plus the Connector Tester, not a targeted subset, because this is a foundational change and two specific items force it: MQTT begins caching connector root property mappings for the first time, and every base assembly built by the released generator rebuilds. Benchmarks run per arm directly rather than through the comparison script, against `bench/scl-base` at `7a5d2ace`.
+
+### Stage 5 lock ordering, corrected
+
+An external review of `dc2020a2` found that the obvious implementation deadlocks. Taking the subject attachment monitor and then executing the interceptor chain inverts against release:
+
+1. A structural write on a child holds that child's attachment monitor and waits for the lifecycle topology gate.
+2. A parent removal holds the topology gate, reaches `ReleaseClaim(child)`, and waits for that same child attachment monitor.
+
+The requirement to take the attachment monitor before chain resolution does not require taking it before the gate. The safe total order for an attached structural write is **lifecycle gate, then attachment monitor, then `SyncRoot`**, which Core must expose as a pre-chain synchronization seam for the built-in lifecycle:
+
+1. Read the exact attached context and obtain its lifecycle synchronization gate.
+2. Enter the lifecycle gate.
+3. Enter the subject attachment monitor.
+4. Revalidate that the exact attached context is unchanged; release and retry if it moved.
+5. Resolve and execute the write chain through the terminal.
+
+The unattached fast path enters only the attachment monitor, rechecks that the subject is still unattached, and writes directly; if an attachment landed, it releases and restarts through the attached path.
+
+### Stage 5 must be production-negative
+
+Once the attachment monitor spans chain resolution through the terminal, the write-path revision machinery is dead and must be deleted rather than layered over: `StructuralWriteInterceptorFactory` and its duplicated terminal bodies, the separate structural-write delegate cache and resolver methods on `InterceptorSubjectContext` and `ContextState`, `PropertyWriteContext.AttachmentRevisionAtEntry` with its extra constructor, `EnterAttachmentGuard`/`ExitAttachmentGuard` and the stale-write exception, and the narrow attachment-guard tolerance in `ConcurrentStructuralWriteLeakTests`. The ordinary cached write chain is reused inside the new synchronization scope. The generated structural helper stays, because it still selects the guarded route and implements the unattached fast path.
+
+The attachment revision itself remains, solely for the public attachment-transition compare-and-swap. That is a separate concern from carrying a revision through every structural write, and removing it would require redesigning the public raw transition seam and reasoning about ABA across detach and reattach lifetimes.
+
+Stage 5 also drops the accommodations for callback reentrancy it is about to forbid: the inexact same-property fallback search in `SubjectOwnership.RemoveIncoming`, the repeated `graph.IsOwned(parent)` checks after edge notifications in `StructuralReconciler`, comments stating that callbacks may write another structural property, and cleanup branches justified only by a downstream interceptor suppressing `next`, since the lifecycle is terminal. Removing the inexact edge fallback is a risky simplification and carries a debug oracle. `ReleaseUnusedClaims` cannot go wholesale: terminal and getter exceptions and a supported normalizing setter can still leave provisional claims unused. Only its downstream-suppression rationale expires.
+
+The scheduled "in-flight edge bookkeeping" reduction candidate is already discharged by the re-derived stage 4: there is no overlay or edge ledger to delete, the old and new occurrence lists are real reconciliation inputs, and committed-outgoing validation is load-bearing.
+
+### Correctness findings open against stage 4
+
+Verified against `dc2020a2`, to be fixed in stage 5:
+
+- **Ownership collections use default equality.** `OwnershipGraph._owned` and the three pooled collections in `LifecycleScratch` (visited sets, subject counters, index groups) key on `IInterceptorSubject` with default equality. Graph membership is identity everywhere else, and a hand-written subject may override `Equals`/`GetHashCode`, which can merge distinct nodes or make a mutable-hash subject unreachable. Use `ReferenceEqualityComparer.Instance` consistently; Registry carries the same pre-existing pattern and should agree with lifecycle identity.
+- **`SubjectOwnership.IncomingCount` is read without synchronization.** Writes happen under the per-subject monitor; `GetReferenceCount` reads the plain `int` outside it. The query must stay lock-free, so make the field volatile rather than atomic: an interlocked read prevents tearing but does not give the publication semantics intended.
+- **The scratch retention bound is misstated.** `LifecycleScratch` claims buffers are bounded by the widest structural value, but discovery and reachability sets can grow to a whole component or ancestor closure. Consider discarding oversized buffers on return instead of retaining a graph-sized buffer per thread. Measurement candidate, not a blocker.
 
 ### Decomposition, fixed before stage 4 begins
 
