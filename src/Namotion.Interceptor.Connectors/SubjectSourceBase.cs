@@ -353,7 +353,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
             if (!result.IsFullySuccessful)
             {
-                _logger.LogWarning(result.Error, "Failed to write {Count} changes to source, queuing for retry.",
+                _logger.LogWarning(result.Error, "Failed to write {Count} changes to source.",
                     result.FailedChanges.Length);
                 WriteRetryQueue.Enqueue(result.FailedChanges.AsMemory());
             }
@@ -364,7 +364,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
         catch (Exception e)
         {
-            _logger.LogWarning(e, "Failed to write {Count} changes to source, queuing for retry.", changes.Length);
+            _logger.LogWarning(e, "Failed to write {Count} changes to source.", changes.Length);
             WriteRetryQueue.Enqueue(changes);
         }
     }

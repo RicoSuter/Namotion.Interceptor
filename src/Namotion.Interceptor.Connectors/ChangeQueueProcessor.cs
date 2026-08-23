@@ -377,15 +377,6 @@ public class ChangeQueueProcessor : IDisposable
 
         var cancellationTask = processingCancellationState.GetProcessingCancellationTask();
 
-        if (cancellationTask.IsCompleted && periodicFlushTask.IsCompleted &&
-            _changes.IsEmpty && _teardownHandler is null)
-        {
-            try { await cancellationTask.ConfigureAwait(false); } catch { /* ignore */ }
-            processingCancellationState.Dispose();
-            teardownTokenSource.Dispose();
-            return;
-        }
-
         var teardownTask = RunTeardownWorkerAsync(
             cancellationTask,
             periodicFlushTask,
@@ -436,7 +427,8 @@ public class ChangeQueueProcessor : IDisposable
                 // The OPC UA server writes synchronously under the SDK's node manager lock and ignores
                 // its token. Use a dedicated thread only for the drain that can run such a handler, not
                 // while waiting for cancellation callbacks or an already active periodic flush to settle.
-                if (!teardownToken.IsCancellationRequested)
+                if (!teardownToken.IsCancellationRequested &&
+                    (!_changes.IsEmpty || _teardownHandler is not null))
                 {
                     await Task.Factory.StartNew(() =>
                     {
