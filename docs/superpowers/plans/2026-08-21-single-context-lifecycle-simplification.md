@@ -14,7 +14,17 @@
 
 A full spike was executed against the previous plan. What follows replaces its task sequence. The spike branch is `spike/single-context-lifecycle` and its findings are in `docs/spike/SPIKE-FINDINGS.md`; the reachability variants are parked on `spike/reach-v1-backward`, `spike/reach-v2-cachedmark` and `spike/reach-v3-incremental`.
 
-**Reuse rather than rewrite.** The spike produced working, tested code for the hardest parts: the occurrence-aware lifecycle rewrite, the backward-search reachability, three fixed defects, and the benchmark scaffold with rows that actually exercise the scan. Those are the starting point. What is redone is the sequencing, the three under-specified areas, and the transitional scaffolding the spike carried.
+**Port the tests, re-derive the code.** The spike's production code is green, reviewed and benchmarked, but it was written against a specification that has since been reversed in five places, and it carries workarounds whose reasons have expired: in-flight bookkeeping that exists because backward search was retrofitted onto an edge-commit order it was not designed for, a throw on transient races that becomes ordering, eager parent publication that becomes lazy, a structural setter that skips the guard, and transitional dual-model scaffolding. Inheriting that means inheriting the workarounds, and code that already passes its tests does not get re-examined. The decomposition the previous plan specified also never happened: one class reached 1604 lines against master's 551.
+
+The tests are the asset. They encode cases that were found the hard way and will not be re-derived from a specification: the duplicate occurrence whose new index collides with a retained one, which 3347 tests missed; the orphaned self-cycle master leaks with no coverage at all; a release descent re-entered from a removal callback; a competing context claiming a subject between validation and claim; and an attachment read taken from inside a caller's lock, which deadlocked against the first implementation and returns instantly against the second.
+
+So the split is three ways:
+
+- **Take as-is**, because they are decision-independent and landed clean: the benchmark scaffold, including the shared-parent matched pair and batch rows the original lacked, and the singleton context service contracts.
+- **Port verbatim as the specification of correct behaviour**: every test written or rewritten during the spike, ported before the code they cover exists. A re-derived implementation must satisfy them.
+- **Re-derive**: the lifecycle production code, under the corrected design, with the decomposition done up front rather than deferred.
+
+Tests-first re-derivation is the safer option here, not the more expensive one. Reused code hides expired workarounds behind a green suite; ported tests make the hard-won cases mandatory for whatever replaces them.
 
 ### Sequence
 
