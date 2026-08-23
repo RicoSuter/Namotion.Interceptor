@@ -32,18 +32,38 @@ Each stage must leave the tree building with zero warnings and the full unit sui
 
 1. **Benchmark base.** Cut a branch from master carrying only `LifecycleOwnershipBenchmark`, so both arms share benchmark source. The spike's fourteen rows already include the shared-parent matched pair and the batch row that the original scaffold lacked. Done: `bench/scl-base` at `7a5d2ace`, master `0418410c` plus the benchmark file only, worktree `/home/rico/GitHub/nib-scl-base`, outside the repository so BenchmarkDotNet does not abort on a second project file.
 2. **Singleton context service contracts.** Landed cleanly in the spike, 266 lines, no behaviour change. Take as-is.
-3. **Read path: stop running user code under the subject monitor.** This is now a prerequisite rather than an afterthought, because it is what makes the lifecycle gate safe to hold across the terminal write. Doing it first means the write protocol never has to be built twice.
-4. **Attachment mechanism, additive.** Exact context, anchors, attachment revision, lock-free reads, and the structural write route with its own terminal cache. The structural setter publishes an executor even when unattached, so the guard always runs. Keep the executor inheriting the context for now: that is what lets every later stage stay green.
-5. **Lifecycle ownership.** Occurrence-aware edges, anchors, deterministic release traversal, and backward-search reachability from the outset rather than a scan to be replaced later. Parent snapshots publish lazily. Carry the spike's debug oracle.
-6. **Concurrency contracts.** Attachment monitor taken before chain resolution and held through the terminal, so transient races order rather than throw. Persistent cross-context conflicts throw. Callback reentrancy rules.
-7. **Generator and Dynamic routing.** Fail-closed classification: scalar route only for provably subject-free declared types. Expect the base-contract change and its diagnostic for every base assembly built by the released generator; that is unavoidable and belongs in the breaking-changes list.
-8. **`AddProperties` atomicity.**
-9. **Handler merge.** Delete the inheritance and parent-tracking handlers, remove their configuration extensions, migrate the three ordering attributes. The merged lifecycle must implement the handler interface or those attributes will not bind.
-10. **Singleton authorities**, and delete the multi-instance machinery that becomes unreachable.
-11. **Consumer migration**, roughly 124 files. The largest stage. Categories and per-project counts are in the findings.
-12. **Removal.** Fallback APIs, executor-as-context, `Context`, `SyncRoot`, subtree-scoped services. Purely subtractive, so a compile error here is a missed call site rather than a design problem.
-13. **Docs and snapshots.** Sixteen generator snapshots and eight public API snapshots.
-14. **Verification.** Full suite, agreed connector and integration scope, and a benchmark comparison run per arm directly rather than through the comparison script.
+3. **Attachment mechanism, additive.** Exact context, anchors, attachment revision, lock-free reads, and the structural write route with its own terminal cache. The structural setter publishes an executor even when unattached, so the guard always runs. Keep the executor inheriting the context for now: that is what lets every later stage stay green.
+4. **Lifecycle ownership**, decomposed from the first commit. Occurrence-aware edges, anchors, deterministic release traversal, and backward-search reachability from the outset rather than a scan to be replaced later. Parent snapshots activate lazily. One unified `HasAnchoredAncestor(start, excluded)` serves both the release decision and anchor consumption; the forward mark does not exist in production and the oracle lives in the test assembly. The decomposition is fixed before any code lands, see below.
+5. **Concurrency contracts.** Attachment monitor taken before chain resolution and held through the terminal, so transient races order rather than throw. Persistent cross-context conflicts throw. Lock order is gate before `SyncRoot`, a total order given the getter contract. Callback reentrancy rules, with a `[Conditional("DEBUG")]` guard for the two contract violations (a getter that writes a subject-typed property, and a structural write from a lifecycle callback) so Release pays nothing.
+6. **Generator and Dynamic routing.** Fail-closed classification: scalar route only for provably subject-free declared types. Expect the base-contract change and its diagnostic for every base assembly built by the released generator; that is unavoidable and belongs in the breaking-changes list.
+7. **`AddProperties` atomicity.**
+8. **Handler merge.** Delete the inheritance and parent-tracking handlers, remove their configuration extensions, migrate the three ordering attributes. The merged lifecycle takes the descent's place as the public ordering seam, so `[RunsBefore(typeof(ContextInheritanceHandler))]` becomes `[RunsBefore(typeof(LifecycleInterceptor))]` and both handler positions keep their current meaning and their measured orders. The merged lifecycle must implement `ILifecycleHandler` or those attributes will not bind.
+9. **Singleton authorities**, and delete the multi-instance machinery that becomes unreachable.
+10. **Consumer migration**, roughly 124 files. The largest stage. Categories and per-project counts are in the findings.
+11. **Removal.** Fallback APIs, executor-as-context, `Context`, `SyncRoot`, subtree-scoped services. Purely subtractive, so a compile error here is a missed call site rather than a design problem.
+12. **Docs and snapshots.** Sixteen generator snapshots and eight public API snapshots, plus the ordering section of `docs/design/tracking-lifecycle.md`, which is written entirely in terms of the deleted descent handler.
+13. **Verification, full.** Every integration suite plus the Connector Tester, not a targeted subset, because this is a foundational change and two specific items force it: MQTT begins caching connector root property mappings for the first time, and every base assembly built by the released generator rebuilds. Benchmarks run per arm directly rather than through the comparison script, against `bench/scl-base` at `7a5d2ace`.
+
+### Decomposition, fixed before stage 4 begins
+
+The spike reached 1748 lines in one file against master's 551, which is what the previous plan deferred and never did. The split is decided up front, target 300 to 500 lines per class, extracted as cohesive collaborators rather than by splitting one class across files:
+
+| Class | Holds | Target |
+|---|---:|---:|
+| `LifecycleInterceptor` | write protocol shell, gate, attach and detach entry points, events, handler fan-out | 400-500 |
+| `SubjectOwnership` | per-subject record: anchor, occurrence-aware incoming and outgoing edges, inline-to-list promotion | 300-400 |
+| `OwnershipGraph` | the owned-subject map and its edge primitives, committed-edge queries, claim and release of candidates | 400-500 |
+| `StructuralReconciler` | the write-time diff and reconcile for scalar, collection and dictionary properties | 400-500 |
+| `ReachabilityWalk` | the single `HasAnchoredAncestor(start, excluded)` backward search, with candidate validation against committed outgoing edges | 200-300 |
+| `ReleaseTraversal` | deterministic first-visit release from the removed edge, cycle drain | 250-350 |
+| `ParentProjection` | lazy-activated parent snapshots behind `GetParents()` | 150-250 |
+
+A class that exceeds 500 lines is a signal to split it further, not to accept it.
+
+### Benchmark rows this plan adds
+
+- Parent projection: a row that never calls `GetParents()` and a row that does, so lazy activation is priced against master rather than asserted. `RegistryBenchmark.ReadParents` is the existing control on the read side.
+- The unattached structural write pair already exists and now measures something real, since the guard no longer skips that path.
 
 ### Simplification rounds
 
@@ -51,16 +71,14 @@ The spike landed at roughly +2,241 production lines through stage 9, and the pro
 
 Two scheduled rounds, plus a standing rule.
 
-**Round one, after the concurrency stage.** By then the write protocol, the attachment state and the reachability algorithm all exist and their interactions are known. Named candidates, each of which exists because of a decision that has since changed:
+**Round one, after the concurrency stage.** By then the write protocol, the attachment state and the reachability algorithm all exist and their interactions are known. Two candidates remain open; the other two were decided up front and moved into stage 4:
 
 - **The attachment revision may be entirely redundant.** It was designed to detect a chain resolved before an attach landed mid-write. The corrected design takes the attachment monitor before resolving the chain and holds it through the terminal, so no such window exists. If that holds, this deletes the revision field, the extra field on the write context, the enter/exit guard pair, and possibly the second per-property terminal cache, whose body is a deliberate duplicate of the scalar terminal. One mechanism instead of three.
-- **Dual anchor bookkeeping.** The per-subject anchor and the anchored-root set record the same fact in two places and are kept in sync by hand. One should derive from the other.
-- **The forward mark should not be production code.** The chosen algorithm keeps the graph version, mark cache and mark stack solely to feed a debug oracle that is compiled out in Release. Moving the oracle into the test assembly as an independent reimplementation removes that state from production and makes the oracle stronger, because it can no longer share a bug with the code it checks.
 - **In-flight edge bookkeeping.** The backward search needs auxiliary lists only because it was retrofitted onto an order that commits outgoing edges before incoming records. Designing that order deliberately may remove them.
 
 **Round two, after the removal stage.** With the fallback graph, executor-as-context and the transitional members gone, re-examine what the surrounding machinery was compensating for. In particular the context service snapshot, its caching and its invalidation were shaped by a fallback graph that no longer exists, and the delegation-era rationale comments must be rewritten rather than carried over.
 
-**Anchors get re-derived, not patched again.** The provisional anchor rule has been through three revisions and still retains mutually-referencing constructor-attached subjects forever. Before writing a fourth variant, evaluate a different framing: the context-taking constructor records the context as a hint without attaching, and attachment happens only through an explicit attach or adoption into an already-attached graph. That may remove the anchor kind distinction and the independent-support walk together. Decide by design, not by adding a case.
+**Anchors: decided, no fourth variant.** The alternative framing was evaluated against master's measured behaviour and rejected: a constructor that only records the context without attaching breaks the documented headline pattern, since `new Person(context)` would then track nothing. Master gives the constructor no durable anchor at all, which is why it silently half-detaches the caller's own root as soon as a back-reference exists. The provisional anchor stays, stated for consumers as "a subject constructed with a context is a root; it stops being a root once it is attached into a graph that is already rooted somewhere else, and from then on it follows that graph". The reduction that was actually available is not a new rule but a unification: `EdgeProvidesIndependentSupport` and the backward reachability search collapse into one `HasAnchoredAncestor(start, excluded)`, and with the forward mark gone the anchored-root set goes with it. Both are folded into stage 4 rather than deferred to a later round. See design decisions 9 and 10.
 
 **Standing rule.** No stage commits without deleting what it made dead, and any stage whose purpose is removal must show a net-negative production diff. Measure with `pwsh scripts/diff-composition.ps1 -PerProject`, and record the number in the stage's commit message so growth is visible as it happens rather than at the end.
 
@@ -75,7 +93,7 @@ Two scheduled rounds, plus a standing rule.
 
 ### Effort
 
-The spike reached stage 9 of 14 and consumed a full working session with parallel agents throughout. Stages 11 and 12 are the bulk of the remaining volume, and stage 14's connector verification does not run in CI and takes hours by itself. Plan accordingly; the previous estimate was wrong because it assumed the ownership nucleus could be replaced without touching the surrounding machinery, and every stage above touches it.
+The spike reached the equivalent of stage 8 of 13 and consumed a full working session with parallel agents throughout. Stages 10 and 11 are the bulk of the remaining volume, and stage 13's full connector and integration verification does not run in CI and takes hours by itself. Plan accordingly; the previous estimate was wrong because it assumed the ownership nucleus could be replaced without touching the surrounding machinery, and every stage above touches it.
 
 ## Corrections after implementation review (authoritative, override the task text below)
 
