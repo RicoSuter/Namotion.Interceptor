@@ -59,8 +59,13 @@ public class AggregatedTrackingContextTests
         child.AddFallbackContext(parent);
 
         // Assert
-        Assert.Throws<InvalidOperationException>(() => ((IInterceptorSubject)person).GetParents());
-        Assert.Throws<InvalidOperationException>(() => person.GetReferenceCount());
+        var parentsException = Assert.Throws<InvalidOperationException>(
+            () => ((IInterceptorSubject)person).GetParents());
+        Assert.Contains("exactly one service", parentsException.Message);
+
+        var referenceCountException = Assert.Throws<InvalidOperationException>(
+            () => person.GetReferenceCount());
+        Assert.Contains("exactly one service", referenceCountException.Message);
     }
 
     [Fact]

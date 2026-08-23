@@ -262,6 +262,39 @@ public class RecursiveAttachTests
         Assert.DoesNotContain(grandmother, attached);
     }
 
+    [Fact]
+    public void WhenUsingLifecycleWithoutContextInheritance_ThenASurvivedEdgeRemovalAttachesNothing()
+    {
+        // Arrange — the removal-path counterpart of the test above. Whether a subject's component is
+        // owned must not depend on whether the subject ever happened to survive an edge removal, and
+        // no attach transition may be published from inside a removal.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle();
+
+        var lifecycleInterceptor = context.TryGetLifecycleInterceptor()!;
+
+        var root = new Person(context) { FirstName = "Root" };
+        var grandmother = new Person { FirstName = "Grandmother" };
+        var child = new Person { FirstName = "Child", Mother = grandmother };
+
+        root.Father = child;
+        root.Mother = child;
+        Assert.Null(grandmother.TryGetContext());
+
+        var attached = new List<IInterceptorSubject>();
+        lifecycleInterceptor.SubjectAttached += change => attached.Add(change.Subject);
+
+        // Act — the child survives, because the second edge still holds it.
+        root.Father = null;
+
+        // Assert
+        Assert.Empty(attached);
+        Assert.Null(grandmother.TryGetContext());
+        Assert.Equal(0, grandmother.GetReferenceCount());
+        Assert.Equal(1, child.GetReferenceCount());
+    }
+
     // ──────────────────────────────────────────────
     // Null baseline: re-attached child without re-seeding
     // ──────────────────────────────────────────────

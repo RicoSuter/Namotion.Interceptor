@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Interceptors;
+
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
@@ -35,15 +37,7 @@ internal sealed class ReleaseTraversal(LifecycleInterceptor lifecycle, Ownership
 
         if (IsStillHeld(subject, ownership))
         {
-            // The composed context a surviving subject resolves through was taken from whichever
-            // parent first pulled it into the graph, and it is decomposed only when the subject
-            // itself leaves. It therefore outlives the edge it came from: this removal can be that
-            // edge, and the parent can be released later, which would leave an owned subject whose
-            // own writes are no longer intercepted. Composing the exact context as well is
-            // idempotent, keeps the subtree services of the live parents that remain, and cannot go
-            // stale while the subject is owned.
-            subject.Context.AddFallbackContext(graph.Context);
-
+            RepairComposedContext(subject);
             lifecycle.PublishEdgeRemoved(subject, property, index, referenceCount);
             return;
         }
@@ -93,6 +87,26 @@ internal sealed class ReleaseTraversal(LifecycleInterceptor lifecycle, Ownership
         finally
         {
             LifecycleScratch.Return(remaining);
+        }
+    }
+
+    /// <summary>
+    /// Keeps a surviving subject resolvable. The context it resolves through is composed from
+    /// whichever parent first pulled it into the graph and decomposed only when the subject itself
+    /// leaves, so it outlives the edge it came from: this removal can be that edge, and that parent
+    /// can be released later, which would leave an owned subject whose own writes are no longer
+    /// intercepted. Composing the exact context as well is idempotent and cannot go stale while the
+    /// subject is owned.
+    /// </summary>
+    /// <remarks>
+    /// Composition only. Going through <see cref="IInterceptorSubjectContext.AddFallbackContext"/>
+    /// would publish an attach for a subject that is already owned, from inside a removal.
+    /// </remarks>
+    private void RepairComposedContext(IInterceptorSubject subject)
+    {
+        if (subject.Context is InterceptorSubjectContext composable)
+        {
+            composable.ComposeFallbackContext(graph.Context);
         }
     }
 

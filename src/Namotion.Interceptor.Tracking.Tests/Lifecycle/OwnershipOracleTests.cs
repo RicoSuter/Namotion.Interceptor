@@ -18,16 +18,49 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// </remarks>
 public class OwnershipOracleTests
 {
+    private static readonly int[] CommittedSeeds = [1, 2, 3, 5, 8, 13, 21, 34];
+
+    public static TheoryData<int> Seeds
+    {
+        get
+        {
+            var data = new TheoryData<int>();
+            foreach (var seed in CommittedSeeds)
+            {
+                data.Add(seed);
+            }
+
+            return data;
+        }
+    }
+
     [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
-    [InlineData(5)]
-    [InlineData(8)]
-    [InlineData(13)]
-    [InlineData(21)]
-    [InlineData(34)]
+    [MemberData(nameof(Seeds))]
     public void WhenAGraphIsMutatedRandomly_ThenOwnershipMatchesForwardReachability(int seed)
+    {
+        RunSeed(seed);
+    }
+
+    /// <summary>
+    /// A truncated run is a silent loss of coverage: the theory case still passes, having exercised
+    /// however few steps preceded the cycle, and a divergence later in that seed becomes unreachable.
+    /// This pins that none of the committed seeds is truncated, so the skip stays free.
+    /// </summary>
+    [Fact]
+    public void WhenTheCommittedSeedsRun_ThenNoneIsTruncatedByThePreExistingFallbackCycle()
+    {
+        // Arrange & Act
+        var truncated = CommittedSeeds.Where(seed => !new OwnershipOracleTests().RunSeed(seed)).ToArray();
+
+        // Assert
+        Assert.Empty(truncated);
+    }
+
+    /// <summary>
+    /// Runs one seed. Returns false when the pre-existing fallback delegation cycle cut it short, so
+    /// a caller can tell a completed run from a truncated one.
+    /// </summary>
+    public bool RunSeed(int seed)
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -42,7 +75,7 @@ public class OwnershipOracleTests
             // A third of the subjects start as constructor roots, so provisional anchors, adoption
             // and orphaning all occur.
             var subject = i % 3 == 0 ? new Person(context) : new Person();
-            Names[subject] = $"S{i}";
+            _names[subject] = $"S{i}";
             universe.Add(subject);
         }
 
@@ -53,6 +86,10 @@ public class OwnershipOracleTests
             try
             {
                 log.Add(Mutate(context, universe, random));
+
+                // Inside the same guard as the mutation: the oracle's own reads go through the
+                // interceptor chain too, so a cycle can surface here rather than there.
+                AssertOwnershipMatchesOracle(context, universe, log);
             }
             catch (InvalidOperationException exception) when (exception.Message.Contains("delegation cycle"))
             {
@@ -61,22 +98,23 @@ public class OwnershipOracleTests
                 // subjects that each become the other's first parent compose a fallback cycle and
                 // every later property read on them throws. It reproduces identically without any of
                 // the ownership state, and the whole composed fallback graph is removed by the
-                // transitional-API removal stage. This seed stops contributing coverage here rather
-                // than reporting an ownership defect it did not find.
-                return;
+                // transitional-API removal stage. Measured over 700 seeds it cuts 21 of them short,
+                // 3.0 percent, costing 0.9 percent of the planned steps, and none of the committed
+                // seeds; the fact above is what keeps that true.
+                return false;
             }
             catch (Exception exception)
             {
                 throw new InvalidOperationException(
                     $"step {step} threw: {exception.Message}\nafter\n{string.Join("\n", log)}", exception);
             }
-
-            AssertOwnershipMatchesOracle(context, universe, log);
         }
+
+        return true;
     }
 
     /// <summary>Applies one random mutation and returns it, so a failure reports how to get there.</summary>
-    private static string Mutate(IInterceptorSubjectContext context, List<Person> universe, Random random)
+    private string Mutate(IInterceptorSubjectContext context, List<Person> universe, Random random)
     {
         var subject = universe[random.Next(universe.Count)];
         switch (random.Next(6))
@@ -139,7 +177,7 @@ public class OwnershipOracleTests
         return random.Next(4) == 0 ? null : universe[random.Next(universe.Count)];
     }
 
-    private static void AssertOwnershipMatchesOracle(
+    private void AssertOwnershipMatchesOracle(
         IInterceptorSubjectContext context, List<Person> universe, List<string> log)
     {
         var trace = string.Join("\n", log);
@@ -236,16 +274,17 @@ public class OwnershipOracleTests
 
     /// <summary>
     /// Stable names captured outside the graph. Reading a name back off the subject would resolve the
-    /// interceptor chain, and the composed fallback graph these tests build can be cyclic.
+    /// interceptor chain, and the composed fallback graph these tests build can be cyclic. Per
+    /// instance, so a run does not retain every subject of every other run.
     /// </summary>
-    private static readonly Dictionary<IInterceptorSubject, string> Names = new();
+    private readonly Dictionary<IInterceptorSubject, string> _names = new();
 
-    private static string Name(IInterceptorSubject subject)
+    private string Name(IInterceptorSubject subject)
     {
-        return Names.GetValueOrDefault(subject, "?");
+        return _names.GetValueOrDefault(subject, "?");
     }
 
-    private static string Describe(IEnumerable<Person> subjects)
+    private string Describe(IEnumerable<Person> subjects)
     {
         return string.Join(", ", subjects.Select(Name).OrderBy(name => name));
     }
