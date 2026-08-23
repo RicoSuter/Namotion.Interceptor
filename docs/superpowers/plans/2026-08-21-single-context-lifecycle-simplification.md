@@ -35,10 +35,10 @@ Each stage must leave the tree building with zero warnings and the full unit sui
 
 The work happens on `rewrite/single-context-impl`, worktree `/home/rico/GitHub/nib-single-context`, branched from `rewrite/single-context-lifecycle`. Both that worktree and the benchmark base sit outside the repository, so BenchmarkDotNet does not abort on a second project file and either can run an arm.
 
-3. **Attachment mechanism, additive.** Exact context, anchors, attachment revision, lock-free reads, and the structural write route with its own terminal cache. The structural setter publishes an executor even when unattached, so the guard always runs. Keep the executor inheriting the context for now: that is what lets every later stage stay green.
+3. **Attachment mechanism, additive.** Exact context, anchors, attachment revision, lock-free reads, and the structural write route with its own terminal cache. The structural setter keeps the unattached short circuit here and gains the guard in stage 5; see design decision 6 for why closing that hole in this stage costs the whole construction path and buys no correctness while the exact context is not yet authoritative. Keep the executor inheriting the context for now: that is what lets every later stage stay green.
 4. **Lifecycle ownership**, decomposed from the first commit. Occurrence-aware edges, anchors, deterministic release traversal, and backward-search reachability from the outset rather than a scan to be replaced later. Parent snapshots activate lazily. One unified `HasAnchoredAncestor(start, excluded)` serves both the release decision and anchor consumption; the forward mark does not exist in production and the oracle lives in the test assembly. The decomposition is fixed before any code lands, see below.
-5. **Concurrency contracts.** Attachment monitor taken before chain resolution and held through the terminal, so transient races order rather than throw. Persistent cross-context conflicts throw. Lock order is gate before `SyncRoot`, a total order given the getter contract. Callback reentrancy rules, with a `[Conditional("DEBUG")]` guard for the two contract violations (a getter that writes a subject-typed property, and a structural write from a lifecycle callback) so Release pays nothing.
-6. **Generator and Dynamic routing.** Fail-closed classification: scalar route only for provably subject-free declared types. Expect the base-contract change and its diagnostic for every base assembly built by the released generator; that is unavoidable and belongs in the breaking-changes list.
+5. **Concurrency contracts.** Attachment monitor taken before chain resolution and held through the terminal, so transient races order rather than throw. Persistent cross-context conflicts throw. The same monitor closes the unattached structural write hole carried over from stage 3: short circuit inside the monitor when there is no attached context, so a concurrent attach cannot interleave and the unattached path stays as cheap as master's. Lock order is gate before `SyncRoot`, a total order given the getter contract. Callback reentrancy rules, with a `[Conditional("DEBUG")]` guard for the two contract violations (a getter that writes a subject-typed property, and a structural write from a lifecycle callback) so Release pays nothing.
+6. **Generator and Dynamic routing.** Absorbed into stage 3 and done there, because correction 3a lists the fail-closed classification among the additive mechanism and the structural helper cannot be emitted without it. Landed: scalar route only for provably subject-free declared types, `Executor` as an explicit implementation on generated and Dynamic subjects, and the enlarged base contract with its diagnostic for every base assembly built by the released generator. That last one belongs in the breaking-changes list.
 7. **`AddProperties` atomicity.**
 8. **Handler merge.** Delete the inheritance and parent-tracking handlers, remove their configuration extensions, migrate the three ordering attributes. The merged lifecycle takes the descent's place as the public ordering seam, so `[RunsBefore(typeof(ContextInheritanceHandler))]` becomes `[RunsBefore(typeof(LifecycleInterceptor))]` and both handler positions keep their current meaning and their measured orders. The merged lifecycle must implement `ILifecycleHandler` or those attributes will not bind.
 9. **Singleton authorities**, and delete the multi-instance machinery that becomes unreachable.
@@ -71,7 +71,7 @@ A class that exceeds 500 lines is a signal to split it further, not to accept it
 ### Benchmark rows this plan adds
 
 - Parent projection: a row that never calls `GetParents()` and a row that does, so lazy activation is priced against master rather than asserted. `RegistryBenchmark.ReadParents` is the existing control on the read side.
-- The unattached structural write pair already exists and now measures something real, since the guard no longer skips that path.
+- The unattached structural write pair already exists and is the control that stage 3 left the construction path at master's cost. It starts measuring the guard in stage 5, when the short circuit moves inside the attachment monitor.
 
 ### Simplification rounds
 
@@ -89,6 +89,14 @@ Two scheduled rounds, plus a standing rule.
 **Anchors: decided, no fourth variant.** The alternative framing was evaluated against master's measured behaviour and rejected: a constructor that only records the context without attaching breaks the documented headline pattern, since `new Person(context)` would then track nothing. Master gives the constructor no durable anchor at all, which is why it silently half-detaches the caller's own root as soon as a back-reference exists. The provisional anchor stays, stated for consumers as "a subject constructed with a context is a root; it stops being a root once it is attached into a graph that is already rooted somewhere else, and from then on it follows that graph". The reduction that was actually available is not a new rule but a unification: `EdgeProvidesIndependentSupport` and the backward reachability search collapse into one `HasAnchoredAncestor(start, excluded)`, and with the forward mark gone the anchored-root set goes with it. Both are folded into stage 4 rather than deferred to a later round. See design decisions 9 and 10.
 
 **Standing rule.** No stage commits without deleting what it made dead, and any stage whose purpose is removal must show a net-negative production diff. Measure with `pwsh scripts/diff-composition.ps1 -PerProject`, and record the number in the stage's commit message so growth is visible as it happens rather than at the end.
+
+### Review gates
+
+The plan was reviewed four times before implementation; the implementation was not. Stages that change semantics rather than add surface get an independent review before the next stage builds on them, performed by agents that did not write the code, reading the diff against the stage's stated intent rather than against the tests. A stage whose tests pass is not evidence the stage is right, which is the failure mode "code that already passes its tests does not get re-examined" names.
+
+- **After stages 4, 5, 8 and 11.** Ownership, concurrency, the handler merge and the removal. Each either changes an observable contract or deletes a mechanism something else depended on. Review the diff for contract drift, lock order, and behaviour the tests do not pin.
+- **Before stage 13 measures anything.** No benchmark, Connector Tester or integration run starts until independent agents confirm merge-readiness. Measuring an unreviewed tree produces numbers that have to be thrown away when the code changes, and this repository has burned two complete, internally consistent, invalid benchmark comparisons already.
+- **Reviewers get the stage intent, not the diff alone.** The corrected design's decisions are the specification; a reviewer who only reads the diff cannot tell an expired workaround from a deliberate one.
 
 ### Standing rules for every stage
 
@@ -128,7 +136,7 @@ Subsequent task numbers shift accordingly.
 
 **C5.** The executor monitor covers metadata publication as well.
 
-**C6.** Structural setters publish the executor rather than using the no-executor short circuit, so an unattached structural write allocates one executor. Measured by a dedicated benchmark row.
+**C6.** Superseded by design decision 6 as rewritten: measuring it showed the cost falls on the whole construction path rather than on one allocation, and that the guard protects nothing until the exact context is authoritative. The short circuit stays in stage 3 and the hole closes in stage 5 under the attachment monitor. The benchmark row still measures the unattached structural write, now as the control that the construction path did not regress.
 
 **C9.** A second per-`TProperty` terminal cache carries the structural route so the scalar terminal is untouched. One shared `PropertyWriteContext` and one interceptor-set-keyed terminal cannot otherwise keep the scalar path free of the check.
 
