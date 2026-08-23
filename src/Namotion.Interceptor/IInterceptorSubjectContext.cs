@@ -11,8 +11,16 @@ public interface IInterceptorSubjectContext
     /// <summary>
     /// Registers a service instance directly with the context.
     /// </summary>
+    /// <remarks>
+    /// A service implementing <see cref="ISingletonContextService{TContract}"/> reserves that
+    /// contract on this context: registering a second service implementing the same contract
+    /// throws, even when it is the same instance or a different <typeparamref name="TService"/>
+    /// is used. Only services registered directly on this context are considered; fallback
+    /// contexts are not inspected. A rejected registration leaves the context unchanged.
+    /// </remarks>
     /// <typeparam name="TService">The type of service to register.</typeparam>
     /// <param name="service">The service instance to add.</param>
+    /// <exception cref="InvalidOperationException">A singleton contract of the service is already reserved on this context.</exception>
     void AddService<TService>(TService service);
 
     /// <summary>
@@ -29,11 +37,18 @@ public interface IInterceptorSubjectContext
     /// Unlike service resolution, this operation can enter a fallback graph that consists only of a
     /// delegation cycle. If no matching service is found, registering one on this context breaks the
     /// cycle and makes subsequent service resolution possible.
+    ///
+    /// A created service implementing <see cref="ISingletonContextService{TContract}"/> is
+    /// validated like in <see cref="AddService{TService}"/>, against the state after the factory
+    /// ran, so it also conflicts with a service the factory itself registered reentrantly. A
+    /// conflict throws rather than returning false and leaves the context unchanged, but any
+    /// registration the factory already published stays.
     /// </remarks>
     /// <typeparam name="TService">The type of service to register.</typeparam>
     /// <param name="factory">Factory function to create the service instance.</param>
     /// <param name="exists">Predicate to check against existing services. If any existing service matches (returns true), the factory is not invoked.</param>
     /// <returns>True if the service was added, false if a matching service already exists.</returns>
+    /// <exception cref="InvalidOperationException">A singleton contract of the created service is already reserved on this context.</exception>
     bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists);
 
     /// <summary>

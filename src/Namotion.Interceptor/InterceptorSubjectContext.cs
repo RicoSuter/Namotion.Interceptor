@@ -50,6 +50,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         internal static readonly int Value = Interlocked.Increment(ref _lastPropertyTypeIndex);
     }
 
+    // Closed ISingletonContextService<TContract> interfaces per implementation type, discovered
+    // once per type so that repeated registrations pay a dictionary lookup instead of an interface
+    // walk. Only the mutators below read it; service resolution and interceptor execution never
+    // touch singleton contracts.
+    private static readonly ConcurrentDictionary<Type, Type[]> SingletonContractsByImplementationType = new();
+
     [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _invalidationVisited;
 
@@ -202,6 +208,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             // the state to not lose it. Mutating a different context from here is forbidden, see
             // the lock order note at the top of the class.
             state = Volatile.Read(ref _state);
+
+            // Validated against the re-read state, so a contract a reentrant factory published
+            // cannot be doubled by the factory's own product.
+            ValidateSingletonContracts(state.Services, service);
             PublishState(new ContextState(state.Services.Add(service!), state.FallbackContexts));
         }
 
@@ -214,10 +224,72 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         lock (_mutationLock)
         {
             var state = Volatile.Read(ref _state);
+            ValidateSingletonContracts(state.Services, service);
             PublishState(new ContextState(state.Services.Add(service!), state.FallbackContexts));
         }
 
         InvalidateUsingContexts();
+    }
+
+    /// <summary>
+    /// Throws when the service implements a singleton contract another directly registered
+    /// service (or the same instance, registered again) already reserves. Runs under
+    /// <see cref="_mutationLock"/> and before the publish, so a rejected registration leaves the
+    /// context untouched. Deliberately blind to fallback contexts: a contract is an authority per
+    /// context, and walking the fallback graph here would make registration order across contexts
+    /// observable.
+    /// </summary>
+    private static void ValidateSingletonContracts(ImmutableArray<object> services, object? service)
+    {
+        if (service is null)
+        {
+            return;
+        }
+
+        var contracts = GetSingletonContracts(service.GetType());
+        if (contracts.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var contract in contracts)
+        {
+            foreach (var existingService in services)
+            {
+                if (contract.IsInstanceOfType(existingService))
+                {
+                    throw CreateSingletonContractConflictException(contract, existingService, service);
+                }
+            }
+        }
+    }
+
+    private static Type[] GetSingletonContracts(Type implementationType)
+    {
+        return SingletonContractsByImplementationType.GetOrAdd(implementationType, static type =>
+        {
+            List<Type>? contracts = null;
+            foreach (var interfaceType in type.GetInterfaces())
+            {
+                if (interfaceType.IsGenericType &&
+                    interfaceType.GetGenericTypeDefinition() == typeof(ISingletonContextService<>))
+                {
+                    (contracts ??= []).Add(interfaceType);
+                }
+            }
+
+            return contracts?.ToArray() ?? Type.EmptyTypes;
+        });
+    }
+
+    private static InvalidOperationException CreateSingletonContractConflictException(
+        Type contract, object existingService, object offendingService)
+    {
+        var contractType = contract.GetGenericArguments()[0];
+        return new InvalidOperationException(
+            $"Cannot add service '{offendingService.GetType().FullName}': the singleton contract " +
+            $"'{contractType.FullName}' is already reserved by service " +
+            $"'{existingService.GetType().FullName}' registered on this context.");
     }
 
     public TInterface? TryGetService<TInterface>()
