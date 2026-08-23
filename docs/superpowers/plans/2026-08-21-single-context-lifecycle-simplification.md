@@ -109,6 +109,25 @@ A class that exceeds 500 lines is a signal to split it further, not to accept it
 
 - **`GetOrAddSubjectId`: shaped by removing `Data` entries, and the residual movement is bounded to the attachment stage.** The measured path is `subject.Data.TryGetValue((null, SubjectIdKey), ...)`, whose key hashes a 39-character string on every call, so the only mechanism by which the ownership model can touch it is occupancy of that dictionary. Stage 4 therefore puts *nothing* in `subject.Data`: all ownership state lives in lifecycle-owned structures. It also removes master's per-subject reference-count entry along with the `AddOrUpdate` master performed on every edge change, and parents are no longer a `Data` entry under `WithParents()` either, so every subject in a tracking context now carries strictly fewer entries than on master. Since the spike measured the same 15.4 percent across all three reachability variants, the movement is invariant to every choice stage 4 makes, and stage 4 only removes entries. The remaining candidate is the attachment stage's interface widening: `IInterceptorSubject.Executor` reshapes the interface method table and `Data` is read through that interface on exactly this path. That is settled by a JIT disassembly diff of `GetOrAddSubjectId` between master and the attachment-stage commit, not by more runs, and it is outside the ownership stage's blast radius.
 
+### Costs to validate at the final benchmark
+
+Two different bars decide whether code stays. Code that buys **correctness** is kept, with no size argument. Code that buys **performance** is kept only when the measured win justifies its line count, and that is decided against the final numbers rather than up front: 3,000 lines for some percentage is not worth it, 200 lines for 5 percent is.
+
+That rule is only applicable at the end if each performance-only mechanism is named and priced **as it lands**. A required row that never gets written silently converts a measurable decision into an opinion. So this list is maintained per stage, and a stage that adds a performance-only mechanism adds its row here.
+
+| Mechanism | Stage | Lines | Priced by | Status |
+|---|---|---:|---|---|
+| `LifecycleScratch` pooling | 4 | ~190 | bulk construction and removal rows | row exists, unmeasured |
+| Lazy parent activation | 4 | part of `SubjectOwnership` / `OwnershipGraph` | a row that never calls `GetParents()` and one that does | **row missing on both arms** |
+| Inline single-edge storage before list promotion | 4 | part of `SubjectOwnership` | single-parent attach and removal rows | row exists, unmeasured |
+| Separate `Contains` and `CollectOccurrences` paths | 4 | part of `StructuralValueScanner` | shared-parent removal, which drives reachability | row exists, unmeasured |
+| `#if DEBUG` read-terminal duplication | 5 | 27 | read rows; Release codegen is byte-identical by construction | verified structurally, not timed |
+| Opaque `Enter`/`ExitStructuralWriteGate` seam | 5 | ~22 | attached structural write rows | **accepted deliberately, to be validated** |
+
+The last one is a cost taken for API hygiene rather than performance: it adds one interface dispatch per attached structural write, against a path that already resolves a service, discovers a subtree, claims, reconciles and fans out callbacks. The expectation is that it does not register. It was kept on that basis, and the final numbers decide whether that was right. If it registers, the alternative is exposing the gate object again, which is cheap to do because nobody implements `ILifecycleInterceptor` and breaking an implementer-facing seam costs little.
+
+Also open from stage 4, and unresolved: `GetOrAddSubjectId` measured 15.4 percent slower on the spike, identically across all three reachability variants. Stage 4 only removes `Data` entries, so the remaining candidate is the stage 3 interface widening, and repository guidance says a movement that size with no known mechanism is settled by diffing JIT output rather than by more runs.
+
 ### Benchmark rows this plan adds
 
 - Parent projection: a row that never calls `GetParents()` and a row that does, so lazy activation is priced against master rather than asserted. `RegistryBenchmark.ReadParents` is the existing control on the read side.
