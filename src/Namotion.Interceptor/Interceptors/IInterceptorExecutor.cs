@@ -83,8 +83,9 @@ public interface IInterceptorExecutor : IInterceptorSubjectContext
     /// <summary>
     /// Sets a structural (subject-referencing) property value. When the subject is attached to a
     /// context with an <see cref="ILifecycleInterceptor"/>, the write enters that lifecycle's
-    /// <see cref="ILifecycleInterceptor.StructuralWriteGate"/> and then the subject's attachment
-    /// monitor before the interceptor chain is resolved, holds both through the terminal, and
+    /// structural write gate (<see cref="ILifecycleInterceptor.EnterStructuralWriteGate"/>) and
+    /// then the subject's attachment monitor before the interceptor chain is resolved, holds both
+    /// through the terminal, and
     /// revalidates the attachment under the locks (releasing and retrying when it moved). An
     /// unattached subject enters only the attachment monitor and writes without a lifecycle. A
     /// racing attachment transition therefore orders against the write instead of failing it.

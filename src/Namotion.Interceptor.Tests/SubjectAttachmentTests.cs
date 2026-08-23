@@ -9,7 +9,11 @@ public class SubjectAttachmentTests
         public int AttachCount;
         public int DetachCount;
 
-        public object StructuralWriteGate { get; } = new();
+        private readonly object _structuralWriteGate = new();
+
+        public void EnterStructuralWriteGate() => Monitor.Enter(_structuralWriteGate);
+
+        public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
 
         public void OnContextComposed(IInterceptorSubject subject) => AttachCount++;
 

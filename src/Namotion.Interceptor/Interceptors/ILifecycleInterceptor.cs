@@ -16,19 +16,26 @@ public interface ILifecycleInterceptor :
     ISingletonContextService<ILifecycleInterceptor>
 {
     /// <summary>
-    /// The synchronization gate a structural write enters before the subject's attachment monitor
-    /// and before the write chain is resolved and executed. This is the pre-chain seam that makes
-    /// the structural lock order a total order: lifecycle gate, then attachment monitor, then the
-    /// subject's <see cref="IInterceptorSubject.SyncRoot"/>. Entering the attachment monitor first
-    /// deadlocks against a removal that holds this gate and releases the subject's claim through
-    /// that same monitor.
+    /// Enters the synchronization gate a structural write must hold before the subject's
+    /// attachment monitor and before the write chain is resolved and executed. This is the
+    /// pre-chain seam that makes the structural lock order a total order: lifecycle gate, then
+    /// attachment monitor, then the subject's <see cref="IInterceptorSubject.SyncRoot"/>. Entering
+    /// the attachment monitor first deadlocks against a removal that holds this gate and releases
+    /// the subject's claim through that same monitor.
     /// </summary>
     /// <remarks>
     /// The gate must support reentrant acquisition on one thread (the lifecycle re-enters it from
-    /// inside the write chain) and is entered with <c>Monitor</c> semantics. The built-in lifecycle
-    /// returns its per-context topology lock.
+    /// inside the write chain). The built-in lifecycle enters its per-context topology lock. An
+    /// enter/exit pair rather than an exposed lock object, so a consumer cannot take the gate with
+    /// an idiomatic-looking <c>lock</c> statement and hang the process against a structural write.
     /// </remarks>
-    object StructuralWriteGate { get; }
+    void EnterStructuralWriteGate();
+
+    /// <summary>
+    /// Exits the gate entered by <see cref="EnterStructuralWriteGate"/>. Call from a finally block
+    /// paired with that enter.
+    /// </summary>
+    void ExitStructuralWriteGate();
 
     /// <summary>
     /// Attaches the subject to <paramref name="context"/> with the given root anchor, together with

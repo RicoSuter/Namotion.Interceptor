@@ -31,7 +31,7 @@ public class LifecycleInterceptor : ILifecycleInterceptor
 
     // One reentrant topology lock per lifecycle, which is one per context because the lifecycle is a
     // singleton contract. Reentrancy is required: the structural write protocol enters the gate in
-    // Core (through StructuralWriteGate, before the chain is resolved) and this interceptor enters
+    // Core (through EnterStructuralWriteGate, before the chain is resolved) and this interceptor enters
     // it again from inside the chain, and an attach descent re-enters it through
     // ContextInheritanceHandler composing a child's context mid-callback.
     private readonly object _gate = new();
@@ -76,7 +76,16 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     #region Structural writes
 
     /// <inheritdoc />
-    public object StructuralWriteGate => _gate;
+    public void EnterStructuralWriteGate()
+    {
+        Monitor.Enter(_gate);
+    }
+
+    /// <inheritdoc />
+    public void ExitStructuralWriteGate()
+    {
+        Monitor.Exit(_gate);
+    }
 
     /// <inheritdoc />
     /// <remarks>

@@ -161,16 +161,16 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
         while (true)
         {
             var attachedContext = _attachedContext;
-            var gate = attachedContext?.TryGetService<ILifecycleInterceptor>()?.StructuralWriteGate;
-            if (gate is null)
+            var lifecycle = attachedContext?.TryGetService<ILifecycleInterceptor>();
+            if (lifecycle is null)
             {
                 // No lifecycle to order against: either the subject is unattached, or its context
                 // has no lifecycle, so nothing downstream takes a topology gate for it. Two
                 // assumptions, stated: interceptors resolved through a lifecycle-free context must
                 // not take another context's lifecycle gate inside this chain, and a lifecycle
-                // registered on the attached context after the gate was read above is not seen by
-                // this write, because the gate comes from that one read (contexts are configured
-                // before subjects attach to them).
+                // registered on the attached context after the resolution above is not seen by
+                // this write, because the gate comes from that one resolution (contexts are
+                // configured before subjects attach to them).
                 lock (_attachmentLock)
                 {
                     if (ReferenceEquals(_attachedContext, attachedContext))
@@ -181,7 +181,8 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             }
             else
             {
-                lock (gate)
+                lifecycle.EnterStructuralWriteGate();
+                try
                 {
                     lock (_attachmentLock)
                     {
@@ -193,6 +194,10 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
                             return WriteStructuralValue(propertyName, newValue, currentValue, writeValue);
                         }
                     }
+                }
+                finally
+                {
+                    lifecycle.ExitStructuralWriteGate();
                 }
             }
         }

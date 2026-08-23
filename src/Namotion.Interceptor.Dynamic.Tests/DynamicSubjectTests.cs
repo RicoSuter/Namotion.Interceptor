@@ -166,7 +166,11 @@ public class DynamicSubjectTests
 
     public class TestLifecycleInterceptor(string name, List<string> logs) : ILifecycleInterceptor
     {
-        public object StructuralWriteGate { get; } = new();
+        private readonly object _structuralWriteGate = new();
+
+        public void EnterStructuralWriteGate() => Monitor.Enter(_structuralWriteGate);
+
+        public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
 
         public void OnContextComposed(IInterceptorSubject subject) => logs.Add($"{name}: Attached");
 

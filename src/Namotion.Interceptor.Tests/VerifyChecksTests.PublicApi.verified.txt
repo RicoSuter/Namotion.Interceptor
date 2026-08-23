@@ -199,9 +199,10 @@ namespace Namotion.Interceptor.Interceptors
     }
     public interface ILifecycleInterceptor : Namotion.Interceptor.ISingletonContextService<Namotion.Interceptor.Interceptors.ILifecycleInterceptor>, Namotion.Interceptor.Interceptors.IWriteInterceptor
     {
-        object StructuralWriteGate { get; }
         void AttachSubjectToContext(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context, Namotion.Interceptor.SubjectAnchorKind anchor);
         void DetachSubjectFromContext(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context);
+        void EnterStructuralWriteGate();
+        void ExitStructuralWriteGate();
         void OnContextComposed(Namotion.Interceptor.IInterceptorSubject subject);
         void OnContextDecomposed(Namotion.Interceptor.IInterceptorSubject subject);
     }
