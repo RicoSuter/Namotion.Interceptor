@@ -19,6 +19,13 @@ public class SubjectAttachmentTests
 
         public void OnContextDecomposed(IInterceptorSubject subject) => DetachCount++;
 
+        // No ownership work in the probe: publishing the metadata is the whole admission.
+        public bool TryAddProperties(SubjectPropertyRegistrationContext registration)
+        {
+            registration.Publish();
+            return true;
+        }
+
         // A minimal faithful lifecycle: it applies the documented root-anchor rules through Core's
         // own helpers and lets the fallback composition drive the counted attach and detach, which
         // is what a real implementation does with its own graph work in between.

@@ -36,8 +36,8 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
         var newOccurrences = LifecycleScratch.RentOccurrenceList();
         try
         {
-            StructuralValueScanner.CollectOccurrences(property, oldValue, oldOccurrences);
-            StructuralValueScanner.CollectOccurrences(property, newValue, newOccurrences);
+            StructuralValueScanner.CollectOccurrences(metadata.Type, oldValue, oldOccurrences);
+            StructuralValueScanner.CollectOccurrences(metadata.Type, newValue, newOccurrences);
 
             // Commit the outgoing edges before the incoming records are touched.
             graph.SetBaseline(property, newValue);

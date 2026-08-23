@@ -28,6 +28,7 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     private readonly StructuralReconciler _reconciler;
     private readonly AttachTraversal _attach;
     private readonly LifecycleNotifier _notifier;
+    private readonly PropertyAdmission _admission;
 
     // One reentrant topology lock per lifecycle, which is one per context because the lifecycle is a
     // singleton contract, and the outermost lock of the structural write order (see the executor's
@@ -72,6 +73,7 @@ public class LifecycleInterceptor : ILifecycleInterceptor
         _attach = new AttachTraversal(_notifier, _graph, _reachability);
         _release = new ReleaseTraversal(_notifier, _graph, _reachability);
         _reconciler = new StructuralReconciler(_notifier, _graph, _attach, _release);
+        _admission = new PropertyAdmission(_graph, _reconciler);
     }
 
     #region Structural writes
@@ -98,8 +100,11 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     {
         var property = context.Property;
         var metadata = property.Metadata;
-        if (!metadata.Type.CanContainSubjects<TProperty>())
+        if (!metadata.Type.CanContainSubjects<TProperty>() || metadata.IsDerived || !metadata.IsIntercepted)
         {
+            // Scalar, derived or non-intercepted: never a graph edge. A derived value is a
+            // projection of edges the stored properties already own, so reconciling it would
+            // double-count every subject it exposes.
             next(ref context);
             return;
         }
@@ -126,7 +131,7 @@ public class LifecycleInterceptor : ILifecycleInterceptor
             var claimed = LifecycleScratch.RentSubjectList();
             try
             {
-                ClaimProposedComponent(property, context.NewValue, claimed);
+                ClaimProposedComponent(metadata.Type, context.NewValue, claimed);
 
                 next(ref context);
 
@@ -149,7 +154,7 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     /// Validates every subject the proposed value reaches against this context and claims the
     /// unattached ones, before the backing writer runs.
     /// </summary>
-    private void ClaimProposedComponent(PropertyReference property, object? proposedValue, List<IInterceptorSubject> claimed)
+    private void ClaimProposedComponent(Type declaredType, object? proposedValue, List<IInterceptorSubject> claimed)
     {
         if (proposedValue is null)
         {
@@ -159,7 +164,7 @@ public class LifecycleInterceptor : ILifecycleInterceptor
         var visited = LifecycleScratch.RentSubjectSet();
         try
         {
-            _graph.DiscoverComponent(property, proposedValue, visited, claimed);
+            _graph.DiscoverComponent(declaredType, proposedValue, visited, claimed);
         }
         finally
         {
@@ -172,6 +177,49 @@ public class LifecycleInterceptor : ILifecycleInterceptor
             throw new InvalidOperationException(
                 "Another context claimed a subject of the assigned graph while this write was validating it. " +
                 "The write was rejected before reaching the backing field.");
+        }
+    }
+
+    /// <inheritdoc />
+    public bool TryAddProperties(SubjectPropertyRegistrationContext registration)
+    {
+        // Reject a cross-context callback before the gate and before the input is enumerated: a
+        // thread inside another lifecycle's callback holds that lifecycle's gate, so blocking on
+        // this one can deadlock against opposing callbacks. A same-lifecycle callback already
+        // holds this gate reentrantly and is the supported dynamic-property-initializer case.
+        if (CallbackReentrancyGuard.IsInsideCallback && !Monitor.IsEntered(_gate))
+        {
+            throw new InvalidOperationException(
+                "AddProperties on a subject owned by another context is not supported from a " +
+                "lifecycle callback, because blocking on a second lifecycle gate there can " +
+                "deadlock against opposing callbacks. The input was not enumerated and nothing " +
+                "was published.");
+        }
+
+        lock (_gate)
+        {
+            var subject = registration.Subject;
+            if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
+            {
+                // The attachment moved between the caller's routing read and the gate; the caller
+                // re-routes against the fresh attachment.
+                return false;
+            }
+
+            if (_graph.IsOwned(subject))
+            {
+                _admission.Admit(registration);
+            }
+            else
+            {
+                // Claimed for this context but not yet published into the graph, which is only
+                // observable from inside this thread's own attach descent: publish the metadata
+                // only, and let the descent discover the then-current properties when it reaches
+                // the subject.
+                registration.Publish();
+            }
+
+            return true;
         }
     }
 

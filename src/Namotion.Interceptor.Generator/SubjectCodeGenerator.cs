@@ -197,15 +197,13 @@ internal static class SubjectCodeGenerator
         builder.AppendLine();
         builder.AppendLine("        void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)");
         builder.AppendLine("        {");
-        builder.AppendLine("            lock (((IInterceptorSubject)this).SyncRoot)");
-        builder.AppendLine("            {");
-        // Dispatching through the interface rather than reading _properties directly is what lets
-        // this method live in the root: it makes the merge start from the most derived
-        // DefaultProperties instead of this class's own.
-        builder.AppendLine("                _properties = ((IInterceptorSubject)this).Properties");
-        builder.AppendLine("                    .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))");
-        builder.AppendLine("                    .ToFrozenDictionary();");
-        builder.AppendLine("            }");
+        // Routed through the executor so an attached subject's lifecycle can admit metadata,
+        // ownership edges and property callbacks as one atomic publication. The registration
+        // context merges from the interface's Properties, which is what lets this method live in
+        // the root: the merge starts from the most derived DefaultProperties instead of this
+        // class's own.
+        builder.AppendLine("            ((IInterceptorSubject)this).Executor.AddProperties(new SubjectPropertyRegistrationContext(");
+        builder.AppendLine("                this, properties, published => _properties = published));");
         builder.AppendLine("        }");
         builder.AppendLine();
     }

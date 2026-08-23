@@ -69,6 +69,34 @@ public interface ILifecycleInterceptor :
     void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context);
 
     /// <summary>
+    /// Admits an <see cref="IInterceptorSubject.AddProperties"/> batch for a subject attached to
+    /// the context this lifecycle owns: rejects a cross-context callback before the input is
+    /// enumerated, then, under the lifecycle's structural gate, materializes the batch once,
+    /// classifies the initial ownership candidates (intercepted, non-derived, subject-capable
+    /// declared type, getter available), invokes each qualifying getter exactly once, validates and
+    /// claims the complete prospective subgraph, publishes the metadata atomically, invokes the
+    /// property lifecycle callbacks in input order, and commits the captured values as ordinary
+    /// structural assignments. If enumeration, duplicate validation, a getter, context validation
+    /// or claiming fails, nothing is published and provisional claims are released before the
+    /// failure escapes.
+    /// </summary>
+    /// <remarks>
+    /// Ownership getters used during admission must be synchronous, stable, side-effect-free,
+    /// callable before the metadata is published, and authoritative for the property's initial
+    /// stored value; they must not mutate ownership or metadata. Later changes to the stored value
+    /// must pass through the property's intercepted setter.
+    /// </remarks>
+    /// <param name="registration">The registration carrying the batch.</param>
+    /// <returns>True when this lifecycle handled the batch. False when the subject was not (or no
+    /// longer) attached to this lifecycle's context at admission time; the implementation must have
+    /// published nothing in that case, and the caller re-routes against the fresh attachment.</returns>
+    /// <exception cref="InvalidOperationException">The call happened inside a lifecycle callback of
+    /// another context (rejected before enumeration, because taking a second lifecycle gate there
+    /// can deadlock against opposing callbacks), a property name is duplicated, or part of the
+    /// captured component belongs to a different context.</exception>
+    bool TryAddProperties(SubjectPropertyRegistrationContext registration);
+
+    /// <summary>
     /// Transitional hook invoked when a context is composed onto a subject's executor as a fallback.
     /// It admits an unattached subject as a provisional root and seeds an already owned subject's
     /// structural properties, which is what drives the recursive attach descent while

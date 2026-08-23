@@ -9,6 +9,9 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// lifecycle instances, so a callback writing into another context's graph is detected too. The
 /// guard is live in every build: the silent failure mode is graph corruption, so a violating
 /// consumer fails fast in Release rather than relying on the reentrancy accommodations.
+/// AddProperties admission reads the same depth through <see cref="IsInsideCallback"/> to reject
+/// a cross-context callback before it enumerates input or blocks on the foreign topology gate,
+/// where waiting could deadlock against opposing callbacks.
 /// </summary>
 /// <remarks>
 /// The attach and detach property lifecycle callbacks
@@ -24,6 +27,13 @@ internal static class CallbackReentrancyGuard
 {
     [ThreadStatic]
     private static int _callbackDepth;
+
+    /// <summary>
+    /// Whether the current thread is executing a lifecycle callback of some built-in lifecycle.
+    /// Which lifecycle is answered by whether the thread holds that lifecycle's gate, because
+    /// callbacks are always published under it.
+    /// </summary>
+    public static bool IsInsideCallback => _callbackDepth > 0;
 
     /// <summary>
     /// Marks the thread as executing a lifecycle callback for the lifetime of the returned scope.

@@ -178,6 +178,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public int GetReferenceCount(Namotion.Interceptor.IInterceptorSubject subject) { }
         public void OnContextComposed(Namotion.Interceptor.IInterceptorSubject subject) { }
         public void OnContextDecomposed(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public bool TryAddProperties(Namotion.Interceptor.Interceptors.SubjectPropertyRegistrationContext registration) { }
         public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
     }
     public static class LifecycleInterceptorExtensions

@@ -34,9 +34,23 @@ public interface IInterceptorSubject
     IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties { get; }
     
     /// <summary>
-    /// Adds additional properties to this subject (e.g. from an inheriting class or dynamic context).
+    /// Adds additional properties to this subject (e.g. from an inheriting class or dynamic
+    /// context). The call routes through <see cref="Executor"/>: on a subject attached to a
+    /// context with a lifecycle, metadata, initial ownership edges and property callbacks publish
+    /// as one atomic admission; on an unattached subject only the metadata publishes, and a later
+    /// attach discovers the then-current structural properties through their normal getters.
     /// </summary>
+    /// <remarks>
+    /// The metadata sequence must be synchronous, stable, and free of topology and metadata side
+    /// effects. It is materialized exactly once, after callback admission; an iterator that
+    /// re-enters the subject or mutates state receives no replay and no rollback. A name that is
+    /// already defined on the subject, or appears twice in the batch, rejects the whole batch
+    /// before anything is published.
+    /// </remarks>
     /// <param name="properties">The additional properties.</param>
+    /// <exception cref="InvalidOperationException">A property name is duplicated, part of a
+    /// captured structural value belongs to a different context, or the call happened inside a
+    /// lifecycle callback of another context.</exception>
     void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties);
     
     // TODO(perf): Use span here?

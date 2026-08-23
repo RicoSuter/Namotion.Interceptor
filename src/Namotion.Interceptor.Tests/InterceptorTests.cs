@@ -145,6 +145,12 @@ public class InterceptorTests
             _logs.Add($"{_name}: Detached");
         }
 
+        public bool TryAddProperties(SubjectPropertyRegistrationContext registration)
+        {
+            registration.Publish();
+            return true;
+        }
+
         public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
         {
             OnContextComposed(subject);

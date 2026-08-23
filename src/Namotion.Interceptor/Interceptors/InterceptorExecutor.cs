@@ -251,6 +251,42 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
         return context.IsWritten;
     }
 
+    /// <inheritdoc />
+    public void AddProperties(SubjectPropertyRegistrationContext registration)
+    {
+        if (!ReferenceEquals(registration.Subject, _subject))
+        {
+            throw new InvalidOperationException(
+                "The registration belongs to a different subject than this executor.");
+        }
+
+        // Same routing shape as SetStructuralPropertyValue: resolve the lifecycle from a lock-free
+        // attachment read, let the lifecycle order the admission behind its own gate, and treat a
+        // stale routing decision as a retry rather than an error. The unattached (or
+        // lifecycle-free) arm publishes under the attachment monitor alone, so a concurrent attach
+        // either sees the published metadata when it seeds or waits until the publication is done.
+        while (true)
+        {
+            var attachedContext = _attachedContext;
+            var lifecycle = attachedContext?.TryGetService<ILifecycleInterceptor>();
+            if (lifecycle is null)
+            {
+                lock (_attachmentLock)
+                {
+                    if (ReferenceEquals(_attachedContext, attachedContext))
+                    {
+                        registration.Publish();
+                        return;
+                    }
+                }
+            }
+            else if (lifecycle.TryAddProperties(registration))
+            {
+                return;
+            }
+        }
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public object? InvokeMethod(string methodName, object?[] parameters, Func<IInterceptorSubject, object?[], object?> invokeMethod)
     {

@@ -234,6 +234,17 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     void IPropertyLifecycleHandler.AttachProperty(SubjectPropertyLifecycleChange change)
     {
         var property = TryGetRegisteredProperty(change.Property);
+        if (property is null &&
+            change.Subject.Properties.TryGetValue(change.Property.Name, out var metadata))
+        {
+            // A property admitted through AddProperties publishes its metadata and this callback
+            // before any manual Registry insert can run, so the projection is created here, which
+            // is also what makes it exist before the property's initial structural edge
+            // notifications resolve it.
+            property = TryGetRegisteredSubject(change.Subject)?
+                .GetOrAddPropertyProjection(change.Property.Name, metadata.Type, metadata.Attributes);
+        }
+
         if (property is not null)
         {
             // handle property initializers from attributes

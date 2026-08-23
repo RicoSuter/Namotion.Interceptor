@@ -43,11 +43,10 @@ public class DynamicSubject : IInterceptorSubject
 
     public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
     {
-        lock (((IInterceptorSubject)this).SyncRoot)
-        {
-            _properties = _properties
-                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-                .ToFrozenDictionary();
-        }
+        // Routed through the executor so an attached subject's lifecycle can admit metadata,
+        // ownership edges and property callbacks as one atomic publication.
+        var subject = (IInterceptorSubject)this;
+        subject.Executor.AddProperties(new SubjectPropertyRegistrationContext(
+            subject, properties, published => _properties = published));
     }
 }

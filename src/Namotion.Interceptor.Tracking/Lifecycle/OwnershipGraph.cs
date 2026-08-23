@@ -41,13 +41,14 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
 
     /// <summary>
     /// Whether the property can carry graph edges: intercepted, so the lifecycle sees its writes,
-    /// and of a declared type that can contain subjects. Derived and non-intercepted properties
-    /// never establish ownership even when their value happens to contain subjects.
+    /// not derived, and of a declared type that can contain subjects. Derived and non-intercepted
+    /// properties never establish ownership even when their value happens to contain subjects: a
+    /// derived value is a projection of edges the underlying stored properties already own.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsStructural(SubjectPropertyMetadata metadata)
+    internal static bool IsStructural(in SubjectPropertyMetadata metadata)
     {
-        return metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects();
+        return metadata is { IsIntercepted: true, IsDerived: false } && metadata.Type.CanContainSubjects();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -183,7 +184,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
                 }
 
                 occurrences.Clear();
-                StructuralValueScanner.CollectOccurrences(property, value, occurrences);
+                StructuralValueScanner.CollectOccurrences(metadata.Type, value, occurrences);
                 foreach (var occurrence in occurrences)
                 {
                     children.Add((property, occurrence));
@@ -355,7 +356,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     /// arriving subgraph rather than to the graph.
     /// </remarks>
     public void DiscoverComponent(
-        PropertyReference property,
+        Type declaredType,
         object? value,
         HashSet<IInterceptorSubject> visited,
         List<IInterceptorSubject> unattached)
@@ -363,7 +364,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
         var occurrences = LifecycleScratch.RentOccurrenceList();
         try
         {
-            StructuralValueScanner.CollectOccurrences(property, value, occurrences);
+            StructuralValueScanner.CollectOccurrences(declaredType, value, occurrences);
             foreach (var occurrence in occurrences)
             {
                 DiscoverComponent(occurrence.Subject, visited, unattached);
@@ -375,7 +376,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
         }
     }
 
-    /// <inheritdoc cref="DiscoverComponent(PropertyReference,object?,HashSet{IInterceptorSubject},List{IInterceptorSubject})"/>
+    /// <inheritdoc cref="DiscoverComponent(Type,object?,HashSet{IInterceptorSubject},List{IInterceptorSubject})"/>
     public void DiscoverComponent(
         IInterceptorSubject start,
         HashSet<IInterceptorSubject> visited,
@@ -421,11 +422,10 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
                         continue;
                     }
 
-                    var childProperty = new PropertyReference(subject, entry.Key);
                     var occurrences = LifecycleScratch.RentOccurrenceList();
                     try
                     {
-                        StructuralValueScanner.CollectOccurrences(childProperty, childValue, occurrences);
+                        StructuralValueScanner.CollectOccurrences(entry.Value.Type, childValue, occurrences);
                         foreach (var occurrence in occurrences)
                         {
                             pending.Push(occurrence.Subject);

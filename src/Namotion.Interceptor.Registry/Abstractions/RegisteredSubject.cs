@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
@@ -329,16 +330,41 @@ public class RegisteredSubject
         Action<IInterceptorSubject, object?>? setValue,
         params Attribute[] attributes)
     {
-        Subject.AddProperties(new SubjectPropertyMetadata(
-            name,
-            type,
-            attributes,
-            getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null,
-            setValue is not null ? (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue?.Invoke(s), setValue) : null,
-            isIntercepted: true,
-            isDynamic: true));
+        // The subject keeps its metadata across detach and reattach while Registry's projection is
+        // rebuilt per attach, so this method must be ensure-shaped: metadata is admitted only when
+        // the subject does not carry the name yet (AddProperties rejects duplicates atomically),
+        // and the projection below is get-or-add.
+        if (!Subject.Properties.ContainsKey(name))
+        {
+            // A stored subject-bearing property writes through the synchronized structural
+            // accessor, like a generated structural setter would; a derived one stays scalar
+            // because a derived value never establishes edges, so the structural gate would
+            // protect nothing.
+            var isStructuralStore = type.CanContainSubjects() && attributes.All(a => a is not DerivedAttribute);
+            Subject.AddProperties(new SubjectPropertyMetadata(
+                name,
+                type,
+                attributes,
+                getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null,
+                setValue is not null
+                    ? isStructuralStore
+                        ? (s, v) => ((IInterceptorExecutor)s.Context).SetStructuralPropertyValue(name, v, getValue?.Invoke(s), setValue)
+                        : (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue?.Invoke(s), setValue)
+                    : null,
+                isIntercepted: true,
+                isDynamic: true));
+        }
 
-        var property = AddPropertyInternal(name, type, attributes);
+        var property = GetOrAddPropertyProjection(name, type, attributes);
+
+        // An attached subject's admission already invoked the property lifecycle callbacks, and
+        // SubjectRegistry.AttachProperty created this projection from inside that fan-out; only an
+        // unattached subject still needs the explicit call. This residual manual path goes with
+        // the rest of the manual projection maintenance when admission takes it over completely.
+        if (Subject.TryGetContext() is null)
+        {
+            Subject.AttachSubjectProperty(property.Reference);
+        }
 
         // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
         // TODO(perf): For derived-with-setter this re-enters RecalculateDerivedProperty (total
@@ -351,12 +377,23 @@ public class RegisteredSubject
         return property;
     }
 
-    private RegisteredSubjectProperty AddPropertyInternal(string name, Type type, Attribute[] attributes)
+    /// <summary>
+    /// Gets the projection for the named property, creating and publishing it when missing. Called
+    /// by <c>AddProperty</c> and, for properties admitted through
+    /// <see cref="IInterceptorSubject.AddProperties"/>, by the registry's property attach callback,
+    /// which is what makes the projection exist before the property's initial structural edge
+    /// notifications resolve it.
+    /// </summary>
+    internal RegisteredSubjectProperty GetOrAddPropertyProjection(string name, Type type, IReadOnlyCollection<Attribute> attributes)
     {
-        var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
-
         lock (_lock)
         {
+            if (_properties.TryGetValue(name, out var existingProperty))
+            {
+                return existingProperty;
+            }
+
+            var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
             var newProperties = _properties
                 .Append(KeyValuePair.Create(subjectProperty.Name, subjectProperty))
                 .ToFrozenDictionary(p => p.Key, p => p.Value);
@@ -367,9 +404,8 @@ public class RegisteredSubject
             {
                 property.AttributesCache = null;
             }
-        }
 
-        Subject.AttachSubjectProperty(subjectProperty.Reference);
-        return subjectProperty;
+            return subjectProperty;
+        }
     }
 }

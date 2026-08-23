@@ -53,12 +53,8 @@ namespace TestNamespace
 
         void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
         {
-            lock (((IInterceptorSubject)this).SyncRoot)
-            {
-                _properties = ((IInterceptorSubject)this).Properties
-                    .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-                    .ToFrozenDictionary();
-            }
+            ((IInterceptorSubject)this).Executor.AddProperties(new SubjectPropertyRegistrationContext(
+                this, properties, published => _properties = published));
         }
 
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =

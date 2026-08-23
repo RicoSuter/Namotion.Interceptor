@@ -105,4 +105,18 @@ public interface IInterceptorExecutor : IInterceptorSubjectContext
     /// <param name="invokeMethod">A delegate that performs the actual method invocation on the subject.</param>
     /// <returns>The return value of the method invocation.</returns>
     object? InvokeMethod(string methodName, object?[] parameters, Func<IInterceptorSubject, object?[], object?> invokeMethod);
+
+    /// <summary>
+    /// Routes an <see cref="IInterceptorSubject.AddProperties"/> call. When the subject is attached
+    /// to a context with an <see cref="ILifecycleInterceptor"/>, the batch is handed to that
+    /// lifecycle through <see cref="ILifecycleInterceptor.TryAddProperties"/> so metadata,
+    /// ownership edges and property callbacks publish as one admission; a stale routing decision
+    /// retries against the fresh attachment, so a racing attachment transition orders against the
+    /// call instead of failing it. An unattached subject (or one attached to a lifecycle-free
+    /// context) publishes the metadata directly under the attachment monitor, with no ownership
+    /// work, which is what serializes the publication against a concurrent attach.
+    /// </summary>
+    /// <param name="registration">The registration carrying the batch; its subject must be the
+    /// subject this executor belongs to.</param>
+    void AddProperties(SubjectPropertyRegistrationContext registration);
 }

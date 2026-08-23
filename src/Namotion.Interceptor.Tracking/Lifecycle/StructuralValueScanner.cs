@@ -27,9 +27,11 @@ internal static class StructuralValueScanner
     /// string/<see cref="IEnumerable"/> arms so common writes do not pay extra type checks. The
     /// trailing <see cref="IEnumerable"/> arm handles read-only types that implement neither
     /// interface (custom read-only list or dictionary wrappers), which is why it has to fall back
-    /// to the declared property shape to tell a keyed value from an ordinal one.
+    /// to the declared property shape to tell a keyed value from an ordinal one. The declared type
+    /// is a parameter rather than a metadata lookup so the scan also works during AddProperties
+    /// admission, where the property's metadata is not published yet.
     /// </remarks>
-    public static void CollectOccurrences(PropertyReference property, object? value, List<SubjectOccurrence> occurrences)
+    public static void CollectOccurrences(Type declaredType, object? value, List<SubjectOccurrence> occurrences)
     {
         switch (value)
         {
@@ -71,7 +73,7 @@ internal static class StructuralValueScanner
                 return;
 
             case IEnumerable enumerable:
-                if (property.Metadata.Type.IsSubjectDictionaryType())
+                if (declaredType.IsSubjectDictionaryType())
                 {
                     foreach (var item in enumerable)
                     {

@@ -82,9 +82,21 @@ public class DynamicSubjectFactory
 
                 var newValue = invocation.Arguments[0];
                 var currentValue = ReadProperty(propertyName, propertyType);
-              
-                context.SetPropertyValue(propertyName, newValue, currentValue,
-                    (_, value) => WriteProperty(propertyName, value));
+
+                // The runtime mirror of the generator's fail-closed routing: only a declared type
+                // that provably cannot hold a subject takes the scalar route, everything else goes
+                // through the synchronized structural accessor so a subject-bearing dynamic write
+                // gets the same pre-chain gate ordering as a generated structural write.
+                if (RequiresStructuralWrite(propertyType))
+                {
+                    context.SetStructuralPropertyValue(propertyName, newValue, currentValue,
+                        (_, value) => WriteProperty(propertyName, value));
+                }
+                else
+                {
+                    context.SetPropertyValue(propertyName, newValue, currentValue,
+                        (_, value) => WriteProperty(propertyName, value));
+                }
 
                 invocation.ReturnValue = null;
             }
@@ -99,6 +111,37 @@ public class DynamicSubjectFactory
                         return invocation.ReturnValue;
                     });
             }
+        }
+
+        private static readonly ConcurrentDictionary<Type, bool> StructuralRouteCache = new();
+
+        private static bool RequiresStructuralWrite(Type type)
+        {
+            return StructuralRouteCache.GetOrAdd(type, static t => !IsProvablySubjectFree(t));
+        }
+
+        /// <summary>
+        /// The same scalar allowlist the generator's PropertyWriteRouting uses: primitives, enums,
+        /// string, decimal, DateTime, DateTimeOffset, TimeSpan, Guid, and Nullable of any of
+        /// these. Everything else fails closed onto the structural route, which costs one gate
+        /// entry on an uncommon property, while a false scalar answer would silently skip the
+        /// pre-chain synchronization on exactly the path it exists for.
+        /// </summary>
+        private static bool IsProvablySubjectFree(Type type)
+        {
+            if (type.IsPrimitive || type.IsEnum)
+            {
+                return true;
+            }
+
+            if (type == typeof(string) || type == typeof(decimal) || type == typeof(DateTime) ||
+                type == typeof(DateTimeOffset) || type == typeof(TimeSpan) || type == typeof(Guid))
+            {
+                return true;
+            }
+
+            var underlyingType = Nullable.GetUnderlyingType(type);
+            return underlyingType is not null && IsProvablySubjectFree(underlyingType);
         }
 
         private object? ReadProperty(string propertyName, Type propertyType)

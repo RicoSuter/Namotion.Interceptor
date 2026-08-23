@@ -1,6 +1,8 @@
 ﻿using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Dynamic.Tests;
 
@@ -12,6 +14,11 @@ public interface IMotor
 public interface ISensor
 {
     int Temperature { get; set; }
+}
+
+public interface IMotorHolder
+{
+    Motor? Motor { get; set; }
 }
 
 [InterceptorSubject]
@@ -122,6 +129,57 @@ public class DynamicSubjectTests
     }
 
     [Fact]
+    public void WhenADynamicStructuralPropertyIsWrittenOnAnAttachedProxy_ThenTheSubjectJoinsTheGraph()
+    {
+        // Arrange: the Castle set path classifies the declared type at runtime and routes a
+        // subject-bearing write through the synchronized structural accessor.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotorHolder));
+        subject.AttachToContext(context);
+        var holder = (IMotorHolder)subject;
+        var motor = new Motor();
+
+        // Act
+        holder.Motor = motor;
+
+        // Assert
+        Assert.Same(context, motor.TryGetContext());
+        Assert.Equal(1, motor.GetReferenceCount());
+
+        // Act
+        holder.Motor = null;
+
+        // Assert
+        Assert.Null(motor.TryGetContext());
+        Assert.Equal(0, motor.GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenADynamicStructuralPropertyIsWrittenBeforeAttach_ThenTheAttachDiscoversIt()
+    {
+        // Arrange: an unattached proxy writes through the structural accessor's unattached arm,
+        // and the later attach discovers the stored subject through the property's getter.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithContextInheritance();
+
+        var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotorHolder));
+        var holder = (IMotorHolder)subject;
+        var motor = new Motor();
+        holder.Motor = motor;
+
+        // Act
+        subject.AttachToContext(context);
+
+        // Assert
+        Assert.Same(context, motor.TryGetContext());
+        Assert.Equal(1, motor.GetReferenceCount());
+    }
+
+    [Fact]
     public void WhenProxyingAGeneratedSubject_ThenNoGeneratedInterceptionMemberBecomesAProperty()
     {
         // Arrange & Act: Motor is [InterceptorSubject], so the proxy's base is generated code.
@@ -175,6 +233,12 @@ public class DynamicSubjectTests
         public void OnContextComposed(IInterceptorSubject subject) => logs.Add($"{name}: Attached");
 
         public void OnContextDecomposed(IInterceptorSubject subject) => logs.Add($"{name}: Detached");
+
+        public bool TryAddProperties(SubjectPropertyRegistrationContext registration)
+        {
+            registration.Publish();
+            return true;
+        }
 
         public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
         {

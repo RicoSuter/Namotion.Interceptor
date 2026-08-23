@@ -95,11 +95,11 @@ public class DynamicPropertyLifecycleTests
     }
 
     [Fact]
-    public void WhenDynamicDerivedPropertyReturnsSubject_ThenSubjectIsTrackedInRegistry()
+    public void WhenDynamicDerivedPropertyReturnsSubject_ThenItEstablishesNoOwnershipEdge()
     {
-        // Arrange: Dynamic derived property that returns a subject reference (e.g., computed "first child").
-        // Verifies that lifecycle tracking correctly attaches/detaches subjects discovered
-        // through dynamic derived properties (IsDerived=true, IsIntercepted=true).
+        // Arrange: a dynamic derived property that returns a subject reference (a computed "first
+        // child"). A derived value is a projection of edges the underlying stored properties
+        // already own, so it must not add another parent edge: only Children carries ownership.
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
@@ -122,22 +122,19 @@ public class DynamicPropertyLifecycleTests
             "FirstChild",
             _ => root.Children.Length > 0 ? root.Children[0] : null);
 
-        // Assert: child1 is now referenced from both Children (index 0) and FirstChild.
-        // Ref count should be 2 (one from Children, one from FirstChild).
-        Assert.Equal(2, child1.GetReferenceCount());
+        // Assert: the derived property adds no edge, so each child keeps its single Children edge.
+        Assert.Equal(1, child1.GetReferenceCount());
         Assert.Equal(1, child2.GetReferenceCount());
 
-        // All subjects tracked: root + child1 + child2
+        // All subjects tracked through their real edges: root + child1 + child2
         Assert.Equal(3, registry.KnownSubjects.Count);
 
-        // Act: Change Children so that child2 is first — derived property should update
+        // Act: Change Children so that child2 is first — the derived value follows the stored edges
         root.Children = [child2];
 
-        // Assert: child1 fully detached (removed from Children and no longer FirstChild)
+        // Assert: child1 fully detached; the derived property alone cannot keep it alive
         Assert.Equal(0, child1.GetReferenceCount());
-
-        // child2 referenced from both Children and FirstChild
-        Assert.Equal(2, child2.GetReferenceCount());
+        Assert.Equal(1, child2.GetReferenceCount());
 
         // root + child2
         Assert.Equal(2, registry.KnownSubjects.Count);
