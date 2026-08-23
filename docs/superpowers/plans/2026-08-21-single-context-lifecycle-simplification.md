@@ -30,7 +30,7 @@ Tests-first re-derivation is the safer option here, not the more expensive one. 
 
 Each stage must leave the tree building with zero warnings and the full unit suite green, verified by **per-project** counts diffed against a recorded baseline, never by the summary line alone.
 
-1. **Benchmark base.** Cut a branch from master carrying only `LifecycleOwnershipBenchmark`, so both arms share benchmark source. The spike's fourteen rows already include the shared-parent matched pair and the batch row that the original scaffold lacked. Record the hash.
+1. **Benchmark base.** Cut a branch from master carrying only `LifecycleOwnershipBenchmark`, so both arms share benchmark source. The spike's fourteen rows already include the shared-parent matched pair and the batch row that the original scaffold lacked. Done: `bench/scl-base` at `7a5d2ace`, master `0418410c` plus the benchmark file only, worktree `/home/rico/GitHub/nib-scl-base`, outside the repository so BenchmarkDotNet does not abort on a second project file.
 2. **Singleton context service contracts.** Landed cleanly in the spike, 266 lines, no behaviour change. Take as-is.
 3. **Read path: stop running user code under the subject monitor.** This is now a prerequisite rather than an afterthought, because it is what makes the lifecycle gate safe to hold across the terminal write. Doing it first means the write protocol never has to be built twice.
 4. **Attachment mechanism, additive.** Exact context, anchors, attachment revision, lock-free reads, and the structural write route with its own terminal cache. The structural setter publishes an executor even when unattached, so the guard always runs. Keep the executor inheriting the context for now: that is what lets every later stage stay green.
