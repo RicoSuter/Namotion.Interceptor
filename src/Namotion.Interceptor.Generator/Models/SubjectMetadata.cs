@@ -11,6 +11,21 @@ internal sealed record SubjectMetadata(
     ContainingType[] ContainingTypes,
     bool NeedsGeneratedParameterlessConstructor,
     bool HasOrWillHaveParameterlessConstructor,
+    IReadOnlyList<SubjectConstructor> Constructors,
     SubjectBaseClass BaseClass,
     IReadOnlyList<PropertyMetadata> Properties,
     IReadOnlyList<MethodMetadata> Methods);
+
+/// <summary>
+/// One declared instance constructor, carried so the emitter can mirror it with a trailing
+/// context parameter. Parameter types are fully qualified because the generated partial half
+/// does not repeat the declaring file's using directives, so a syntax-text name may not
+/// resolve there.
+/// </summary>
+internal sealed record SubjectConstructor(
+    string Accessibility,
+    IReadOnlyList<SubjectConstructorParameter> Parameters);
+
+internal sealed record SubjectConstructorParameter(
+    string FullyQualifiedTypeName,
+    string Name);

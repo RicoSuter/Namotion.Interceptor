@@ -130,6 +130,8 @@ internal static class SubjectMetadataExtractor
         var (needsGeneratedParameterlessConstructor, hasOrWillHaveParameterlessConstructor) =
             DetectConstructorState(allTypeDeclarations);
 
+        var constructors = CollectConstructors(allTypeDeclarations, semanticModel);
+
         return new ExtractionResult(
             new SubjectMetadata(
                 className,
@@ -140,6 +142,7 @@ internal static class SubjectMetadataExtractor
                 containingTypes,
                 needsGeneratedParameterlessConstructor,
                 hasOrWillHaveParameterlessConstructor,
+                constructors,
                 baseClass,
                 properties,
                 methods),
@@ -833,6 +836,67 @@ internal static class SubjectMetadataExtractor
 
         // First constructor has parameters, so we don't have a parameterless constructor
         return (NeedsGeneratedParameterlessConstructor: false, HasOrWillHaveParameterlessConstructor: false);
+    }
+
+    /// <summary>
+    /// Collects every declared instance constructor across all partial declarations. Parameter
+    /// types are resolved through each declaration's own semantic model rather than taken from
+    /// syntax text, because the generated partial half does not repeat the declaring file's using
+    /// directives, so a name like "List&lt;Foo&gt;" may not resolve there.
+    /// </summary>
+    private static IReadOnlyList<SubjectConstructor> CollectConstructors(
+        TypeDeclarationSyntax[] allTypeDeclarations,
+        SemanticModel semanticModel)
+    {
+        var constructors = new List<SubjectConstructor>();
+
+        foreach (var typeDeclaration in allTypeDeclarations)
+        {
+            var declarationModel = semanticModel.Compilation.GetSemanticModel(typeDeclaration.SyntaxTree);
+
+            foreach (var constructor in typeDeclaration.Members.OfType<ConstructorDeclarationSyntax>())
+            {
+                // A static constructor has no accessibility and cannot be chained to.
+                if (constructor.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword)))
+                {
+                    continue;
+                }
+
+                var parameters = CollectConstructorParameters(constructor, declarationModel);
+                if (parameters is null)
+                {
+                    continue;
+                }
+
+                constructors.Add(new SubjectConstructor(
+                    GetAccessModifier(constructor.Modifiers),
+                    parameters));
+            }
+        }
+
+        return constructors;
+    }
+
+    private static IReadOnlyList<SubjectConstructorParameter>? CollectConstructorParameters(
+        ConstructorDeclarationSyntax constructor,
+        SemanticModel declarationModel)
+    {
+        var parameters = new List<SubjectConstructorParameter>(constructor.ParameterList.Parameters.Count);
+
+        foreach (var parameter in constructor.ParameterList.Parameters)
+        {
+            var fullyQualifiedTypeName = GetFullTypeName(parameter.Type, declarationModel);
+            if (fullyQualifiedTypeName is null)
+            {
+                // Only reachable with error code, since a constructor parameter cannot omit its
+                // type; dropping the whole constructor beats carrying a wrong signature.
+                return null;
+            }
+
+            parameters.Add(new SubjectConstructorParameter(fullyQualifiedTypeName, parameter.Identifier.ValueText));
+        }
+
+        return parameters;
     }
 
     private static string GetAccessModifier(SyntaxTokenList modifiers)
