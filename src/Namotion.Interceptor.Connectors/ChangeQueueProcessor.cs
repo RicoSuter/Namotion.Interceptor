@@ -30,6 +30,9 @@ public class ChangeQueueProcessor : IDisposable
     private readonly int? _maxQueueDepth;
     private long _dropCount;
     private int _flushGate; // 0 = free, 1 = flushing
+    private const int PreparingBufferedWrite = -1;
+    private const int TimedOutWhilePreparingBufferedWrite = -2;
+    private int _inFlightCount;
     private int _disposed; // 0 = not disposed, 1 = disposed (use Interlocked for thread-safe check)
 
     /// <summary>
@@ -39,8 +42,7 @@ public class ChangeQueueProcessor : IDisposable
     internal ChangeDeliveryRule DeliveryRule => _deliveryRule;
 
     /// <summary>
-    /// Number of accepted changes not delivered because of overflow, write failure, cancellation on
-    /// the immediate path, or teardown.
+    /// Number of accepted changes discarded or left unconfirmed by overflow, write failure, cancellation, or teardown.
     /// </summary>
     public long DropCount => Interlocked.Read(ref _dropCount);
 
@@ -201,6 +203,70 @@ public class ChangeQueueProcessor : IDisposable
     /// <returns>The task.</returns>
     public async Task ProcessAsync(CancellationToken cancellationToken)
     {
+        var processingCancellationState = new ProcessingCancellationState();
+        var teardownTokenSource = new CancellationTokenSource();
+        var teardownLifetimeTransferred = false;
+        RegisteredWaitHandle? cancellationWait = null;
+
+        try
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                processingCancellationState.RequestCancellation();
+            }
+            else if (cancellationToken.CanBeCanceled)
+            {
+                cancellationWait = ThreadPool.RegisterWaitForSingleObject(
+                    cancellationToken.WaitHandle,
+                    static (state, _) => ((ProcessingCancellationState)state!).RequestCancellation(),
+                    processingCancellationState,
+                    Timeout.InfiniteTimeSpan,
+                    executeOnlyOnce: true);
+            }
+
+            var processingTask = ProcessCoreAsync(
+                processingCancellationState,
+                teardownTokenSource);
+
+            if (await Task.WhenAny(processingTask, processingCancellationState.CancellationRequested)
+                    .ConfigureAwait(false) == processingTask)
+            {
+                await processingTask.ConfigureAwait(false);
+                return;
+            }
+
+            try
+            {
+                await processingTask.WaitAsync(TeardownFlushBound).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                teardownLifetimeTransferred = true;
+                _ = CancelTeardownAsync(teardownTokenSource, processingTask);
+                var inFlightCount = ClaimInFlightCount();
+                _ = Task.Factory.StartNew(
+                    () => ReportTimedOutTeardown(inFlightCount),
+                    CancellationToken.None,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default);
+            }
+        }
+        finally
+        {
+            cancellationWait?.Unregister(null);
+            if (!teardownLifetimeTransferred)
+            {
+                teardownTokenSource.Dispose();
+            }
+        }
+    }
+
+    private async Task ProcessCoreAsync(
+        ProcessingCancellationState processingCancellationState,
+        CancellationTokenSource teardownTokenSource)
+    {
+        var teardownToken = teardownTokenSource.Token;
+
         // Snapshot of changes already queued at drain start: these were captured while the source was
         // still connecting, so one whose value the model has moved past is stale state and is dropped.
         // Changes arriving after it are steady state, where an intermediate value is data rather than
@@ -214,42 +280,20 @@ public class ChangeQueueProcessor : IDisposable
         var queuedBeforeStart = _subscription.Count;
 
         using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
-        var processingTokenSource = new CancellationTokenSource();
-        var processingToken = processingTokenSource.Token;
-        using var dequeueStopTokenSource = new CancellationTokenSource();
-        var processingCancellationState = new ProcessingCancellationState(
-            processingTokenSource,
-            dequeueStopTokenSource);
-        RegisteredWaitHandle? cancellationWait = null;
         var flushTask = Task.CompletedTask;
 
         try
         {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                processingCancellationState.RequestCancellation();
-            }
-            else if (cancellationToken.CanBeCanceled)
-            {
-                // Observe the wait handle so synchronous caller cancellation cannot run a blocking
-                // processing callback inline before the host starts its timeout-aware wait.
-                cancellationWait = ThreadPool.RegisterWaitForSingleObject(
-                    cancellationToken.WaitHandle,
-                    static (state, _) => ((ProcessingCancellationState)state!).RequestCancellation(),
-                    processingCancellationState,
-                    Timeout.InfiniteTimeSpan,
-                    executeOnlyOnce: true);
-            }
-
             flushTask = periodicTimer is not null
                 ? Task.Run(async () =>
                 {
                     try
                     {
                         // ReSharper disable AccessToDisposedClosure
-                        while (await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
+                        while (await periodicTimer.WaitForNextTickAsync(
+                                   processingCancellationState.ProcessingToken).ConfigureAwait(false))
                         {
-                            await TryFlushAsync(processingToken).ConfigureAwait(false);
+                            await TryFlushAsync(processingCancellationState.ProcessingToken).ConfigureAwait(false);
                         }
                         // ReSharper restore AccessToDisposedClosure
                     }
@@ -263,6 +307,8 @@ public class ChangeQueueProcessor : IDisposable
                 })
                 : Task.CompletedTask;
 
+            await Task.Yield();
+
             if (periodicTimer is null)
             {
                 _logger.LogWarning(
@@ -272,9 +318,7 @@ public class ChangeQueueProcessor : IDisposable
                     "Consider setting a bufferTime (e.g., 8-50ms) to enable batching and merging.");
             }
 
-            await Task.Yield();
-
-            while (_subscription.TryDequeue(out var change, dequeueStopTokenSource.Token))
+            while (_subscription.TryDequeue(out var change, processingCancellationState.DequeueStopToken))
             {
                 var wasQueuedBeforeStart = queuedBeforeStart > 0;
                 if (wasQueuedBeforeStart)
@@ -318,20 +362,26 @@ public class ChangeQueueProcessor : IDisposable
 
                     // Immediate path: send a single change without buffering (zero allocation)
                     _immediateBuffer[0] = change;
+                    Volatile.Write(ref _inFlightCount, 1);
                     try
                     {
-                        await _writeHandler(_immediateBuffer, processingToken).ConfigureAwait(false);
+                        await _writeHandler(_immediateBuffer, processingCancellationState.ProcessingToken).ConfigureAwait(false);
+                        Volatile.Write(ref _inFlightCount, 0);
                     }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    catch (OperationCanceledException) when (processingCancellationState.ProcessingToken.IsCancellationRequested)
                     {
                         // Nothing buffers on this path, so the teardown drain cannot recover this change.
-                        CountUndelivered(1);
+                        CountPendingImmediateWrite();
                         throw;
                     }
                     catch (Exception ex)
                     {
-                        CountUndelivered(1);
+                        CountPendingImmediateWrite();
                         _logger.LogError(ex, "Failed to write a change, which is discarded.");
+                    }
+                    finally
+                    {
+                        Volatile.Write(ref _inFlightCount, 0);
                     }
                 }
                 else
@@ -349,61 +399,62 @@ public class ChangeQueueProcessor : IDisposable
         }
         finally
         {
-            cancellationWait?.Unregister(null);
-            await CompleteTeardownAsync(flushTask, processingCancellationState).ConfigureAwait(false);
+            var cancellationTask = processingCancellationState.GetProcessingCancellationTask();
+            await RunTeardownWorkerAsync(
+                cancellationTask,
+                flushTask,
+                processingCancellationState,
+                teardownToken).ConfigureAwait(false);
         }
     }
 
-    /// <summary>
-    /// Completes active work and the connector's final handoff under one deadline.
-    /// </summary>
-    private async Task CompleteTeardownAsync(
-        Task periodicFlushTask,
-        ProcessingCancellationState processingCancellationState)
+    private async Task CancelTeardownAsync(
+        CancellationTokenSource teardownTokenSource,
+        Task processingTask)
     {
-        // The caller's token is already cancelled, so the drain needs a fresh one.
-        var teardownTokenSource = new CancellationTokenSource(TeardownFlushBound);
-
-        // Capture before the worker can dispose the source; Token throws after disposal.
-        var teardownToken = teardownTokenSource.Token;
-
-        var cancellationTask = processingCancellationState.GetProcessingCancellationTask();
-
-        var teardownTask = RunTeardownWorkerAsync(
-            cancellationTask,
-            periodicFlushTask,
-            processingCancellationState,
-            teardownTokenSource,
-            teardownToken);
-
         try
         {
-            await teardownTask.WaitAsync(teardownToken).ConfigureAwait(false);
+            await teardownTokenSource.CancelAsync().ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (Exception exception)
         {
-            // Count now and after active work settles, since cancellation can requeue a batch later.
-            try
-            {
-                CountRemainingAfterDrain();
-            }
-            catch (Exception exception)
-            {
-                _logger.LogError(exception, "Failed to count buffered changes while stopping.");
-            }
-
-            _logger.LogWarning(
-                "Gave up waiting after {Bound} for the remaining buffered changes to be written while " +
-                "stopping. A write handler that ignores cancellation may still complete it.",
-                TeardownFlushBound);
+            _logger.LogError(exception, "A teardown cancellation callback failed.");
         }
+        finally
+        {
+            try { await processingTask.ConfigureAwait(false); } catch { /* worker observes and logs */ }
+            teardownTokenSource.Dispose();
+        }
+    }
+
+    private void ReportTimedOutTeardown(int inFlightCount)
+    {
+        try
+        {
+            var remainingCount = DrainRemainingCount();
+            CountUndelivered(remainingCount + inFlightCount + ClaimInFlightCount());
+            if (remainingCount > 0)
+            {
+                _logger.LogWarning(
+                    "{Count} buffered changes were not written while stopping and are discarded.",
+                    remainingCount);
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to count buffered changes while stopping.");
+        }
+
+        _logger.LogWarning(
+            "Gave up waiting after {Bound} for the remaining buffered changes to be written while " +
+            "stopping. A write handler that ignores cancellation may still complete it.",
+            TeardownFlushBound);
     }
 
     private async Task RunTeardownWorkerAsync(
         Task cancellationTask,
         Task periodicFlushTask,
         ProcessingCancellationState processingCancellationState,
-        CancellationTokenSource teardownTokenSource,
         CancellationToken teardownToken)
     {
         try
@@ -441,14 +492,7 @@ public class ChangeQueueProcessor : IDisposable
                 }
                 finally
                 {
-                    try
-                    {
-                        processingCancellationState.Dispose();
-                    }
-                    finally
-                    {
-                        teardownTokenSource.Dispose();
-                    }
+                    processingCancellationState.Dispose();
                 }
             }
         }
@@ -462,17 +506,59 @@ public class ChangeQueueProcessor : IDisposable
     // The timeout and late-worker sweeps may race; TryDequeue partitions entries between them.
     private void CountRemainingAfterDrain()
     {
-        var remaining = 0L;
-        while (_changes.TryDequeue(out _))
-        {
-            remaining++;
-        }
+        var remaining = DrainRemainingCount();
 
         if (remaining > 0)
         {
             CountUndelivered(remaining);
             _logger.LogWarning(
                 "{Count} buffered changes were not written while stopping and are discarded.", remaining);
+        }
+    }
+
+    private long DrainRemainingCount()
+    {
+        var remaining = 0L;
+        while (_changes.TryDequeue(out _))
+        {
+            remaining++;
+        }
+
+        return remaining;
+    }
+
+    private void CountPendingImmediateWrite()
+    {
+        CountUndelivered(Math.Max(0, Interlocked.Exchange(ref _inFlightCount, 0)));
+    }
+
+    private int ClaimInFlightCount()
+    {
+        while (true)
+        {
+            var count = Volatile.Read(ref _inFlightCount);
+            if (count == PreparingBufferedWrite)
+            {
+                if (Interlocked.CompareExchange(
+                        ref _inFlightCount,
+                        TimedOutWhilePreparingBufferedWrite,
+                        PreparingBufferedWrite) == PreparingBufferedWrite)
+                {
+                    return 0;
+                }
+
+                continue;
+            }
+
+            if (count == TimedOutWhilePreparingBufferedWrite)
+            {
+                return 0;
+            }
+
+            if (count <= 0 || Interlocked.CompareExchange(ref _inFlightCount, 0, count) == count)
+            {
+                return Math.Max(0, count);
+            }
         }
     }
 
@@ -525,6 +611,7 @@ public class ChangeQueueProcessor : IDisposable
             }
 
             // Drain the concurrent queue into the scratch buffer under exclusive flush
+            Volatile.Write(ref _inFlightCount, PreparingBufferedWrite);
             _flushChanges.Clear();
             while (_changes.TryDequeue(out var change))
             {
@@ -538,20 +625,33 @@ public class ChangeQueueProcessor : IDisposable
 
             merged = true;
             var mergedChanges = _changeMerger.Merge(CollectionsMarshal.AsSpan(_flushChanges), _deliveryRule);
+            if (Interlocked.CompareExchange(
+                    ref _inFlightCount,
+                    mergedChanges.Length,
+                    PreparingBufferedWrite) == TimedOutWhilePreparingBufferedWrite)
+            {
+                Volatile.Write(ref _inFlightCount, 0);
+                CountUndelivered(mergedChanges.Length);
+                return;
+            }
 
             if (mergedChanges.Length > 0)
             {
                 try
                 {
                     await _writeHandler(mergedChanges, cancellationToken).ConfigureAwait(false);
+                    Volatile.Write(ref _inFlightCount, 0);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
                     // Cancellation leaves the merged survivors unconfirmed. Copy them before Reset releases
                     // the buffer; requeueing the raw input would overcount collapsed duplicates.
-                    foreach (var change in mergedChanges.Span)
+                    if (Interlocked.Exchange(ref _inFlightCount, 0) > 0)
                     {
-                        _changes.Enqueue(change);
+                        foreach (var change in mergedChanges.Span)
+                        {
+                            _changes.Enqueue(change);
+                        }
                     }
 
                     throw;
@@ -559,9 +659,12 @@ public class ChangeQueueProcessor : IDisposable
                 catch (Exception ex)
                 {
                     // Requeueing a non-cancellation failure could grow the queue without bound.
-                    var undelivered = mergedChanges.Length;
-                    CountUndelivered(undelivered);
-                    _logger.LogError(ex, "Failed to write {Count} changes, which are discarded.", undelivered);
+                    var undelivered = Math.Max(0, Interlocked.Exchange(ref _inFlightCount, 0));
+                    if (undelivered > 0)
+                    {
+                        CountUndelivered(undelivered);
+                        _logger.LogError(ex, "Failed to write {Count} changes, which are discarded.", undelivered);
+                    }
                 }
             }
         }
@@ -569,6 +672,8 @@ public class ChangeQueueProcessor : IDisposable
         {
             try
             {
+                Volatile.Write(ref _inFlightCount, 0);
+
                 // Clear buffers to allow GC of SubjectPropertyChange objects
                 _flushChanges.Clear();
 
@@ -627,18 +732,25 @@ public class ChangeQueueProcessor : IDisposable
         }
     }
 
-    private sealed class ProcessingCancellationState(
-        CancellationTokenSource processingTokenSource,
-        CancellationTokenSource dequeueStopTokenSource) : IDisposable
+    private sealed class ProcessingCancellationState : IDisposable
     {
+        private readonly CancellationTokenSource _processingTokenSource = new();
+        private readonly CancellationTokenSource _dequeueStopTokenSource = new();
         private readonly object _gate = new();
+        private readonly TaskCompletionSource _cancellationRequested = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private Task? _processingCancellationTask;
+
+        public Task CancellationRequested => _cancellationRequested.Task;
+        public CancellationToken ProcessingToken => _processingTokenSource.Token;
+        public CancellationToken DequeueStopToken => _dequeueStopTokenSource.Token;
 
         public void RequestCancellation()
         {
+            _cancellationRequested.TrySetResult();
+
             try
             {
-                dequeueStopTokenSource.Cancel();
+                _dequeueStopTokenSource.Cancel();
             }
             catch (ObjectDisposedException)
             {
@@ -659,7 +771,7 @@ public class ChangeQueueProcessor : IDisposable
 
                 try
                 {
-                    return _processingCancellationTask = processingTokenSource.CancelAsync();
+                    return _processingCancellationTask = _processingTokenSource.CancelAsync();
                 }
                 catch (Exception exception)
                 {
@@ -668,6 +780,10 @@ public class ChangeQueueProcessor : IDisposable
             }
         }
 
-        public void Dispose() => processingTokenSource.Dispose();
+        public void Dispose()
+        {
+            _dequeueStopTokenSource.Dispose();
+            _processingTokenSource.Dispose();
+        }
     }
 }

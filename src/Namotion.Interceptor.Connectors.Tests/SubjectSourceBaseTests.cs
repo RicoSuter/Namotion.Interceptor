@@ -2083,6 +2083,82 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
+    public async Task WhenTheRetryQueueIsRetiredDuringAnOlderWrite_ThenTheCurrentBatchIsNotStarted()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context);
+
+        var probeWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var olderWriteEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseOlderWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var currentWriteEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(10))
+        {
+            WriteChangesOverride = async (changes, _) =>
+            {
+                var values = changes.ToArray()
+                    .Select(change => change.GetNewValue<string?>())
+                    .ToArray();
+
+                if (values.Contains("Probe"))
+                {
+                    probeWritten.TrySetResult();
+                }
+
+                if (values.Contains("OlderRetry"))
+                {
+                    olderWriteEntered.TrySetResult();
+                    await releaseOlderWrite.Task.ConfigureAwait(false);
+                }
+
+                if (values.Contains("Current"))
+                {
+                    currentWriteEntered.TrySetResult();
+                }
+
+                return WriteResult.Success;
+            },
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(subject, nameof(Person.LastName)).SetSource(source);
+
+        await source.StartAsync(CancellationToken.None);
+        try
+        {
+            subject.LastName = "Probe";
+            await probeWritten.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+            EnqueueRetryChange(source, subject, nameof(Person.FirstName), "Original", "OlderRetry");
+            subject.FirstName = "Current";
+            await olderWriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+            // Act
+            source.WriteRetryQueue.Retire();
+            releaseOlderWrite.TrySetResult();
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => currentWriteEntered.Task.IsCompleted || source.Diagnostics.OutboundRetries.TotalDropped == 1,
+                message: "the in-flight write did not settle after retirement");
+
+            // Assert
+            Assert.False(currentWriteEntered.Task.IsCompleted,
+                "a new source write started after the retry queue was retired");
+            Assert.Equal(1, source.Diagnostics.OutboundRetries.TotalDropped);
+        }
+        finally
+        {
+            releaseOlderWrite.TrySetResult();
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task WhenTheRunEnds_ThenStrandedRetryQueueWritesAreCounted()
     {
         // Arrange: every write fails, so the batch parks and stays parked. Stopping without disposing is

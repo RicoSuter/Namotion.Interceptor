@@ -198,9 +198,9 @@ If a transaction repair write fails, the source keeps the older value and the su
 
 ### Flushing On Stop
 
-When a connector stops, the processor drains buffered outbound changes while the transport is still live. Sources preserve retry-queue ordering; servers broadcast to connected clients. Undelivered buffered work increments `Diagnostics.OutboundChanges.TotalDropped`, while source writes still parked at run end increment `Diagnostics.OutboundRetries.TotalDropped` (see [Connector Diagnostics](#connector-diagnostics)).
+When a connector stops, the processor drains buffered outbound changes while the transport is still live. Sources preserve retry-queue ordering; servers broadcast to connected clients. Discarded or unconfirmed outbound work increments `Diagnostics.OutboundChanges.TotalDropped`, while source writes still parked at run end increment `Diagnostics.OutboundRetries.TotalDropped` (see [Connector Diagnostics](#connector-diagnostics)).
 
-The active periodic write, remaining buffer, and source retry flush share a fixed internal 5 second deadline. `HostOptions.ShutdownTimeout`, 30 seconds by default, caps hosted shutdown but cannot extend this deadline; detached sources have no other bound. A zero-buffer handler runs inline and must return or observe cancellation before bounded teardown begins.
+The active write, remaining buffer, and source retry flush share a fixed internal 5 second deadline. `HostOptions.ShutdownTimeout`, 30 seconds by default, caps hosted shutdown but cannot extend this deadline; detached sources have no other bound.
 
 Stopping cancels an active buffered write, whose delivery may already be partial or complete. The drain retries the unconfirmed batch under its teardown deadline, providing at-least-once delivery; a receiver may therefore observe the same value again.
 
@@ -678,7 +678,7 @@ The three buffers answer three different questions, and reading which one is gro
 - `OutboundRetries` growing means the far end is rejecting writes.
 - `InboundBuffer` growing means an initial load is still in progress.
 
-`OutboundChanges.TotalDropped` counts accepted changes lost to overflow, write failure, or teardown (see [Flushing On Stop](#flushing-on-stop)). A `null` capacity does not imply a zero total.
+`OutboundChanges.TotalDropped` counts accepted changes discarded or left unconfirmed by overflow, write failure, or teardown (see [Flushing On Stop](#flushing-on-stop)). A `null` capacity does not imply a zero total.
 
 `InboundBuffer.TotalDropped` is the one drop count that is not data loss: it counts buffered updates discarded when a connect attempt was abandoned before its load completed, and applying a superseded snapshot would have been wrong. It is still worth watching, because it is the only signal of how often initial loads are being superseded, which is reconnect thrash.
 

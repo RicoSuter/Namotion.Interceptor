@@ -420,7 +420,7 @@ public class WriteRetryQueueTests
     }
 
     [Fact]
-    public void WhenANonEmptyQueueIsRetired_ThenThePendingWritesAreCountedAndLogged()
+    public void WhenANonEmptyQueueIsRetired_ThenThePendingWritesAreCountedWithoutLogging()
     {
         // Arrange
         var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
@@ -436,7 +436,7 @@ public class WriteRetryQueueTests
         Assert.True(queue.IsEmpty);
         Assert.Equal(0, queue.PendingWriteCount);
         Assert.Equal(3, diagnostics.TotalDropped);
-        Assert.Contains(logger.Warnings, message => message.Contains("never delivered"));
+        Assert.Empty(logger.Warnings);
     }
 
     [Fact]
@@ -473,7 +473,7 @@ public class WriteRetryQueueTests
 
         // Assert
         Assert.Equal(3, diagnostics.TotalDropped);
-        Assert.Single(logger.Warnings);
+        Assert.Empty(logger.Warnings);
     }
 
     [Fact]

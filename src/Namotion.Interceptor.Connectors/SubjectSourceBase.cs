@@ -286,7 +286,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         _bufferTime,
                         maxQueueDepth: null,
                         logger: _logger,
-                        dropHandler: Metrics.OutboundChanges.AddDropped,
+                        dropHandler: Metrics.OutboundChanges.CreateDropReporter(),
                         teardownHandler: async teardownToken =>
                             await WriteRetryQueue.FlushAsync(this, teardownToken).ConfigureAwait(false));
 
@@ -337,7 +337,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     {
         // First flush any queued changes
         var succeeded = await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
-        if (!succeeded)
+        if (!succeeded || !WriteRetryQueue.TryAdmitWrite())
         {
             WriteRetryQueue.Enqueue(changes);
             return;

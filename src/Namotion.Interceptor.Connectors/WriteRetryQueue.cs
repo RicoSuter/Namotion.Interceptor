@@ -131,9 +131,17 @@ internal sealed class WriteRetryQueue : IDisposable
         if (stranded > 0)
         {
             _metrics.AddDropped(stranded);
-            _logger.LogWarning(
-                "{Count} queued writes were never delivered before the source stopped and are discarded.",
-                stranded);
+        }
+    }
+
+    /// <summary>
+    /// Atomically admits a new source write unless the queue has been retired.
+    /// </summary>
+    public bool TryAdmitWrite()
+    {
+        lock (_lock)
+        {
+            return !_retired;
         }
     }
 

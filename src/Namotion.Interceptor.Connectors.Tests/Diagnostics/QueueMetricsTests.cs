@@ -239,6 +239,24 @@ public class QueueMetricsTests
     }
 
     [Fact]
+    public void WhenADropReporterOutlivesReset_ThenItCannotAddToTheNextEpoch()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(ConnectorMetrics.OutboundChanges));
+        var oldReporter = metrics.CreateDropReporter();
+        oldReporter(5);
+        metrics.Reset();
+        var currentReporter = metrics.CreateDropReporter();
+
+        // Act
+        oldReporter(7);
+        currentReporter(3);
+
+        // Assert
+        Assert.Equal(3, new QueueDiagnostics(metrics).TotalDropped);
+    }
+
+    [Fact]
     public void WhenRegisterIsCalledWhileARegistrationIsLive_ThenItThrowsAndHandleDisposalAllowsRegisteringAgain()
     {
         // Arrange
