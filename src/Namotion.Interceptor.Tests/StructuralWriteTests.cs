@@ -50,6 +50,43 @@ public class StructuralWriteTests
         }
     }
 
+    /// <summary>
+    /// Counts on which side of the structural routing decision this lifecycle ran: a gate entry
+    /// means the routing saw it, a chain execution means the compiled write chain contained it.
+    /// The graph entry points throw because the registering test never attaches or admits anything
+    /// through the probe, and a silent no-op there would hide a scenario defect.
+    /// </summary>
+    private sealed class CountingLifecycleInterceptor : ILifecycleInterceptor
+    {
+        private readonly object _structuralWriteGate = new();
+
+        public int GateEnterCount;
+        public int WritePropertyCount;
+
+        public void EnterStructuralWriteGate()
+        {
+            Monitor.Enter(_structuralWriteGate);
+            Interlocked.Increment(ref GateEnterCount);
+        }
+
+        public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
+
+        public bool TryAddProperties(SubjectPropertyRegistrationContext registration) =>
+            throw new NotSupportedException("The probe admits no properties.");
+
+        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor) =>
+            throw new NotSupportedException("The probe attaches no subjects.");
+
+        public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context) =>
+            throw new NotSupportedException("The probe detaches no subjects.");
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            Interlocked.Increment(ref WritePropertyCount);
+            next(ref context);
+        }
+    }
+
     private static IInterceptorExecutor GetExecutor(IInterceptorSubject subject)
     {
         return subject.Executor;
@@ -183,6 +220,83 @@ public class StructuralWriteTests
         Assert.True(backingWritten);
         Assert.True(detachCompleted.IsSet);
         Assert.Null(executor.AttachedContext);
+    }
+
+    [Fact]
+    public void WhenLifecycleIsRegisteredWhileAStructuralWriteWaitsForTheMonitor_ThenThatWriteSeesItNowhere()
+    {
+        // Arrange: the routing decision and the write chain must derive from one context state.
+        // A lifecycle registered between the routing resolution and the chain resolution would
+        // otherwise sit in the chain but not in the routing, and its WriteProperty would take the
+        // structural gate inside the attachment monitor, inverting the documented lock order.
+        //
+        // Warm up the whole no-lifecycle structural path first, so the raced writer below executes
+        // only jitted code between its start and the attachment monitor.
+        var warmupGate = new GatingWriteInterceptor();
+        warmupGate.ResumeWrite.Set();
+        var warmupContext = InterceptorSubjectContext.Create();
+        warmupContext.AddService(warmupGate);
+        GetExecutor(new Car(warmupContext)).SetStructuralPropertyValue("Speed", 1, 0, (_, _) => { });
+
+        var gate = new GatingWriteInterceptor();
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(gate);
+        var subject = new Car(context);
+        var executor = GetExecutor(subject);
+        var probe = new CountingLifecycleInterceptor();
+
+        var monitorHolderCommitted = false;
+        var monitorHolder = new Thread(() =>
+            executor.SetStructuralPropertyValue("Speed", 42, 0, (_, _) => monitorHolderCommitted = true));
+        monitorHolder.IsBackground = true;
+
+        var racedWriteCommitted = false;
+        var racedWriter = new Thread(() =>
+            executor.SetStructuralPropertyValue("Speed", 43, 42, (_, _) => racedWriteCommitted = true));
+        racedWriter.IsBackground = true;
+
+        // Act: the first write pauses inside its chain, holding the attachment monitor. The raced
+        // write then resolves its routing (no lifecycle yet) and parks on that monitor.
+        monitorHolder.Start();
+        Assert.True(gate.ReachedChain.Wait(TimeSpan.FromSeconds(30)));
+
+        racedWriter.Start();
+
+        // WaitSleepJoin is a positive observation of the park: the warmed-up path between Start
+        // and the monitor contains no other managed blocking point, and the gate-entry assert
+        // below catches the residual misordering where the park happened before the routing read.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while ((racedWriter.ThreadState & System.Threading.ThreadState.WaitSleepJoin) == 0)
+        {
+            Assert.True(DateTime.UtcNow < deadline, "the raced writer never parked on the attachment monitor");
+            Thread.Yield();
+        }
+
+        // The registration lands after the raced write resolved its routing and before it resolves
+        // its chain, which is exactly the window the pinned state has to close.
+        context.AddService(probe);
+        gate.ResumeWrite.Set();
+
+        Assert.True(monitorHolder.Join(TimeSpan.FromSeconds(30)), "the monitor-holding write did not complete");
+        Assert.True(racedWriter.Join(TimeSpan.FromSeconds(30)), "the raced write did not complete");
+
+        // Assert: scenario validity first. Had the raced routing seen the probe, it would have
+        // entered the gate, and the run would prove nothing about the window.
+        Assert.True(probe.GateEnterCount == 0,
+            "the probe was registered before the raced write resolved its routing, so the race was not established");
+
+        // The raced write sees the late lifecycle nowhere: not in the routing (above) and not in
+        // the chain. A chain resolved from a fresh state instead of the routing's pinned state
+        // would have run the probe here, without its gate.
+        Assert.Equal(0, probe.WritePropertyCount);
+        Assert.True(monitorHolderCommitted);
+        Assert.True(racedWriteCommitted);
+
+        // The next write pins a fresh state and sees the probe on both sides: the routing enters
+        // its gate and the chain runs it.
+        executor.SetStructuralPropertyValue("Speed", 44, 43, (_, _) => { });
+        Assert.Equal(1, probe.GateEnterCount);
+        Assert.Equal(1, probe.WritePropertyCount);
     }
 
     [Fact]

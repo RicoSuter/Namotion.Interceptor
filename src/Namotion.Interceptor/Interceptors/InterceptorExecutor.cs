@@ -210,24 +210,31 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         // monitor from before chain resolution through the terminal is what turns a racing
         // attachment transition into ordering: the transition waits on the monitor instead of
         // invalidating an in-flight write.
+        //
+        // The routing decision (is there a lifecycle to gate on?) and the write chain both derive
+        // from one pinned context state. Pinning is what keeps them consistent: a chain resolved
+        // from a second, fresh read could contain a lifecycle the routing did not see, and its
+        // WriteProperty would take the gate inside the attachment monitor, inverting the lock
+        // order above.
         while (true)
         {
             var attachedContext = _attachedContext;
-            var lifecycle = attachedContext?.TryGetService<ILifecycleInterceptor>();
+            var contextState = attachedContext?.PinState();
+            var lifecycle = attachedContext?.TryGetServiceFromState<ILifecycleInterceptor>(contextState!);
             if (lifecycle is null)
             {
-                // No lifecycle to order against: either the subject is unattached, or its context
-                // has no lifecycle, so nothing downstream takes a topology gate for it. Two
-                // assumptions, stated: interceptors resolved through a lifecycle-free context must
-                // not take another context's lifecycle gate inside this chain, and a lifecycle
-                // registered on the attached context after the resolution above is not seen by
-                // this write, because the gate comes from that one resolution (contexts are
-                // configured before subjects attach to them).
+                // No lifecycle to order against: either the subject is unattached, or the pinned
+                // state has no lifecycle, so nothing downstream takes a topology gate for it. A
+                // lifecycle registered on the attached context after the pin is invisible to this
+                // write as a whole, routing and chain alike, and is seen by the next write, which
+                // pins a fresh state. One assumption remains: interceptors resolved through a
+                // lifecycle-free state must not take another context's lifecycle gate inside this
+                // chain.
                 lock (_attachmentLock)
                 {
                     if (ReferenceEquals(_attachedContext, attachedContext))
                     {
-                        return WriteStructuralValue(propertyName, newValue, currentValue, writeValue);
+                        return WriteStructuralValue(attachedContext, contextState, propertyName, newValue, currentValue, writeValue);
                     }
                 }
             }
@@ -243,7 +250,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                         // releases both and retries against the fresh attachment.
                         if (ReferenceEquals(_attachedContext, attachedContext))
                         {
-                            return WriteStructuralValue(propertyName, newValue, currentValue, writeValue);
+                            return WriteStructuralValue(attachedContext, contextState, propertyName, newValue, currentValue, writeValue);
                         }
                     }
                 }
@@ -257,12 +264,20 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
 
     /// <summary>
     /// Commits a structural write while the caller holds the attachment monitor (and the lifecycle
-    /// gate when the subject is attached to a context with a lifecycle).
+    /// gate when the routing found a lifecycle). <paramref name="attachedContext"/> and
+    /// <paramref name="contextState"/> are the routing snapshot pair, revalidated by the caller
+    /// under the monitor and null together exactly when the subject was unattached at routing
+    /// time; the chain resolves from that pinned state so it cannot disagree with the routing.
     /// </summary>
-    private bool WriteStructuralValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue)
+    private bool WriteStructuralValue<TProperty>(
+        InterceptorSubjectContext? attachedContext,
+        InterceptorSubjectContext.ContextState? contextState,
+        string propertyName,
+        TProperty newValue,
+        TProperty currentValue,
+        Action<IInterceptorSubject, TProperty> writeValue)
     {
-        var attachedContext = _attachedContext;
-        if (attachedContext is null)
+        if (attachedContext is null || contextState is null)
         {
             // Unattached: nothing intercepts this subject, so the write is a plain backing store,
             // as cheap as the pre-executor short circuit in the generated helper. It still runs
@@ -278,7 +293,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             currentValue,
             newValue);
 
-        attachedContext.ExecuteInterceptedWrite(ref context, writeValue);
+        attachedContext.ExecuteInterceptedWrite(contextState, ref context, writeValue);
         return context.IsWritten;
     }
 
@@ -327,6 +342,9 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         // stale routing decision as a retry rather than an error. The unattached (or
         // lifecycle-free) arm publishes under the attachment monitor alone, so a concurrent attach
         // either sees the published metadata when it seeds or waits until the publication is done.
+        // Unlike the structural write, no state pin is needed: the lifecycle-free arm publishes
+        // metadata and resolves no interceptor chain, so there is no second state read that could
+        // disagree with the routing.
         while (true)
         {
             var attachedContext = _attachedContext;

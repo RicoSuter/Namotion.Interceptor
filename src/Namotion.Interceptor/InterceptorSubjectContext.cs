@@ -168,7 +168,26 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
 
     public TInterface? TryGetService<TInterface>()
     {
-        var services = GetServices<TInterface>();
+        return TryGetServiceFromState<TInterface>(PinState());
+    }
+
+    /// <summary>
+    /// Pins the current state snapshot with a single volatile read. A caller that must make
+    /// several decisions against one consistent view of the context (the structural write's
+    /// routing and its chain) pins once and passes the snapshot to the FromState members.
+    /// </summary>
+    internal ContextState PinState()
+    {
+        return Volatile.Read(ref _state);
+    }
+
+    /// <summary>
+    /// <see cref="TryGetService{TInterface}"/> against a pinned snapshot instead of the current
+    /// state.
+    /// </summary>
+    internal TInterface? TryGetServiceFromState<TInterface>(ContextState state)
+    {
+        var services = GetServicesFromState<TInterface>(state);
         return services.Length switch
         {
             1 => services[0],
@@ -188,7 +207,18 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void ExecuteInterceptedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
     {
-        var state = Volatile.Read(ref _state);
+        ExecuteInterceptedWrite(Volatile.Read(ref _state), ref context, writeValue);
+    }
+
+    /// <summary>
+    /// <see cref="ExecuteInterceptedWrite{TProperty}(ref PropertyWriteContext{TProperty}, Action{IInterceptorSubject, TProperty})"/>
+    /// against a pinned snapshot instead of the current state. The structural write passes the
+    /// snapshot its routing decision read, so the chain cannot contain a lifecycle the routing
+    /// did not see.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void ExecuteInterceptedWrite<TProperty>(ContextState state, ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
+    {
         var action = GetWriteInterceptorFunction<TProperty>(state);
         action(ref context, writeValue);
     }
@@ -344,7 +374,7 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
         Volatile.Write(ref _state, state);
     }
 
-    private sealed class ContextState
+    internal sealed class ContextState
     {
         // Insertion order is kept and duplicate references tolerated: dedup lives in the service
         // computation, which keeps the first occurrence under the default comparer. The walk
