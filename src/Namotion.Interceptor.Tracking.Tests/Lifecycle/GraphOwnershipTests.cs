@@ -516,7 +516,7 @@ public class GraphOwnershipTests
         // Assert
         Assert.True(callbackObserved);
         Assert.IsType<LifecycleContractViolationException>(callbackException);
-        Assert.Contains("lifecycle callback must not write a structural", callbackException.Message);
+        Assert.Contains("lifecycle callback must not change graph topology", callbackException.Message);
         Assert.Same(context, root.TryGetContext());
         Assert.Same(context, parent.TryGetContext());
         Assert.Equal(1, a.GetReferenceCount());

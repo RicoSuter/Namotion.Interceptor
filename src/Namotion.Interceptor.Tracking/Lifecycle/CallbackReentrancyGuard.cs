@@ -59,10 +59,12 @@ internal static class CallbackReentrancyGuard
         if (IsInsideAnyCallback)
         {
             throw new LifecycleContractViolationException(
-                "A lifecycle callback must not write a structural (subject-typed) property. The " +
-                "callback runs while the lifecycle holds its topology gate mid-reconcile, so the " +
-                "write would re-enter the reconciler on half-updated edge state. Defer the write " +
-                "until the triggering operation completes.");
+                "A lifecycle callback must not change graph topology: no structural " +
+                "(subject-typed) property write, and no explicit attach or detach. The callback " +
+                "runs while the lifecycle holds its topology gate mid-reconcile, so the change " +
+                "would re-enter the reconciler on half-updated edge state, and reaching a second " +
+                "lifecycle's gate from inside a callback can deadlock. Defer the change until the " +
+                "triggering operation completes.");
         }
     }
 

@@ -78,4 +78,98 @@ public class CallbackContractTests
         // Assert
         Assert.IsType<LifecycleContractViolationException>(deepException);
     }
+
+    [Fact]
+    public void WhenALifecycleCallbackAttachesASubject_ThenItThrows()
+    {
+        // Arrange
+        // The flag must be set BEFORE the attempt. Pre-fix the attach succeeds and publishes
+        // another attach, which re-enters this handler before callbackException is assigned, and
+        // the recursion ends in a stack overflow that kills the whole assembly rather than
+        // failing one test.
+        Exception? callbackException = null;
+        var attempted = false;
+        var context = CreateContext()
+            .WithService(() => new DelegateLifecycleHandler(change =>
+            {
+                if (attempted)
+                {
+                    return;
+                }
+
+                attempted = true;
+                callbackException = Record.Exception(
+                    () => new Person { FirstName = "X" }.AttachToContext(change.Subject.GetContext()));
+            }), _ => false);
+
+        // Act
+        _ = new Person(context) { FirstName = "R" };
+
+        // Assert
+        Assert.IsType<LifecycleContractViolationException>(callbackException);
+    }
+
+    [Fact]
+    public void WhenALifecycleCallbackDetachesASubject_ThenItThrows()
+    {
+        // Arrange
+        Exception? callbackException = null;
+        Person? pinned = null;
+        var context = CreateContext()
+            .WithService(() => new DelegateLifecycleHandler(change =>
+            {
+                if (callbackException is not null || pinned is null || ReferenceEquals(change.Subject, pinned))
+                {
+                    return;
+                }
+
+                callbackException = Record.Exception(() => pinned.DetachFromContext(pinned.GetContext()));
+            }), _ => false);
+
+        // Explicit attach, not a context constructor: a constructed subject carries a Provisional
+        // anchor, and ValidateExplicitDetach already rejects detaching one with a plain
+        // InvalidOperationException, so the test would pass pre-fix for the wrong reason.
+        pinned = new Person { FirstName = "P" };
+        pinned.AttachToContext(context);
+
+        // Act
+        _ = new Person(context) { FirstName = "R" };
+
+        // Assert
+        Assert.IsType<LifecycleContractViolationException>(callbackException);
+        Assert.NotNull(pinned.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenTwoLifecyclesAttachIntoEachOtherFromCallbacks_ThenNeitherDeadlocks()
+    {
+        // Arrange: the reproduction of the cross-lifecycle gate deadlock. Each thread holds its
+        // own gate inside a callback and reaches for the other's. The contract must reject the
+        // attach before either gate is requested, so both threads finish.
+        var first = CreateContext();
+        var second = CreateContext();
+        var ready = new CountdownEvent(2);
+
+        void Body(IInterceptorSubjectContext own, IInterceptorSubjectContext other)
+        {
+            own.WithService(() => new DelegateLifecycleHandler(_ =>
+            {
+                ready.Signal();
+                ready.Wait(TimeSpan.FromSeconds(5));
+                Record.Exception(() => new Person { FirstName = "X" }.AttachToContext(other));
+            }), _ => false);
+
+            _ = new Person(own) { FirstName = "R" };
+        }
+
+        // Act
+        var a = new Thread(() => Body(first, second)) { IsBackground = true };
+        var b = new Thread(() => Body(second, first)) { IsBackground = true };
+        a.Start();
+        b.Start();
+
+        // Assert: a bounded join, so a regression fails the test instead of hanging the suite.
+        Assert.True(a.Join(TimeSpan.FromSeconds(10)), "thread a did not finish, the gates deadlocked");
+        Assert.True(b.Join(TimeSpan.FromSeconds(10)), "thread b did not finish, the gates deadlocked");
+    }
 }

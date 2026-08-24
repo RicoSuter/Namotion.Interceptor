@@ -256,6 +256,8 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// <inheritdoc />
     public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
     {
+        CallbackReentrancyGuard.ThrowIfInsideCallback();
+
         if (!ReferenceEquals(context, _context))
         {
             throw new InvalidOperationException("The subject cannot be attached through the lifecycle of another context.");
@@ -292,6 +294,8 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// <inheritdoc />
     public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
+        CallbackReentrancyGuard.ThrowIfInsideCallback();
+
         if (!ReferenceEquals(context, _context))
         {
             throw new InvalidOperationException("The subject cannot be detached through the lifecycle of another context.");
