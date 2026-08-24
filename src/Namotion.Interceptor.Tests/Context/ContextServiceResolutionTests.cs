@@ -40,6 +40,24 @@ public class ContextServiceResolutionTests
     }
     
     [Fact]
+    public void WhenTheSameInstanceIsRegisteredTwice_ThenItResolvesOnce()
+    {
+        // Arrange: registration keeps insertion order and tolerates duplicate references, so the
+        // dedup lives in service resolution, keeping the first occurrence.
+        var context = InterceptorSubjectContext.Create();
+        var service = new DuplicateOrderedService();
+
+        context.AddService(service);
+        context.AddService(service);
+
+        // Act
+        var services = context.GetServices<IOrderedTestService>();
+
+        // Assert
+        Assert.Same(service, Assert.Single(services));
+    }
+
+    [Fact]
     public void WhenTwoInstancesOfSameServiceTypeAreRegistered_ThenOrderingAttributeBindsAgainstAllInstances()
     {
         // Arrange: the first duplicate enumerates before the constrainer, so last-index binding

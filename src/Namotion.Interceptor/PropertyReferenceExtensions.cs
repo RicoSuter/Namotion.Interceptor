@@ -25,7 +25,10 @@ public static class PropertyReferenceExtensions
     internal static void SetPropertyValueWithInterception(this PropertyReference property, object? newValue,
         object? currentValue, Action<IInterceptorSubject, object?> writeValue, long rawTimestamp)
     {
-        var executor = property.Subject.Executor as InterceptorExecutor;
-        executor?.SetPropertyValue(property.Name, newValue, currentValue, writeValue, rawTimestamp);
+        // Hard cast: IInterceptorExecutor is not independently implementable (the chain terminals
+        // and the commit revision live on the built-in executor), and silently skipping this write
+        // would drop a derived-property cascade.
+        var executor = (InterceptorExecutor)property.Subject.Executor;
+        executor.SetPropertyValue(property.Name, newValue, currentValue, writeValue, rawTimestamp);
     }
 }

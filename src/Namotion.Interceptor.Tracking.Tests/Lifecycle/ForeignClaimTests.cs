@@ -78,8 +78,10 @@ public class ForeignClaimTests
         var candidate = new Person { FirstName = "C" };
         candidate.Father = foreign;
 
-        // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => parent.Father = candidate);
+        // Act & Assert: the message is pinned because several InvalidOperationExceptions can fire
+        // on this path and only this one means the cross-context discovery rejection.
+        var exception = Assert.Throws<InvalidOperationException>(() => parent.Father = candidate);
+        Assert.Contains("owned by a different context", exception.Message);
         Assert.Null(parent.Father);
         Assert.Null(candidate.TryGetContext());
         Assert.Equal(0, candidate.GetReferenceCount());

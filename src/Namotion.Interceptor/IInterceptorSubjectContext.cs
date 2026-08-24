@@ -6,6 +6,12 @@ namespace Namotion.Interceptor;
 /// The central context for interceptor subjects: service registration and retrieval. Execution of
 /// intercepted operations is an internal concern of the implementation.
 /// </summary>
+/// <remarks>
+/// Not independently implementable: interceptor chains compile inside the built-in
+/// implementation, so contexts come from <see cref="InterceptorSubjectContext.Create"/> and
+/// attaching a foreign implementation of this interface is rejected by the executor. The
+/// interface exists as the consumer-facing surface, not as an extension point.
+/// </remarks>
 public interface IInterceptorSubjectContext
 {
     /// <summary>

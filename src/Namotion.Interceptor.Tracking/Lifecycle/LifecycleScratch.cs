@@ -4,9 +4,9 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
 /// Thread-static scratch pools for the lifecycle's traversals. Every graph operation needs a handful
-/// of short-lived lists, sets and stacks, and reentrancy (an attach descent re-entered through a
-/// callback composing a child's context) means several can be live on one thread at once, so they
-/// are pooled rather than held as fields.
+/// of short-lived lists, sets and stacks, and reentrancy (a release descent re-entered from a
+/// removal callback, or an admission from a lifecycle callback) means several can be live on one
+/// thread at once, so they are pooled rather than held as fields.
 ///
 /// The pools are unbounded and never trimmed, so a thread retains buffers sized to the largest
 /// graph operation it ever performed. Occurrence and index buffers are bounded by the widest single

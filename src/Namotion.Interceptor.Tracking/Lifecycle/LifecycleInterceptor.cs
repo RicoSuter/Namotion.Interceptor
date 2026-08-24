@@ -39,8 +39,8 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     // singleton contract, and the outermost lock of the structural write order (see the executor's
     // _attachmentLock note for the full order). Reentrancy is required: the structural write
     // protocol enters the gate in Core (through EnterStructuralWriteGate, before the chain is
-    // resolved) and this interceptor enters it again from inside the chain, and an attach descent
-    // re-enters it through the handler slot below composing a child's context mid-callback.
+    // resolved) and this interceptor enters it again from inside the chain, and a same-lifecycle
+    // callback re-enters it through TryAddProperties (the dynamic-property-initializer case).
     private readonly object _gate = new();
 
     /// <summary>

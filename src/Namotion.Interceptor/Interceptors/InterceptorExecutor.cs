@@ -60,7 +60,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     // Interlocked.Read: netstandard2.0 also targets 32-bit runtimes, where a plain long load can
     // tear.
     private readonly object _attachmentLock = new();
-    private volatile IInterceptorSubjectContext? _attachedContext;
+    private volatile InterceptorSubjectContext? _attachedContext;
     private volatile SubjectAnchorKind _anchor;
     private long _attachmentRevision;
 
@@ -83,6 +83,18 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 $"Cannot apply the anchor '{anchor}' without an attached context.");
         }
 
+        // Rejected loudly rather than attached uselessly: interceptor chains compile inside
+        // InterceptorSubjectContext, so a foreign implementation of the interface would attach,
+        // report itself through TryGetContext(), and intercept nothing.
+        if (context is not (null or InterceptorSubjectContext))
+        {
+            throw new InvalidOperationException(
+                $"The context of type '{context.GetType().FullName}' is not a context created by " +
+                "InterceptorSubjectContext.Create(). IInterceptorSubjectContext cannot be implemented " +
+                "independently: interceptor chains compile inside the built-in implementation, so a " +
+                "foreign context would attach without any interception.");
+        }
+
         lock (_attachmentLock)
         {
             if (_attachmentRevision != expectedRevision)
@@ -98,7 +110,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             }
 
             // Fields first, revision last; see the publication ordering note on the fields above.
-            _attachedContext = context;
+            _attachedContext = (InterceptorSubjectContext?)context;
             _anchor = anchor;
             currentRevision = _attachmentRevision + 1;
             Interlocked.Exchange(ref _attachmentRevision, currentRevision);
@@ -144,11 +156,10 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     }
 
     /// <summary>
-    /// The chains an executor runs when its subject's attached context cannot compile one: the
-    /// subject is unattached, or the attached context is a hand-rolled
-    /// <see cref="IInterceptorSubjectContext"/> implementation, which has no chain machinery.
-    /// Nothing intercepts in either case, so these are the zero-interceptor chains: a plain read,
-    /// and the terminal write with its commit bookkeeping.
+    /// The chain an unattached subject's scalar write runs: nothing intercepts, so this is the
+    /// zero-interceptor chain, the terminal write with its commit bookkeeping. Reads and method
+    /// invocations need no counterpart because their zero-interceptor chains are the plain
+    /// operations.
     /// </summary>
     private static class UninterceptedChain<TProperty>
     {
@@ -159,7 +170,8 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
     {
-        if (_attachedContext is not InterceptorSubjectContext attachedContext)
+        var attachedContext = _attachedContext;
+        if (attachedContext is null)
         {
             // The zero-interceptor read chain is the plain read, no terminal lock; see
             // ReadInterceptorFactory.
@@ -179,13 +191,14 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             currentValue,
             newValue);
 
-        if (_attachedContext is InterceptorSubjectContext attachedContext)
+        var attachedContext = _attachedContext;
+        if (attachedContext is null)
         {
-            attachedContext.ExecuteInterceptedWrite(ref context, writeValue);
+            UninterceptedChain<TProperty>.Write(ref context, writeValue);
         }
         else
         {
-            UninterceptedChain<TProperty>.Write(ref context, writeValue);
+            attachedContext.ExecuteInterceptedWrite(ref context, writeValue);
         }
 
         return context.IsWritten;
@@ -265,15 +278,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             currentValue,
             newValue);
 
-        if (attachedContext is InterceptorSubjectContext contextImplementation)
-        {
-            contextImplementation.ExecuteInterceptedWrite(ref context, writeValue);
-        }
-        else
-        {
-            UninterceptedChain<TProperty>.Write(ref context, writeValue);
-        }
-
+        attachedContext.ExecuteInterceptedWrite(ref context, writeValue);
         return context.IsWritten;
     }
 
@@ -295,13 +300,14 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             newValue,
             rawTimestamp);
 
-        if (_attachedContext is InterceptorSubjectContext attachedContext)
+        var attachedContext = _attachedContext;
+        if (attachedContext is null)
         {
-            attachedContext.ExecuteInterceptedWrite(ref context, writeValue);
+            UninterceptedChain<TProperty>.Write(ref context, writeValue);
         }
         else
         {
-            UninterceptedChain<TProperty>.Write(ref context, writeValue);
+            attachedContext.ExecuteInterceptedWrite(ref context, writeValue);
         }
 
         return context.IsWritten;
@@ -346,7 +352,8 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public object? InvokeMethod(string methodName, object?[] parameters, Func<IInterceptorSubject, object?[], object?> invokeMethod)
     {
-        if (_attachedContext is not InterceptorSubjectContext attachedContext)
+        var attachedContext = _attachedContext;
+        if (attachedContext is null)
         {
             // The zero-interceptor invoke chain is the direct invocation; see MethodInvocationFactory.
             return invokeMethod(_subject, parameters);

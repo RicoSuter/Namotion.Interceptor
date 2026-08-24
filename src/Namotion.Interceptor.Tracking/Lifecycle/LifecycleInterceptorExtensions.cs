@@ -22,12 +22,17 @@ public static class LifecycleInterceptorExtensions
         return subject.TryGetContext()?.TryGetLifecycleInterceptor()?.GetReferenceCount(subject) ?? 0;
     }
 
+    /// <summary>
+    /// Runs the property attach callbacks for one property. The subject must be attached: every
+    /// caller runs inside an attach descent or a property admission, where the attachment is
+    /// already established.
+    /// </summary>
     public static void AttachSubjectProperty(this IInterceptorSubject subject, PropertyReference property)
     {
         using var scope = CallbackReentrancyGuard.EnterPropertyCallbackScope();
         var change = new SubjectPropertyLifecycleChange(subject, property);
 
-        foreach (var handler in subject.TryGetContext()?.GetServices<IPropertyLifecycleHandler>() ?? [])
+        foreach (var handler in subject.GetContext().GetServices<IPropertyLifecycleHandler>())
         {
             handler.AttachProperty(change);
         }
@@ -38,12 +43,16 @@ public static class LifecycleInterceptorExtensions
         }
     }
 
+    /// <summary>
+    /// Runs the property detach callbacks for one property. The subject must be attached: the
+    /// release descent runs these before the claim is released.
+    /// </summary>
     public static void DetachSubjectProperty(this IInterceptorSubject subject, PropertyReference property)
     {
         using var scope = CallbackReentrancyGuard.EnterPropertyCallbackScope();
         var change = new SubjectPropertyLifecycleChange(subject, property);
 
-        foreach (var handler in subject.TryGetContext()?.GetServices<IPropertyLifecycleHandler>() ?? [])
+        foreach (var handler in subject.GetContext().GetServices<IPropertyLifecycleHandler>())
         {
             handler.DetachProperty(change);
         }

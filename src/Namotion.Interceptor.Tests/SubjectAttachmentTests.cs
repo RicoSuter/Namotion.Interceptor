@@ -355,6 +355,65 @@ public class SubjectAttachmentTests
     }
 
     [Fact]
+    public void WhenAttachingAForeignContextImplementation_ThenTheAttachThrowsBeforeAnyStateChange()
+    {
+        // Arrange: interceptor chains compile inside InterceptorSubjectContext, so a hand-rolled
+        // implementation of the interface would attach, report itself through TryGetContext(),
+        // and intercept nothing. The raw seam rejects it loudly instead.
+        var subject = new Car();
+        var executor = GetExecutor(subject);
+        var foreignContext = new ForeignContext();
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => subject.AttachToContext(foreignContext));
+        Assert.Contains("InterceptorSubjectContext.Create()", exception.Message);
+        Assert.Null(subject.TryGetContext());
+        Assert.Equal(0, executor.AttachmentRevision);
+    }
+
+    [Fact]
+    public void WhenAttachingOnALifecycleFreeContext_ThenOnlyTheRootAttachesAndDetachReleasesIt()
+    {
+        // Arrange: without a lifecycle the attach is root-only. The context's services become
+        // resolvable from the root, but no descent runs, so a referenced child stays unattached.
+        var context = InterceptorSubjectContext.Create();
+        var root = new StructuralHolder { Child = new StructuralHolder() };
+        var subject = (IInterceptorSubject)root;
+
+        // Act
+        subject.AttachToContext(context);
+
+        // Assert
+        Assert.Same(context, subject.TryGetContext());
+        Assert.Equal(SubjectAnchorKind.Explicit, subject.Executor.Anchor);
+        Assert.Null(((IInterceptorSubject)root.Child!).TryGetContext());
+
+        // Act: the lifecycle-free detach clears the attachment entirely, because no edge model
+        // exists that could still hold the subject.
+        subject.DetachFromContext(context);
+
+        // Assert
+        Assert.Null(subject.TryGetContext());
+        Assert.Equal(SubjectAnchorKind.None, subject.Executor.Anchor);
+    }
+
+    /// <summary>
+    /// A hand-rolled context implementation, which the attach seam must reject; see
+    /// WhenAttachingAForeignContextImplementation_ThenTheAttachThrowsBeforeAnyStateChange.
+    /// </summary>
+    private sealed class ForeignContext : IInterceptorSubjectContext
+    {
+        public void AddService<TService>(TService service) => throw new NotSupportedException();
+
+        public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists) => throw new NotSupportedException();
+
+        public TInterface? TryGetService<TInterface>() => default;
+
+        public System.Collections.Immutable.ImmutableArray<TInterface> GetServices<TInterface>() => [];
+    }
+
+    [Fact]
     public void WhenDetachingAndReattaching_ThenLifecycleRunsAgain()
     {
         // Arrange

@@ -226,9 +226,9 @@ public class StructuralWriteTests
     }
 
     [Fact]
-    public void WhenComposedSubjectTakesAStructuralWrite_ThenItRunsTheChainUnderTheAttachmentMonitor()
+    public void WhenAttachedSubjectTakesAStructuralWrite_ThenItRunsTheChainUnderTheAttachmentMonitor()
     {
-        // Arrange: once a context is composed the write runs the ordinary chain inside the
+        // Arrange: once a context is attached the write runs the ordinary chain inside the
         // attachment monitor, so it consumes a commit revision and stamps write state.
         var holder = new StructuralHolder(InterceptorSubjectContext.Create());
 

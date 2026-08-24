@@ -6,6 +6,11 @@ namespace Namotion.Interceptor.Interceptors;
 /// executor is not a service container; services live on the attached
 /// <see cref="IInterceptorSubjectContext"/>, reachable through <see cref="AttachedContext"/>.
 /// </summary>
+/// <remarks>
+/// Not independently implementable: the chain terminals, the terminal lock and the commit
+/// revision live on <see cref="InterceptorExecutor"/>, and library paths cast to it. Subject
+/// implementations publish one through <see cref="InterceptorExecutor.GetOrCreate"/>.
+/// </remarks>
 public interface IInterceptorExecutor
 {
     /// <summary>

@@ -45,7 +45,7 @@ public Person() { }
 
 public Person(IInterceptorSubjectContext context) : this()
 {
-    ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+    InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAnchorKind.Provisional);
 }
 ```
 

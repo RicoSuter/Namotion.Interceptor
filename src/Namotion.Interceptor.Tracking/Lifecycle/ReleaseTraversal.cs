@@ -44,7 +44,7 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
 
     /// <summary>
     /// Releases a subject that lost its root anchor, together with everything below it that only it
-    /// held. Used by explicit detach and by the transitional forced detach.
+    /// held. Used by explicit detach.
     /// </summary>
     public void ReleaseRoot(IInterceptorSubject subject)
     {

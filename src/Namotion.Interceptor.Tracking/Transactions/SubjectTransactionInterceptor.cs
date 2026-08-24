@@ -137,7 +137,6 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         next(ref context);
     }
 
-
     private sealed class LockReleaser(SemaphoreSlim semaphore) : IDisposable
     {
         private int _disposed;

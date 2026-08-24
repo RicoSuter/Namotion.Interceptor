@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.Tests.Context;
@@ -9,17 +10,18 @@ public class ContextConcurrencyTests
 
     /// <summary>
     /// Registering services publishes a fresh state while attached subjects resolve compiled
-    /// chains from the previous one; neither side may block the other.
+    /// chains from the previous one; neither side may block the other, and once the writes
+    /// settle a write must reach exactly the final interceptor set (quiescent consistency, so a
+    /// chain compiled from a pre-mutation state cannot survive the mutation).
     /// </summary>
     [Theory]
     [InlineData(nameof(IInterceptorSubjectContext.AddService))]
     [InlineData(nameof(IInterceptorSubjectContext.TryAddService))]
-    public async Task WhenContextIsMutatedWhileSubjectIsWritten_ThenNoDeadlockOccurs(string mutation)
+    public async Task WhenContextIsMutatedWhileSubjectIsWritten_ThenNoDeadlockOccursAndTheFinalChainIsComplete(string mutation)
     {
         for (var attempt = 1; attempt <= Attempts; attempt++)
         {
             var subjectContext = InterceptorSubjectContext.Create();
-            subjectContext.AddService(new MarkerService());
 
             var car = new Car(subjectContext);
             using var start = new ManualResetEventSlim(false);
@@ -41,11 +43,11 @@ public class ContextConcurrencyTests
                     switch (mutation)
                     {
                         case nameof(IInterceptorSubjectContext.AddService):
-                            subjectContext.AddService(new MarkerService());
+                            subjectContext.AddService<IWriteInterceptor>(new CountingWriteInterceptor());
                             break;
 
                         case nameof(IInterceptorSubjectContext.TryAddService):
-                            subjectContext.TryAddService(() => new MarkerService(), _ => false);
+                            subjectContext.TryAddService<IWriteInterceptor>(() => new CountingWriteInterceptor(), _ => false);
                             break;
 
                         default:
@@ -54,7 +56,7 @@ public class ContextConcurrencyTests
                 }
             }, TaskCreationOptions.LongRunning);
 
-            // Act & Assert
+            // Act
             start.Set();
             var both = Task.WhenAll(writer, mutator);
             try
@@ -68,6 +70,35 @@ public class ContextConcurrencyTests
                     "on the subject's context blocked each other.",
                     exception);
             }
+
+            // Assert: one settled write runs every registered interceptor exactly once.
+            var interceptors = new List<CountingWriteInterceptor>();
+            foreach (var interceptor in subjectContext.GetServices<IWriteInterceptor>())
+            {
+                interceptors.Add((CountingWriteInterceptor)interceptor);
+            }
+
+            Assert.Equal(Mutations, interceptors.Count);
+
+            var countsBefore = interceptors.ConvertAll(interceptor => interceptor.WriteCount);
+            car.Speed = -1;
+            for (var index = 0; index < interceptors.Count; index++)
+            {
+                Assert.Equal(countsBefore[index] + 1, interceptors[index].WriteCount);
+            }
+        }
+    }
+
+    private sealed class CountingWriteInterceptor : IWriteInterceptor
+    {
+        private int _writeCount;
+
+        internal int WriteCount => Volatile.Read(ref _writeCount);
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            Interlocked.Increment(ref _writeCount);
+            next(ref context);
         }
     }
 
