@@ -79,8 +79,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 Volatile.Write(ref data.IsDerived, true);
                 try
                 {
-                    data.LastKnownValue = EvaluateAndStabilize(data, change.Property, callerHoldsLock: true);
-                    ThrowIfExposesUntrackedSubject(change.Property, data.LastKnownValue);
+                    // Checked before the commit, matching the recalculation path: a value
+                    // exposing an untracked subject must never become LastKnownValue.
+                    var value = EvaluateAndStabilize(data, change.Property, callerHoldsLock: true);
+                    ThrowIfExposesUntrackedSubject(change.Property, value);
+                    data.LastKnownValue = value;
                     change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
                 }
                 catch (Exception exception) when (exception is not LifecycleContractViolationException)

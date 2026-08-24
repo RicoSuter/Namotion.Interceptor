@@ -32,6 +32,8 @@ Rules:
 
 This removes the footgun rather than warning about it. `ActivatorUtilities` selects the constructor with the most parameters it can satisfy, so wherever the context is a registered service, DI now picks the mirrored constructor and the subject attaches by itself. That is precisely the case that broke HomeBlaze.
 
+One carve-out: the mirror drops optional parameter defaults, because the metadata does not capture them. When an optional parameter's type is not registered, `ActivatorUtilities` cannot satisfy the mirror and falls back to the original constructor, and the subject is silently detached again, which is the very failure the mirror exists to prevent. The fix therefore holds only where every constructor parameter is resolvable from the container.
+
 A compile-time diagnostic was considered and rejected as the primary fix: the generator cannot tell whether an author intends to attach explicitly, or never to attach at all, so the diagnostic would fire on correct code. It would be noisy at warning level and ignored at info level, and it would fix nothing.
 
 ### Consequences

@@ -130,7 +130,7 @@ internal static class SubjectMetadataExtractor
         var (needsGeneratedParameterlessConstructor, hasOrWillHaveParameterlessConstructor) =
             DetectConstructorState(allTypeDeclarations);
 
-        var constructors = CollectConstructors(allTypeDeclarations, semanticModel);
+        var constructors = CollectConstructors(allTypeDeclarations, semanticModel, cancellationToken);
 
         return new ExtractionResult(
             new SubjectMetadata(
@@ -847,7 +847,8 @@ internal static class SubjectMetadataExtractor
     /// </summary>
     private static IReadOnlyList<SubjectConstructor> CollectConstructors(
         TypeDeclarationSyntax[] allTypeDeclarations,
-        SemanticModel semanticModel)
+        SemanticModel semanticModel,
+        CancellationToken cancellationToken)
     {
         var constructors = new List<SubjectConstructor>();
 
@@ -859,6 +860,17 @@ internal static class SubjectMetadataExtractor
             {
                 // A static constructor has no accessibility and cannot be chained to.
                 if (constructor.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword)))
+                {
+                    continue;
+                }
+
+                // An obsolete constructor is never mirrored: the mirror's ": this(...)" chain
+                // would reference it from the generated file, raising CS0618 (or CS0619 with
+                // error: true) in code the consumer does not own. Resolved through the semantic
+                // model so an alias, the "Attribute" suffix and qualified spellings are all
+                // caught, not just the literal identifier "Obsolete".
+                if (SymbolExtensions.HasAttribute(
+                        constructor.AttributeLists, KnownTypes.ObsoleteAttribute, declarationModel, cancellationToken))
                 {
                     continue;
                 }
@@ -894,18 +906,41 @@ internal static class SubjectMetadataExtractor
                 return null;
             }
 
-            var fullyQualifiedTypeName = GetFullTypeName(parameter.Type, declarationModel);
-            if (fullyQualifiedTypeName is null)
+            var parameterType = parameter.Type is not null
+                ? declarationModel.GetTypeInfo(parameter.Type).Type
+                : null;
+            if (parameterType is null)
             {
                 // Only reachable with error code, since a constructor parameter cannot omit its
                 // type; dropping the whole constructor beats carrying a wrong signature.
                 return null;
             }
 
-            parameters.Add(new SubjectConstructorParameter(fullyQualifiedTypeName, parameter.Identifier.ValueText));
+            // A pointer or function pointer type compiles only in an unsafe context, which the
+            // generated mirror does not have; "unsafe" sits on the constructor, so the modifier
+            // check above never sees it. Arrays are unwrapped because int*[] carries the same
+            // requirement.
+            if (ContainsPointerType(parameterType))
+            {
+                return null;
+            }
+
+            parameters.Add(new SubjectConstructorParameter(
+                parameterType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                parameter.Identifier.ValueText));
         }
 
         return parameters;
+    }
+
+    private static bool ContainsPointerType(ITypeSymbol type)
+    {
+        while (type is IArrayTypeSymbol array)
+        {
+            type = array.ElementType;
+        }
+
+        return type.TypeKind is TypeKind.Pointer or TypeKind.FunctionPointer;
     }
 
     private static string GetAccessModifier(SyntaxTokenList modifiers)

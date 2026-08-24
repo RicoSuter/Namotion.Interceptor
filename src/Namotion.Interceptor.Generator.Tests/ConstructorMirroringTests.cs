@@ -225,4 +225,113 @@ public class ConstructorMirroringTests
         Assert.NotNull(serviceType);
         Assert.NotNull(serviceType.GetConstructor([typeof(string), typeof(IInterceptorSubjectContext)]));
     }
+
+    [Fact]
+    public void WhenAConstructorIsObsolete_ThenNoMirrorIsEmitted()
+    {
+        // Arrange: a mirror would chain ": this(x)", which references the obsolete constructor
+        // from the generated file and raises CS0618 there, an error in any consumer build with
+        // TreatWarningsAsErrors, in code the consumer does not own.
+        const string source = """
+            using System;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class Service
+                {
+                    [Obsolete("use another constructor")]
+                    public Service(int x)
+                    {
+                    }
+
+                    public partial string Name { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunForExecution(source);
+
+        // Assert
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+
+        var serviceType = result.LoadAssembly().GetType("Repro.Service");
+        Assert.NotNull(serviceType);
+        Assert.Null(serviceType.GetConstructor([typeof(int), typeof(IInterceptorSubjectContext)]));
+    }
+
+    [Fact]
+    public void WhenAConstructorIsObsoleteAsError_ThenNoMirrorIsEmitted()
+    {
+        // Arrange: with error: true the chained reference is CS0619, a hard error in every build.
+        // The fully qualified spelling proves the detection resolves the attribute symbol rather
+        // than matching the written identifier.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class Service
+                {
+                    [global::System.ObsoleteAttribute("gone", error: true)]
+                    public Service(int x)
+                    {
+                    }
+
+                    public partial string Name { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunForExecution(source);
+
+        // Assert
+        Assert.Empty(result.CompilationErrors);
+
+        var serviceType = result.LoadAssembly().GetType("Repro.Service");
+        Assert.NotNull(serviceType);
+        Assert.Null(serviceType.GetConstructor([typeof(int), typeof(IInterceptorSubjectContext)]));
+    }
+
+    [Fact]
+    public void WhenAConstructorHasAPointerParameter_ThenNoMirrorIsEmitted()
+    {
+        // Arrange: "unsafe" sits on the constructor rather than the parameter, so the parameter
+        // modifier filter does not catch it, and a mirror would re-state the pointer type without
+        // an unsafe context (CS0214 in the generated file).
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class Service
+                {
+                    public unsafe Service(int* p)
+                    {
+                    }
+
+                    public partial string Name { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunForExecution(source, allowUnsafe: true);
+
+        // Assert
+        Assert.Empty(result.CompilationErrors);
+
+        var serviceType = result.LoadAssembly().GetType("Repro.Service");
+        Assert.NotNull(serviceType);
+        Assert.Single(serviceType.GetConstructors(BindingFlags.Instance | BindingFlags.Public));
+    }
 }

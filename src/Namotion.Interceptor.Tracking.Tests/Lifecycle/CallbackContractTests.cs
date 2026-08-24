@@ -201,6 +201,24 @@ public class CallbackContractTests
     }
 
     [Fact]
+    public void WhenTheAttachEvaluationExposesAnUnattachedSubject_ThenNoValueIsCommitted()
+    {
+        // Arrange
+        var context = CreateDerivedContext();
+        var subject = new LazyDerivedSubject();
+
+        // Act
+        var exception = Record.Exception(() => subject.AttachToContext(context));
+
+        // Assert: the rejected value must never become LastKnownValue, matching the
+        // recalculation path, which checks before committing.
+        Assert.IsType<LifecycleContractViolationException>(exception);
+        var data = new PropertyReference(subject, nameof(LazyDerivedSubject.Current)).TryGetDerivedPropertyData();
+        Assert.NotNull(data);
+        Assert.Null(data.LastKnownValue);
+    }
+
+    [Fact]
     public void WhenADerivedPropertyProjectsAnAttachedSubject_ThenItDoesNotThrow()
     {
         // Arrange
