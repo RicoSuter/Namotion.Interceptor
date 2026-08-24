@@ -111,3 +111,44 @@ What changed, so you do not re-derive it: four stale comment or documentation si
 Two consequences worth knowing. Extracting the notifier moved the events, and two connector tests reach an event's compiler-generated backing field by reflection to simulate a detach, so a test helper is pinning that field's location; it now hops through the notifier first. And that extraction is why this commit is production-positive (+113) rather than net-negative: its purpose is structure, not removal.
 
 **The parent-order question is answered: order is not meaningful, deliberately.** `GetParents()` enumerates the inline slot then the overflow list, and removal promotes an overflow entry into the inline slot, so the sequence follows add and remove history rather than the property's occurrence order. The previous implementation returned a `HashSet`, so no consumer can have depended on an order either. The occurrence index carried in each entry is where the meaning lives, and the oracle compares those. Recorded as deliberate at the sort, in the `GetParents()` XML remarks, and in `docs/tracking.md`. If order ever must become meaningful, the storage has to change first.
+
+## Breaking changes, consolidated for the pull request
+
+Assembled from the stage commit messages; the PR description draws from this list rather than re-deriving it.
+
+**Removed APIs and capabilities**
+
+1. Subtree-scoped subject-local services are removed. A service registered on a context applies to every subject attached to that context; there is no per-subject or subtree scoping. If subtree scoping returns, it is through the separately designed mechanism listed under deferred extensions.
+2. `IInterceptorSubject.Context` and `IInterceptorSubject.SyncRoot` are removed. The interface is `Executor`, `Data`, `Properties`, `AddProperties`. The executor's terminal lock is internal.
+3. `AddFallbackContext` and `RemoveFallbackContext` are removed, along with the whole fallback graph: delegation resolution, cycle detection and cross-context invalidation.
+4. `WithParents()` and `WithContextInheritance()` are removed with no obsolete aliases. Parent tracking and context inheritance are intrinsic to `WithLifecycle()`, which `WithFullPropertyTracking()` and `WithRegistry()` both install.
+5. `ContextInheritanceHandler` and `ParentTrackingHandler` are deleted. `[RunsBefore(typeof(ContextInheritanceHandler))]` and the equivalent `RunsAfter` migrate to `typeof(LifecycleInterceptor)`, which implements `ILifecycleHandler` at the former descent slot. Both positions keep their measured orders.
+
+**Sealed and non-implementable surface**
+
+6. `InterceptorSubjectContext` and `LifecycleInterceptor` are sealed. `IInterceptorSubjectContext` and `IInterceptorExecutor` are not independently implementable: attaching a subject to a foreign context implementation throws with a message naming the constraint, rather than silently attaching with zero interception.
+7. `ILifecycleInterceptor` gained `EnterStructuralWriteGate`/`ExitStructuralWriteGate` and `TryAddProperties`, and its transitional composition hooks are gone; third-party implementations must update. The lifecycle gate is exposed as an opaque enter/exit pair rather than a lockable object.
+
+**Behavioural changes**
+
+8. Detach callback order is top-down for handlers behind the old descent (was bottom-up). Attach order is unchanged. Master had two detach orders; one traversal remains, so stop order is now the reverse of start order.
+9. A subject constructed with a context is a provisional root: it stops being a root once it is attached into a graph that is already rooted somewhere else, and from then on it follows that graph. Anchored roots legitimately sit at reference count zero; `ReferenceCount` is never an ownership predicate.
+10. Duplicate occurrences count: `[a, a, b]` is two edges for `a`, `GetReferenceCount()` answers 2, and removing one occurrence does not detach the subject.
+11. Orphaned cycles are released. Master leaked a cycle whose last external reference was removed; the reachability model releases it deterministically.
+12. `GetParents()` and `GetReferenceCount()` answer from the lifecycle on any `WithLifecycle()` context and return empty for unattached subjects. During a final-release detach callback, `GetParents()` on the releasing subject returns empty.
+13. Composing two contexts that each configure Tracking throws at subject construction. Note `WithSourceMonitoring()` reaches a lifecycle through the former `WithParents()` path.
+14. A second instance of any singleton-contract service on one context throws, including the same instance re-registered and a subclass beside the default. This covers the lifecycle, `ISubjectRegistry`, `ISubjectIdRegistry`, `ITransactionWriter`, `SourceMonitor`, `SubjectTransactionInterceptor`, `PropertyChangeInterceptor`, `HostedServiceHandler`, `PropertyValueEqualityCheckHandler`, `DerivedPropertyChangeHandler`, `ReadPropertyRecorder`, `ValidationInterceptor` and `DataAnnotationsValidator`. A custom `ITransactionWriter` or `ISubjectRegistry` alongside the corresponding configuration extension now throws where it was previously silently skipped or doubled.
+15. Duplicate-name `AddProperties` throws atomically before any getter runs (was silent last-wins). Derived and non-intercepted properties never establish ownership edges. `AddProperties` on another context's subject from inside a lifecycle callback throws before enumeration. Registry `AddProperty` with an existing name and identical shape is an idempotent no-op that runs no property attach callback; a different shape throws.
+16. Structural writes, explicit attach or detach, and cross-context `AddProperties` from inside a lifecycle callback are contract violations that throw in every build configuration. Property lifecycle callbacks (`AttachProperty`/`DetachProperty`) are a documented exemption.
+17. The generator base contract gained `Executor` and `SetStructuralPropertyValue`, so every base assembly built by the released generator fails the contract check and takes the NI0012 root-mode fallback until rebuilt.
+18. Adding a dynamic property no longer emits an initial property change event, and Registry's synthetic null-to-value initial write is gone.
+19. MQTT connector ownership checks use Registry membership instead of `ReferenceCount <= 0`, so anchored roots at zero references stay cached, and MQTT caches connector root property mappings for the first time.
+
+**Migration hazard**
+
+20. A consumer whose configuration reads `.WithLifecycle().WithService(handler).WithContextInheritance()` must migrate to `.WithService(handler).WithLifecycle()`. Deleting the trailing call instead silently moves the handler from ahead of the descent to behind it.
+
+**Pre-existing defects fixed by this work**
+
+- `ContextInheritanceHandler` composed the parent context on a subject's first attach but decomposed the parent of the last detach, so for a subject with two or more distinct parents the composition survived the detach: a fully detached subject kept resolving the graph's lifecycle handlers and write pipeline, and the stale fallback could later close a delegation cycle that made every read and write throw, unrecoverable through the object model. Order-dependent; reproduces on the v0.9.1 tag; on v0.8.0 and earlier, which have no cycle detection, the same shape dies on an uncatchable StackOverflowException.
+- `ISubjectRegistry` carried no singleton contract (only the concrete `SubjectRegistry` did), so a custom registry implementation plus `WithRegistry()` silently installed a second registry that broke resolution at first use.
