@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
@@ -30,8 +31,9 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
     // Safety limit for stabilization loops. Prevents infinite loops from getters
     // with side effects that mutate the tracked state (a user error but shouldn't hang).
-    // In correct code, the loop runs 1-2 iterations max.
-    private const int MaxStabilizationIterations = 100;
+    // In correct code, the loop runs 1-2 iterations max. Internal so tests can prove the
+    // untracked-subject retry actually reaches this bound before it throws.
+    internal const int MaxStabilizationIterations = 100;
 
     [ThreadStatic]
     private static DerivedPropertyRecorder? _recorder;
@@ -242,6 +244,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // Crucially, IsRecalculating stays true during NotifyDerivedPropertyChanged. This
         // serializes notification delivery with recalculation, preventing a stale notification
         // from being delivered after a newer one (TOCTOU race between guard checks and delivery).
+        var untrackedValueRetries = 0;
         try
         {
             for (var outerIteration = 0; outerIteration < MaxStabilizationIterations; outerIteration++)
@@ -282,14 +285,24 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                             continue;
                         }
 
-                        // Behind the staleness gates on purpose: the evaluation ran outside the
-                        // lock, so a concurrent structural write can detach a projected subject
-                        // before this point. Such a value is discarded above and re-evaluated;
-                        // checking it next to the evaluation would instead throw an unabsorbed
-                        // exception out of an unrelated write on another thread. Before the
-                        // commit, so a violating value never becomes LastKnownValue and never
-                        // produces a change notification.
-                        ThrowIfExposesUntrackedSubject(derivedProperty, newValue);
+                        // Behind the staleness gates and before the commit, so an exposing value
+                        // never becomes LastKnownValue and never produces a change notification.
+                        // The evaluation ran outside the lock, so a concurrent structural write
+                        // can detach a projected subject after this thread evaluated but before
+                        // its cascade marks this data stale: that value is a stale read produced
+                        // by correct code, not a violation, so it is re-evaluated like any stale
+                        // result instead of thrown out of an innocent write on this thread.
+                        // Only a value still exposing an unattached subject at the retry bound
+                        // is a genuine orphan that never converges, and that one throws.
+                        if (ExposesUntrackedSubject(derivedProperty, newValue))
+                        {
+                            if (++untrackedValueRetries >= MaxStabilizationIterations)
+                            {
+                                ThrowUntrackedSubject(derivedProperty);
+                            }
+
+                            continue;
+                        }
 
                         data.LastKnownValue = newValue;
                         sequence = ++data.RecalculationSequence;
@@ -391,19 +404,35 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// <summary>
     /// Rejects a derived value that exposes a subject the graph does not own. Derived properties
     /// establish no ownership edges, so such a subject is never attached, never registered and
-    /// never released: silent before this check existed.
+    /// never released: silent before this check existed. Only the attach path throws on first
+    /// detection; it runs under the topology gate, where no concurrent detach can interleave.
     /// </summary>
     private static void ThrowIfExposesUntrackedSubject(PropertyReference property, object? value)
     {
+        if (ExposesUntrackedSubject(property, value))
+        {
+            ThrowUntrackedSubject(property);
+        }
+    }
+
+    private static bool ExposesUntrackedSubject(PropertyReference property, object? value)
+    {
         if (value is null || !property.Metadata.Type.CanContainSubjects())
         {
-            return;
+            return false;
+        }
+
+        // An object-declared derived property cannot be excluded by its declared type, so decide
+        // on what actually came back: a string or a boxed scalar exits before renting anything.
+        if (!value.GetType().CanContainSubjects())
+        {
+            return false;
         }
 
         var context = property.Subject.TryGetContext();
         if (context is null)
         {
-            return;
+            return false;
         }
 
         var occurrences = LifecycleScratch.RentOccurrenceList();
@@ -412,22 +441,28 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             StructuralValueScanner.CollectOccurrences(property.Metadata.Type, value, occurrences);
             foreach (var occurrence in occurrences)
             {
-                if (ReferenceEquals(occurrence.Subject.TryGetContext(), context))
+                if (!ReferenceEquals(occurrence.Subject.TryGetContext(), context))
                 {
-                    continue;
+                    return true;
                 }
-
-                throw new LifecycleContractViolationException(
-                    $"The derived property '{property.Name}' returned a subject that is not " +
-                    "attached to this context. Derived properties establish no ownership edges, " +
-                    "so that subject is never tracked, registered or released. Assign it to a " +
-                    "stored (non-derived) property instead, or attach it explicitly.");
             }
+
+            return false;
         }
         finally
         {
             LifecycleScratch.Return(occurrences);
         }
+    }
+
+    [DoesNotReturn]
+    private static void ThrowUntrackedSubject(PropertyReference property)
+    {
+        throw new LifecycleContractViolationException(
+            $"The derived property '{property.Name}' returned a subject that is not " +
+            "attached to this context. Derived properties establish no ownership edges, " +
+            "so that subject is never tracked, registered or released. Assign it to a " +
+            "stored (non-derived) property instead, or attach it explicitly.");
     }
 
     /// <summary>

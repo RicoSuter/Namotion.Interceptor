@@ -54,7 +54,7 @@ writes a private field, so no interceptor sees it and no guard fires, and becaus
 
 Scope and limits:
 
-- Cost is confined to derived properties whose declared type can contain subjects. The generator already classifies fail-closed, so scalar derived properties pay nothing.
+- Cost is confined to derived properties whose declared type can contain subjects. The generator already classifies fail-closed, so scalar derived properties pay nothing. An `object`-declared derived property cannot be excluded by its declared type, so the check additionally short-circuits on the runtime type of the returned value: a string or boxed scalar result exits before any scan.
 - The legitimate projection case still passes: a derived property returning a subject already attached through a stored property is untouched.
 - The check is best-effort by construction. `[Derived]` reads are not intercepted, so a getter the library never evaluates is never checked. Attach-time evaluation catches the lazy-initialisation shape, which is the one that matters.
 

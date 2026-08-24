@@ -12,9 +12,18 @@ namespace Namotion.Interceptor.Tracking.Tests.Models;
 [InterceptorSubject]
 public partial class SideEffectPerson
 {
+    private int _successfulCompanionWrites;
+
     public partial string? Name { get; set; }
 
     public partial Person? Companion { get; set; }
+
+    /// <summary>
+    /// Counts Companion writes that actually landed. The absorption below eats every write that
+    /// runs inside a callback scope, so without this count the deadlock regression test cannot
+    /// tell a live recalculation path from one whose writes are all silently absorbed.
+    /// </summary>
+    public int SuccessfulCompanionWriteCount => Volatile.Read(ref _successfulCompanionWrites);
 
     [Derived]
     public string Greeting => ComputeGreeting();
@@ -34,6 +43,7 @@ public partial class SideEffectPerson
         try
         {
             Companion = null;
+            Interlocked.Increment(ref _successfulCompanionWrites);
         }
         catch (LifecycleContractViolationException)
         {

@@ -607,6 +607,25 @@ public class GraphOwnershipTests
     }
 
     [Fact]
+    public void WhenTheLaggingEdgeIsNotTheFirstSlot_ThenSamePropertyFallbackStillDrainsIt()
+    {
+        // Arrange: the lagging edge lives in the additional-edges list because another property
+        // occupies the first slot, so the fallback must find it there.
+        var parent = new Person { FirstName = "P" };
+        var property = new PropertyReference(parent, nameof(Person.Children));
+        var ownership = new SubjectOwnership();
+        ownership.AddIncoming(new PropertyReference(parent, nameof(Person.Father)), null);
+        ownership.AddIncoming(property, 2);
+
+        // Act: the committed value holds the subject at index 0, the stored edge still says 2.
+        var removed = ownership.RemoveIncoming(property, 0);
+
+        // Assert
+        Assert.True(removed);
+        Assert.Equal(1, ownership.IncomingCount);
+    }
+
+    [Fact]
     public void WhenLifecycleCallbackWritesScalarProperty_ThenTheWriteIsAllowed()
     {
         // Arrange: scalar writes from callbacks stay supported; only structural writes are the

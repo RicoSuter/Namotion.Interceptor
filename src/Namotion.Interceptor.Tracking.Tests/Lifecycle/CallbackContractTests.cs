@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -212,5 +213,72 @@ public class CallbackContractTests
         // Assert
         Assert.NotNull(subject.FirstChild);
         Assert.NotNull(subject.FirstChild!.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenAnObjectDeclaredDerivedPropertyReturnsAString_ThenItDoesNotThrow()
+    {
+        // Arrange: the declared type object cannot exclude the property from the untracked-subject
+        // check, so the runtime type of the returned value must.
+        var context = CreateDerivedContext();
+
+        // Act
+        var subject = new ObjectDerivedStringSubject(context);
+        subject.Name = "world";
+
+        // Assert
+        Assert.Equal("Hello, world", subject.Value);
+    }
+
+    [Fact]
+    public void WhenAnObjectDeclaredDerivedPropertyExposesAnUnattachedSubject_ThenItThrows()
+    {
+        // Arrange: the runtime-type fast path must stay fail-closed for a real subject hiding
+        // behind an object declaration.
+        var context = CreateDerivedContext();
+
+        // Act & Assert
+        var exception = Record.Exception(() => new ObjectDerivedLazySubject(context));
+
+        Assert.IsType<LifecycleContractViolationException>(exception);
+    }
+
+    [Fact]
+    public void WhenADerivedValueExposesAnUnattachedSubjectTransiently_ThenTheRecalculationRetriesAndConverges()
+    {
+        // Arrange: derived evaluation runs outside lock(data), so a concurrent structural write
+        // can detach a projected subject after evaluation but before its cascade marks the data
+        // stale. The one-shot flag reproduces that window deterministically: one evaluation
+        // returns an unattached subject, the re-evaluation is clean.
+        var context = CreateDerivedContext();
+        var subject = new TransientOrphanDerivedSubject(context);
+        subject.ReturnUnattachedSubjectOnce = true;
+
+        // Act: the triggering write is innocent and must not observe a spurious throw.
+        subject.Name = "x";
+
+        // Assert
+        Assert.Null(subject.Current);
+    }
+
+    [Fact]
+    public void WhenADerivedValueKeepsExposingAnUnattachedSubject_ThenTheRecalculationThrowsAfterTheRetryBound()
+    {
+        // Arrange: attach passes because the getter projects nothing yet; the projection is then
+        // cached in a plain field, so clearing the stored edge turns every re-evaluation into the
+        // same genuine orphan that no retry converges away.
+        var context = CreateDerivedContext();
+        var subject = new CachingOrphanDerivedSubject(context);
+        subject.Stored = new Person { FirstName = "C" };
+        var evaluationsBeforeDetach = subject.EvaluationCount;
+
+        // Act
+        var exception = Record.Exception(() => subject.Stored = null);
+
+        // Assert: the throw must come out of the bounded retry loop, not the first detection.
+        Assert.IsType<LifecycleContractViolationException>(exception);
+        Assert.True(
+            subject.EvaluationCount - evaluationsBeforeDetach >= DerivedPropertyChangeHandler.MaxStabilizationIterations,
+            "the recalculation must re-evaluate up to the retry bound before declaring a genuine orphan");
     }
 }

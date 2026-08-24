@@ -730,9 +730,10 @@ The same now-false exemption claim lives in code comments, not only in the docs.
 - `src/Namotion.Interceptor.Tracking/Lifecycle/CallbackReentrancyGuard.cs:17-25`, class summary and remarks, "are exempt, deliberately ... remain load-bearing"
 - `src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleInterceptor.cs:180-184`, "they are exempt from the structural write contract"
 - `src/Namotion.Interceptor.Tracking/Lifecycle/SubjectOwnership.cs:92-101`, which justifies the kept `RemoveIncoming` fallback entirely by the exemption and must be rewritten to the stored-index-lag justification
+- `src/Namotion.Interceptor.Tracking/Lifecycle/StructuralReconciler.cs:89`, the released-parent early exit rationale, "entered from an exempt attach or detach property callback"
 - `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/AddPropertiesLifecycleTests.cs:298`
 
-Run: `grep -rn "are a supported shape\|Conditional(\"DEBUG\")\|not removable while the exemption\|exempt from the structural write" docs/ src/ --include=*.md --include=*.cs`
+Run: `grep -rn "are a supported shape\|Conditional(\"DEBUG\")\|not removable while the exemption\|exempt from the structural write\|exempt attach or detach" docs/ src/ --include=*.md --include=*.cs`
 
 Expected: no hits outside `docs/superpowers/plans/`, which are historical records and are deliberately not reconciled.
 

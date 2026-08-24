@@ -769,6 +769,7 @@ public class DerivedPropertyConcurrencyTests
         // so setting holder.Person = null triggers detach of all SideEffectPerson properties
         // (including Greeting) under lock(_attachedSubjects).
 
+        var totalSuccessfulWrites = 0;
         for (var i = 0; i < DefaultIterations; i++)
         {
             // Arrange
@@ -783,6 +784,10 @@ public class DerivedPropertyConcurrencyTests
                 Companion = new Person(context) { FirstName = "Friend" }
             };
             holder.Person = person;
+
+            // The Arrange writes above already recalculate Greeting, so only writes landed during
+            // the concurrent phase count towards proving that phase alive.
+            var successfulWritesBeforeAct = person.SuccessfulCompanionWriteCount;
 
             var barrier = new Barrier(2);
 
@@ -834,8 +839,17 @@ public class DerivedPropertyConcurrencyTests
             Assert.True(completed == work, "Test timed out — possible deadlock");
             await work;
 
+            // Captured before the Greeting read below, which invokes the getter itself and would
+            // otherwise count a write the concurrent phase never produced.
+            totalSuccessfulWrites += person.SuccessfulCompanionWriteCount - successfulWritesBeforeAct;
+
             Assert.Equal($"Hello, {person.Name}", person.Greeting);
         }
+
+        // The getter absorbs the contract violation thrown inside callback scopes, so if
+        // recalculation ever moves inside one, every write is eaten and this test passes while
+        // pinning nothing. At least one landed write proves the recalculation path stayed alive.
+        Assert.True(totalSuccessfulWrites > 0, "No Companion write ever landed; the getter absorbed all of them and the test went vacuous.");
     }
 
     private static int TireIndex(int threadIndex) => (threadIndex % 3) + 1;
