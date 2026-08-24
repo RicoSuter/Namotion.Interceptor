@@ -75,15 +75,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             if (metadata.IsDerived)
             {
                 Volatile.Write(ref data.IsDerived, true);
-                try
-                {
-                    data.LastKnownValue = EvaluateAndStabilize(data, change.Property, callerHoldsLock: true);
-                    change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
-                }
-                catch (Exception)
-                {
-                    // Getter threw. The value will be computed on the next dependency write.
-                }
+                data.LastKnownValue = EvaluateAndStabilize(data, change.Property, callerHoldsLock: true);
+                change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
             }
         }
     }
