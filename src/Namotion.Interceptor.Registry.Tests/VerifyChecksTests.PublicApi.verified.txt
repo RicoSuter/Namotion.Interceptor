@@ -12,7 +12,7 @@ namespace Namotion.Interceptor.Registry.Abstractions
     {
         void InitializeProperty(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property);
     }
-    public interface ISubjectRegistry
+    public interface ISubjectRegistry : Namotion.Interceptor.ISingletonContextService<Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry>
     {
         System.Collections.Generic.IReadOnlyDictionary<Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject> KnownSubjects { get; }
         Namotion.Interceptor.Registry.Abstractions.RegisteredSubject? TryGetRegisteredSubject(Namotion.Interceptor.IInterceptorSubject subject);

@@ -239,68 +239,6 @@ public class SourceWaitTests
     }
 
     [Fact]
-    public void WhenTwoMonitorsAreReachable_ThenCompleteSourceRegistrationSignalsAll()
-    {
-        // Arrange
-        // The child context contributes a second monitor manually: under exact-context
-        // ownership a subject enters exactly one context's graph, so the child cannot carry a
-        // second lifecycle of its own (WithSourceMonitoring would register one).
-        var parent = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithLifecycle()
-            .WithSourceMonitoring();
-        var child = InterceptorSubjectContext.Create();
-        child.AddFallbackContext(parent);
-        var childMonitor = new SourceMonitor();
-        child.AddService<ILifecycleHandler>(childMonitor);
-
-        var parentMonitor = parent.GetSourceMonitor();
-
-        // Act
-        child.CompleteSourceRegistration();
-
-        // Assert
-        Assert.True(parentMonitor.IsRegistrationComplete);
-        Assert.True(childMonitor.IsRegistrationComplete);
-    }
-
-    [Fact]
-    public void WhenDeferWaitCompletionIsCalledWithTwoMonitors_ThenBothHoldsAreReleased()
-    {
-        // Arrange
-        // The child context contributes a second monitor manually: under exact-context
-        // ownership a subject enters exactly one context's graph, so the child cannot carry a
-        // second lifecycle of its own (WithSourceMonitoring would register one).
-        var parent = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithLifecycle()
-            .WithSourceMonitoring();
-        var child = InterceptorSubjectContext.Create();
-        child.AddFallbackContext(parent);
-        var childMonitor = new SourceMonitor();
-        child.AddService<ILifecycleHandler>(childMonitor);
-
-        var parentMonitor = parent.GetSourceMonitor();
-
-        parentMonitor.CompleteSourceRegistration();
-        childMonitor.CompleteSourceRegistration();
-
-        // Act
-        var hold = child.DeferWaitCompletion();
-
-        // Assert - both should be incomplete while holds are out
-        Assert.False(parentMonitor.IsRegistrationComplete);
-        Assert.False(childMonitor.IsRegistrationComplete);
-
-        // Act - release the holds
-        hold.Dispose();
-
-        // Assert - both should be complete
-        Assert.True(parentMonitor.IsRegistrationComplete);
-        Assert.True(childMonitor.IsRegistrationComplete);
-    }
-
-    [Fact]
     public async Task WhenRegistrationIsIncomplete_ThenTheWaitDoesNotComplete()
     {
         // Arrange
@@ -787,44 +725,29 @@ public class SourceWaitTests
     }
 
     [Fact]
-    public void WhenOneMonitorsReleaseThrows_ThenTheOtherMonitorIsStillReleased()
+    public void WhenReleaseReEvaluationThrows_ThenRegistrationStillCompletes()
     {
         // Arrange
-        // The child context contributes a second monitor manually: under exact-context
-        // ownership a subject enters exactly one context's graph, so the child cannot carry a
-        // second lifecycle of its own (WithSourceMonitoring would register one).
-        var parent = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithLifecycle()
-            .WithSourceMonitoring();
-        var child = InterceptorSubjectContext.Create();
-        child.AddFallbackContext(parent);
-        var childMonitor = new SourceMonitor();
-        child.AddService<ILifecycleHandler>(childMonitor);
+        var context = CreateContext();
+        var monitor = context.GetSourceMonitor();
+        monitor.CompleteSourceRegistration();
 
-        var parentMonitor = parent.GetSourceMonitor();
-
-        parentMonitor.CompleteSourceRegistration();
-        childMonitor.CompleteSourceRegistration();
-
-        var root = new Person(child);
+        var root = new Person(context);
         var throwing = new ThrowingScopeSource(root);
-        childMonitor.Register(throwing);
+        monitor.Register(throwing);
 
-        // Re-arms both monitors and gives each a pending wait, so the release below has something
-        // to re-evaluate: it is that re-evaluation, not the release itself, that throws.
-        var hold = child.DeferWaitCompletion();
+        // Re-arms the monitor and gives it a pending wait, so the release below has something to
+        // re-evaluate: it is that re-evaluation, not the release itself, that throws.
+        var hold = context.DeferWaitCompletion();
         var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
         Assert.False(wait.IsCompleted);
 
         // Act
         var exception = Assert.Throws<InvalidOperationException>(() => hold.Dispose());
 
-        // Assert - the throwing monitor's own count still dropped, and the other monitor's hold was
-        // not stranded by the first one's exception.
+        // Assert - the hold's own count still dropped, so the exception cannot wedge registration.
         Assert.Equal("scope check failed", exception.Message);
-        Assert.True(parentMonitor.IsRegistrationComplete);
-        Assert.True(childMonitor.IsRegistrationComplete);
+        Assert.True(monitor.IsRegistrationComplete);
     }
 }
 

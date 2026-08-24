@@ -21,7 +21,8 @@ namespace Namotion.Interceptor.Tracking.Change;
 // announces a child that is still dormant.
 [RunsAfter(typeof(SubjectTransactionInterceptor))]
 [RunsBefore(typeof(LifecycleInterceptor))]
-public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChange>, IWriteInterceptor
+public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChange>, IWriteInterceptor,
+    ISingletonContextService<PropertyChangeInterceptor>
 {
     private readonly Lock _modificationLock = new();
 

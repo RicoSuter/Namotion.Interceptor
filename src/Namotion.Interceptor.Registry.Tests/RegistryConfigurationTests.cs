@@ -70,6 +70,48 @@ public class RegistryConfigurationTests
         Assert.Contains("singleton contract", exception.Message);
     }
 
+    [Fact]
+    public void WhenACustomRegistryImplementationIsRegistered_ThenWithRegistryThrows()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var customRegistry = new CustomRegistry();
+        context.AddService<ISubjectRegistry>(customRegistry);
+
+        // Act & Assert: the abstraction carries the singleton contract, so any implementation
+        // reserves the slot and the default is not silently installed beside it.
+        var exception = Assert.Throws<InvalidOperationException>(() => context.WithRegistry());
+        Assert.Contains("singleton contract", exception.Message);
+        Assert.Same(customRegistry, Assert.Single(context.GetServices<ISubjectRegistry>()));
+    }
+
+    [Fact]
+    public void WhenRegistryIsAddedAfterSubjectsAreAttached_ThenExistingSubjectsAreNotBackfilled()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle();
+        var earlySubject = new Models.Person(context);
+
+        // Act: late direct additions stay allowed and receive no replay of earlier attaches.
+        context.WithRegistry();
+        var lateSubject = new Models.Person(context);
+
+        // Assert
+        var registry = context.GetService<ISubjectRegistry>();
+        Assert.Null(registry.TryGetRegisteredSubject(earlySubject));
+        Assert.NotNull(registry.TryGetRegisteredSubject(lateSubject));
+    }
+
+    private sealed class CustomRegistry : ISubjectRegistry
+    {
+        public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects
+            => new Dictionary<IInterceptorSubject, RegisteredSubject>();
+
+        public RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject) => null;
+    }
+
     private sealed class CustomLifecycle : ILifecycleInterceptor
     {
         public void EnterStructuralWriteGate()

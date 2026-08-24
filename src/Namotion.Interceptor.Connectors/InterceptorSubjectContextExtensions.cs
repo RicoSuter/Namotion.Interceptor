@@ -3,7 +3,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Transactions;
-using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Transactions;
 
@@ -19,6 +18,11 @@ public static class InterceptorSubjectContextExtensions
     /// Registers an <see cref="ITransactionWriter"/> that writes changes to external sources.
     /// Automatically registers WithTransactions() if not already registered.
     /// </summary>
+    /// <remarks>
+    /// Idempotent for the default writer. A custom <see cref="ITransactionWriter"/> registered on
+    /// the same context conflicts through the writer slot's singleton contract, so this call then
+    /// throws instead of silently leaving the commit on a foreign writer.
+    /// </remarks>
     /// <param name="context">The interceptor subject context to configure.</param>
     /// <returns>The same context instance for method chaining.</returns>
     public static IInterceptorSubjectContext WithSourceTransactions(this IInterceptorSubjectContext context)
@@ -27,7 +31,7 @@ public static class InterceptorSubjectContextExtensions
             .WithTransactions()
             .TryAddService<ITransactionWriter>(
                 () => new SourceTransactionWriter(),
-                _ => true);
+                writer => writer is SourceTransactionWriter);
 
         return context;
     }
@@ -42,16 +46,16 @@ public static class InterceptorSubjectContextExtensions
     {
         context.WithLifecycle();
 
-        context.TryAddService<SourceMonitor>(() =>
+        // One registration serves every role (SourceMonitor and ILifecycleHandler) through
+        // assignability-based resolution.
+        context.TryAddService(() =>
         {
             // Lazy logger: the context is configured before any logging provider exists. This is the
             // same Func<ILogger?> idiom HostedServiceHandler uses. Without it every warning the wait
             // engine emits is a silent no-op, and those warnings are the only thing distinguishing a
             // vacuous completion from a live tree.
-            var monitor = new SourceMonitor(() =>
+            return new SourceMonitor(() =>
                 context.TryGetService<ILoggerFactory>()?.CreateLogger<SourceMonitor>());
-            context.AddService<ILifecycleHandler>(monitor);
-            return monitor;
         }, _ => true);
 
         return context;

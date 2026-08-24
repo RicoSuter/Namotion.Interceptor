@@ -16,7 +16,8 @@ namespace Namotion.Interceptor.Connectors.Monitoring;
 /// change, so a newly attached subtree has to be fully entered first.
 /// </remarks>
 [RunsAfter(typeof(LifecycleInterceptor))]
-public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
+public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer,
+    ISingletonContextService<SourceMonitor>
 {
     private readonly Lock _lock = new();
     private Func<ILogger?>? _loggerResolver;
@@ -424,11 +425,10 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
             }
 
             // A throw from one wait's IsBranchSynchronized must not skip re-evaluating the rest -
-            // that would be a lost wakeup for every wait after it. Written out rather than delegated to
-            // ExceptionAggregation.ForEach, unlike the two cold call sites: this runs on every
-            // property-reference add/remove tree-wide while any wait is pending, and the helper's
-            // IEnumerable<T> parameter would box the ImmutableArray, heap-allocate its enumerator,
-            // and allocate a closure per pass, since the lambda captures this.
+            // that would be a lost wakeup for every wait after it. Written out rather than behind a
+            // delegate-taking helper: this runs on every property-reference add/remove tree-wide
+            // while any wait is pending, and a helper would box the ImmutableArray, heap-allocate
+            // its enumerator, and allocate a closure per pass, since the lambda captures this.
             foreach (var wait in _waits)
             {
                 try

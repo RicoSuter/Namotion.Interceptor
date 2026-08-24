@@ -11,7 +11,8 @@ namespace Namotion.Interceptor.Validation;
 /// Runs before the transaction interceptor to validate during both capture and commit phases.
 /// </summary>
 [RunsBefore(typeof(SubjectTransactionInterceptor))]
-public class ValidationInterceptor : IWriteInterceptor
+public class ValidationInterceptor : IWriteInterceptor,
+    ISingletonContextService<ValidationInterceptor>
 {
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)

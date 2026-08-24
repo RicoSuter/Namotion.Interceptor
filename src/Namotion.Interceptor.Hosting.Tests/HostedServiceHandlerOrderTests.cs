@@ -4,9 +4,11 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace Namotion.Interceptor.Hosting.Tests;
 
 /// <summary>
-/// Proves the handler's <c>[RunsAfter(typeof(LifecycleInterceptor))]</c> binds against the merged
-/// ordering seam. <c>WithHostedServices</c> registers the handler before it installs the lifecycle,
-/// so unordered resolution would keep the handler ahead; only a bound constraint flips it behind.
+/// Pins the resolved fan-out for <c>WithHostedServices</c>: the handler resolves behind the
+/// lifecycle. Registration is lifecycle-first since the extension establishes its dependency
+/// before publishing the handler, so this order alone no longer distinguishes a bound constraint
+/// from registration order; the adversarial binding proof for the seam lives in
+/// <c>LifecycleHandlerOrderTests</c>.
 /// </summary>
 public class HostedServiceHandlerOrderTests
 {

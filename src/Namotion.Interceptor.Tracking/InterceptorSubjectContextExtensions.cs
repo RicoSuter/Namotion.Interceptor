@@ -18,11 +18,14 @@ public static class InterceptorSubjectContextExtensions
     /// <returns>The context.</returns>
     public static IInterceptorSubjectContext WithFullPropertyTracking(this IInterceptorSubjectContext context)
     {
+        // Lifecycle first, so a lifecycle conflict throws before any dependent service is
+        // published. Chain order is unaffected: every write interceptor here is pinned by its
+        // ordering attributes, not by registration order.
         return context
+            .WithLifecycle()
             .WithEqualityCheck()
             .WithDerivedPropertyChangeDetection()
-            .WithPropertyChangeSubscriptions()
-            .WithLifecycle();
+            .WithPropertyChangeSubscriptions();
     }
 
     /// <summary>
@@ -55,11 +58,11 @@ public static class InterceptorSubjectContextExtensions
     /// <returns>The context.</returns>
     public static IInterceptorSubjectContext WithDerivedPropertyChangeDetection(this IInterceptorSubjectContext context)
     {
-        context // must be before lifecycle!
-            .WithService(() => new DerivedPropertyChangeHandler());
-
+        // Lifecycle first, so a lifecycle conflict throws before the handler is published. The
+        // handler's chain position ahead of the lifecycle is pinned by its [RunsBefore] attributes.
         return context
-            .WithLifecycle();
+            .WithLifecycle()
+            .WithService(() => new DerivedPropertyChangeHandler());
     }
 
     /// <summary>

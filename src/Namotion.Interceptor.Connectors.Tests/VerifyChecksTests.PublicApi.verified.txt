@@ -308,7 +308,7 @@ namespace Namotion.Interceptor.Connectors.Monitoring
     }
     [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
             typeof(Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor)})]
-    public class SourceMonitor : Namotion.Interceptor.Tracking.IStartupCompletionDeferrer, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
+    public class SourceMonitor : Namotion.Interceptor.ISingletonContextService<Namotion.Interceptor.Connectors.Monitoring.SourceMonitor>, Namotion.Interceptor.Tracking.IStartupCompletionDeferrer, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
     {
         public bool IsRegistrationComplete { get; }
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Connectors.ISubjectSource> Sources { get; }

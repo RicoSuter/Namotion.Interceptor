@@ -22,7 +22,8 @@ namespace Namotion.Interceptor.Tracking.Change;
 // load-bearing under aggregation, where instances would otherwise interleave and one context's
 // cascade could be announced before another's dispatch of the triggering write.
 [RunsBefore(typeof(PropertyChangeInterceptor))]
-public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
+public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler,
+    ISingletonContextService<DerivedPropertyChangeHandler>
 {
     private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
 

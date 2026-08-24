@@ -21,8 +21,7 @@ namespace Namotion.Interceptor.Registry;
 /// view. It remains a projection only; no registry state participates in ownership or reachability.
 /// </remarks>
 [RunsBefore(typeof(LifecycleInterceptor))]
-public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler,
-    ISingletonContextService<ISubjectRegistry>
+public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
 {
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
     private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
