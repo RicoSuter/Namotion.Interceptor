@@ -839,10 +839,11 @@ internal static class SubjectMetadataExtractor
     }
 
     /// <summary>
-    /// Collects every declared instance constructor across all partial declarations. Parameter
-    /// types are resolved through each declaration's own semantic model rather than taken from
-    /// syntax text, because the generated partial half does not repeat the declaring file's using
-    /// directives, so a name like "List&lt;Foo&gt;" may not resolve there.
+    /// Collects the declared instance constructors across all partial declarations, omitting the
+    /// ones a mirror could not reproduce faithfully. Parameter types are resolved through each
+    /// declaration's own semantic model rather than taken from syntax text, because the generated
+    /// partial half does not repeat the declaring file's using directives, so a name like
+    /// "List&lt;Foo&gt;" may not resolve there.
     /// </summary>
     private static IReadOnlyList<SubjectConstructor> CollectConstructors(
         TypeDeclarationSyntax[] allTypeDeclarations,
@@ -885,6 +886,14 @@ internal static class SubjectMetadataExtractor
 
         foreach (var parameter in constructor.ParameterList.Parameters)
         {
+            // ref, out, in, params or scoped: the metadata carries no parameter modifier, so a
+            // mirror would either not compile or silently change the calling convention. Such a
+            // constructor is never mirrored.
+            if (parameter.Modifiers.Count > 0)
+            {
+                return null;
+            }
+
             var fullyQualifiedTypeName = GetFullTypeName(parameter.Type, declarationModel);
             if (fullyQualifiedTypeName is null)
             {

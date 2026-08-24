@@ -293,6 +293,92 @@ internal static class SubjectCodeGenerator
             builder.AppendLine("        }");
             builder.AppendLine();
         }
+
+        // Mirror every declared constructor with a trailing context parameter. Without the mirror,
+        // a subject whose only constructor takes dependencies has no context-taking constructor,
+        // so dependency injection returns a permanently detached subject with no diagnostic.
+        foreach (var constructor in metadata.Constructors)
+        {
+            if (!ShouldMirror(metadata, constructor))
+            {
+                continue;
+            }
+
+            var contextParameterName = UnusedParameterName("context", constructor);
+            var parameters = string.Join(", ", constructor.Parameters.Select(p => $"{p.FullyQualifiedTypeName} {p.Name}"));
+            var declaredParameters = parameters.Length > 0 ? parameters + ", " : "";
+            var arguments = string.Join(", ", constructor.Parameters.Select(p => p.Name));
+
+            builder.AppendLine($"        {constructor.Accessibility} {metadata.ClassName}({declaredParameters}IInterceptorSubjectContext {contextParameterName}) : this({arguments})");
+            builder.AppendLine("        {");
+            // Provisional, matching the parameterless form above: dependency injection selects
+            // this constructor for every subject it builds, and an explicit anchor would make each
+            // an unreleasable root.
+            builder.AppendLine($"            InterceptorSubjectExtensions.AttachToContext(this, {contextParameterName}, SubjectAnchorKind.Provisional);");
+            builder.AppendLine("        }");
+            builder.AppendLine();
+        }
+    }
+
+    private const string ContextParameterTypeName = "global::Namotion.Interceptor.IInterceptorSubjectContext";
+
+    private static bool ShouldMirror(SubjectMetadata metadata, SubjectConstructor constructor)
+    {
+        // The context form of the parameterless constructor is already emitted by the block above
+        // whenever the detection saw that constructor; mirroring it again would be a duplicate.
+        if (constructor.Parameters.Count == 0 && metadata.HasOrWillHaveParameterlessConstructor)
+        {
+            return false;
+        }
+
+        // A constructor that already ends in a context parameter would mirror into a two-context
+        // signature that helps nobody.
+        if (constructor.Parameters.Count > 0 &&
+            constructor.Parameters[constructor.Parameters.Count - 1].FullyQualifiedTypeName == ContextParameterTypeName)
+        {
+            return false;
+        }
+
+        // A hand-written constructor with the mirrored signature always wins.
+        return !metadata.Constructors.Any(other => MirrorsSignatureOf(other, constructor));
+    }
+
+    /// <summary>
+    /// Whether <paramref name="other"/> has exactly <paramref name="constructor"/>'s parameter
+    /// types followed by one trailing context parameter.
+    /// </summary>
+    private static bool MirrorsSignatureOf(SubjectConstructor other, SubjectConstructor constructor)
+    {
+        if (other.Parameters.Count != constructor.Parameters.Count + 1 ||
+            other.Parameters[other.Parameters.Count - 1].FullyQualifiedTypeName != ContextParameterTypeName)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < constructor.Parameters.Count; i++)
+        {
+            if (other.Parameters[i].FullyQualifiedTypeName != constructor.Parameters[i].FullyQualifiedTypeName)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// A declared parameter may itself be named "context", and a mirror repeating that name would
+    /// not compile.
+    /// </summary>
+    private static string UnusedParameterName(string baseName, SubjectConstructor constructor)
+    {
+        var name = baseName;
+        while (constructor.Parameters.Any(p => p.Name == name))
+        {
+            name += "_";
+        }
+
+        return name;
     }
 
     private static void EmitProperties(StringBuilder builder, SubjectMetadata metadata)
