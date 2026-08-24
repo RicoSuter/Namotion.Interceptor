@@ -132,23 +132,90 @@ One test fix was needed and only the integration gate could have found it: `Mqtt
 ## Still to run
 
 - **Connector Tester.** Hours, does not run in CI. Note `HeapMB` trends upward on master too, about 0.08 MB per cycle on mqtt-chaos, so a single-arm upward trend is never on its own a regression finding.
-- **Benchmarks**, per arm against `bench/scl-base` at `4be50401`. The CPU is pinned (governor `performance`, min and max both 3600000 on all 16 cores, `no_turbo` 1). Verify by reading the governor and `scaling_min_freq`, not the instantaneous `/proc/cpuinfo` MHz, which reads low on an idle core and is misleading.
+- **Benchmarks: done**, see "Benchmark results" below. Both rounds ran, the control held, the noise floor was measured at about 6 percent, and the one unexplained delta was closed by JIT disassembly. Re-run only if the code changes.
 
-  Run **per arm, never concurrently**, directly rather than through the comparison script:
+## Benchmark results, measured 2026-08-24
 
-  ```
-  dotnet run -c Release --project src/Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj -- \
-    --filter '*LifecycleOwnershipBenchmark*' '*ParentProjectionBenchmark*' '*ServiceOrderResolverBenchmark*'
-  ```
+Treatment `rewrite/single-context-impl` at `0c8d2fdf` against `bench/scl-base` at `4be50401`, which is master `0418410c` plus two benchmark-only commits so both arms compile identical benchmark source, verified by md5 on all files and by an empty `git diff master..HEAD -- ':!*Benchmark*'` on the base arm. Both arms share merge-base `0418410c`. Each arm ran separately, never concurrently, CPU pinned throughout.
 
-  `ServiceOrderResolverBenchmark` is included deliberately as the subject-free control: it touches no subject and must not move between arms. **If the control moves, the two halves are not comparable and no other row means anything**, which is how two invalid comparisons were produced here before. BenchmarkDotNet rejects repeated `--filter` flags; multiple patterns go after one `--filter` as positional values.
+**The noise floor is about 6 percent.** The control ran twice on the identical treatment binary, once per round, and `MixedDependencies` moved 5.6 percent between the two. Cross-arm control spread was -3.4 to +3.3 percent, with control allocations identical to the byte on every row in every run. Treat timed deltas below 6 percent as nothing. Allocation counts are deterministic and are not subject to this.
 
-  What the numbers decide:
-  1. The threshold call on the five performance-only mechanisms in the plan's cost table, `LifecycleScratch` (~190 lines, pure allocation avoidance, no capability) being the largest and lazy parent activation the one that was unpriceable until `ParentProjectionBenchmark` existed.
-  2. Whether `GetOrAddSubjectId` still shows the spike's unexplained 15.4 percent. Stage 4 only removes `Data` entries, so the remaining candidate is the stage 3 interface widening; repository guidance says settle a movement that size with no known mechanism by diffing JIT output rather than by more runs.
-  3. Whether the ownership model costs what it should. The only measured performance datum so far is delegation depth falling from 21 hops to 1, from the stage 4 costing experiment; everything else is structural argument.
+### Round 1, lifecycle ownership and parent projection
 
-  Never judge from one run: rows here have swung several percent between identical runs. Run the same comparison twice and quote both.
+| Row | Δ time | Δ alloc |
+|---|---:|---:|
+| SetScalarUnattached | -0.9% | 0 B both |
+| SetStructuralUnattached | +4.8% (noise) | 0 B both |
+| SetScalarAttached | +2.0% (noise) | 0 B both |
+| ReplaceSingleChildReference | -2.3% | -16% |
+| ReplaceCollectionUniqueChildren | -8.4% | -10% |
+| ReplaceCollectionDuplicateChildren | +6.0% (noise) | +9% |
+| ReorderCollection | +113% | +30% |
+| ReplaceCyclicChildGraph | +455% | +210% |
+| AttachAndReleaseSubtree | -20.5% | -13% |
+| ReleaseSmallSubtreeFromLargeContext | -2.6% | -16% |
+| RemoveOneParentOfSharedChild | +39% | -92.5% |
+| RemoveOneParentOfSharedChildInLargeContext | +43% | -92.5% |
+| ReleaseOrphanedCycle | +477% | +338% |
+| RemoveSharedEdgesInBatch | +46% | -63% |
+| EdgeToggleParentsInactive | +3.3% (noise) | -82.5% |
+| EdgeToggleParentsActive | +10.3% | -45% |
+
+### Round 2, registry
+
+Nothing regressed. Every row is faster or flat.
+
+| Row | Δ time | Δ alloc |
+|---|---:|---:|
+| AddLotsOfPreviousCars | -18.6% | -7.3% |
+| IncrementDerivedAverage | -4.0% | = |
+| WriteNoOp | -8.7% | = |
+| Write | -8.0% | = |
+| WriteWithTimestampScope | -4.8% | = |
+| Read | -13.0% | = |
+| DerivedAverage | -9.8% | = |
+| ChangeAllTires | -3.4% | -5.7% |
+| GetOrAddSubjectId | -1.6% | = |
+| GenerateSubjectId | +0.6% | = |
+| KnownSubjectsSnapshot | +0.04% | = |
+| ReadParents | +1.9% | = |
+
+### Three of the four large round-1 regressions are master doing less because it is wrong
+
+Verified by probe against both arms, with master's opt-in `WithParents()` enabled so the comparison is not against a disabled feature:
+
+| Scenario | master `4be50401` | rewrite `0c8d2fdf` | correct |
+|---|---|---|---|
+| orphaned 3-node cycle released | 4 subjects to 4, leaks all 3 | 4 to 1 | 1 |
+| parent index after reversing an 8-item collection | `Items#0`, stale | `Items#7` | `Items#7` |
+| parent entries for `[a, a, b]` | 1 | 2 | 2 |
+
+So `ReleaseOrphanedCycle` and `ReplaceCyclicChildGraph` compare releasing a cycle against not releasing it: reference counting cannot collect cycles, so master leaks the ring permanently. `ReorderCollection` compares updating occurrence indices against leaving them stale. `ReplaceCollectionDuplicateChildren` is inside the noise floor and is not a cost at all.
+
+The genuine same-work costs are `RemoveOneParentOfSharedChild` at +39 percent and `RemoveSharedEdgesInBatch` at +46 percent, both acyclic shapes where master's refcount decrement gets the right answer more cheaply than a backward reachability walk. Both come with large allocation wins, and the walk is bounded: 1,795 ns in a 500-subject context against 1,772 ns in a small one, so it is not scanning the graph.
+
+### The read and write gains are attributable, confirmed by machine code
+
+Chain composition is identical on both arms, 1 `IReadInterceptor` and 4 `IWriteInterceptor` of the same types in the same order, so the gain is not a shorter chain. The structural difference is that master gives every subject its own `InterceptorExecutor` acting as its context, while the rewrite shares one `InterceptorSubjectContext` across the graph.
+
+JIT disassembly of the read path, driven identically on both arms:
+
+| Method | master | rewrite |
+|---|---|---|
+| generated `get_Value():int` | 37 instruction lines | identical |
+| `Node:GetPropertyValue[int]` | 39 instruction lines | identical |
+| `InterceptorExecutor:GetPropertyValue[int]` | 80 instruction lines | 70 |
+
+The whole difference sits in the executor: master executes a delegation-validity guard with dependent loads and a conditional out-of-line call to `InterceptorSubjectContext:ResolveDelegationChain` on every property read. The rewrite deleted the mechanism, so the instructions are gone. The guard's first test is whether the context has a delegation target, null for a root and non-null for a child, which is why every child-touching row moved and every root-only or subject-free row stayed flat.
+
+### Verdict against the plan's cost table
+
+Nothing in these numbers argues for deleting any of the five performance-only mechanisms.
+
+- **Lazy parent activation**: validated by an ablation within one arm, 56 B inactive against 176 B active, and 56 B against master's 320 B. Keep.
+- **Opaque `Enter`/`ExitStructuralWriteGate` seam**: does not register. Attached structural writes came out faster than master despite doing strictly more work. Keep.
+- **`GetOrAddSubjectId` 15.4 percent from the spike**: does not reproduce, measured -1.6 percent. Closed with no mechanism needed, which is evidence for the re-derive rather than port rule.
+- **`LifecycleScratch` pooling, inline single-edge storage, separate `Contains` and `CollectOccurrences` paths**: still unpriced as individual mechanisms. Cross-arm runs price the design, not its parts, and no intra-arm ablation was run for these three. The design-level result is strongly positive, so none is a deletion candidate on current evidence.
 
 ## Breaking changes, consolidated for the pull request
 
