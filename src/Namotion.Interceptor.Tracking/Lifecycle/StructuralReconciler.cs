@@ -39,6 +39,21 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             StructuralValueScanner.CollectOccurrences(metadata.Type, oldValue, oldOccurrences);
             StructuralValueScanner.CollectOccurrences(metadata.Type, newValue, newOccurrences);
 
+            if (!graph.IsOwned(property.Subject))
+            {
+                // Code running downstream of the lifecycle at callback depth zero (a third-party
+                // write interceptor, a hand-written terminal, a dynamic getter reread, or a
+                // side-effecting user collection enumerated just above) holds the gate reentrantly
+                // and can release the writing parent before this point. That release already
+                // collected this property's children through the old baseline, so nothing may
+                // continue on the parent's behalf: committing the new baseline would recreate an
+                // entry that no later release ever removes, and the addition loop would attach
+                // occurrences to a released owner. The in-loop released-parent exits below remain
+                // for the residual shape where user code invoked by the loops themselves releases
+                // the parent mid-flight.
+                return;
+            }
+
             // Commit the outgoing edges before the incoming records are touched.
             graph.SetBaseline(property, newValue);
 

@@ -366,6 +366,10 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
 
     #region Committed state queries
 
+    // Internal for tests only: committed baselines have no public observer, and the
+    // released-parent regression tests must assert that none survives a subject's release.
+    internal OwnershipGraph Graph => _graph;
+
     /// <summary>
     /// Gets the number of committed incoming edge occurrences, which is the subject's reference
     /// count. An anchored root with no edge reports zero, so this is not an attachment predicate.

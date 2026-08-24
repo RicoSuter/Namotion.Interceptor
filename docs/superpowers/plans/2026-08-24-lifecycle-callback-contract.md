@@ -615,6 +615,8 @@ If the verdict is "unreachable", continue to Task 5. If any path can still relea
 
 ## Task 5: Delete the accommodations, conditional on Task 4
 
+**Cancelled by Task 4's verdict.** A third-party write interceptor ordered downstream of the lifecycle can release the writing parent at callback depth zero, so the accommodations stay and Task 5b replaces this task. Kept for the record; do not execute.
+
 Only if Task 4 concluded "unreachable".
 
 **Files:**
@@ -695,6 +697,47 @@ git commit -m "refactor: delete the released-parent early exits
 They existed only to survive a callback releasing the writing parent
 mid-reconcile. That release now throws at the attempt, and the reachability
 proof found no other path, so the state they compensated for cannot arise."
+```
+
+---
+
+## Task 5b: Guard Reconcile entry against a released writing parent
+
+Replaces Task 5, which Task 4's verdict cancelled: a third-party `IWriteInterceptor` ordered downstream of `LifecycleInterceptor` runs during `next` at callback depth zero, holds the lifecycle gate reentrantly, and can release the writing parent before `Reconcile` is entered, by removing its last support through a nested structural write or by explicit detach. Nothing pins the lifecycle last in the chain, and the codebase documents that placement as expected. The six early exits therefore stay, but they only bound the damage of this shape instead of repairing it: `Reconcile` had no ownership check at entry, so it committed a fresh baseline for the released parent that no later release ever removes, and the addition loop fully attached the first new occurrence to the dead owner before an exit fired, leaving that subject attached forever while its parent reports detached.
+
+The fix is one ownership check in `Reconcile`, after the occurrence collection and before the baseline commit: a released parent returns without committing a baseline and without entering the loops, and the write protocol's `ReleaseUnusedClaims` compensation then hands back the claims of every proposed subject, so nothing half-processes and nothing is stranded. The in-loop exits are not deleted: Task 4 could not exhaust the residual mid-flight path through side-effecting user code the loops themselves invoke (a dictionary indexer, a collection enumerator, or an index `Equals` running the write protocol reentrantly), and they remain the defence for exactly that shape. One adjacent residue is recorded rather than fixed: on the depth-zero `AddProperties` admission path, a user getter invoked by `CaptureStructuralValues` could release the admitting subject, and `PropertyAdmission.Admit`'s direct null-value `SetBaseline` branch would then write one orphaned null entry; the non-null branch goes through `Reconcile` and is covered by the entry check.
+
+**Files:**
+- Modify: `src/Namotion.Interceptor.Tracking/Lifecycle/StructuralReconciler.cs`
+- Modify: `src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleInterceptor.cs` (internal graph accessor for the tests)
+- Create: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/DownstreamWriteInterceptorReleaseTests.cs`
+
+- [ ] **Step 1: Write the failing tests**
+
+A third-party `IWriteInterceptor` with no ordering attributes, registered after `WithLifecycle`, releases the writing parent on a structural write and then calls `next`: once by nulling the property that holds the parent's last support, once by explicit detach. Assert that no subject is left attached with an incoming edge naming the released parent, and that no committed baseline survives for it. The baseline assertion needs an internal `Graph` accessor on `LifecycleInterceptor`, because committed baselines have no public observer.
+
+- [ ] **Step 2: Verify both tests fail before the fix**
+
+Run: `dotnet test src/Namotion.Interceptor.Tracking.Tests --filter "FullyQualifiedName~DownstreamWriteInterceptorReleaseTests"`
+Expected: both FAIL on the stranded child, `Assert.Null(child.TryGetContext())` observing the context while the parent already reports detached, which is exactly the released-before-entry state from Task 4's candidate 3.
+
+- [ ] **Step 3: Add the ownership check**
+
+In `Reconcile`, after both `CollectOccurrences` calls and before `SetBaseline`, return when `!graph.IsOwned(property.Subject)`. Placing the check after the occurrence collection also covers a release performed by a side-effecting user enumerator that the collection itself invokes.
+
+- [ ] **Step 4: Verify the tests pass and the suite stays green**
+
+Run: `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"`
+Expected: every assembly green, counts parsed by match rather than by line.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/Namotion.Interceptor.Tracking/Lifecycle/StructuralReconciler.cs \
+        src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleInterceptor.cs \
+        src/Namotion.Interceptor.Tracking.Tests/Lifecycle/DownstreamWriteInterceptorReleaseTests.cs \
+        docs/superpowers/plans/2026-08-24-lifecycle-callback-contract.md
+git commit -m "fix: stop reconciling on behalf of a released writing parent"
 ```
 
 ---
