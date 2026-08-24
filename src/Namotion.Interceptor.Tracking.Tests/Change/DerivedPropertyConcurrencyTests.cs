@@ -746,12 +746,16 @@ public class DerivedPropertyConcurrencyTests
     }
 
     [Fact]
-    public async Task WhenDerivedGetterWritesToSubjectTypedProperty_ThenNoDeadlockAndCorrectValue()
+    public async Task WhenDerivedGetterWritesToSubjectTypedPropertyOnRecalculation_ThenNoDeadlockAndCorrectValue()
     {
         // Regression test: reproduces deadlock between lock(data) and lock(_attachedSubjects).
         //
         // SideEffectPerson.Greeting getter writes to Companion (subject-typed property),
-        // which triggers LifecycleInterceptor.WriteProperty → lock(_attachedSubjects).
+        // which triggers LifecycleInterceptor.WriteProperty → lock(_attachedSubjects). The write
+        // only happens for real on the recalculation path: attach-time evaluation runs inside
+        // the derived handler's attach callback, where the callback contract rejects it, and the
+        // model absorbs that rejection so attach and re-attach complete and the toggling below
+        // keeps producing lock contention.
         //
         // The deadlock (fixed by evaluating getter outside lock(data)):
         //   Thread A: RecalculateDerivedProperty(Greeting) → lock(data_Greeting) → getter

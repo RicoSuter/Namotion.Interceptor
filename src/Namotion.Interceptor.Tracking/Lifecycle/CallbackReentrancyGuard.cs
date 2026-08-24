@@ -28,11 +28,8 @@ internal static class CallbackReentrancyGuard
     [ThreadStatic]
     private static int _callbackDepth;
 
-    // Property lifecycle callbacks carry their own depth: they are exempt from the structural
-    // write contract (so they must not feed ThrowIfInsideCallback), but AddProperties admission
-    // still has to know the thread is inside a lifecycle operation, because a property callback
-    // published under one lifecycle's gate that blocks on another lifecycle's gate deadlocks
-    // exactly like a subject callback would.
+    // Property callbacks are not exempt: a callback may evaluate anything and may mutate no
+    // topology, so this depth feeds the contract check exactly like the lifecycle callback depth.
     [ThreadStatic]
     private static int _propertyCallbackDepth;
 
@@ -59,7 +56,7 @@ internal static class CallbackReentrancyGuard
     /// <summary>Called on entry of the lifecycle's structural write protocol.</summary>
     public static void ThrowIfInsideCallback()
     {
-        if (_callbackDepth > 0)
+        if (IsInsideAnyCallback)
         {
             throw new LifecycleContractViolationException(
                 "A lifecycle callback must not write a structural (subject-typed) property. The " +
@@ -71,9 +68,8 @@ internal static class CallbackReentrancyGuard
 
     /// <summary>
     /// Marks the thread as executing a property lifecycle callback for the lifetime of the
-    /// returned scope. This depth feeds only <see cref="IsInsideAnyCallback"/>, never
-    /// <see cref="ThrowIfInsideCallback"/>, because property callbacks keep their structural
-    /// write exemption.
+    /// returned scope. Property callbacks are not exempt: this depth feeds
+    /// <see cref="ThrowIfInsideCallback"/> exactly like the lifecycle callback depth.
     /// </summary>
     public static PropertyCallbackScope EnterPropertyCallbackScope()
     {

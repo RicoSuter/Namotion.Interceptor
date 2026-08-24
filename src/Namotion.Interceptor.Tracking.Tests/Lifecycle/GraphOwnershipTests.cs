@@ -525,25 +525,23 @@ public class GraphOwnershipTests
     }
 
     [Fact]
-    public void WhenParentIsReleasedReentrantlyDuringCollectionWrite_ThenCommittedChildIsReleasedWithIt()
+    public void WhenPropertyDetachCallbackReleasesTheWritingParent_ThenTheGuardRejectsIt()
     {
-        // Arrange: a callback reacting to b's release detaches the writing parent itself, so the
-        // parent's release descends its already-committed new edges while a's stored incoming
-        // edge still carries its pre-write index. The inexact-index removal in the ownership
-        // state must still drain that edge, or a would stay attached to a released parent, and
-        // the reconciler must stop publishing for the released parent. Routed through a detach
-        // property lifecycle callback, which is the documented exemption from the callback write
-        // contract, so this settled-graph behavior holds in every build.
-        var released = false;
+        // Arrange: a detach property callback reacting to b's release tries to release the
+        // writing parent itself. Property lifecycle callbacks are not exempt from the callback
+        // contract, so the write is rejected mid-reconcile and the outer write completes on a
+        // consistent graph instead of descending from a released parent.
+        var callbackObserved = false;
+        Exception? callbackException = null;
         Person? root = null;
         Person? b = null;
         var context = CreateContext()
             .WithService(() => new DelegatePropertyDetachHandler(change =>
             {
-                if (!released && ReferenceEquals(change.Subject, b))
+                if (!callbackObserved && ReferenceEquals(change.Subject, b))
                 {
-                    released = true;
-                    root!.Father = null;
+                    callbackObserved = true;
+                    callbackException = Record.Exception(() => root!.Father = null);
                 }
             }), _ => false);
 
@@ -557,13 +555,55 @@ public class GraphOwnershipTests
         // Act
         parent.Children = [a];
 
-        // Assert: the whole former subtree is fully released.
-        Assert.True(released);
-        Assert.Null(parent.TryGetContext());
-        Assert.Null(a.TryGetContext());
-        Assert.Equal(0, a.GetReferenceCount());
-        Assert.Empty(a.GetParents());
+        // Assert: the reentrant release was rejected, so the subtree stays attached and settled.
+        Assert.True(callbackObserved);
+        Assert.IsType<LifecycleContractViolationException>(callbackException);
+        Assert.Same(parent, root.Father);
+        Assert.Same(context, parent.TryGetContext());
+        Assert.Same(context, a.TryGetContext());
+        Assert.Equal(1, a.GetReferenceCount());
+        Assert.Single(a.GetParents());
+        Assert.Equal(0, b.GetReferenceCount());
         Assert.Null(b.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenStoredIncomingIndexLagsTheCommittedValue_ThenSamePropertyFallbackDrainsTheEdge()
+    {
+        // Arrange: a reconcile commits the property's new value before it refreshes the retained
+        // edges' stored indices, so inside that window a release descent can drain a committed
+        // edge whose new index the subject has not adopted yet. The callback contract forbids
+        // the reentrant graph shape that used to cover this end to end, so the fallback is
+        // pinned directly here until its stored-index-lag justification is independently
+        // retired.
+        var parent = new Person { FirstName = "P" };
+        var property = new PropertyReference(parent, nameof(Person.Children));
+        var ownership = new SubjectOwnership();
+        ownership.AddIncoming(property, 1);
+
+        // Act: the committed value holds the subject at index 0, the stored edge still says 1.
+        var removed = ownership.RemoveIncoming(property, 0);
+
+        // Assert
+        Assert.True(removed);
+        Assert.Equal(0, ownership.IncomingCount);
+    }
+
+    [Fact]
+    public void WhenRemovingAnEdgeOfAnotherProperty_ThenTheSamePropertyFallbackDoesNotApply()
+    {
+        // Arrange: the fallback is scoped to occurrences of the same property; an edge of a
+        // different property must never be drained in its place.
+        var parent = new Person { FirstName = "P" };
+        var ownership = new SubjectOwnership();
+        ownership.AddIncoming(new PropertyReference(parent, nameof(Person.Children)), 0);
+
+        // Act
+        var removed = ownership.RemoveIncoming(new PropertyReference(parent, nameof(Person.Father)), 0);
+
+        // Assert
+        Assert.False(removed);
+        Assert.Equal(1, ownership.IncomingCount);
     }
 
     [Fact]

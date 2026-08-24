@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -24,7 +25,20 @@ public partial class SideEffectPerson
         // This triggers LifecycleInterceptor.WriteProperty → lock(_attachedSubjects).
         // Without the unlocked evaluation in RecalculateDerivedProperty, this would
         // deadlock when concurrent lifecycle operations acquire lock(data) for Greeting.
-        Companion = null;
+        //
+        // The write is only legal on that recalculation path, which runs outside any
+        // lifecycle callback. Attach-time evaluation runs inside the derived handler's
+        // attach callback, where the callback contract rejects a structural write, so the
+        // violation is absorbed here to let attach complete and the tests keep driving
+        // the recalculation path, which is the one under test.
+        try
+        {
+            Companion = null;
+        }
+        catch (LifecycleContractViolationException)
+        {
+        }
+
         return $"Hello, {Name}";
     }
 }
