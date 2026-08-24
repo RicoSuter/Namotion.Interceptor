@@ -12,8 +12,8 @@ public static class PropertyReferenceExtensions
     public static void SetPropertyValueWithInterception(this PropertyReference property, object? newValue,
         object? currentValue, Action<IInterceptorSubject, object?> writeValue)
     {
-        var executor = property.Subject.Context as IInterceptorExecutor;
-        executor?.SetPropertyValue(property.Name, newValue, currentValue, writeValue);
+        var executor = property.Subject.Executor;
+        executor.SetPropertyValue(property.Name, newValue, currentValue, writeValue);
     }
 
     /// <summary>
@@ -25,7 +25,7 @@ public static class PropertyReferenceExtensions
     internal static void SetPropertyValueWithInterception(this PropertyReference property, object? newValue,
         object? currentValue, Action<IInterceptorSubject, object?> writeValue, long rawTimestamp)
     {
-        var executor = property.Subject.Context as InterceptorExecutor;
+        var executor = property.Subject.Executor as InterceptorExecutor;
         executor?.SetPropertyValue(property.Name, newValue, currentValue, writeValue, rawTimestamp);
     }
 }

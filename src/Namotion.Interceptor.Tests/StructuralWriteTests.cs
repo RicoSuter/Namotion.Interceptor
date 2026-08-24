@@ -51,7 +51,7 @@ public class StructuralWriteTests
 
     private static IInterceptorExecutor GetExecutor(IInterceptorSubject subject)
     {
-        return (IInterceptorExecutor)subject.Context;
+        return subject.Executor;
     }
 
     [Fact]

@@ -358,11 +358,11 @@ public class RegisteredSubject
             name,
             type,
             attributes,
-            getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null,
+            getValue is not null ? s => s.Executor.GetPropertyValue(name, getValue) : null,
             setValue is not null
                 ? isStructuralStore
-                    ? (s, v) => ((IInterceptorExecutor)s.Context).SetStructuralPropertyValue(name, v, getValue?.Invoke(s), setValue)
-                    : (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue?.Invoke(s), setValue)
+                    ? (s, v) => s.Executor.SetStructuralPropertyValue(name, v, getValue?.Invoke(s), setValue)
+                    : (s, v) => s.Executor.SetPropertyValue(name, v, getValue?.Invoke(s), setValue)
                 : null,
             isIntercepted: true,
             isDynamic: true));

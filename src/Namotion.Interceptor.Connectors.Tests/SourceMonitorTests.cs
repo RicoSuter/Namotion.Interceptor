@@ -556,7 +556,7 @@ public class SourceMonitorTests
         Assert.Null(secondRoot.Mother);
         Assert.Same(firstTree, ((IInterceptorSubject)shared).TryGetContext());
 
-        var reachable = ((IInterceptorSubject)shared).Context.GetServices<SourceMonitor>();
+        var reachable = ((IInterceptorSubject)shared).GetContext().GetServices<SourceMonitor>();
         Assert.Single(reachable);
         Assert.Same(firstTree.GetSourceMonitor(), reachable[0]);
     }

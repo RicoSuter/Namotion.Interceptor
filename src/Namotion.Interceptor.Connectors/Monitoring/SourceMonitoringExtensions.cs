@@ -68,6 +68,6 @@ public static class SourceMonitoringExtensions
 
         // Resolved before the wait is created, so a null subject and an unreachable monitor keep
         // throwing synchronously rather than surfacing on await.
-        return subject.Context.GetSourceMonitor().WaitForSynchronizationAsync(subject, cancellationToken);
+        return subject.GetContext().GetSourceMonitor().WaitForSynchronizationAsync(subject, cancellationToken);
     }
 }

@@ -53,7 +53,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         IInterceptorSubject subject,
         MqttClientConfiguration configuration,
         ILogger<MqttSubjectClientSource> logger)
-        : base(subject.Context, logger, configuration.BufferTime, configuration.RetryTime, configuration.WriteRetryQueueSize,
+        : base(subject.GetContext(), logger, configuration.BufferTime, configuration.RetryTime, configuration.WriteRetryQueueSize,
             configuration.TeardownFlushTimeout)
     {
         ArgumentNullException.ThrowIfNull(subject);
@@ -608,7 +608,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         if (_propertyToTopic.TryAdd(propertyReference, entry))
         {
             var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
-            if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+            if (registeredSubject is null)
             {
                 _propertyToTopic.TryRemove(propertyReference, out _);
             }
@@ -637,7 +637,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             if (propertyReference is { } propRef)
             {
                 var registeredSubject = propRef.Subject.TryGetRegisteredSubject();
-                if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+                if (registeredSubject is null)
                 {
                     _topicToProperty.TryRemove(topic, out _);
                 }

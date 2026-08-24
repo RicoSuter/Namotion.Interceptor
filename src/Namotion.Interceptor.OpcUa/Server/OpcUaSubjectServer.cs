@@ -97,7 +97,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         }
 
         _subject = subject;
-        _context = subject.Context;
+        _context = subject.GetContext();
         _logger = logger;
         _configuration = configuration;
         Diagnostics = new OpcUaServerDiagnostics(this, Metrics);

@@ -33,12 +33,12 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         {
             if (change.Subject is IHostedService hostedService)
             {
-                AttachHostedService(hostedService, change.Subject.Context);
+                AttachHostedService(hostedService, change.Subject.GetContext());
             }
 
             foreach (var hostedService2 in change.Subject.GetAttachedHostedServices())
             {
-                AttachHostedService(hostedService2, change.Subject.Context);
+                AttachHostedService(hostedService2, change.Subject.GetContext());
             }
         }
         else if (change.IsContextDetach)

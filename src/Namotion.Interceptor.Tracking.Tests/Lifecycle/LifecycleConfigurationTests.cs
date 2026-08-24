@@ -1,5 +1,5 @@
+using System.Collections.Immutable;
 using Namotion.Interceptor.Interceptors;
-using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -30,7 +30,7 @@ public class LifecycleConfigurationTests
         person.Mother = new Person { FirstName = "Mother" };
 
         // Assert
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), person.Mother.GetServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), person.Mother!.GetResolvedServices<ILifecycleInterceptor>());
     }
 
     [Fact]
@@ -60,9 +60,9 @@ public class LifecycleConfigurationTests
         };
 
         // Assert
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), person.GetServices<ILifecycleInterceptor>());
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), mother.GetServices<ILifecycleInterceptor>());
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), grandmother.GetServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), person.GetResolvedServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), mother.GetResolvedServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), grandmother.GetResolvedServices<ILifecycleInterceptor>());
     }
 
     [Fact]
@@ -94,9 +94,9 @@ public class LifecycleConfigurationTests
         person.Mother = null;
 
         // Assert
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), person.GetServices<ILifecycleInterceptor>());
-        Assert.Empty(mother.GetServices<ILifecycleInterceptor>());
-        Assert.Empty(grandmother.GetServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), person.GetResolvedServices<ILifecycleInterceptor>());
+        Assert.Empty(mother.GetResolvedServices<ILifecycleInterceptor>());
+        Assert.Empty(grandmother.GetResolvedServices<ILifecycleInterceptor>());
     }
 
     [Fact]
@@ -121,9 +121,9 @@ public class LifecycleConfigurationTests
         };
 
         // Assert
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), person.GetServices<ILifecycleInterceptor>());
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child1.GetServices<ILifecycleInterceptor>());
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child2.GetServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), person.GetResolvedServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child1.GetResolvedServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child2.GetResolvedServices<ILifecycleInterceptor>());
     }
 
     [Fact]
@@ -144,9 +144,9 @@ public class LifecycleConfigurationTests
         child3.Mother = child1;
 
         // Assert
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child1.GetServices<ILifecycleInterceptor>());
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child2.GetServices<ILifecycleInterceptor>());
-        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child3.GetServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child1.GetResolvedServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child2.GetResolvedServices<ILifecycleInterceptor>());
+        Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child3.GetResolvedServices<ILifecycleInterceptor>());
     }
 
     [Fact]
@@ -181,16 +181,16 @@ public class LifecycleConfigurationTests
         // registered on one subject reaches that subject and nothing else. It used to reach the
         // subjects below it as well, because they resolved through it; they now resolve through the
         // context they are attached to.
-        Assert.Contains(1, person.GetServices<int>());
-        Assert.DoesNotContain(2, person.GetServices<int>());
-        Assert.Single(person.GetServices<LifecycleInterceptor>());
+        Assert.Contains(1, ((IInterceptorSubject)person).Context.GetServices<int>());
+        Assert.DoesNotContain(2, ((IInterceptorSubject)person).Context.GetServices<int>());
+        Assert.Single(((IInterceptorSubject)person).Context.GetServices<LifecycleInterceptor>());
 
-        Assert.Contains(1, person.Mother.GetServices<int>());
-        Assert.Contains(2, person.Mother.GetServices<int>());
+        Assert.Contains(1, ((IInterceptorSubject)person.Mother!).Context.GetServices<int>());
+        Assert.Contains(2, ((IInterceptorSubject)person.Mother!).Context.GetServices<int>());
 
-        Assert.Contains(1, person.Mother.Mother.GetServices<int>());
-        Assert.DoesNotContain(2, person.Mother.Mother.GetServices<int>());
-        Assert.Single(person.Mother.Mother.GetServices<LifecycleInterceptor>());
+        Assert.Contains(1, ((IInterceptorSubject)person.Mother!.Mother!).Context.GetServices<int>());
+        Assert.DoesNotContain(2, ((IInterceptorSubject)person.Mother!.Mother!).Context.GetServices<int>());
+        Assert.Single(((IInterceptorSubject)person.Mother!.Mother!).Context.GetServices<LifecycleInterceptor>());
     }
 
     #endregion
@@ -340,4 +340,16 @@ public class LifecycleConfigurationTests
     }
 
     #endregion
+}
+
+/// <summary>
+/// The services a subject resolves through the one exact context it is attached to; an
+/// unattached subject resolves nothing.
+/// </summary>
+file static class SubjectServiceResolutionExtensions
+{
+    public static ImmutableArray<TService> GetResolvedServices<TService>(this IInterceptorSubject subject)
+    {
+        return subject.TryGetContext()?.GetServices<TService>() ?? [];
+    }
 }

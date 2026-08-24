@@ -21,7 +21,7 @@ public static class SubjectRegistryJsonExtensions
     /// <returns>The path.</returns>
     public static string GetJsonPath(this PropertyReference property, JsonSerializerOptions jsonSerializerOptions)
     {
-        var registry = property.Subject.Context.TryGetService<ISubjectRegistry>();
+        var registry = property.Subject.TryGetContext()?.TryGetService<ISubjectRegistry>();
         if (registry is not null)
         {
             // TODO: avoid endless recursion

@@ -6,7 +6,7 @@ public class AttachmentTransitionTests
 {
     private static IInterceptorExecutor CreateExecutor()
     {
-        return (IInterceptorExecutor)((IInterceptorSubject)new Car()).Context;
+        return ((IInterceptorSubject)new Car()).Executor;
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public class AttachmentTransitionTests
         // Arrange: the seam is public interface surface, usable by an out-of-assembly
         // lifecycle implementation without reflection or friend access.
         var subject = new Car();
-        var executor = (IInterceptorExecutor)((IInterceptorSubject)subject).Context;
+        var executor = ((IInterceptorSubject)subject).Executor;
         var context = InterceptorSubjectContext.Create();
 
         // Act

@@ -31,7 +31,7 @@ public static class LifecycleInterceptorExtensions
         using var scope = CallbackReentrancyGuard.EnterPropertyCallbackScope();
         var change = new SubjectPropertyLifecycleChange(subject, property);
 
-        foreach (var handler in subject.Context.GetServices<IPropertyLifecycleHandler>())
+        foreach (var handler in subject.TryGetContext()?.GetServices<IPropertyLifecycleHandler>() ?? [])
         {
             handler.AttachProperty(change);
         }
@@ -47,7 +47,7 @@ public static class LifecycleInterceptorExtensions
         using var scope = CallbackReentrancyGuard.EnterPropertyCallbackScope();
         var change = new SubjectPropertyLifecycleChange(subject, property);
 
-        foreach (var handler in subject.Context.GetServices<IPropertyLifecycleHandler>())
+        foreach (var handler in subject.TryGetContext()?.GetServices<IPropertyLifecycleHandler>() ?? [])
         {
             handler.DetachProperty(change);
         }

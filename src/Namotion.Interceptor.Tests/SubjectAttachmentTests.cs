@@ -52,7 +52,7 @@ public class SubjectAttachmentTests
 
     private static IInterceptorExecutor GetExecutor(IInterceptorSubject subject)
     {
-        return (IInterceptorExecutor)subject.Context;
+        return subject.Executor;
     }
 
     private static InterceptorSubjectContext CreateContextWithProbe(out LifecycleProbe probe)

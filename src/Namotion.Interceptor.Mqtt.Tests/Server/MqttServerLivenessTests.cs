@@ -176,7 +176,7 @@ public partial class MqttServerLivenessTests
             initialStateDelay: TimeSpan.FromMinutes(5),
             withLifecycle: true);
 
-        var lifecycleInterceptor = server.RootSubject.Context.TryGetLifecycleInterceptor()!;
+        var lifecycleInterceptor = server.RootSubject.GetContext().TryGetLifecycleInterceptor()!;
         var baselineHandlerCount = GetSubjectDetachingHandlerCount(lifecycleInterceptor);
 
         using var client = new MqttClientFactory().CreateMqttClient();

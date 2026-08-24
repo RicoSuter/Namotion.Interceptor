@@ -452,7 +452,7 @@ public class SourceWaitResultTests
         var hold = monitor.DeferWaitCompletion();
         monitor.CompleteSourceRegistration();
 
-        var poisonWait = new PoisonAnchor(context).WaitForSynchronizationAsync(cancellationToken);
+        var poisonWait = monitor.WaitForSynchronizationAsync(new PoisonAnchor(context), cancellationToken);
         Assert.False(poisonWait.IsCompleted);
 
         Assert.Throws<InvalidOperationException>(() => hold.Dispose());

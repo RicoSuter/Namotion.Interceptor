@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Performance;
@@ -44,7 +45,7 @@ internal static class SubjectUpdateApplier
         Dictionary<string, SubjectPropertyUpdate> properties,
         SubjectUpdateApplyContext context)
     {
-        var registry = subject.Context.GetService<ISubjectRegistry>();
+        var registry = subject.GetContext().GetService<ISubjectRegistry>();
 
         foreach (var (propertyName, propertyUpdate) in properties)
         {
@@ -142,7 +143,7 @@ internal static class SubjectUpdateApplier
             else
             {
                 var newItem = context.SubjectFactory.CreateSubject(property);
-                newItem.Context.AddFallbackContext(parent.Context);
+                AttachAsProvisionalRoot(newItem, parent);
 
                 if (context.TryMarkAsProcessed(propertyUpdate.Id))
                 {
@@ -156,6 +157,19 @@ internal static class SubjectUpdateApplier
         {
             context.SetPropertyValue(property, propertyUpdate.Timestamp, null);
         }
+    }
+
+    /// <summary>
+    /// Attaches a freshly created item to the parent's context as a provisional root, so its
+    /// population runs registered and intercepted exactly as it will after the assignment. The
+    /// first supporting edge (the assignment that follows the population) clears the anchor, so
+    /// no detach ceremony is needed.
+    /// </summary>
+    internal static void AttachAsProvisionalRoot(IInterceptorSubject newItem, IInterceptorSubject parent)
+    {
+        var context = parent.GetContext();
+        context.GetService<ILifecycleInterceptor>()
+            .AttachSubjectToContext(newItem, context, SubjectAnchorKind.Provisional);
     }
 
     private static object? ConvertValue(object? value, Type targetType)

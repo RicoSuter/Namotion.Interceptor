@@ -176,7 +176,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
 
         // Registration precedes the pump so SourceRegistered precedes any StateChanged of this source.
-        var monitor = RootSubject.Context.TryGetService<SourceMonitor>();
+        var monitor = RootSubject.TryGetContext()?.TryGetService<SourceMonitor>();
         Interlocked.Exchange(ref _registeredMonitor, monitor);
         try
         {

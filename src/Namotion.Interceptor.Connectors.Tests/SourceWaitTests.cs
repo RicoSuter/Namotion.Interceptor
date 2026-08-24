@@ -366,7 +366,7 @@ public class SourceWaitTests
         // every re-evaluation pass. An earlier version of this test drove the throw from a
         // one-shot diagnostic warning instead, which meant nothing threw on the second pass and
         // the test passed with the per-wait isolation removed.
-        var poisonWait = new PoisonAnchor(context).WaitForSynchronizationAsync(CancellationToken.None);
+        var poisonWait = monitor.WaitForSynchronizationAsync(new PoisonAnchor(context), CancellationToken.None);
         Assert.False(poisonWait.IsCompleted);
 
         // A second, later wait whose own re-evaluation never touches the poison anchor: its scope
@@ -434,7 +434,7 @@ public class SourceWaitTests
         monitor.CompleteSourceRegistration();
 
         var hold = monitor.DeferWaitCompletion();
-        var poisonWait = new PoisonAnchor(context).WaitForSynchronizationAsync(CancellationToken.None);
+        var poisonWait = monitor.WaitForSynchronizationAsync(new PoisonAnchor(context), CancellationToken.None);
         Assert.False(poisonWait.IsCompleted);
         Assert.Throws<InvalidOperationException>(() => hold.Dispose());
 
@@ -815,6 +815,8 @@ internal sealed class RecordingLoggerFactory(RecordingLogger logger) : ILoggerFa
 /// Used as a wait anchor to make one wait's re-evaluation throw on every pass while leaving every
 /// other wait unaffected. GetParents() reads the subject's attachment, and SourceScope's walk starts
 /// from the anchor, so the throw lands inside that wait's own IsBranchSynchronized and nowhere else.
+/// The wait is registered on the monitor directly: WaitForSynchronizationAsync's extension resolves
+/// the monitor through the subject's attached context, which is exactly the poisoned read.
 /// A throwing source would not work here: IsBranchSynchronized iterates the shared source list for
 /// every wait, so one poison source makes every wait's evaluation throw.
 /// </remarks>

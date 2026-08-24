@@ -87,7 +87,7 @@ public static class SourcePropertyExtensions
         // Cached on the context's copy-on-write state snapshot, so a tree without monitoring pays
         // one lookup per claim and nothing else. With no subscribers this skips the clock, the
         // event and the monitor's lock entirely, which is the common shape.
-        var monitor = property.Subject.Context.TryGetService<SourceMonitor>();
+        var monitor = property.Subject.TryGetContext()?.TryGetService<SourceMonitor>();
         if (monitor is null || !monitor.HasSubscribers)
         {
             return;

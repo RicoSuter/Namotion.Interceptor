@@ -1,4 +1,5 @@
 using Moq;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Connectors.Tests;
@@ -149,10 +150,10 @@ public class SourceOwnershipManagerTests
         // Create subjects and properties (subjects need Data for PropertyReference to work)
         var subject1Mock = new Mock<IInterceptorSubject>();
         subject1Mock.Setup(s => s.Data).Returns(new System.Collections.Concurrent.ConcurrentDictionary<(string?, string), object?>());
-        subject1Mock.Setup(s => s.Context).Returns(InterceptorSubjectContext.Create());
+        subject1Mock.Setup(s => s.Executor).Returns(CreateAttachedExecutor(InterceptorSubjectContext.Create()));
         var subject2Mock = new Mock<IInterceptorSubject>();
         subject2Mock.Setup(s => s.Data).Returns(new System.Collections.Concurrent.ConcurrentDictionary<(string?, string), object?>());
-        subject2Mock.Setup(s => s.Context).Returns(InterceptorSubjectContext.Create());
+        subject2Mock.Setup(s => s.Executor).Returns(CreateAttachedExecutor(InterceptorSubjectContext.Create()));
         var property1 = new PropertyReference(subject1Mock.Object, "Prop1");
         var property2 = new PropertyReference(subject2Mock.Object, "Prop2");
         var property3 = new PropertyReference(subject1Mock.Object, "Prop3");
@@ -181,7 +182,7 @@ public class SourceOwnershipManagerTests
         var subjectMock = new Mock<IInterceptorSubject>();
         var contextMock = new Mock<IInterceptorSubjectContext>();
         contextMock.Setup(c => c.TryGetService<LifecycleInterceptor>()).Returns((LifecycleInterceptor?)null);
-        subjectMock.Setup(s => s.Context).Returns(contextMock.Object);
+        subjectMock.Setup(s => s.Executor).Returns(CreateAttachedExecutor(contextMock.Object));
 
         var sourceMock = new Mock<ISubjectSource>();
         sourceMock.Setup(s => s.RootSubject).Returns(subjectMock.Object);
@@ -226,7 +227,7 @@ public class SourceOwnershipManagerTests
         var subjectMock = new Mock<IInterceptorSubject>();
         var contextMock = new Mock<IInterceptorSubjectContext>();
         contextMock.Setup(c => c.TryGetService<LifecycleInterceptor>()).Returns(lifecycleInterceptor);
-        subjectMock.Setup(s => s.Context).Returns(contextMock.Object);
+        subjectMock.Setup(s => s.Executor).Returns(CreateAttachedExecutor(contextMock.Object));
 
         var sourceMock = new Mock<ISubjectSource>();
         sourceMock.Setup(s => s.RootSubject).Returns(subjectMock.Object);
@@ -236,11 +237,23 @@ public class SourceOwnershipManagerTests
         return (lifecycleInterceptor, manager);
     }
 
+
+    /// <summary>
+    /// An executor stub exposing only the exact attached context, which is the one member the
+    /// production code reads from these mocks.
+    /// </summary>
+    private static IInterceptorExecutor CreateAttachedExecutor(IInterceptorSubjectContext? context)
+    {
+        var executorMock = new Mock<IInterceptorExecutor>();
+        executorMock.Setup(e => e.AttachedContext).Returns(context);
+        return executorMock.Object;
+    }
+
     private static PropertyReference CreatePropertyReference(string name = "TestProperty")
     {
         var subjectMock = new Mock<IInterceptorSubject>();
         subjectMock.Setup(s => s.Data).Returns(new System.Collections.Concurrent.ConcurrentDictionary<(string?, string), object?>());
-        subjectMock.Setup(s => s.Context).Returns(InterceptorSubjectContext.Create());
+        subjectMock.Setup(s => s.Executor).Returns(CreateAttachedExecutor(InterceptorSubjectContext.Create()));
         return new PropertyReference(subjectMock.Object, name);
     }
 }

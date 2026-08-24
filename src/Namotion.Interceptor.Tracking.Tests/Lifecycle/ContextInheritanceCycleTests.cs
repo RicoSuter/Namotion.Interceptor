@@ -34,7 +34,7 @@ public class ContextInheritanceCycleTests
         // Assert
         Assert.Equal(0, shared.GetReferenceCount());
         Assert.Null(((IInterceptorSubject)shared).TryGetContext());
-        Assert.Empty(((IInterceptorSubject)shared).Context.GetServices<ILifecycleHandler>());
+        Assert.Empty(((IInterceptorSubject)shared).TryGetContext()?.GetServices<ILifecycleHandler>() ?? []);
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public class ContextInheritanceCycleTests
         // Assert: the outcome must not depend on the removal order.
         Assert.Equal(0, shared.GetReferenceCount());
         Assert.Null(((IInterceptorSubject)shared).TryGetContext());
-        Assert.Empty(((IInterceptorSubject)shared).Context.GetServices<ILifecycleHandler>());
+        Assert.Empty(((IInterceptorSubject)shared).TryGetContext()?.GetServices<ILifecycleHandler>() ?? []);
     }
 
     [Fact]
@@ -93,7 +93,7 @@ public class ContextInheritanceCycleTests
         Assert.Equal("1st", first.FirstName);
         first.LastName = "X";
         Assert.Equal("X", first.LastName);
-        Assert.NotEmpty(((IInterceptorSubject)first).Context.GetServices<ILifecycleHandler>());
+        Assert.NotEmpty(((IInterceptorSubject)first).TryGetContext()?.GetServices<ILifecycleHandler>() ?? []);
     }
 
     [Fact]

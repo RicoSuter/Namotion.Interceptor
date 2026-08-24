@@ -255,7 +255,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
             }
 
             // handle property initializers from context
-            foreach (var initializer in change.Subject.Context.GetServices<ISubjectPropertyInitializer>())
+            foreach (var initializer in change.Subject.TryGetContext()?.GetServices<ISubjectPropertyInitializer>() ?? [])
             {
                 initializer.InitializeProperty(property);
             }

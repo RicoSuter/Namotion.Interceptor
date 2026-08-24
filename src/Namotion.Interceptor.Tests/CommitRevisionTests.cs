@@ -40,8 +40,8 @@ public class CommitRevisionTests
 
         // Assert: the terminal assigned one revision per committed write, while an unwritten subject
         // sharing the same context stayed at zero, so the counter is per subject.
-        Assert.Equal(3, ((InterceptorExecutor)((IInterceptorSubject)written).Context).Revision);
-        Assert.Equal(0, ((InterceptorExecutor)((IInterceptorSubject)untouched).Context).Revision);
+        Assert.Equal(3, ((InterceptorExecutor)((IInterceptorSubject)written).Executor).Revision);
+        Assert.Equal(0, ((InterceptorExecutor)((IInterceptorSubject)untouched).Executor).Revision);
     }
 
     /// <summary>

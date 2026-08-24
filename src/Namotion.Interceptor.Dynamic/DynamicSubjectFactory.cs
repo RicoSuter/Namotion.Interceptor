@@ -64,7 +64,7 @@ public class DynamicSubjectFactory
             }
             
             var subject = (IInterceptorSubject)invocation.Proxy;
-            var context = (IInterceptorExecutor)subject.Context;
+            var context = subject.Executor;
 
             if (invocation.Method.IsSpecialName &&
                 invocation.Method.Name.StartsWith("get_"))

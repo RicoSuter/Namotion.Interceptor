@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry;
@@ -277,7 +278,12 @@ internal class OpcUaSubjectLoader
 
         if (isNewSubject)
         {
-            subjectToLoad.Context.AddFallbackContext(subject.Context);
+            // A provisional root: the asynchronous population below runs registered and
+            // intercepted, and the assignment at the end provides the supporting edge that
+            // clears the anchor, so no detach ceremony is needed.
+            var context = subject.GetContext();
+            context.GetService<ILifecycleInterceptor>()
+                .AttachSubjectToContext(subjectToLoad, context, SubjectAnchorKind.Provisional);
         }
 
         // Pre-attached children participate in the dedup cache too: any later sibling

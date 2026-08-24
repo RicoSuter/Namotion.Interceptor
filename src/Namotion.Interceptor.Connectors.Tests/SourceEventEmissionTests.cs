@@ -169,7 +169,7 @@ public class SourceEventEmissionTests
         // guard existing from it being deleted. What IS a real, checkable claim is that this claim,
         // made in a context with no monitor anywhere in its fallback chain, never reaches an
         // unrelated, independently monitored context: the monitor lookup stays correctly scoped to
-        // property.Subject.Context rather than leaking somewhere global.
+        // the property's subject's attached context rather than leaking somewhere global.
         var isolatedContext = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var isolatedPerson = new Person(isolatedContext);
         var isolatedProperty = new PropertyReference(isolatedPerson, nameof(Person.FirstName));
