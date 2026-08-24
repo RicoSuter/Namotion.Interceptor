@@ -172,4 +172,45 @@ public class CallbackContractTests
         Assert.True(a.Join(TimeSpan.FromSeconds(10)), "thread a did not finish, the gates deadlocked");
         Assert.True(b.Join(TimeSpan.FromSeconds(10)), "thread b did not finish, the gates deadlocked");
     }
+
+    /// <summary>
+    /// Derived getters are only evaluated when DerivedPropertyChangeHandler is registered, which
+    /// WithLifecycle() alone does not do. Without this the tests below pass vacuously.
+    /// </summary>
+    private static IInterceptorSubjectContext CreateDerivedContext()
+    {
+        return InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithDerivedPropertyChangeDetection();
+    }
+
+    [Fact]
+    public void WhenADerivedPropertyExposesAnUnattachedSubject_ThenItThrows()
+    {
+        // Arrange
+        var context = CreateDerivedContext();
+
+        // Act & Assert: the lazily created child is owned by nothing, so it would never be
+        // tracked. Attach-time evaluation of the derived getter is where that surfaces.
+        var exception = Record.Exception(() => new LazyDerivedSubject(context));
+
+        Assert.IsType<LifecycleContractViolationException>(exception);
+        Assert.Contains("derived", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void WhenADerivedPropertyProjectsAnAttachedSubject_ThenItDoesNotThrow()
+    {
+        // Arrange
+        var context = CreateDerivedContext();
+
+        // Act: FirstChild projects a subject already owned through the stored Children edge.
+        var subject = new ProjectingDerivedSubject(context);
+        subject.Children = [new Person { FirstName = "C" }];
+
+        // Assert
+        Assert.NotNull(subject.FirstChild);
+        Assert.NotNull(subject.FirstChild!.TryGetContext());
+    }
 }

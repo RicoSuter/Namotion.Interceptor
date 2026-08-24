@@ -78,6 +78,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 try
                 {
                     data.LastKnownValue = EvaluateAndStabilize(data, change.Property, callerHoldsLock: true);
+                    ThrowIfExposesUntrackedSubject(change.Property, data.LastKnownValue);
                     change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
                 }
                 catch (Exception exception) when (exception is not LifecycleContractViolationException)
@@ -281,6 +282,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                             continue;
                         }
 
+                        // Behind the staleness gates on purpose: the evaluation ran outside the
+                        // lock, so a concurrent structural write can detach a projected subject
+                        // before this point. Such a value is discarded above and re-evaluated;
+                        // checking it next to the evaluation would instead throw an unabsorbed
+                        // exception out of an unrelated write on another thread. Before the
+                        // commit, so a violating value never becomes LastKnownValue and never
+                        // produces a change notification.
+                        ThrowIfExposesUntrackedSubject(derivedProperty, newValue);
+
                         data.LastKnownValue = newValue;
                         sequence = ++data.RecalculationSequence;
                         derivedProperty.SetWriteTimestamp(storageTimestamp);
@@ -375,6 +385,48 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)
         {
             raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
+        }
+    }
+
+    /// <summary>
+    /// Rejects a derived value that exposes a subject the graph does not own. Derived properties
+    /// establish no ownership edges, so such a subject is never attached, never registered and
+    /// never released: silent before this check existed.
+    /// </summary>
+    private static void ThrowIfExposesUntrackedSubject(PropertyReference property, object? value)
+    {
+        if (value is null || !property.Metadata.Type.CanContainSubjects())
+        {
+            return;
+        }
+
+        var context = property.Subject.TryGetContext();
+        if (context is null)
+        {
+            return;
+        }
+
+        var occurrences = LifecycleScratch.RentOccurrenceList();
+        try
+        {
+            StructuralValueScanner.CollectOccurrences(property.Metadata.Type, value, occurrences);
+            foreach (var occurrence in occurrences)
+            {
+                if (ReferenceEquals(occurrence.Subject.TryGetContext(), context))
+                {
+                    continue;
+                }
+
+                throw new LifecycleContractViolationException(
+                    $"The derived property '{property.Name}' returned a subject that is not " +
+                    "attached to this context. Derived properties establish no ownership edges, " +
+                    "so that subject is never tracked, registered or released. Assign it to a " +
+                    "stored (non-derived) property instead, or attach it explicitly.");
+            }
+        }
+        finally
+        {
+            LifecycleScratch.Return(occurrences);
         }
     }
 
