@@ -13,7 +13,9 @@ public enum SubjectAnchorKind
 
     /// <summary>
     /// The subject was anchored by a context-taking constructor. A provisional anchor is cleared
-    /// automatically when the subject gains an inherited structural edge.
+    /// automatically when the subject gains an inherited structural edge whose parent reaches an
+    /// anchor other than the subject itself; a back edge from the subject's own subtree does not
+    /// clear it.
     /// </summary>
     Provisional,
 

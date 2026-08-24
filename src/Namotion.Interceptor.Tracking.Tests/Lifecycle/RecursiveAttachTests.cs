@@ -34,7 +34,7 @@ public class RecursiveAttachTests
         // Act
         parent.Mother = mother;
 
-        // Assert — both Mother and Grandmother must be attached
+        // Assert: both Mother and Grandmother must be attached
         Assert.Contains(mother, attached);
         Assert.Contains(grandmother, attached);
     }
@@ -86,7 +86,7 @@ public class RecursiveAttachTests
         // Act
         parent.Mother = mother;
 
-        // Assert — all three levels must be attached
+        // Assert: all three levels must be attached
         Assert.Contains(mother, attached);
         Assert.Contains(grandmother, attached);
         Assert.Contains(greatGrandmother, attached);
@@ -122,7 +122,7 @@ public class RecursiveAttachTests
         // Act
         parent.Mother = null;
 
-        // Assert — both Mother and Grandmother must be detached
+        // Assert: both Mother and Grandmother must be detached
         Assert.Contains(mother, detached);
         Assert.Contains(grandmother, detached);
     }
@@ -187,7 +187,7 @@ public class RecursiveAttachTests
                 detached.Add(change.Subject);
         };
 
-        // Act — replace grandmother with a new one
+        // Act: replace grandmother with a new one
         var newGrandmother = new Person { FirstName = "NewGrandmother" };
         mother.Mother = newGrandmother;
 
@@ -220,10 +220,10 @@ public class RecursiveAttachTests
         nodeA.Mother = nodeB;
         nodeB.Mother = nodeA;
 
-        // Act — attach the cycle
+        // Act: attach the cycle
         parent.Mother = nodeA;
 
-        // Assert — both nodes attached, no stack overflow
+        // Assert: both nodes attached, no stack overflow
         Assert.Contains(nodeA, attached);
         Assert.Contains(nodeB, attached);
     }
@@ -235,7 +235,7 @@ public class RecursiveAttachTests
     [Fact]
     public void WhenUsingLifecycleAlone_ThenTheWholeSubtreeIsAttached()
     {
-        // Arrange — WithLifecycle() alone is the full graph lifecycle: the descent that used to
+        // Arrange: WithLifecycle() alone is the full graph lifecycle: the descent that used to
         // require the separate context-inheritance handler is intrinsic.
         var context = InterceptorSubjectContext
             .Create()
@@ -261,7 +261,7 @@ public class RecursiveAttachTests
     [Fact]
     public void WhenAnEdgeRemovalIsSurvived_ThenNoAttachIsPublished()
     {
-        // Arrange — no attach transition may be published from inside a removal, and whether a
+        // Arrange: no attach transition may be published from inside a removal, and whether a
         // subject's component is owned must not depend on it having survived an edge removal.
         var context = InterceptorSubjectContext
             .Create()
@@ -278,7 +278,7 @@ public class RecursiveAttachTests
         var attached = new List<IInterceptorSubject>();
         lifecycleInterceptor.SubjectAttached += change => attached.Add(change.Subject);
 
-        // Act — the child survives, because the second edge still holds it.
+        // Act: the child survives, because the second edge still holds it.
         root.Father = null;
 
         // Assert
@@ -317,7 +317,7 @@ public class RecursiveAttachTests
         var attached = new List<IInterceptorSubject>();
         lifecycleInterceptor.SubjectAttached += change => attached.Add(change.Subject);
 
-        // Act — re-attach the child. Its backing store still holds the grandmother while the
+        // Act: re-attach the child. Its backing store still holds the grandmother while the
         // lifecycle holds no baseline for child.Mother, so the descent must re-seed the child's
         // properties and rediscover the stored subtree rather than trust a stale baseline.
         parent.Mother = child;

@@ -161,7 +161,7 @@ var context = InterceptorSubjectContext
 
 Methods can be intercepted similarly: implement `IMethodInterceptor` and suffix your method name with `WithoutInterceptor`. The generator emits a wrapper (with the suffix dropped) that routes through the chain.
 
-Interceptor ordering, fallback contexts, and the read/write pipeline diagrams are documented in [Interceptors and Contexts](docs/interceptor.md).
+Interceptor ordering, the one-context-per-subject model, and the read/write pipeline diagrams are documented in [Interceptors and Contexts](docs/interceptor.md).
 
 ## Tracking
 

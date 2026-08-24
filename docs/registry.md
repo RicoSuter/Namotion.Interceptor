@@ -117,9 +117,9 @@ Derived properties automatically participate in change tracking and will update 
 
 ### Lifecycle tracking for dynamic properties
 
-Dynamic properties (including derived) fully participate in lifecycle tracking when `WithLifecycle()` or `WithFullPropertyTracking()` is enabled. If a dynamic property holds a reference to another subject, that subject is automatically attached to the lifecycle graph with proper reference counting. For example, a `AddDerivedProperty<Tire>("FirstTire", ...)` that returns the first tire from a collection would give that tire a reference count of 2 — one from the collection property and one from the derived property.
+Dynamic properties participate in lifecycle tracking when `WithLifecycle()` or `WithFullPropertyTracking()` is enabled. A stored dynamic property holding a reference to another subject attaches that subject and counts it. Derived properties are excluded, because a derived value is a projection of edges the stored properties already own, so an `AddDerivedProperty<Tire>("FirstTire", ...)` that returns the first tire from a collection leaves that tire at reference count 1, from the collection property alone.
 
-When the underlying data changes, derived properties are re-evaluated and lifecycle tracking reconciles the old and new subjects automatically (attaching new subjects, detaching removed ones).
+When a stored dynamic property's value changes, lifecycle tracking reconciles the old and new subjects automatically (attaching new subjects, detaching removed ones). A derived property just follows the stored edges: when they change, its value changes with them, without adding or removing any attachment.
 
 When a dynamic property is added, its initial value triggers a change event with `OldValue = null`, representing a transition from "property did not exist" to its initial value. This ensures interceptors (lifecycle, change tracking, etc.) correctly process the initial state.
 
@@ -255,4 +255,4 @@ Subject IDs are automatically managed during the subject lifecycle:
 
 ### Without a registry
 
-Subject IDs also work without a registry configured — IDs are stored directly in the subject's `Data` dictionary. However, the reverse index lookup (`TryGetSubjectById`) requires a registry.
+Subject IDs also work without a registry configured: IDs are stored directly in the subject's `Data` dictionary. However, the reverse index lookup (`TryGetSubjectById`) requires a registry.

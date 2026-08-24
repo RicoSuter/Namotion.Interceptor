@@ -44,7 +44,7 @@ var interceptors = context.GetServices<IWriteInterceptor>();
 var registry = context.TryGetService<SubjectRegistry>();
 ```
 
-Services are cached after first resolution. The cache is invalidated when services or fallback contexts change.
+Services are cached after first resolution. Every registration publishes a fresh context state with empty caches, so a cached resolution can never survive the registration that would change it.
 
 ## One Context Per Subject
 
@@ -98,7 +98,7 @@ public class LateHandler : IWriteInterceptor { }
 
 - Services are partitioned into three groups: `[RunsFirst]` → Middle → `[RunsLast]`
 - Within each group, `[RunsBefore]` and `[RunsAfter]` define the topological order
-- A reference to a type with multiple registered instances binds against every instance, for example when a context aggregates fallback contexts that each register the same service type
+- A reference to a type with multiple registered instances binds against every instance, for example when the same handler type is registered twice on one context
 - Instances of the same type keep their registration order relative to each other
 - Without ordering attributes, registration order is preserved
 - Missing dependency types are silently ignored (supports optional dependencies)

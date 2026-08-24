@@ -61,7 +61,7 @@ public class ContextServiceResolutionTests
     public void WhenTwoInstancesOfSameServiceTypeAreRegistered_ThenOrderingAttributeBindsAgainstAllInstances()
     {
         // Arrange: the first duplicate enumerates before the constrainer, so last-index binding
-        // would leave it unordered (issue #380).
+        // would leave it unordered.
         var context = InterceptorSubjectContext.Create();
 
         var duplicate0 = new DuplicateOrderedService();

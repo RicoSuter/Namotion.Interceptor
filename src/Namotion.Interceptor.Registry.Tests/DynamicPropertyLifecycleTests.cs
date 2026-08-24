@@ -241,7 +241,7 @@ public class DynamicPropertyLifecycleTests
         // All subjects tracked through their real edges: root + child1 + child2
         Assert.Equal(3, registry.KnownSubjects.Count);
 
-        // Act: Change Children so that child2 is first — the derived value follows the stored edges
+        // Act: Change Children so that child2 is first; the derived value follows the stored edges
         root.Children = [child2];
 
         // Assert: child1 fully detached; the derived property alone cannot keep it alive
@@ -251,7 +251,7 @@ public class DynamicPropertyLifecycleTests
         // root + child2
         Assert.Equal(2, registry.KnownSubjects.Count);
 
-        // Act: Set Children to empty — derived property returns null
+        // Act: Set Children to empty; derived property returns null
         root.Children = [];
 
         // Assert: child2 fully detached
