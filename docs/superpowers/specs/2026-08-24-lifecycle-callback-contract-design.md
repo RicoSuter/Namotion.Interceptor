@@ -25,17 +25,23 @@ This is closer to today's real behaviour than the fuller contract would be: cons
 
 `ThrowIfInsideCallback` tests `IsInsideAnyCallback` rather than `_callbackDepth` alone, which removes the depth dependence in one line. `LifecycleInterceptor.AttachSubjectToContext` and `DetachSubjectFromContext` gain the guard call they never had; a reproduction showed two threads, each holding its own lifecycle gate inside a callback and attaching into the other's context, deadlock permanently. There is one gate per lifecycle and no order among gates, so the callback contract is the only thing preventing a thread from holding two.
 
-**3. `DerivedPropertyChangeHandler` stops swallowing.**
+**3. Contract violations get their own type, and are the only thing the derived handler does not absorb.**
 
-The blanket `catch (Exception) { }` around the attach-time evaluation is removed, so a violating getter surfaces instead of leaving a derived value that silently never initialises. The catch was a deferral rather than a retry: it abandoned the initial evaluation and relied on the next dependency write to recompute.
+`DerivedPropertyChangeHandler` absorbs exceptions from derived getters in two places, and both stay. The absorption is deliberate resilience aimed at buggy or transiently failing getters, with a coherent recovery story: keep the last known value, recompute on the next dependency write. Removing it is a different change from settling this contract, and a blanket removal would not even have achieved the goal, because only the attach-time catch was in view. The second catch, on the dependency-driven recalculation path, runs far more often.
 
-Measured before deciding: with the catch removed the whole suite passes, 3,409 tests across 26 assemblies, zero failures. Nothing in the repository throws from a derived getter during attach, so the deferral was protecting a case that does not occur here. This covers the repository's own derived getters and unit paths, not every consumer shape, and narrowing to a filtered catch stays available if it bites.
+Instead, `LifecycleContractViolationException : InvalidOperationException` is thrown by the reentrancy guard and by the check in decision 4, and both catches filter it:
 
-The construction-time worry that motivated a filtered catch does not apply: the generated context constructor is `public Car(IInterceptorSubjectContext context) : this()`, so the parameterless constructor runs to completion before `AttachToContext`, and attach cannot observe a half-built subject through that path.
+```csharp
+catch (Exception exception) when (exception is not LifecycleContractViolationException)
+```
+
+A dedicated type is required rather than convenient: the guard previously threw a plain `InvalidOperationException`, which a filter cannot distinguish from a getter's own. Deriving from `InvalidOperationException` keeps existing consumer catches working.
+
+This is also the only shape in which decision 4 functions at all. An orphan detected during recalculation would otherwise be swallowed by the second catch, on the hot path, which is exactly the silent failure the check exists to remove.
 
 **4. A derived property that yields an untracked subject throws.**
 
-Evaluating a `[Derived]` property whose declared type can contain subjects, where the result holds a subject not attached to this context, throws and says why: derived properties do not establish ownership, so that subject will never be tracked.
+Evaluating a `[Derived]` property whose declared type can contain subjects, where the result holds a subject not attached to this context, throws `LifecycleContractViolationException` and says why: derived properties do not establish ownership, so that subject will never be tracked.
 
 This closes the quietest hole in the area. The pattern
 
@@ -67,6 +73,8 @@ Topology mutation from a property callback stays unsupported. Supporting it mean
 Re-establishing ownership edges from derived properties is also out of scope, and is a separate design question about the derived model rather than about callbacks: a derived getter may return a different object per evaluation, so an edge from a projection can attach objects the next evaluation orphans.
 
 Neither exclusion leaves a silent failure. Decision 1 throws on the mutation, decision 4 throws on the orphan.
+
+One worry that motivated an earlier, wider version of decision 3 turned out not to apply, and is recorded so it is not re-derived: the generated context constructor is `public Car(IInterceptorSubjectContext context) : this()`, so the parameterless constructor runs to completion before `AttachToContext`, and attach cannot observe a half-built subject through that path.
 
 ## Consequences
 

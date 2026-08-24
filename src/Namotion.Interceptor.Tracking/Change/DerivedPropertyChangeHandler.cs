@@ -75,8 +75,17 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             if (metadata.IsDerived)
             {
                 Volatile.Write(ref data.IsDerived, true);
-                data.LastKnownValue = EvaluateAndStabilize(data, change.Property, callerHoldsLock: true);
-                change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
+                try
+                {
+                    data.LastKnownValue = EvaluateAndStabilize(data, change.Property, callerHoldsLock: true);
+                    change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
+                }
+                catch (Exception exception) when (exception is not LifecycleContractViolationException)
+                {
+                    // Getter threw. The value will be computed on the next dependency write. A
+                    // contract violation is excluded: absorbing it would hide an illegal getter
+                    // behind a derived value that silently never initializes.
+                }
             }
         }
     }
@@ -248,9 +257,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                     {
                         newValue = EvaluateAndStabilize(data, derivedProperty, callerHoldsLock: false);
                     }
-                    catch (Exception)
+                    catch (Exception exception) when (exception is not LifecycleContractViolationException)
                     {
                         // Getter threw. Keep LastKnownValue; a concurrent writer's cascade will retry.
+                        // A contract violation is excluded: this path runs on every dependency write,
+                        // so absorbing it here would hide the violation on the hot path.
                         return;
                     }
 

@@ -61,7 +61,7 @@ internal static class CallbackReentrancyGuard
     {
         if (_callbackDepth > 0)
         {
-            throw new InvalidOperationException(
+            throw new LifecycleContractViolationException(
                 "A lifecycle callback must not write a structural (subject-typed) property. The " +
                 "callback runs while the lifecycle holds its topology gate mid-reconcile, so the " +
                 "write would re-enter the reconciler on half-updated edge state. Defer the write " +

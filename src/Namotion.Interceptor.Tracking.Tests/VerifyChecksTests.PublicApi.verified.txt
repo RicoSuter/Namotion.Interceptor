@@ -149,6 +149,10 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
         void RefreshCollectionProperty(Namotion.Interceptor.PropertyReference property, object? value);
     }
+    public sealed class LifecycleContractViolationException : System.InvalidOperationException
+    {
+        public LifecycleContractViolationException(string message) { }
+    }
     public sealed class LifecycleInterceptor : Namotion.Interceptor.ISingletonContextService<Namotion.Interceptor.Interceptors.ILifecycleInterceptor>, Namotion.Interceptor.Interceptors.ILifecycleInterceptor, Namotion.Interceptor.Interceptors.IWriteInterceptor, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
     {
         public LifecycleInterceptor(Namotion.Interceptor.IInterceptorSubjectContext context) { }

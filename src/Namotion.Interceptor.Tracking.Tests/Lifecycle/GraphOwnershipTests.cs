@@ -515,7 +515,7 @@ public class GraphOwnershipTests
 
         // Assert
         Assert.True(callbackObserved);
-        Assert.IsType<InvalidOperationException>(callbackException);
+        Assert.IsType<LifecycleContractViolationException>(callbackException);
         Assert.Contains("lifecycle callback must not write a structural", callbackException.Message);
         Assert.Same(context, root.TryGetContext());
         Assert.Same(context, parent.TryGetContext());
