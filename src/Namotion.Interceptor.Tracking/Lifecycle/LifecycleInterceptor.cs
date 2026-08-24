@@ -191,7 +191,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         // Reject a cross-context callback before the gate and before the input is enumerated: a
         // thread inside another lifecycle's callback holds that lifecycle's gate, so blocking on
         // this one can deadlock against opposing callbacks. Property lifecycle callbacks count
-        // too: they are exempt from the structural write contract, not from the gate order. A
+        // too: they are published under the same gate, so the deadlock shape is identical. A
         // same-lifecycle callback already holds this gate reentrantly and is the supported
         // dynamic-property-initializer case.
         if (CallbackReentrancyGuard.IsInsideAnyCallback && !Monitor.IsEntered(_gate))

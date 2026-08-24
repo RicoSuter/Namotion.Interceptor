@@ -100,11 +100,12 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             release.RemoveEdge(occurrence.Subject, property, occurrence.Index);
             if (!graph.IsOwned(parent))
             {
-                // A reentrant descent released the writing parent mid-publication, entered from
-                // an exempt attach or detach property callback, or from a third-party write
-                // interceptor running downstream of the lifecycle. The remaining edges belong to
-                // a subject that is no longer in the graph, so publishing them would claim on
-                // behalf of a released owner.
+                // Side-effecting user code invoked by this loop at callback depth zero (a
+                // dictionary-key Equals, a user collection or dictionary implementation) can run
+                // the write protocol reentrantly and release the writing parent mid-publication;
+                // callbacks cannot, they throw. The remaining edges belong to a subject that is
+                // no longer in the graph, so publishing them would claim on behalf of a released
+                // owner.
                 return;
             }
         }
@@ -184,7 +185,7 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
                 release.RemoveEdge(occurrence.Subject, property, occurrence.Index);
                 if (!graph.IsOwned(parent))
                 {
-                    // See ReconcileKeyed: a reentrant callback descent released the writing parent.
+                    // See ReconcileKeyed: user code invoked by the loop released the writing parent.
                     return;
                 }
             }

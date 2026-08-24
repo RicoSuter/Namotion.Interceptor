@@ -92,11 +92,13 @@ internal sealed class SubjectOwnership
     /// </summary>
     /// <remarks>
     /// The inexact case is reachable and must not fail. A reconcile commits the property's new
-    /// value before it refreshes the retained edges' stored indices, so a release descent entered
-    /// reentrantly from a lifecycle callback drains committed edges whose new index this subject
-    /// has not adopted yet. The attach and detach property lifecycle callbacks are exempt from
-    /// the callback write contract (see <see cref="CallbackReentrancyGuard"/>), so that descent
-    /// is a supported shape. Only the per-property occurrence count is authoritative in that
+    /// value before it refreshes the retained edges' stored indices, so a release descent that
+    /// runs inside that window collects children through the committed baseline and presents
+    /// indices this record has not adopted yet. Lifecycle callbacks cannot open the window
+    /// anymore (topology mutation from a callback throws, see
+    /// <see cref="CallbackReentrancyGuard"/>), but side-effecting user code the reconcile loops
+    /// invoke at callback depth zero, such as a dictionary-key <c>Equals</c> or a user collection
+    /// implementation, still can. Only the per-property occurrence count is authoritative in that
     /// window; refusing to remove would leak the edge and leave the subject attached to a
     /// released parent.
     /// </remarks>

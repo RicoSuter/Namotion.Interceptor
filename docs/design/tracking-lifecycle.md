@@ -37,13 +37,13 @@ The anchor lives on the executor (`IInterceptorExecutor.Anchor`), never mirrored
 
 ## Data Structures
 
-**The owned-subject map** (`OwnershipGraph._owned`): a `ConcurrentDictionary<IInterceptorSubject, SubjectOwnership>` keyed by reference equality. Concurrent so that lock-free readers (`GetParents()`, `GetReferenceCount()`) can find a record without the topology gate; only the gate holder mutates it.
+**The owned-subject map** (`OwnershipGraph._owned`): a `ConcurrentDictionary<IInterceptorSubject, SubjectOwnership>` keyed by reference equality. Concurrent so that gate-free readers (`GetParents()`, `GetReferenceCount()`) can find a record without the topology gate; only the gate holder mutates it.
 
 **Property baselines are the committed outgoing edges.** The last reconciled value of every structural property is the outgoing truth: a subject commits an edge to a child exactly when the baseline of one of its structural properties still contains that child. There is no second outgoing representation, which removes the whole class of bugs where two representations disagree, and it is what makes the release descent and the reachability walk read the same relation.
 
 **Incoming edges** live on `SubjectOwnership`, occurrence-aware: each edge carries the property and the occurrence index or dictionary key, so `[a, a, b]` records two distinct edges for `a` and `GetReferenceCount()` answers 2. A single incoming edge is stored inline; a list is allocated only from the second edge.
 
-**Parent snapshots activate lazily.** The first `GetParents()` on a subject sets a per-subject bit; from then on that subject publishes an immutable snapshot eagerly on every edge change. A consumer that never asks pays nothing, and the read is a lock-free snapshot read.
+**Parent snapshots activate lazily.** The first `GetParents()` on a subject takes that subject's `SubjectOwnership` monitor to set the activation bit and materialize the initial snapshot; from then on the subject publishes an immutable snapshot eagerly on every edge change and every later read is a lock-free snapshot read. A consumer that never asks pays nothing.
 
 ## The Reconcile Order Invariant
 
@@ -75,21 +75,24 @@ Inside the chain, `LifecycleInterceptor.WriteProperty` validates and claims the 
 
 ## Lock Ordering
 
-The total order is **lifecycle gate → attachment monitor → SyncRoot**.
+The total order is **lifecycle gate → attachment monitor → SyncRoot**, with the per-subject `SubjectOwnership` monitor as a leaf below all three.
 
 - The **lifecycle gate** is one private reentrant monitor per lifecycle, the outermost lock. Every topology change holds it. Reentrancy is required because same-lifecycle `TryAddProperties` re-enters from inside callbacks.
 - The **attachment monitor** is the executor's private lock guarding the attachment triple (context, anchor, revision). Transitions are leaf acquisitions or taken under the gate. Attachment reads are lock-free (volatile fields, revision published last with release semantics), because consumers read them from inside their own locks and a locking read deadlocks against a held commit.
 - **SyncRoot** is the executor's internal per-subject terminal lock, pairing the backing write with revision increment and write-state publication. The zero-interceptor read chain takes no lock; removing SyncRoot from the write terminal would permit torn reads of value types wider than 64 bits.
+- The **`SubjectOwnership` monitor** is a per-subject leaf lock guarding the incoming-edge record and the parent snapshot. The lifecycle takes it under the gate for every edge mutation; the first `GetParents()` on a subject takes it without the gate, from any thread, to activate parent publication. Nothing foreign runs while it is held and the type never leaves the assembly, so it cannot participate in an ordering cycle.
 
 Taking the attachment monitor before the gate deadlocks: a structural write holding a child's monitor would wait for the gate while a parent removal holding the gate reaches `ReleaseClaim(child)` and waits for that monitor. The lock-order tests inject exactly this inversion and fail with a bounded join rather than hanging.
 
-`GetParents()` and `GetReferenceCount()` never take the lifecycle gate. `SourceMonitor` holds its own lock across a graph walk that calls `GetParents()` and is also called from inside the gate, so a locking read would deadlock.
+`GetParents()` and `GetReferenceCount()` never take the lifecycle gate: `GetReferenceCount()` is a plain volatile read, and `GetParents()` is a lock-free snapshot read except for the first call on a subject, which takes that subject's `SubjectOwnership` monitor to activate publication. `SourceMonitor` holds its own lock across a graph walk that calls `GetParents()` and is also called from inside the gate, so a gate-taking read would deadlock.
 
 ## Callback Contract
 
-Lifecycle callbacks are synchronous and exception-free by contract; violations propagate with no rollback. A structural write, explicit attach or detach, or cross-context `AddProperties` from inside a lifecycle callback (an `ILifecycleHandler` invocation, a subject attach or detach event, or a collection refresh) is a contract violation detected by `CallbackReentrancyGuard`, which is live in every build because the silent failure mode is graph corruption.
+Lifecycle callbacks are synchronous and exception-free by contract; violations propagate with no rollback. A callback may evaluate anything, including user getters, and may change no graph topology: no structural property write, no explicit attach or detach, and no cross-context `AddProperties`. A structural write and an explicit attach or detach throw `LifecycleContractViolationException` in every build, uniformly at every graph depth, because the silent failure modes are graph corruption and a deadlock between two lifecycle gates; a cross-context `AddProperties` is rejected with a plain `InvalidOperationException` before it enumerates input or blocks on the foreign topology gate. Property lifecycle callbacks (`IPropertyLifecycleHandler.AttachProperty`/`DetachProperty`) are not exempt: the derived-property handler evaluates user getters from its attach callback, and evaluation is what the contract permits.
 
-**Property lifecycle callbacks (`IPropertyLifecycleHandler.AttachProperty`/`DetachProperty`) are exempt**, deliberately: the derived-property handler evaluates user getters from its attach callback, and derived getters that write subject-typed properties are a supported shape. Two accommodations make the exemption safe: the released-parent early exits in `StructuralReconciler` (a callback can release the writing parent mid-reconcile, and the loops must stop rather than attach further subjects to a dead owner), and the inexact same-property fallback in `SubjectOwnership.RemoveIncoming` (stored indices can lag the committed value inside the reconcile window). Neither is removable while the exemption stands.
+`DerivedPropertyChangeHandler` absorbs exceptions from derived getters, keeping the last known value and recomputing on the next dependency write, and filters `LifecycleContractViolationException` out of that absorption so a contract breach cannot hide behind a derived value that silently never initializes. A derived property whose declared type can contain subjects also throws when it returns a subject this context does not own, because derived properties establish no ownership edges and such a subject would never be tracked.
+
+The contract binds callbacks, not the rest of the write chain: a third-party `IWriteInterceptor` registered after `WithLifecycle` runs during `next` at callback depth zero, on the writing thread, holding the topology gate reentrantly, and can release the writing parent through a nested structural write or an explicit detach before the reconcile runs; a hand-written terminal setter and a dynamic subject's authoritative getter reread sit in the same window. An ownership check at `Reconcile` entry closes that shape: a released parent commits no baseline and enters no loop, and `ReleaseUnusedClaims` hands the proposed subjects' claims back. The released-parent early exits inside the reconcile loops remain load-bearing for the residual shape the entry check cannot see: side-effecting user code the loops themselves invoke at depth zero (a dictionary-key `Equals`, a user collection or dictionary implementation) can run the write protocol reentrantly and release the parent mid-flight. The inexact same-property fallback in `SubjectOwnership.RemoveIncoming` stays on its own justification: a reconcile commits the property's new value before retained edges adopt their new indices, so a release descent inside that window presents indices the incoming records have not adopted yet, and only the per-property occurrence count is authoritative there.
 
 ## Handler Order
 
@@ -104,5 +107,5 @@ Observed orders on a three-level chain: attach ahead of the descent `top, mid, l
 - Property baselines and committed outgoing edges are one representation.
 - Algorithms reading incoming edges validate against committed outgoing edges.
 - Release is deterministic first-visit from the removed edge; the owned map is never enumerated.
-- Parent and reference-count reads are lock-free; the lifecycle is the sole writer of parent state.
-- The lock order is gate, then attachment monitor, then SyncRoot, with no path acquiring in any other order.
+- Reference-count reads are lock-free; parent reads are lock-free snapshot reads once the first call activates publication under the subject's leaf monitor; the lifecycle is the sole writer of parent state.
+- The lock order is gate, then attachment monitor, then SyncRoot, with no path acquiring in any other order and the `SubjectOwnership` monitor as a leaf below all three.

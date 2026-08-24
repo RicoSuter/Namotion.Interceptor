@@ -2,26 +2,28 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
 /// Enforces the callback contract: a lifecycle callback (an <see cref="ILifecycleHandler"/>
-/// invocation, a subject attach or detach event, or a collection refresh) must not write a
-/// structural property. The lifecycle publishes callbacks while it holds the topology gate in the
-/// middle of reconciling an edge set, so a structural write from a callback re-enters the
-/// reconciler on half-updated state. The depth is thread-local and shared across built-in
-/// lifecycle instances, so a callback writing into another context's graph is detected too. The
-/// guard is live in every build: the silent failure mode is graph corruption, so a violating
-/// consumer fails fast in Release rather than relying on the reentrancy accommodations.
-/// AddProperties admission reads both depths through <see cref="IsInsideAnyCallback"/> to reject
-/// a cross-context callback before it enumerates input or blocks on the foreign topology gate,
+/// invocation, a subject attach or detach event, a collection refresh, or a property lifecycle
+/// callback) may evaluate anything and may change no graph topology: no structural property
+/// write, and no explicit attach or detach. The lifecycle publishes callbacks while it holds the
+/// topology gate in the middle of reconciling an edge set, so a topology change from a callback
+/// would re-enter the reconciler on half-updated state, and reaching a second lifecycle's gate
+/// from inside a callback can deadlock because there is no order among gates. The depth is
+/// thread-local and shared across built-in lifecycle instances, so a callback writing into
+/// another context's graph is detected too. The guard is live in every build: the silent failure
+/// mode is graph corruption, so a violating consumer fails fast in Release. AddProperties
+/// admission reads both depths through <see cref="IsInsideAnyCallback"/> to reject a
+/// cross-context callback before it enumerates input or blocks on the foreign topology gate,
 /// where waiting could deadlock against opposing callbacks.
 /// </summary>
 /// <remarks>
-/// The attach and detach property lifecycle callbacks
+/// The rule is uniform at every graph depth: the attach and detach property lifecycle callbacks
 /// (<see cref="IPropertyLifecycleHandler.AttachProperty"/> and
-/// <see cref="IPropertyLifecycleHandler.DetachProperty"/>) are exempt, deliberately: the
-/// derived-property handler evaluates user getters from its attach callback, and derived getters
-/// with structural side effects are a supported shape. Because of that exemption, the
-/// reconciler's released-parent early exits and the inexact incoming-edge fallback in
-/// <see cref="SubjectOwnership.RemoveIncoming"/> remain load-bearing. Scalar writes from
-/// callbacks stay allowed.
+/// <see cref="IPropertyLifecycleHandler.DetachProperty"/>) are not exempt. The derived-property
+/// handler evaluates user getters from its attach callback, and evaluation is what the contract
+/// permits. Scalar writes from callbacks stay allowed. The guard does not bind code running at
+/// callback depth zero downstream of the lifecycle, such as a third-party write interceptor
+/// during <c>next</c>; the ownership check at <see cref="StructuralReconciler"/> entry and the
+/// released-parent exits inside its loops handle that shape.
 /// </remarks>
 internal static class CallbackReentrancyGuard
 {
@@ -35,9 +37,9 @@ internal static class CallbackReentrancyGuard
 
     /// <summary>
     /// Whether the current thread is executing any lifecycle callback of some built-in lifecycle,
-    /// including the property lifecycle callbacks that are exempt from the structural write
-    /// contract. Which lifecycle is answered by whether the thread holds that lifecycle's gate,
-    /// because callbacks are always published under it.
+    /// property lifecycle callbacks included, since they are not exempt from the contract. Which
+    /// lifecycle is answered by whether the thread holds that lifecycle's gate, because callbacks
+    /// are always published under it.
     /// </summary>
     public static bool IsInsideAnyCallback => _callbackDepth > 0 || _propertyCallbackDepth > 0;
 

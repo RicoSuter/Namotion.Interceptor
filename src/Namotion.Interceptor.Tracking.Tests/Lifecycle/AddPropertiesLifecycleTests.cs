@@ -296,8 +296,8 @@ public class AddPropertiesLifecycleTests
     [Fact]
     public void WhenAPropertyCallbackAddsPropertiesToASubjectOfAnotherContext_ThenTheCallIsRejectedBeforeEnumeration()
     {
-        // Arrange: property lifecycle callbacks are exempt from the structural write contract but
-        // not from the gate order, so a cross-context AddProperties from one must be rejected
+        // Arrange: property lifecycle callbacks are published under the topology gate like every
+        // other lifecycle callback, so a cross-context AddProperties from one must be rejected
         // before it can block on the foreign topology gate.
         var contextB = CreateContext();
         var other = new Person(contextB) { FirstName = "B" };
