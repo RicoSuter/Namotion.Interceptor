@@ -30,7 +30,7 @@ Tests-first re-derivation is the safer option here, not the more expensive one. 
 
 Each stage must leave the tree building with zero warnings and the full unit suite green, verified by **per-project** counts diffed against a recorded baseline, never by the summary line alone.
 
-1. **Benchmark base.** Cut a branch from master carrying only `LifecycleOwnershipBenchmark`, so both arms share benchmark source. The spike's fourteen rows already include the shared-parent matched pair and the batch row that the original scaffold lacked. Done: `bench/scl-base` at `7a5d2ace`, master `0418410c` plus the benchmark file only, worktree `/home/rico/GitHub/nib-scl-base`, outside the repository so BenchmarkDotNet does not abort on a second project file.
+1. **Benchmark base.** Cut a branch from master carrying only `LifecycleOwnershipBenchmark`, so both arms share benchmark source. The spike's fourteen rows already include the shared-parent matched pair and the batch row that the original scaffold lacked. Done: `bench/scl-base` at `4be50401`, master `0418410c` plus the benchmark file only, worktree `/home/rico/GitHub/nib-scl-base`, outside the repository so BenchmarkDotNet does not abort on a second project file.
 2. **Singleton context service contracts.** Landed cleanly in the spike, 266 lines, no behaviour change. Take as-is.
 
 The work happens on `rewrite/single-context-impl`, worktree `/home/rico/GitHub/nib-single-context`, branched from `rewrite/single-context-lifecycle`. Both that worktree and the benchmark base sit outside the repository, so BenchmarkDotNet does not abort on a second project file and either can run an arm.
@@ -45,7 +45,7 @@ The work happens on `rewrite/single-context-impl`, worktree `/home/rico/GitHub/n
 10. **Consumer migration**, roughly 124 files. The largest stage. Categories and per-project counts are in the findings.
 11. **Removal.** Fallback APIs, executor-as-context, `Context`, `SyncRoot`. Purely subtractive, so a compile error here is a missed call site rather than a design problem. Subtree-scoped services are no longer part of this stage: they were removed in stage 4, because the composition that produced them is the same mechanism that leaked a detached subject's context, deepened resolution linearly with the graph, and closed a resolution loop on mutual references. See the composition-target commit for the measurements.
 12. **Docs and snapshots.** Sixteen generator snapshots and eight public API snapshots, plus the ordering section of `docs/design/tracking-lifecycle.md`, which is written entirely in terms of the deleted descent handler.
-13. **Verification, full.** Every integration suite plus the Connector Tester, not a targeted subset, because this is a foundational change and two specific items force it: MQTT begins caching connector root property mappings for the first time, and every base assembly built by the released generator rebuilds. Benchmarks run per arm directly rather than through the comparison script, against `bench/scl-base` at `7a5d2ace`.
+13. **Verification, full.** Every integration suite plus the Connector Tester, not a targeted subset, because this is a foundational change and two specific items force it: MQTT begins caching connector root property mappings for the first time, and every base assembly built by the released generator rebuilds. Benchmarks run per arm directly rather than through the comparison script, against `bench/scl-base` at `4be50401`.
 
 ### Stage 5 lock ordering, corrected
 
@@ -118,7 +118,7 @@ That rule is only applicable at the end if each performance-only mechanism is na
 | Mechanism | Stage | Lines | Priced by | Status |
 |---|---|---:|---|---|
 | `LifecycleScratch` pooling | 4 | ~190 | bulk construction and removal rows | row exists, unmeasured |
-| Lazy parent activation | 4 | part of `SubjectOwnership` / `OwnershipGraph` | a row that never calls `GetParents()` and one that does | **row missing on both arms** |
+| Lazy parent activation | 4 | part of `SubjectOwnership` / `OwnershipGraph` | `ParentProjectionBenchmark`, inactive and active toggle rows | row exists on both arms, probe-verified |
 | Inline single-edge storage before list promotion | 4 | part of `SubjectOwnership` | single-parent attach and removal rows | row exists, unmeasured |
 | Separate `Contains` and `CollectOccurrences` paths | 4 | part of `StructuralValueScanner` | shared-parent removal, which drives reachability | row exists, unmeasured |
 | `#if DEBUG` read-terminal duplication | 5 | 27 | read rows; Release codegen is byte-identical by construction | verified structurally, not timed |
