@@ -123,7 +123,6 @@ That rule is only applicable at the end if each performance-only mechanism is na
 | Separate `Contains` and `CollectOccurrences` paths | 4 | part of `StructuralValueScanner` | shared-parent removal, which drives reachability | row exists, unmeasured |
 | `#if DEBUG` read-terminal duplication | 5 | 27 | read rows; Release codegen is byte-identical by construction | verified structurally, not timed |
 | Opaque `Enter`/`ExitStructuralWriteGate` seam | 5 | ~22 | attached structural write rows | **accepted deliberately, to be validated** |
-| Per-type structural-route cache in `DynamicSubjectInterceptor` | 7 | ~8 | no row exists; Castle interception dominates the dynamic write path, and the cache mirrors the established `SubjectPropertyTypeExtensions` classification caches | accepted, not to be timed |
 
 The last one is a cost taken for API hygiene rather than performance: it adds one interface dispatch per attached structural write, against a path that already resolves a service, discovers a subtree, claims, reconciles and fans out callbacks. The expectation is that it does not register. It was kept on that basis, and the final numbers decide whether that was right. If it registers, the alternative is exposing the gate object again, which is cheap to do because nobody implements `ILifecycleInterceptor` and breaking an implementer-facing seam costs little.
 

@@ -73,7 +73,7 @@ public class LifecycleInterceptor : ILifecycleInterceptor
         _attach = new AttachTraversal(_notifier, _graph, _reachability);
         _release = new ReleaseTraversal(_notifier, _graph, _reachability);
         _reconciler = new StructuralReconciler(_notifier, _graph, _attach, _release);
-        _admission = new PropertyAdmission(_graph, _reconciler);
+        _admission = new PropertyAdmission(_graph, _reconciler, _attach);
     }
 
     #region Structural writes
@@ -185,9 +185,11 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     {
         // Reject a cross-context callback before the gate and before the input is enumerated: a
         // thread inside another lifecycle's callback holds that lifecycle's gate, so blocking on
-        // this one can deadlock against opposing callbacks. A same-lifecycle callback already
-        // holds this gate reentrantly and is the supported dynamic-property-initializer case.
-        if (CallbackReentrancyGuard.IsInsideCallback && !Monitor.IsEntered(_gate))
+        // this one can deadlock against opposing callbacks. Property lifecycle callbacks count
+        // too: they are exempt from the structural write contract, not from the gate order. A
+        // same-lifecycle callback already holds this gate reentrantly and is the supported
+        // dynamic-property-initializer case.
+        if (CallbackReentrancyGuard.IsInsideAnyCallback && !Monitor.IsEntered(_gate))
         {
             throw new InvalidOperationException(
                 "AddProperties on a subject owned by another context is not supported from a " +
@@ -213,10 +215,9 @@ public class LifecycleInterceptor : ILifecycleInterceptor
             else
             {
                 // Claimed for this context but not yet published into the graph, which is only
-                // observable from inside this thread's own attach descent: publish the metadata
-                // only, and let the descent discover the then-current properties when it reaches
-                // the subject.
-                registration.Publish();
+                // observable from inside this thread's own attach descent; see AdmitUnowned for
+                // the two shapes.
+                _admission.AdmitUnowned(registration);
             }
 
             return true;

@@ -294,6 +294,187 @@ public class AddPropertiesLifecycleTests
     }
 
     [Fact]
+    public void WhenAPropertyCallbackAddsPropertiesToASubjectOfAnotherContext_ThenTheCallIsRejectedBeforeEnumeration()
+    {
+        // Arrange: property lifecycle callbacks are exempt from the structural write contract but
+        // not from the gate order, so a cross-context AddProperties from one must be rejected
+        // before it can block on the foreign topology gate.
+        var contextB = CreateContext();
+        var other = new Person(contextB) { FirstName = "B" };
+        var otherPropertyCount = ((IInterceptorSubject)other).Properties.Count;
+        var sequence = new CountingMetadataSequence([CreateScalarProperty("A")]);
+        var fired = false;
+        var contextA = CreateContext()
+            .WithService(() => new DelegatePropertyAttachHandler(_ =>
+            {
+                if (!fired)
+                {
+                    fired = true;
+                    ((IInterceptorSubject)other).AddProperties(sequence);
+                }
+            }), _ => false);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => new Person(contextA));
+
+        // Assert: rejected before the input was enumerated and before anything published.
+        Assert.True(fired);
+        Assert.Equal(0, sequence.EnumerationCount);
+        Assert.Equal(otherPropertyCount, ((IInterceptorSubject)other).Properties.Count);
+    }
+
+    [Fact]
+    public void WhenACallbackAddsPropertiesToTheSeededRootMidDescent_ThenTheNewEdgeIsEstablished()
+    {
+        // Arrange: an explicit attach seeds the root's baselines before owning it, then attaches
+        // its children; a callback fired for a child that adds properties to the root therefore
+        // lands on a claimed, seeded, not-yet-owned subject, and the new property's edge must
+        // still be established.
+        Person? root = null;
+        Person? father = null;
+        var newChild = new Person { FirstName = "N" };
+        var added = false;
+        var context = CreateContext()
+            .WithService(() => new DelegateLifecycleHandler(change =>
+            {
+                if (change.IsContextAttach && ReferenceEquals(change.Subject, father) && !added)
+                {
+                    added = true;
+                    ((IInterceptorSubject)root!).AddProperties(
+                        CreateStructuralProperty("Extra", _ => newChild));
+                }
+            }), _ => false);
+
+        root = new Person { FirstName = "R" };
+        father = new Person { FirstName = "F" };
+        root.Father = father;
+
+        // Act
+        root.AttachToContext(context);
+
+        // Assert: the batch published and its edge exists.
+        Assert.True(added);
+        Assert.True(((IInterceptorSubject)root).Properties.ContainsKey("Extra"));
+        Assert.Same(context, newChild.TryGetContext());
+        Assert.Equal(1, newChild.GetReferenceCount());
+        Assert.Equal(1, father.GetReferenceCount());
+
+        // Act: a second parent edge re-enters the descent for the root, which re-checks the
+        // seeded-baseline invariant; a subject whose new property had no baseline would be
+        // re-seeded here and every edge would double.
+        var parent2 = new Person(context) { FirstName = "P" };
+        parent2.Children = [root];
+
+        // Assert
+        Assert.Equal(1, newChild.GetReferenceCount());
+        Assert.Equal(1, father.GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenAPropertyHandlerThrowsDuringAdmissionFanOut_ThenMetadataStaysPublishedAndClaimsAreReleased()
+    {
+        // Arrange: callbacks after the metadata swap are exception-free by contract; a violating
+        // handler propagates with no rollback, so the metadata stays published while the claims
+        // that never became ownership are handed back.
+        var context = CreateContext()
+            .WithService(() => new DelegatePropertyAttachHandler(change =>
+            {
+                if (change.Property.Name == "Poison")
+                {
+                    throw new InvalidOperationException("violating handler");
+                }
+            }), _ => false);
+        var root = new Person(context) { FirstName = "R" };
+        var subject = (IInterceptorSubject)root;
+        var child = new Person { FirstName = "C" };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => subject.AddProperties(CreateStructuralProperty("Poison", _ => child)));
+
+        // Assert
+        Assert.Equal("violating handler", exception.Message);
+        Assert.True(subject.Properties.ContainsKey("Poison"));
+        Assert.Null(child.TryGetContext());
+        Assert.Equal(0, child.GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenAGetterAddsANonCollidingProperty_ThenBothBatchesPublish()
+    {
+        // Arrange: a getter mutating metadata violates the admission contract, but the
+        // non-colliding shape settles deterministically (the nested batch publishes first) and is
+        // pinned because it is the shape the reentrant-duplicate rejection is defined against.
+        var context = CreateContext();
+        var root = new Person(context) { FirstName = "R" };
+        var subject = (IInterceptorSubject)root;
+        var child = new Person { FirstName = "C" };
+
+        // Act
+        subject.AddProperties(CreateStructuralProperty("Outer", _ =>
+        {
+            subject.AddProperties(CreateScalarProperty("Nested"));
+            return child;
+        }));
+
+        // Assert
+        Assert.True(subject.Properties.ContainsKey("Outer"));
+        Assert.True(subject.Properties.ContainsKey("Nested"));
+        Assert.Same(context, child.TryGetContext());
+        Assert.Equal(1, child.GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenAGetterAddsACollidingProperty_ThenTheOuterBatchIsRejected()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new Person(context) { FirstName = "R" };
+        var subject = (IInterceptorSubject)root;
+        var child = new Person { FirstName = "C" };
+        var batch = new[]
+        {
+            CreateStructuralProperty("Outer", _ =>
+            {
+                subject.AddProperties(CreateScalarProperty("X"));
+                return child;
+            }),
+            CreateScalarProperty("X")
+        };
+
+        // Act & Assert: the nested batch published "X" between materialization and publication,
+        // so the outer batch is rejected at its publication recheck and publishes nothing.
+        Assert.Throws<InvalidOperationException>(() => subject.AddProperties(batch));
+
+        // Assert
+        Assert.True(subject.Properties.ContainsKey("X"));
+        Assert.False(subject.Properties.ContainsKey("Outer"));
+        Assert.Null(child.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenAGetterWritesAScalarPropertyOfItsSubject_ThenTheBatchIsAdmitted()
+    {
+        // Arrange: scalar writes stay allowed everywhere, including from an admission getter.
+        var context = CreateContext();
+        var root = new Person(context) { FirstName = "R" };
+        var subject = (IInterceptorSubject)root;
+        var child = new Person { FirstName = "C" };
+
+        // Act
+        subject.AddProperties(CreateStructuralProperty("Extra", _ =>
+        {
+            root.LastName = "Mut";
+            return child;
+        }));
+
+        // Assert
+        Assert.Equal("Mut", root.LastName);
+        Assert.True(subject.Properties.ContainsKey("Extra"));
+        Assert.Equal(1, child.GetReferenceCount());
+    }
+
+    [Fact]
     public void WhenADerivedStructuralPropertyIsAdmitted_ThenNoEdgeIsEstablishedAndTheGetterIsNotInvoked()
     {
         // Arrange

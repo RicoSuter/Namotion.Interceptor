@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// lifecycle instances, so a callback writing into another context's graph is detected too. The
 /// guard is live in every build: the silent failure mode is graph corruption, so a violating
 /// consumer fails fast in Release rather than relying on the reentrancy accommodations.
-/// AddProperties admission reads the same depth through <see cref="IsInsideCallback"/> to reject
+/// AddProperties admission reads both depths through <see cref="IsInsideAnyCallback"/> to reject
 /// a cross-context callback before it enumerates input or blocks on the foreign topology gate,
 /// where waiting could deadlock against opposing callbacks.
 /// </summary>
@@ -28,12 +28,21 @@ internal static class CallbackReentrancyGuard
     [ThreadStatic]
     private static int _callbackDepth;
 
+    // Property lifecycle callbacks carry their own depth: they are exempt from the structural
+    // write contract (so they must not feed ThrowIfInsideCallback), but AddProperties admission
+    // still has to know the thread is inside a lifecycle operation, because a property callback
+    // published under one lifecycle's gate that blocks on another lifecycle's gate deadlocks
+    // exactly like a subject callback would.
+    [ThreadStatic]
+    private static int _propertyCallbackDepth;
+
     /// <summary>
-    /// Whether the current thread is executing a lifecycle callback of some built-in lifecycle.
-    /// Which lifecycle is answered by whether the thread holds that lifecycle's gate, because
-    /// callbacks are always published under it.
+    /// Whether the current thread is executing any lifecycle callback of some built-in lifecycle,
+    /// including the property lifecycle callbacks that are exempt from the structural write
+    /// contract. Which lifecycle is answered by whether the thread holds that lifecycle's gate,
+    /// because callbacks are always published under it.
     /// </summary>
-    public static bool IsInsideCallback => _callbackDepth > 0;
+    public static bool IsInsideAnyCallback => _callbackDepth > 0 || _propertyCallbackDepth > 0;
 
     /// <summary>
     /// Marks the thread as executing a lifecycle callback for the lifetime of the returned scope.
@@ -60,11 +69,31 @@ internal static class CallbackReentrancyGuard
         }
     }
 
+    /// <summary>
+    /// Marks the thread as executing a property lifecycle callback for the lifetime of the
+    /// returned scope. This depth feeds only <see cref="IsInsideAnyCallback"/>, never
+    /// <see cref="ThrowIfInsideCallback"/>, because property callbacks keep their structural
+    /// write exemption.
+    /// </summary>
+    public static PropertyCallbackScope EnterPropertyCallbackScope()
+    {
+        _propertyCallbackDepth++;
+        return default;
+    }
+
     internal readonly struct CallbackScope : IDisposable
     {
         public void Dispose()
         {
             _callbackDepth--;
+        }
+    }
+
+    internal readonly struct PropertyCallbackScope : IDisposable
+    {
+        public void Dispose()
+        {
+            _propertyCallbackDepth--;
         }
     }
 }

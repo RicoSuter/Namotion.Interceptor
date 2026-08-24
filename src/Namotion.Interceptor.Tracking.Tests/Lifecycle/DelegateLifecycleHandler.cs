@@ -11,6 +11,20 @@ internal sealed class DelegateLifecycleHandler(Action<SubjectLifecycleChange> on
     }
 }
 
+/// <summary>Runs a delegate on every property attach, for tests that react from inside a
+/// property lifecycle callback.</summary>
+internal sealed class DelegatePropertyAttachHandler(Action<SubjectPropertyLifecycleChange> onAttach) : IPropertyLifecycleHandler
+{
+    public void AttachProperty(SubjectPropertyLifecycleChange change)
+    {
+        onAttach(change);
+    }
+
+    public void DetachProperty(SubjectPropertyLifecycleChange change)
+    {
+    }
+}
+
 /// <summary>Runs a delegate on every property detach, for tests that react from inside a
 /// property lifecycle callback, which is exempt from the callback write contract.</summary>
 internal sealed class DelegatePropertyDetachHandler(Action<SubjectPropertyLifecycleChange> onDetach) : IPropertyLifecycleHandler

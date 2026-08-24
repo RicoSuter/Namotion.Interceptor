@@ -97,6 +97,10 @@ Breaking changes to list:
 - Detach callback order flipped to top-down for handlers behind the descent.
 - The generator base contract gained `Executor` and `SetStructuralPropertyValue`, so every base assembly built by the released generator rebuilds and takes the NI0012 fallback until updated.
 - A second `ILifecycleInterceptor` on one context is a singleton contract conflict.
+- `AddProperties` rejects duplicate names atomically (previously a silent last-wins replacement), materializes its input exactly once, and no longer takes `SyncRoot`; serialization moved to the lifecycle gate and the attachment monitor.
+- Derived and non-intercepted properties never establish ownership edges; a dynamic derived subject-valued property no longer counts as a parent edge, and a derived subject-typed write also no longer passes the callback write guard, because the lifecycle exits before it.
+- `AddProperties` on a subject owned by another context throws before enumeration when called from any lifecycle, subject event, or property lifecycle callback.
+- `RegisteredSubject.AddProperty` with an existing name is an idempotent no-op when the shape (type and attributes) matches, keeping the first registration's accessors and running no property attach callback for that call, so `ISubjectPropertyInitializer`s do not rerun; a different shape throws. The previous behavior threw for the reattach rerun and silently replaced metadata on the subject. The synthetic initial null-to-value write is removed, so adding a dynamic property no longer emits an initial property change event.
 
 ## Stage 4's code-quality review: landed
 

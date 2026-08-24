@@ -106,12 +106,22 @@ public sealed class SubjectPropertyRegistrationContext
             merged.Add(pair.Key, pair.Value);
         }
 
-        // Add rather than the indexer: GetProperties validated the names against the same state
-        // this merge reads, so a collision here means an unsupported reentrant mutation and must
-        // fail loudly rather than silently replace a property.
+        // Recheck rather than assign blindly: GetProperties validated the names against the state
+        // it materialized from, so a collision here means an unsupported reentrant mutation (for
+        // example a getter that added properties) and must fail loudly rather than silently
+        // replace a property.
         for (var index = 0; index < batch.Count; index++)
         {
-            merged.Add(batch[index].Name, batch[index]);
+            var metadata = batch[index];
+            if (merged.ContainsKey(metadata.Name))
+            {
+                throw new InvalidOperationException(
+                    $"A property named '{metadata.Name}' was added to the subject " +
+                    $"'{Subject.GetType().Name}' while this batch was being admitted, which the " +
+                    "input contract forbids. The batch was not published.");
+            }
+
+            merged.Add(metadata.Name, metadata);
         }
 
         _published = true;

@@ -330,30 +330,42 @@ public class RegisteredSubject
         Action<IInterceptorSubject, object?>? setValue,
         params Attribute[] attributes)
     {
-        // The subject keeps its metadata across detach and reattach while Registry's projection is
-        // rebuilt per attach, so this method must be ensure-shaped: metadata is admitted only when
-        // the subject does not carry the name yet (AddProperties rejects duplicates atomically),
-        // and the projection below is get-or-add.
-        if (!Subject.Properties.ContainsKey(name))
+        if (Subject.Properties.TryGetValue(name, out var existingMetadata))
         {
-            // A stored subject-bearing property writes through the synchronized structural
-            // accessor, like a generated structural setter would; a derived one stays scalar
-            // because a derived value never establishes edges, so the structural gate would
-            // protect nothing.
-            var isStructuralStore = type.CanContainSubjects() && attributes.All(a => a is not DerivedAttribute);
-            Subject.AddProperties(new SubjectPropertyMetadata(
-                name,
-                type,
-                attributes,
-                getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null,
-                setValue is not null
-                    ? isStructuralStore
-                        ? (s, v) => ((IInterceptorExecutor)s.Context).SetStructuralPropertyValue(name, v, getValue?.Invoke(s), setValue)
-                        : (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue?.Invoke(s), setValue)
-                    : null,
-                isIntercepted: true,
-                isDynamic: true));
+            // The subject keeps its metadata across detach and reattach while Registry's
+            // projection is rebuilt per attach, and initializers rerun their AddProperty on every
+            // attach, so a re-registration with the same shape is idempotent: the original
+            // registration's accessor delegates stay authoritative and the caller's are
+            // discarded, and no property attach callback runs for this call. A different shape
+            // is a genuine duplicate and is rejected like any duplicate metadata name.
+            if (existingMetadata.Type != type || !AttributesMatch(existingMetadata.Attributes, attributes))
+            {
+                throw new InvalidOperationException(
+                    $"A property named '{name}' is already defined on the subject " +
+                    $"'{Subject.GetType().Name}' with a different shape. Only an identically " +
+                    "shaped re-registration, the reattach case, is supported.");
+            }
+
+            return GetOrAddPropertyProjection(name, existingMetadata.Type, existingMetadata.Attributes);
         }
+
+        // A stored subject-bearing property writes through the synchronized structural
+        // accessor, like a generated structural setter would; a derived one stays scalar
+        // because a derived value never establishes edges, so the structural gate would
+        // protect nothing.
+        var isStructuralStore = type.CanContainSubjects() && attributes.All(a => a is not DerivedAttribute);
+        Subject.AddProperties(new SubjectPropertyMetadata(
+            name,
+            type,
+            attributes,
+            getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null,
+            setValue is not null
+                ? isStructuralStore
+                    ? (s, v) => ((IInterceptorExecutor)s.Context).SetStructuralPropertyValue(name, v, getValue?.Invoke(s), setValue)
+                    : (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue?.Invoke(s), setValue)
+                : null,
+            isIntercepted: true,
+            isDynamic: true));
 
         var property = GetOrAddPropertyProjection(name, type, attributes);
 
@@ -361,20 +373,41 @@ public class RegisteredSubject
         // SubjectRegistry.AttachProperty created this projection from inside that fan-out; only an
         // unattached subject still needs the explicit call. This residual manual path goes with
         // the rest of the manual projection maintenance when admission takes it over completely.
+        // The synthetic null-to-value write that used to follow is gone: the admission itself
+        // captures and commits the initial structural value, so the write had become a no-op
+        // chain traversal that could only throw, through the callback write guard, when a
+        // lifecycle handler added a structural property.
         if (Subject.TryGetContext() is null)
         {
             Subject.AttachSubjectProperty(property.Reference);
         }
 
-        // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
-        // TODO(perf): For derived-with-setter this re-enters RecalculateDerivedProperty (total
-        // 3 getter invocations: AttachProperty + invoke below + recalc), but AttachProperty has
-        // already seeded LastKnownValue. Consider a dedicated lifecycle notification for derived,
-        // or passing currentValue so PropertyValueEqualityCheckHandler short-circuits the write.
-        property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null,
-            null, delegate { });
-
         return property;
+    }
+
+    /// <summary>
+    /// Whether a re-registration carries the same observable shape as the existing metadata.
+    /// Accessor delegates cannot be compared (initializers create fresh closures on every
+    /// attach), so shape is the declared type and the attribute list, compared pairwise with
+    /// <see cref="Attribute"/> value equality.
+    /// </summary>
+    private static bool AttributesMatch(IReadOnlyCollection<Attribute> existingAttributes, Attribute[] requestedAttributes)
+    {
+        if (existingAttributes.Count != requestedAttributes.Length)
+        {
+            return false;
+        }
+
+        var index = 0;
+        foreach (var attribute in existingAttributes)
+        {
+            if (!Equals(attribute, requestedAttributes[index++]))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

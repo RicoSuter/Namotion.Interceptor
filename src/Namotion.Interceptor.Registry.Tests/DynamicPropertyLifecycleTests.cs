@@ -95,6 +95,74 @@ public class DynamicPropertyLifecycleTests
     }
 
     [Fact]
+    public void WhenAddPropertyIsRepeatedWithTheSameShape_ThenTheFirstRegistrationStaysAuthoritative()
+    {
+        // Arrange: initializers rerun AddProperty on every attach with fresh delegates, so a
+        // same-shaped re-registration is idempotent and the original accessors stay authoritative.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var root = new Person(context) { FirstName = "Root" };
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+
+        // Act
+        var first = registeredRoot.AddProperty("Dyn", typeof(string), _ => "first", null);
+        var second = registeredRoot.AddProperty("Dyn", typeof(string), _ => "second", null);
+
+        // Assert
+        Assert.Same(first, second);
+        Assert.Equal("first", first.Reference.Metadata.GetValue?.Invoke(root));
+    }
+
+    [Fact]
+    public void WhenAddPropertyIsRepeatedWithADifferentShape_ThenItThrows()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var root = new Person(context) { FirstName = "Root" };
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+        registeredRoot.AddProperty("Dyn", typeof(string), _ => "first", null);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(
+            () => registeredRoot.AddProperty("Dyn", typeof(int), _ => 2, null));
+    }
+
+    [Fact]
+    public void WhenASubjectWithADynamicPropertyIsReattached_ThenAddPropertyRerunsWithoutError()
+    {
+        // Arrange: the subject keeps its dynamic metadata across detach while Registry's
+        // projection is rebuilt per attach, and initializers rerun their AddProperty on every
+        // attach, so the rerun must succeed rather than reject the surviving name.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var root = new Person(context) { FirstName = "Root" };
+        var father = new Person { FirstName = "F" };
+        root.Father = father;
+        father.TryGetRegisteredSubject()!.AddProperty("FooBar", typeof(string), _ => "one", null);
+
+        // Act: detach releases the Registry projection; reattach rebuilds it from the surviving
+        // metadata, and the initializer-style rerun re-registers the same shape.
+        root.Father = null;
+        Assert.Null(father.TryGetContext());
+        root.Father = father;
+        var property = father.TryGetRegisteredSubject()!.AddProperty("FooBar", typeof(string), _ => "two", null);
+
+        // Assert
+        Assert.NotNull(father.TryGetRegisteredSubject()!.TryGetProperty("FooBar"));
+        Assert.Equal("one", property.Reference.Metadata.GetValue?.Invoke(father));
+    }
+
+    [Fact]
     public void WhenDynamicDerivedPropertyReturnsSubject_ThenItEstablishesNoOwnershipEdge()
     {
         // Arrange: a dynamic derived property that returns a subject reference (a computed "first
