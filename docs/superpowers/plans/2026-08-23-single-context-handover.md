@@ -112,6 +112,28 @@ Two consequences worth knowing. Extracting the notifier moved the events, and tw
 
 **The parent-order question is answered: order is not meaningful, deliberately.** `GetParents()` enumerates the inline slot then the overflow list, and removal promotes an overflow entry into the inline slot, so the sequence follows add and remove history rather than the property's occurrence order. The previous implementation returned a `HashSet`, so no consumer can have depended on an order either. The occurrence index carried in each entry is where the meaning lives, and the oracle compares those. Recorded as deliberate at the sort, in the `GetParents()` XML remarks, and in `docs/tracking.md`. If order ever must become meaningful, the storage has to change first.
 
+## Final verification status
+
+| Suite | Tests | Failures |
+|---|---:|---:|
+| Unit, whole solution | 3,409 | 0 |
+| OPC UA, with integration | 353 | 0 |
+| MQTT, with integration | 104 | 0 |
+| WebSocket, with integration | 161 | 0 |
+| HomeBlaze Services | 221 | 0 |
+| HomeBlaze E2E | 23 | 20, unresolved, see below |
+
+All three connector changes this work flagged for integration verification are clean: the OPC UA loader's provisional attach (which replaced the temporary-construction protocol), MQTT's root-mapping caching, and MQTT's Registry-membership ownership checks.
+
+One test fix was needed and only the integration gate could have found it: `MqttServerLivenessTests` reflected on a private `SubjectDetaching` field of `LifecycleInterceptor`, which moved onto `LifecycleNotifier` when the notification surface was extracted. Two Connectors tests were corrected at the time; this third one is integration-only, so every earlier gate skipped it. Both remaining reflection sites now take the two-hop form.
+
+**HomeBlaze E2E is unresolved and deliberately parked.** Playwright's Chromium was never installed on this machine, so the suite had never run at all; installing it took the failures from 23 to 20. All 20 remaining failures are the same call, `NavigateToDemoFolderAsync` timing out on `GetByText("demo")`, which is the fixture's first navigation step, while all 14 Markdown, Navigation, PageEdit and PluginLoading tests pass. That shape points at missing seed data rather than at this change, but an A/B against master was started and stopped before it finished, so **this is not established either way**. Anyone finishing this work should run that A/B before claiming the suite is unaffected.
+
+## Still to run
+
+- **Connector Tester.** Hours, does not run in CI. Note `HeapMB` trends upward on master too, about 0.08 MB per cycle on mqtt-chaos, so a single-arm upward trend is never on its own a regression finding.
+- **Benchmarks**, per arm against `bench/scl-base` at `4be50401`. Requires the CPU pinned to 3.6GHz with no-turbo first; the machine boots throttled to 0.80GHz and anything measured before that is not decision-grade.
+
 ## Breaking changes, consolidated for the pull request
 
 Assembled from the stage commit messages; the PR description draws from this list rather than re-deriving it.
