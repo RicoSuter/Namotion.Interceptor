@@ -76,6 +76,8 @@ Neither exclusion leaves a silent failure. Decision 1 throws on the mutation, de
 
 One worry that motivated an earlier, wider version of decision 3 turned out not to apply, and is recorded so it is not re-derived: the generated context constructor is `public Car(IInterceptorSubjectContext context) : this()`, so the parameterless constructor runs to completion before `AttachToContext`, and attach cannot observe a half-built subject through that path.
 
+The rule creates an asymmetry that consumers must be told about plainly: a side-effecting derived getter that writes a subject-typed property is now illegal when evaluated at attach, and stays legal when evaluated on recalculation, because only the attach path runs inside a lifecycle callback. `SideEffectPerson.Greeting` in the test suite is exactly this shape. That asymmetry is a consequence of the contract being about callbacks rather than about getters, and it is deliberate, but it is the kind of thing that reads as a bug when met in the wild.
+
 ## Consequences
 
 Both documents that state the contract are rewritten to the single rule. `tracking-lifecycle.md` loses the paragraph justifying accommodations that no longer exist, and design decision 3 loses the `[Conditional("DEBUG")]` claim, which was never true of the tree.

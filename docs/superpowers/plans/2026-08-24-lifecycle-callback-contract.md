@@ -22,7 +22,7 @@
 | `src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleInterceptor.cs` | write protocol, gate, attach and detach entry points | modify: guard calls at `AttachSubjectToContext`, `DetachSubjectFromContext` |
 | `src/Namotion.Interceptor.Tracking/Change/DerivedPropertyChangeHandler.cs` | derived evaluation and change detection | modify: untracked-subject check |
 | `src/Namotion.Interceptor.Tracking/Lifecycle/StructuralValueScanner.cs` | the one interpretation of "which subjects does this value hold" | reuse, no change |
-| `src/Namotion.Interceptor.Tracking/Lifecycle/StructuralReconciler.cs` | write-time diff and reconcile | modify in Task 6, conditional |
+| `src/Namotion.Interceptor.Tracking/Lifecycle/StructuralReconciler.cs` | write-time diff and reconcile | modify in Task 5, conditional |
 | `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/CallbackContractTests.cs` | every contract test in one place | create |
 | `docs/design/tracking-lifecycle.md` | shipped internal design doc | modify: callback contract section |
 | `docs/superpowers/specs/2026-08-21-single-context-lifecycle-simplification-design.md` | the superseded decision 3 wording | modify |
@@ -60,16 +60,22 @@ public class CallbackContractTests
     public void WhenAPropertyCallbackWritesStructuralPropertyAtTopLevel_ThenItThrows()
     {
         // Arrange
+        // The one-shot flag is load-bearing twice over. The handler also fires during stranger's
+        // OWN construction, while the local is still null, which would record a
+        // NullReferenceException and gate out every later invocation. And pre-fix the write
+        // succeeds, so without the flag each attempt publishes another attach and recurses.
         Exception? callbackException = null;
+        var attempted = false;
         Person? stranger = null;
-        var handler = new DelegatePropertyLifecycleHandler(change =>
+        var handler = new DelegatePropertyAttachHandler(change =>
         {
-            if (callbackException is not null)
+            if (attempted || stranger is null)
             {
                 return;
             }
 
-            callbackException = Record.Exception(() => stranger!.Father = new Person());
+            attempted = true;
+            callbackException = Record.Exception(() => stranger.Father = new Person());
         });
 
         var context = CreateContext().WithService(() => handler, _ => false);
@@ -89,15 +95,17 @@ public class CallbackContractTests
         // Arrange: three levels, so the callback for the deepest subject runs inside the
         // descent's own callback scope. This is the case a single-level test cannot see.
         Exception? deepException = null;
+        var attempted = false;
         Person? stranger = null;
-        var handler = new DelegatePropertyLifecycleHandler(change =>
+        var handler = new DelegatePropertyAttachHandler(change =>
         {
-            if (change.Subject is not Person { FirstName: "leaf" })
+            if (attempted || stranger is null || change.Subject is not Person { FirstName: "leaf" })
             {
                 return;
             }
 
-            deepException = Record.Exception(() => stranger!.Father = new Person());
+            attempted = true;
+            deepException = Record.Exception(() => stranger.Father = new Person());
         });
 
         var context = CreateContext().WithService(() => handler, _ => false);
@@ -117,23 +125,7 @@ public class CallbackContractTests
 }
 ```
 
-Create `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/DelegatePropertyLifecycleHandler.cs`:
-
-```csharp
-using Namotion.Interceptor.Tracking.Lifecycle;
-
-namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
-
-internal sealed class DelegatePropertyLifecycleHandler(Action<SubjectPropertyLifecycleChange> onAttach)
-    : IPropertyLifecycleHandler
-{
-    public void AttachProperty(SubjectPropertyLifecycleChange change) => onAttach(change);
-
-    public void DetachProperty(SubjectPropertyLifecycleChange change)
-    {
-    }
-}
-```
+`DelegatePropertyAttachHandler` already exists at `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/DelegateLifecycleHandler.cs:16` with exactly this shape. Reuse it; do not create a second helper.
 
 - [ ] **Step 2: Run the tests to verify the depth-2 case fails**
 
@@ -172,9 +164,14 @@ Expected: PASS, 2 tests.
 Run: `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration" > /tmp/uniform.log 2>&1; echo $?`
 Then: `grep -oE "Total: +[0-9]+" /tmp/uniform.log | awk '{s+=$2; n++} END {print "assemblies="n" total="s}'` and `grep -E "Failed: +[1-9]" /tmp/uniform.log`
 
-Expected: 26 assemblies, 3,409 total, no line from the second grep.
+Expected: 3,409 total across all assemblies, and no line from the second grep. Parse by match, never by line: parallel test processes interleave stdout, so two assemblies' summaries can share one line and a line-based count silently loses one.
 
-This step can genuinely fail. Making the guard uniform newly rejects writes that previously succeeded at depth 0, so any test relying on that shape breaks. If one does, read it before changing it: if it asserts a supported behaviour the spec now forbids, update the test and note it in the commit; if it reveals a first-party handler mutating topology from a property callback, stop and report, because that is a production bug this plan did not anticipate.
+**Two existing tests are known casualties, and both need deliberate surgery rather than deletion.** An adversarial review reproduced both, so do not treat them as surprises:
+
+1. `GraphOwnershipTests.WhenParentIsReleasedReentrantlyDuringCollectionWrite_ThenCommittedChildIsReleasedWithIt` (`GraphOwnershipTests.cs:526-568`) routes `root!.Father = null` through a detach property callback with no `Record.Exception`, so the Act line now throws. It is also **the only test covering the inexact same-property fallback in `SubjectOwnership.RemoveIncoming`**, which Task 5 Step 3 deliberately keeps. Whatever replaces it must preserve that coverage or knowingly relocate it, otherwise the fallback becomes unpinned four tasks before anyone reasons about it.
+2. `DerivedPropertyConcurrencyTests.WhenDerivedGetterWritesToSubjectTypedProperty_ThenNoDeadlockAndCorrectValue` (`DerivedPropertyConcurrencyTests.cs:748-833`): `SideEffectPerson.Greeting` writes the structural `Companion` and is evaluated from the derived handler's `AttachProperty`, so re-attach now throws, and the test's `catch (NullReferenceException)` does not absorb it. The deadlock this test pins (getter evaluation outside `lock(data)`) stays load-bearing on the recalculation path, where getter side effects remain legal, so keep the test and narrow it to the recalculation path.
+
+Beyond those two, a failure means a first-party handler mutates topology from a property callback. Stop and report: that is a production bug this plan did not anticipate. The review checked every first-party handler and found none, so a third failure is genuinely new information.
 
 - [ ] **Step 6: Commit**
 
@@ -209,15 +206,21 @@ Append to `CallbackContractTests.cs`:
     public void WhenALifecycleCallbackAttachesASubject_ThenItThrows()
     {
         // Arrange
+        // The flag must be set BEFORE the attempt. Pre-fix the attach succeeds and publishes
+        // another attach, which re-enters this handler before callbackException is assigned, and
+        // the recursion ends in a stack overflow that kills the whole assembly rather than
+        // failing one test.
         Exception? callbackException = null;
+        var attempted = false;
         var context = CreateContext()
             .WithService(() => new DelegateLifecycleHandler(change =>
             {
-                if (callbackException is not null)
+                if (attempted)
                 {
                     return;
                 }
 
+                attempted = true;
                 callbackException = Record.Exception(
                     () => new Person { FirstName = "X" }.AttachToContext(change.Subject.GetContext()));
             }), _ => false);
@@ -246,7 +249,11 @@ Append to `CallbackContractTests.cs`:
                 callbackException = Record.Exception(() => pinned.DetachFromContext(pinned.GetContext()));
             }), _ => false);
 
-        pinned = new Person(context) { FirstName = "P" };
+        // Explicit attach, not a context constructor: a constructed subject carries a Provisional
+        // anchor, and ValidateExplicitDetach already rejects detaching one with a plain
+        // InvalidOperationException, so the test would pass pre-fix for the wrong reason.
+        pinned = new Person { FirstName = "P" };
+        pinned.AttachToContext(context);
 
         // Act
         _ = new Person(context) { FirstName = "R" };
@@ -279,8 +286,8 @@ Append to `CallbackContractTests.cs`:
         }
 
         // Act
-        var a = new Thread(() => Body(first, second));
-        var b = new Thread(() => Body(second, first));
+        var a = new Thread(() => Body(first, second)) { IsBackground = true };
+        var b = new Thread(() => Body(second, first)) { IsBackground = true };
         a.Start();
         b.Start();
 
@@ -376,11 +383,23 @@ A derived getter that lazily creates a subject writes a private field, so no int
 Append to `CallbackContractTests.cs`:
 
 ```csharp
+    /// <summary>
+    /// Derived getters are only evaluated when DerivedPropertyChangeHandler is registered, which
+    /// WithLifecycle() alone does not do. Without this the tests below pass vacuously.
+    /// </summary>
+    private static IInterceptorSubjectContext CreateDerivedContext()
+    {
+        return InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithDerivedPropertyChangeDetection();
+    }
+
     [Fact]
     public void WhenADerivedPropertyExposesAnUnattachedSubject_ThenItThrows()
     {
         // Arrange
-        var context = CreateContext();
+        var context = CreateDerivedContext();
 
         // Act & Assert: the lazily created child is owned by nothing, so it would never be
         // tracked. Attach-time evaluation of the derived getter is where that surfaces.
@@ -394,7 +413,7 @@ Append to `CallbackContractTests.cs`:
     public void WhenADerivedPropertyProjectsAnAttachedSubject_ThenItDoesNotThrow()
     {
         // Arrange
-        var context = CreateContext();
+        var context = CreateDerivedContext();
 
         // Act: FirstChild projects a subject already owned through the stored Children edge.
         var subject = new ProjectingDerivedSubject(context);
@@ -507,9 +526,11 @@ Call it immediately after each evaluation, inside the existing `try` blocks so t
                     ThrowIfExposesUntrackedSubject(change.Property, data.LastKnownValue);
 ```
 
+On the recalculation path the check must **not** go next to the evaluation. `EvaluateAndStabilize(..., callerHoldsLock: false)` runs outside the lock, and a concurrent structural write can detach the projected subject between evaluation and check. Today that stale value is discarded by the phase-3 gates and re-evaluated; checking early would instead throw on it, and by decision 3 the exception is deliberately not absorbed, so it would propagate out of an innocent scalar write on another thread. Place the call after the `RecalculationNeeded` discard and the `IsAttached` and sequence checks, on a value that survives the commit gates:
+
 ```csharp
-                        newValue = EvaluateAndStabilize(data, derivedProperty, callerHoldsLock: false);
-                        ThrowIfExposesUntrackedSubject(derivedProperty, newValue);
+                    // inside lock (data), after the staleness gates have accepted this value
+                    ThrowIfExposesUntrackedSubject(derivedProperty, newValue);
 ```
 
 Add whichever `using` directives the file lacks for `LifecycleScratch`, `StructuralValueScanner` and `CanContainSubjects`; `LifecycleContractViolationException` is already reachable through the existing `Namotion.Interceptor.Tracking.Lifecycle` using.
@@ -527,6 +548,14 @@ Then: `grep -E "Failed: +[1-9]" /tmp/derived.log`
 Expected: exit 0, no output.
 
 A failure here is informative rather than a nuisance: it means some existing subject exposes an untracked subject from a derived property, which is exactly the silent bug this check exists to find. Report the subject and property rather than weakening the check.
+
+- [ ] **Step 5b: Audit the first-party derived properties this check can reject**
+
+`Category!=Integration` never runs HomeBlaze, and HomeBlaze is the consumer that breaks first. `Widget.ResolvedSubject` (`src/HomeBlaze/HomeBlaze.Components/Widget.cs:33-34`) is a first-party `[Derived] IInterceptorSubject?` that resolves another subject by path, which is exactly the shape this check scrutinizes.
+
+Run: `grep -rn "\[Derived\]" src/ --include=*.cs -A3 | grep -iE "IInterceptorSubject|Subject[ ?]|Person|Widget" | head -30`
+
+For each hit, decide whether it can return a subject this context does not own. Then run the HomeBlaze service tests, which do not need a browser: `dotnet test src/HomeBlaze/HomeBlaze.Services.Tests`. Expected: 221 tests, 0 failures.
 
 - [ ] **Step 6: Commit**
 
@@ -604,7 +633,7 @@ Mutation testing showed all six exits can be deleted with the suite green, so a 
         // contract is ever loosened, this test fails first and says why the exits must come back.
         Exception? callbackException = null;
         Person? root = null;
-        var handler = new DelegatePropertyLifecycleHandler(change =>
+        var handler = new DelegatePropertyAttachHandler(change =>
         {
             if (callbackException is not null || change.Subject is not Person { FirstName: "y" })
             {
@@ -696,7 +725,14 @@ In `docs/superpowers/specs/2026-08-21-single-context-lifecycle-simplification-de
 
 - [ ] **Step 3: Verify no stale claim survives**
 
-Run: `grep -rn "are a supported shape\|Conditional(\"DEBUG\")\|not removable while the exemption" docs/ --include=*.md`
+The same now-false exemption claim lives in code comments, not only in the docs. Rewrite each of these to the settled rule:
+
+- `src/Namotion.Interceptor.Tracking/Lifecycle/CallbackReentrancyGuard.cs:17-25`, class summary and remarks, "are exempt, deliberately ... remain load-bearing"
+- `src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleInterceptor.cs:180-184`, "they are exempt from the structural write contract"
+- `src/Namotion.Interceptor.Tracking/Lifecycle/SubjectOwnership.cs:92-101`, which justifies the kept `RemoveIncoming` fallback entirely by the exemption and must be rewritten to the stored-index-lag justification
+- `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/AddPropertiesLifecycleTests.cs:298`
+
+Run: `grep -rn "are a supported shape\|Conditional(\"DEBUG\")\|not removable while the exemption\|exempt from the structural write" docs/ src/ --include=*.md --include=*.cs`
 
 Expected: no hits outside `docs/superpowers/plans/`, which are historical records and are deliberately not reconciled.
 
@@ -721,4 +757,4 @@ code. The rule is now uniform and enforced, so both say the same thing."
 - A derived property exposing an untracked subject throws; one projecting an owned subject does not.
 - The accommodations are either deleted with a reachability proof recorded, or kept with the reason recorded and the removal-loop residue reopened as a live bug.
 - No shipped document claims topology mutation from a property callback is supported, and no document claims a `[Conditional("DEBUG")]` guard exists.
-- Full unit suite green: 26 assemblies, zero failures, zero warnings.
+- Full unit suite green: 3,409 tests, zero failures, zero warnings.
