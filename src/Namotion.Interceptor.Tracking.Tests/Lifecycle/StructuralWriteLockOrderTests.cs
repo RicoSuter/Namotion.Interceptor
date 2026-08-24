@@ -21,7 +21,7 @@ public class StructuralWriteLockOrderTests
     {
         return InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
     }
 
     private static void ThrowIfAny(List<Exception> exceptions)

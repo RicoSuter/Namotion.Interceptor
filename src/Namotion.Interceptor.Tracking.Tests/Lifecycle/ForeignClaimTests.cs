@@ -14,8 +14,7 @@ public class ForeignClaimTests
     {
         return InterceptorSubjectContext
             .Create()
-            .WithContextInheritance()
-            .WithParents();
+            .WithLifecycle();
     }
 
     [Fact]

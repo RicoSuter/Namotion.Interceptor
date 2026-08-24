@@ -14,8 +14,7 @@ public class GraphOwnershipTests
     {
         return InterceptorSubjectContext
             .Create()
-            .WithContextInheritance()
-            .WithParents();
+            .WithLifecycle();
     }
 
     [Fact]

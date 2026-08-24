@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Tests.Models;
 using Namotion.Interceptor.Testing;
 
@@ -134,7 +135,11 @@ public class CycleTests
         root.Father = null;
 
         // Assert - A detaches and the orphaned B <-> C cycle is released as well: the
-        // reachability scan proves the cycle unreachable from any root
+        // reachability scan proves the cycle unreachable from any root. The registry projection
+        // detaches completely with it; keeping orphaned cycles registered was a limitation of the
+        // reference-count model this projection no longer has.
+        var registry = context.GetService<ISubjectRegistry>();
+        Assert.Equal([root], registry.KnownSubjects.Keys);
         return Verify(helper.GetEvents());
     }
 }

@@ -12,9 +12,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// </summary>
 /// <remarks>
 /// It reaches further than <c>WithLifecycle()</c> suggests: <c>WithFullPropertyTracking()</c>,
-/// <c>WithRegistry()</c>, <c>WithContextInheritance()</c>, <c>WithParents()</c> and
-/// <c>WithSourceMonitoring()</c> all register a lifecycle. A context that only needs to contribute
-/// interceptors or services to an aggregate must register those alone.
+/// <c>WithRegistry()</c> and <c>WithSourceMonitoring()</c> all register a lifecycle. A context that
+/// only needs to contribute interceptors or services to an aggregate must register those alone.
 /// </remarks>
 public class AggregatedTrackingContextTests
 {
@@ -34,10 +33,10 @@ public class AggregatedTrackingContextTests
     [Fact]
     public void WhenSourceMonitoringIsAggregatedOntoTracking_ThenConstructionThrows()
     {
-        // Arrange: the non-obvious shape. WithSourceMonitoring() reaches a lifecycle through
-        // WithParents(), so a context that looks like it only adds monitoring adds a second owner.
+        // Arrange: the non-obvious shape. WithSourceMonitoring() registers a lifecycle of its
+        // own, so a context that looks like it only adds monitoring adds a second owner.
         var parent = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        var child = InterceptorSubjectContext.Create().WithParents();
+        var child = InterceptorSubjectContext.Create().WithLifecycle();
         child.AddFallbackContext(parent);
 
         // Act & Assert

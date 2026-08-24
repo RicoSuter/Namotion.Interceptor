@@ -135,7 +135,7 @@ public class DynamicSubjectTests
         // subject-bearing write through the synchronized structural accessor.
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotorHolder));
         subject.AttachToContext(context);
@@ -164,7 +164,7 @@ public class DynamicSubjectTests
         // and the later attach discovers the stored subject through the property's getter.
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotorHolder));
         var holder = (IMotorHolder)subject;

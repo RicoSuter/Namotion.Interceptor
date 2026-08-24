@@ -19,8 +19,7 @@ public class SubjectIdentityTests
         // default equality is a recorded follow-up, not part of this stage.
         return InterceptorSubjectContext
             .Create()
-            .WithContextInheritance()
-            .WithParents();
+            .WithLifecycle();
     }
 
     [Fact]

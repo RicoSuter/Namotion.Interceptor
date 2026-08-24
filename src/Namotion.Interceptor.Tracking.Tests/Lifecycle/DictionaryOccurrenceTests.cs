@@ -15,8 +15,7 @@ public class DictionaryOccurrenceTests
     {
         return InterceptorSubjectContext
             .Create()
-            .WithContextInheritance()
-            .WithParents();
+            .WithLifecycle();
     }
 
     [Fact]

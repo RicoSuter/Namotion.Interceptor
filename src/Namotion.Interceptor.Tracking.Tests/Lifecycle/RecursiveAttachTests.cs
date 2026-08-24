@@ -5,12 +5,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 
 /// <summary>
 /// Tests that verify recursive discovery of descendants when subjects enter the graph.
-/// Discovery happens through ContextInheritanceHandler → AttachSubjectToContext, which
-/// seeds _lastProcessedValues and recursively attaches children.
-///
-/// WithLifecycle() alone does NOT discover grandchildren — subjects must have the
-/// context (via inheritance or manual assignment) for the lifecycle interceptor to
-/// observe their properties.
+/// Discovery happens through the lifecycle's own descent slot, which seeds the property baselines
+/// and recursively attaches children; context inheritance is intrinsic to WithLifecycle().
 /// </summary>
 public class RecursiveAttachTests
 {
@@ -24,7 +20,7 @@ public class RecursiveAttachTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor()!;
         var attached = new List<IInterceptorSubject>();
@@ -49,7 +45,7 @@ public class RecursiveAttachTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor()!;
         var attached = new List<IInterceptorSubject>();
@@ -75,7 +71,7 @@ public class RecursiveAttachTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor()!;
         var attached = new List<IInterceptorSubject>();
@@ -106,7 +102,7 @@ public class RecursiveAttachTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor()!;
 
@@ -137,7 +133,7 @@ public class RecursiveAttachTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor()!;
 
@@ -172,7 +168,7 @@ public class RecursiveAttachTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor()!;
 
@@ -210,7 +206,7 @@ public class RecursiveAttachTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor()!;
         var attached = new List<IInterceptorSubject>();
@@ -233,13 +229,14 @@ public class RecursiveAttachTests
     }
 
     // ──────────────────────────────────────────────
-    // WithLifecycle() alone: only direct children tracked
+    // WithLifecycle() alone carries the full descent
     // ──────────────────────────────────────────────
 
     [Fact]
-    public void WhenUsingLifecycleWithoutContextInheritance_ThenOnlyDirectChildrenAreAttached()
+    public void WhenUsingLifecycleAlone_ThenTheWholeSubtreeIsAttached()
     {
-        // Arrange — WithLifecycle() alone, no context inheritance
+        // Arrange — WithLifecycle() alone is the full graph lifecycle: the descent that used to
+        // require the separate context-inheritance handler is intrinsic.
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle();
@@ -256,18 +253,16 @@ public class RecursiveAttachTests
         // Act
         parent.Mother = mother;
 
-        // Assert — only direct child is attached, grandchild is NOT
-        // (the recursive descent is driven by the context-inheritance handler, which is not registered)
+        // Assert
         Assert.Contains(mother, attached);
-        Assert.DoesNotContain(grandmother, attached);
+        Assert.Contains(grandmother, attached);
     }
 
     [Fact]
-    public void WhenUsingLifecycleWithoutContextInheritance_ThenASurvivedEdgeRemovalAttachesNothing()
+    public void WhenAnEdgeRemovalIsSurvived_ThenNoAttachIsPublished()
     {
-        // Arrange — the removal-path counterpart of the test above. Whether a subject's component is
-        // owned must not depend on whether the subject ever happened to survive an edge removal, and
-        // no attach transition may be published from inside a removal.
+        // Arrange — no attach transition may be published from inside a removal, and whether a
+        // subject's component is owned must not depend on it having survived an edge removal.
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle();
@@ -275,12 +270,10 @@ public class RecursiveAttachTests
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor()!;
 
         var root = new Person(context) { FirstName = "Root" };
-        var grandmother = new Person { FirstName = "Grandmother" };
-        var child = new Person { FirstName = "Child", Mother = grandmother };
+        var child = new Person { FirstName = "Child" };
 
         root.Father = child;
         root.Mother = child;
-        Assert.Null(grandmother.TryGetContext());
 
         var attached = new List<IInterceptorSubject>();
         lifecycleInterceptor.SubjectAttached += change => attached.Add(change.Subject);
@@ -290,9 +283,8 @@ public class RecursiveAttachTests
 
         // Assert
         Assert.Empty(attached);
-        Assert.Null(grandmother.TryGetContext());
-        Assert.Equal(0, grandmother.GetReferenceCount());
         Assert.Equal(1, child.GetReferenceCount());
+        Assert.Same(context, child.TryGetContext());
     }
 
     // ──────────────────────────────────────────────
@@ -300,9 +292,9 @@ public class RecursiveAttachTests
     // ──────────────────────────────────────────────
 
     [Fact]
-    public void WhenReattachedChildWritesSameValue_ThenGrandchildIsRediscovered()
+    public void WhenAReleasedChildIsReattached_ThenItsSubtreeIsRediscovered()
     {
-        // Arrange — WithLifecycle() only (no context inheritance, no equality check).
+        // Arrange
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle();
@@ -322,21 +314,13 @@ public class RecursiveAttachTests
         Assert.Null(child.TryGetContext());
         Assert.Null(grandmother.TryGetContext());
 
-        // Re-attach the child. There is no context-inheritance handler here, so nothing re-seeds
-        // the child's own properties: its backing store still holds the grandmother, but the
-        // lifecycle holds no baseline for child.Mother and the grandmother is not tracked.
-        parent.Mother = child;
-        Assert.Same(context, child.TryGetContext());
-        Assert.Null(grandmother.TryGetContext());
-
         var attached = new List<IInterceptorSubject>();
         lifecycleInterceptor.SubjectAttached += change => attached.Add(change.Subject);
 
-        // Act — re-write the same value to child.Mother (no equality interceptor to block it).
-        // The reconcile finds no committed baseline for the property, and the missing baseline has
-        // to read as null rather than as the property's current value: reading the current value
-        // would make old and new reference-equal, return early, and leave the grandmother detached.
-        child.Mother = grandmother;
+        // Act — re-attach the child. Its backing store still holds the grandmother while the
+        // lifecycle holds no baseline for child.Mother, so the descent must re-seed the child's
+        // properties and rediscover the stored subtree rather than trust a stale baseline.
+        parent.Mother = child;
 
         // Assert
         Assert.Contains(grandmother, attached);

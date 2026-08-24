@@ -3,7 +3,6 @@ using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
-using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Registry;
 
@@ -11,16 +10,19 @@ namespace Namotion.Interceptor.Registry;
 /// Registers subjects and their property edges as they enter the object graph.
 /// </summary>
 /// <remarks>
-/// Runs before <see cref="ContextInheritanceHandler"/>, which walks down into a newly attached
-/// subtree, so a subject is registered before the descent reaches its children. That holds at every
-/// level, so while attaching, any handler running at or behind this one finds every ancestor of a
-/// subject already registered. Detach does not mirror that; see the design doc. Also ordered ahead
-/// of <see cref="ParentTrackingHandler"/>, which fixes the order of
-/// the two recorders instead of leaving it to registration order. See "Handler Order Around the
-/// Descent" in docs/design/tracking-lifecycle.md.
+/// Runs before <see cref="LifecycleInterceptor"/>'s handler slot, which walks down into a newly
+/// attached subtree, so a subject is registered before the descent reaches its children. That holds
+/// at every level, so while attaching, any handler running at or behind this one finds every
+/// ancestor of a subject already registered. Detach does not mirror that; see the design doc and
+/// "Handler Order Around the Descent" in docs/design/tracking-lifecycle.md.
+///
+/// The registry is the singleton authority for <see cref="ISubjectRegistry"/> on its context: it
+/// holds the one projection every consumer navigates, so a second one would silently split that
+/// view. It remains a projection only; no registry state participates in ownership or reachability.
 /// </remarks>
-[RunsBefore(typeof(ParentTrackingHandler), typeof(ContextInheritanceHandler))]
-public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
+[RunsBefore(typeof(LifecycleInterceptor))]
+public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler,
+    ISingletonContextService<ISubjectRegistry>
 {
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
     private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();

@@ -54,8 +54,7 @@ public class OwnershipOracleTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance()
-            .WithParents();
+            .WithLifecycle();
 
         var random = new Random(seed);
         var universe = new List<Person>();

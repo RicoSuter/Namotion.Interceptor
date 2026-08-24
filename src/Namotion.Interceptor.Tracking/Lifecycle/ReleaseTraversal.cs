@@ -109,9 +109,9 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
             // Drop the ownership record and the baselines first: from here on the subject is
             // released as far as every other query is concerned, which is what makes the callbacks
             // below safe to re-enter this descent from. It also means the callbacks see no parents
-            // at all rather than only the edge being removed; handlers ordered after the
-            // parent-tracking slot observed the same thing before, because that slot removed the
-            // last remaining entry ahead of them.
+            // at all rather than only the edge being removed; handlers ordered behind the descent
+            // observed the same thing before, because the previous parent writer removed the last
+            // remaining entry ahead of them.
             graph.RemoveOwnership(subject);
             graph.RemoveBaselines(subject);
 

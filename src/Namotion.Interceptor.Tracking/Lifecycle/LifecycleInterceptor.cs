@@ -19,7 +19,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// reads deliberately do not take it: they read published per-subject state, because consumers call
 /// them from inside their own locks and from inside lifecycle callbacks.
 /// </remarks>
-public class LifecycleInterceptor : ILifecycleInterceptor
+public class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHandler
 {
     private readonly IInterceptorSubjectContext _context;
     private readonly OwnershipGraph _graph;
@@ -35,7 +35,7 @@ public class LifecycleInterceptor : ILifecycleInterceptor
     // _attachmentLock note for the full order). Reentrancy is required: the structural write
     // protocol enters the gate in Core (through EnterStructuralWriteGate, before the chain is
     // resolved) and this interceptor enters it again from inside the chain, and an attach descent
-    // re-enters it through ContextInheritanceHandler composing a child's context mid-callback.
+    // re-enters it through the handler slot below composing a child's context mid-callback.
     private readonly object _gate = new();
 
     /// <summary>
@@ -221,6 +221,48 @@ public class LifecycleInterceptor : ILifecycleInterceptor
             }
 
             return true;
+        }
+    }
+
+    #endregion
+
+    #region Ordered handler slot (the descent)
+
+    /// <summary>
+    /// The lifecycle's slot in the ordered <see cref="ILifecycleHandler"/> fan-out: it composes the
+    /// context a subject was claimed for onto that subject, which is what drives the recursive
+    /// attach descent, and decomposes it again when the subject leaves. This slot is the public
+    /// ordering seam: a handler runs ahead of the descent with
+    /// <c>[RunsBefore(typeof(LifecycleInterceptor))]</c> and behind it with <c>[RunsAfter]</c>.
+    /// </summary>
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
+    {
+        if (!change.Property.HasValue)
+        {
+            return;
+        }
+
+        // The exact context the subject was claimed for, not the executor of the parent that
+        // happened to pull it in: composing a parent would chain one subject's resolution through
+        // another's. The `??` arm is the third-party path: a custom ILifecycleInterceptor need not
+        // claim subjects, so there may be no attached context to inherit and the parent's is the
+        // best available answer.
+        var inheritedContext = change.Subject.TryGetContext() ?? change.Property.Value.Subject.Context;
+        if (change.IsContextAttach)
+        {
+            if (!change.Subject.Context.AddFallbackContext(inheritedContext) &&
+                inheritedContext.TryGetService<ILifecycleInterceptor>() is { } lifecycle)
+            {
+                // Composing the context is what re-enters the lifecycle and discovers the subject's
+                // own component. A composition left behind by an earlier attach makes that a no-op,
+                // so the descent has to be entered directly instead; without it an attached parent
+                // keeps referencing children that never joined the graph.
+                lifecycle.OnContextComposed(change.Subject);
+            }
+        }
+        else if (change is { IsContextDetach: true, IsPropertyReferenceRemoved: true })
+        {
+            change.Subject.Context.RemoveFallbackContext(inheritedContext);
         }
     }
 

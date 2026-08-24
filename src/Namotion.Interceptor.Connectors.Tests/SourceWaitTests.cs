@@ -614,7 +614,7 @@ public class SourceWaitTests
 
         // Assert
         // This is the test that catches handler-ordering defects. If the monitor ran before
-        // ParentTrackingHandler it would re-evaluate against moving's stale parent set, still find
+        // the lifecycle's parent publication it would re-evaluate against moving's stale parent set, still find
         // blocking in scope, and never look again - the wait would hang.
         await wait.WaitAsync(TimeSpan.FromSeconds(5));
     }

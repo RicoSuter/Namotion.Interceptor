@@ -59,8 +59,7 @@ public class DerivedPropertyConcurrencyTests
             // Arrange
             var context = InterceptorSubjectContext
                 .Create()
-                .WithFullPropertyTracking()
-                .WithContextInheritance();
+                .WithFullPropertyTracking();
 
             var car = new Car(context);
             car.Tires[0].Pressure = 30;
@@ -103,8 +102,7 @@ public class DerivedPropertyConcurrencyTests
             // Arrange
             var context = InterceptorSubjectContext
                 .Create()
-                .WithFullPropertyTracking()
-                .WithContextInheritance();
+                .WithFullPropertyTracking();
 
             var car = new Car(context);
             var targetTire = car.Tires[0];
@@ -147,8 +145,7 @@ public class DerivedPropertyConcurrencyTests
             // Arrange
             var context = InterceptorSubjectContext
                 .Create()
-                .WithFullPropertyTracking()
-                .WithContextInheritance();
+                .WithFullPropertyTracking();
 
             var car = new Car(context);
 
@@ -183,8 +180,7 @@ public class DerivedPropertyConcurrencyTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithFullPropertyTracking()
-            .WithContextInheritance();
+            .WithFullPropertyTracking();
 
         // Act
         var weakTire = CreateCarAndReplaceFirstTire(context);
@@ -393,8 +389,7 @@ public class DerivedPropertyConcurrencyTests
             // Arrange
             var context = InterceptorSubjectContext
                 .Create()
-                .WithFullPropertyTracking()
-                .WithContextInheritance();
+                .WithFullPropertyTracking();
 
             var car = new Car(context);
             car.Tires[0].Pressure = 10;
@@ -481,8 +476,7 @@ public class DerivedPropertyConcurrencyTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithFullPropertyTracking()
-            .WithContextInheritance();
+            .WithFullPropertyTracking();
 
         var car = new Car(context);
         var pressureCounter = 0;
@@ -535,8 +529,7 @@ public class DerivedPropertyConcurrencyTests
         const int batchSize = 8;
         var context = InterceptorSubjectContext
             .Create()
-            .WithFullPropertyTracking()
-            .WithContextInheritance();
+            .WithFullPropertyTracking();
 
         var cars = new Car[carCount];
 
@@ -581,8 +574,7 @@ public class DerivedPropertyConcurrencyTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithFullPropertyTracking()
-            .WithContextInheritance();
+            .WithFullPropertyTracking();
 
         const int subjectPoolSize = 10;
         const int threadCount = 4;
@@ -778,8 +770,7 @@ public class DerivedPropertyConcurrencyTests
             // Arrange
             var context = InterceptorSubjectContext
                 .Create()
-                .WithFullPropertyTracking()
-                .WithContextInheritance();
+                .WithFullPropertyTracking();
 
             var holder = new SideEffectHolder(context);
             var person = new SideEffectPerson(context)

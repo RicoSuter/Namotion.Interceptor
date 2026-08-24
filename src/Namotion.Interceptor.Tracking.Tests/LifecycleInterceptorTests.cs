@@ -60,9 +60,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         // Act
         var mother1 = new Person(context) { FirstName = "Mother1" };
@@ -87,9 +86,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         // Act
         var mother1 = new Person { FirstName = "Mother1" };
@@ -134,9 +132,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         // Act
         var mother1 = new Person(context) { FirstName = "Mother1" };
@@ -158,9 +155,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         // Act & Assert
         var car = new Car(context)
@@ -242,9 +238,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var car1 = new Car { Name = "Car1" };
@@ -266,9 +261,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var car1 = new Car { Name = "Car1" };
@@ -294,9 +288,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var car1 = new Car { Name = "Car1" };
@@ -323,9 +316,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var car1 = new Car { Name = "Car1" };
@@ -359,9 +351,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var tire1 = new Tire { Pressure = 2.0m };
@@ -382,9 +373,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var tire1 = new Tire { Pressure = 2.0m };
@@ -410,9 +400,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var car1 = new Car { Name = "Car1" };
@@ -439,9 +428,8 @@ public class LifecycleInterceptorTests
         var handler = new TestLifecycleHandler();
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
             .WithService(() => handler)
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var garage = new Garage(context) { Name = "TestGarage" };
         var car1 = new Car { Name = "Car1" };

@@ -18,7 +18,7 @@ public class AddPropertiesLifecycleTests
     {
         return InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
     }
 
     private static SubjectPropertyMetadata CreateScalarProperty(string name)

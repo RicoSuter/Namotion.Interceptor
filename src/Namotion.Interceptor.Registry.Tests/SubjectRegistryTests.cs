@@ -153,7 +153,6 @@ public class SubjectRegistryTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithParents()
             .WithRegistry();
 
         // Act

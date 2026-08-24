@@ -163,6 +163,45 @@ public class DynamicPropertyLifecycleTests
     }
 
     [Fact]
+    public void WhenAStoredDynamicSubjectPropertyIsAdded_ThenTheProjectionExistsBeforeItsInitialEdgePublishes()
+    {
+        // Arrange: the registry resolves an edge notification through the parent's registered
+        // property, and throws when it is missing. A stored dynamic property with an initial
+        // subject value therefore proves by succeeding that admission created the projection
+        // before it published the initial structural edge.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var root = new Person(context) { FirstName = "Root" };
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+        var ward = new Person { FirstName = "Ward" };
+        var stored = ward;
+
+        // Act
+        registeredRoot.AddProperty(
+            "Ward",
+            typeof(Person),
+            getValue: _ => stored,
+            setValue: (_, value) => stored = (Person)value!);
+
+        // Assert: the edge resolved through the new projection and is projected on both sides.
+        var wardRegistered = ward.TryGetRegisteredSubject();
+        Assert.NotNull(wardRegistered);
+        var parent = Assert.Single(wardRegistered.Parents);
+        Assert.Equal("Ward", parent.Property.Name);
+        Assert.Null(parent.Index);
+
+        var wardProperty = registeredRoot.TryGetProperty("Ward")!;
+        var child = Assert.Single(wardProperty.Children);
+        Assert.Same(ward, child.Subject);
+
+        Assert.Equal(1, ward.GetReferenceCount());
+        Assert.Same(context, ward.TryGetContext());
+    }
+
+    [Fact]
     public void WhenDynamicDerivedPropertyReturnsSubject_ThenItEstablishesNoOwnershipEdge()
     {
         // Arrange: a dynamic derived property that returns a subject reference (a computed "first
@@ -190,9 +229,14 @@ public class DynamicPropertyLifecycleTests
             "FirstChild",
             _ => root.Children.Length > 0 ? root.Children[0] : null);
 
-        // Assert: the derived property adds no edge, so each child keeps its single Children edge.
+        // Assert: the derived property adds no edge, so each child keeps its single Children edge,
+        // and the registry projects no parent entry for the derived property either.
         Assert.Equal(1, child1.GetReferenceCount());
         Assert.Equal(1, child2.GetReferenceCount());
+        Assert.NotNull(registeredRoot.TryGetProperty("FirstChild"));
+        var child1Parent = Assert.Single(child1.TryGetRegisteredSubject()!.Parents);
+        Assert.Equal(nameof(Person.Children), child1Parent.Property.Name);
+        Assert.DoesNotContain(child1.TryGetRegisteredSubject()!.Parents, parent => parent.Property.Name == "FirstChild");
 
         // All subjects tracked through their real edges: root + child1 + child2
         Assert.Equal(3, registry.KnownSubjects.Count);

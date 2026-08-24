@@ -14,7 +14,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// leaving through is on the change itself, and a subject that survives an edge removal still
 /// reports the edges that remain, which is the state a source-scope walk actually resolves against.
 ///
-/// Handlers ordered after the parent-tracking slot, which is where <c>SourceMonitor</c> sits, saw
+/// Handlers ordered behind the lifecycle descent, which is where <c>SourceMonitor</c> sits, saw
 /// the same empty result before this change: the previous parent writer removed the entry for the
 /// removed edge before they ran, and a final release was by definition the removal of the last edge.
 /// </remarks>
@@ -27,8 +27,7 @@ public class DetachParentVisibilityTests
         var observed = new List<int>();
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance()
-            .WithParents()
+            .WithLifecycle()
             .WithService(() => new LateParentProbe(observed), _ => false);
 
         var root = new Person(context) { FirstName = "Root" };
@@ -51,8 +50,7 @@ public class DetachParentVisibilityTests
         var observed = new List<int>();
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance()
-            .WithParents()
+            .WithLifecycle()
             .WithService(() => new LateParentProbe(observed), _ => false);
 
         var root = new Person(context) { FirstName = "Root" };
@@ -72,7 +70,7 @@ public class DetachParentVisibilityTests
     /// Occupies the same ordering position as <c>SourceMonitor</c>, which is the only first-party
     /// consumer that walks parents from inside a lifecycle callback.
     /// </summary>
-    [RunsAfter(typeof(ParentTrackingHandler), typeof(ContextInheritanceHandler))]
+    [RunsAfter(typeof(LifecycleInterceptor))]
     private sealed class LateParentProbe(List<int> observed) : ILifecycleHandler
     {
         public void HandleLifecycleChange(SubjectLifecycleChange change)

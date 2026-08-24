@@ -563,7 +563,7 @@ public class SourceMonitorTests
     {
         // Arrange
         // Note: a monitor-bearing context ALWAYS has the lifecycle interceptor, because
-        // WithSourceMonitoring implies WithParents and WithParents returns WithLifecycle. So the
+        // WithSourceMonitoring implies WithLifecycle. So the
         // reachable robustness case is a tree where nothing attaches, not one with no interceptor.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithSourceMonitoring();
         var monitor = context.GetSourceMonitor();

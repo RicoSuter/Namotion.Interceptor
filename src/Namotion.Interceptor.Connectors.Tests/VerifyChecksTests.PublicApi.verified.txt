@@ -307,8 +307,7 @@ namespace Namotion.Interceptor.Connectors.Monitoring
         PropertyReleased = 4,
     }
     [Namotion.Interceptor.Attributes.RunsAfter(new System.Type[] {
-            typeof(Namotion.Interceptor.Tracking.Lifecycle.ContextInheritanceHandler),
-            typeof(Namotion.Interceptor.Tracking.Parent.ParentTrackingHandler)})]
+            typeof(Namotion.Interceptor.Tracking.Lifecycle.LifecycleInterceptor)})]
     public class SourceMonitor : Namotion.Interceptor.Tracking.IStartupCompletionDeferrer, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
     {
         public bool IsRegistrationComplete { get; }

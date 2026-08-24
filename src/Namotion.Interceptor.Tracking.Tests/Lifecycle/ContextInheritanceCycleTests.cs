@@ -17,7 +17,7 @@ public class ContextInheritanceCycleTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var root = new Person(context) { FirstName = "Root" };
         var first = new Person { FirstName = "1st" };
@@ -43,7 +43,7 @@ public class ContextInheritanceCycleTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var root = new Person(context) { FirstName = "Root" };
         var first = new Person { FirstName = "1st" };
@@ -69,7 +69,7 @@ public class ContextInheritanceCycleTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var root = new Person(context) { FirstName = "Root" };
         var first = new Person { FirstName = "1st" };
@@ -102,7 +102,7 @@ public class ContextInheritanceCycleTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithContextInheritance();
+            .WithLifecycle();
 
         var root = new Person(context) { FirstName = "Root" };
         var first = new Person { FirstName = "1st" };
@@ -125,35 +125,6 @@ public class ContextInheritanceCycleTests
         // Assert
         Assert.Equal(0, first.GetReferenceCount());
         Assert.Null(((IInterceptorSubject)first).TryGetContext());
-    }
-
-    [Fact]
-    public void WhenOnlyLifecycleIsRegistered_ThenNoContextIsComposedAndNothingThrows()
-    {
-        // Arrange: the control. Without the inheritance handler nothing is composed at all, so the
-        // shape is harmless whatever the ownership model does.
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithLifecycle();
-
-        var root = new Person(context) { FirstName = "Root" };
-        var first = new Person { FirstName = "1st" };
-        var shared = new Person { FirstName = "Shd" };
-
-        // Act
-        root.Mother = first;
-        first.Mother = shared;
-        root.Father = shared;
-        first.Mother = null;
-        root.Father = null;
-        root.Mother = null;
-        shared.Mother = first;
-        root.Mother = shared;
-        root.Father = first;
-        root.Mother = null;
-
-        // Assert
-        Assert.Equal("1st", first.FirstName);
     }
 
     [Fact]

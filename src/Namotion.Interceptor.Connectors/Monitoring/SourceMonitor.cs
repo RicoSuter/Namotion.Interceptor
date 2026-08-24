@@ -4,7 +4,6 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
-using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Connectors.Monitoring;
 
@@ -13,10 +12,10 @@ namespace Namotion.Interceptor.Connectors.Monitoring;
 /// Added to the tree root context by WithSourceMonitoring.
 /// </summary>
 /// <remarks>
-/// Must run after ParentTrackingHandler: wait re-evaluation walks the parent set that handler
-/// maintains for the same lifecycle change, so it has to be up to date first.
+/// Runs behind the lifecycle descent: wait re-evaluation walks the graph for the same lifecycle
+/// change, so a newly attached subtree has to be fully entered first.
 /// </remarks>
-[RunsAfter(typeof(ContextInheritanceHandler), typeof(ParentTrackingHandler))]
+[RunsAfter(typeof(LifecycleInterceptor))]
 public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
 {
     private readonly Lock _lock = new();
