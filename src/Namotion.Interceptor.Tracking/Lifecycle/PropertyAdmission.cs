@@ -29,6 +29,22 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
             return;
         }
 
+        if (!graph.AreBaselinesSeeded(subject))
+        {
+            // Owned but not yet seeded: an edge-driven attach records ownership before the descent
+            // seeds, so a handler that adds properties lands in that window. Committing a baseline
+            // here decides the pending seeding by name, because AreBaselinesSeeded answers from
+            // whichever structural property enumerates first. Seeding is then either skipped, and
+            // this subject's own children never attach at all, or it runs and re-attaches this
+            // batch's edges a second time. Seeding reads every structural getter, including the
+            // ones this batch adds, so it publishes these edges itself. The property callbacks
+            // still belong to this call: Publish snapshots the property names before the handlers
+            // run, precisely so a handler's additions are attached by that call and not twice.
+            registration.Publish();
+            InvokePropertyAttachCallbacks(subject, batch);
+            return;
+        }
+
         var captured = CaptureStructuralValues(subject, batch);
         if (captured is null)
         {

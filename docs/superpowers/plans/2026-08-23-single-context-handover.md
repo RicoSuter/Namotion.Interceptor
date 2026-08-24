@@ -134,6 +134,54 @@ One test fix was needed and only the integration gate could have found it: `Mqtt
 - **Connector Tester.** Hours, does not run in CI. Note `HeapMB` trends upward on master too, about 0.08 MB per cycle on mqtt-chaos, so a single-arm upward trend is never on its own a regression finding.
 - **Benchmarks: done**, see "Benchmark results" below. Both rounds ran, the control held, the noise floor was measured at about 6 percent, and the one unexplained delta was closed by JIT disassembly. Re-run only if the code changes.
 
+## Multi-agent review, 2026-08-24
+
+Five independent reviewers, none of which wrote the code, against `ea1a81d0`. Two used reproduction probes, one used mutation testing, one built an independent differential oracle. Findings below are stated with the verification that backs them.
+
+**The ownership model itself is sound.** An independently written randomized differential oracle (400 seeds x 50 mutations over shapes the shipped oracle does not cover, including dictionaries with colliding keys and interleaved explicit attach and detach) plus 6 threads x 400 mutations x 40 rounds found no divergence. Reachability over occurrence-aware committed edges, baselines-as-outgoing-truth, the `CommitsEdgeTo` rule, the single backward walk and the provisional-anchor independent-support rule all held under adversarial reading. Every defect below sits at a seam, not in the model.
+
+### Blockers
+
+1. **`PropertyAdmission.Admit` had no `AreBaselinesSeeded` guard.** `AreBaselinesSeeded` answers from whichever structural property enumerates first, on the stated assumption that baselines are present or absent together. An edge-driven attach records ownership before the descent seeds, so a handler adding properties in that window commits one baseline and decides the pending seeding by name: either seeding is skipped and the subject's own children never attach, or it re-runs and duplicates this batch's edges (`GetReferenceCount() == 2` for one occurrence). Both reproduced. `AdmitUnowned` already had the guard. **Fixed**, verified by build plus 911 tests; a regression test is still owed because the defect is invisible to the current suite.
+
+2. **The removal loop's released-parent early exit strands the unprocessed old occurrences.** When a callback releases the writing parent mid-removal, `StructuralReconciler` stops, but occurrences below the current index keep their incoming edges, and the parent's own release collects children from the already-committed new baseline, which no longer contains them. Reproduced: subjects stay attached forever, still registered, hosted services still running, reporting a detached parent. Re-attaching compounds rather than heals. Open.
+
+3. **`AttachTraversal.Publish` has no released-subject guard.** If an exempt `AttachProperty` callback releases the subject mid-fan-out, the next iteration calls `GetContext()` on a detached subject and `InvalidOperationException` escapes through an ordinary generated setter, after the backing field was written and the baseline committed. `ReleaseTraversal` has the same unguarded shape. Reproduced, and found independently by two reviewers. Open.
+
+4. **Explicit attach and detach bypass the reentrancy guard entirely.** `AttachSubjectToContext` and `DetachSubjectFromContext` take the gate with no `ThrowIfInsideCallback`, while `WriteProperty` and `TryAddProperties` both guard. A cross-lifecycle deadlock was reproduced: two threads each hold their own gate inside a callback and attach into the other's context. The design doc claims this case is detected, which is what made it easy to miss. Open.
+
+5. **The property-callback exemption does not apply where documented.** `ThrowIfInsideCallback` tests `_callbackDepth` only; `EnterPropertyCallbackScope` bumps a separate counter whose own comment says it feeds only `IsInsideAnyCallback`. The descent runs inside the notifier's scope, so property callbacks below the top level throw. `DerivedPropertyChangeHandler` swallows the exception in `catch (Exception) { }`, so a documented-supported shape silently fails to initialize by graph depth, in Release. Two counters cannot express "the innermost scope is a property callback"; the cheapest fix is for the property scope to record the `_callbackDepth` it was entered at and exempt only when they match. Open, needs a design decision.
+
+6. **HomeBlaze is a regression.** The A/B that was never finished came back: base passes 23 of 23, treatment fails. Failures are all content that renders only if the root subject is attached. Under investigation at the time of writing, with an explicit `Root.AttachToContext` in `RootManager` as the confirmation patch. The likely mechanism is the provisional anchor: a root constructed with a context that is later adopted into an already-rooted graph loses its anchor. If confirmed, this is the first real consumer put through the new anchor semantics and it broke on its ordinary startup path.
+
+### Test coverage: the load-bearing mechanisms are unpinned
+
+Mutation testing, 20 single-edit deletions against 911 tests (Tracking 593, Registry 169, Core 149), baseline green. Each of these passed 911 of 911 with the mechanism deleted:
+
+- the `CommitsEdgeTo` rejection in `ReachabilityWalk`, which the design doc calls "the single most load-bearing invariant in the area", and the deliberate placement of `visited.Add(parent)` after it
+- `ReleaseUnusedClaims` on the structural write path (the admission-path counterpart is covered; only the write path is blind)
+- all six released-parent early exits in `StructuralReconciler`, including under the test named for them, whose data shape never reaches an exit
+- the lock-free parent and reference-count read contract, which could start taking the gate with every test still green
+- the detach handler fan-out order
+
+New reachability finding: `ReleaseUnusedClaims` is reachable with first-party components today. `ValidationInterceptor` carries no ordering relation to `LifecycleInterceptor` and resolves behind it, so a failing validator on a subject-typed property runs that compensation path now. The comment at `OwnershipGraph.cs` asserting "First-party interceptors all order before the lifecycle" is wrong.
+
+Oracle limits worth fixing, cheaply: it seeds `MarkForward` from the implementation's own `executor.Anchor`, so under-consumption of anchors is structurally invisible; its budget (8 seeds, 60 steps, 10 subjects) is 20-35x below where a known defect first appears, and the stressed run costs 6 seconds; and its model has no dictionary property, no `AddProperties`, no second context and no lifecycle handler, so keyed reconciliation, admission, reentrancy and callback ordering are all outside it.
+
+### Concurrency
+
+The total order holds within one context. Across contexts it does not, because there is one gate per lifecycle with no order among gates, and the contract that was supposed to prevent a thread holding two is the one blocker 4 shows is unenforced. Also open: a lifecycle registered between the routing decision and the chain resolution ends up in the chain but not the routing, taking the gate while the attachment monitor is held (medium, derived not reproduced); and the retry loops contradict spec decision 5, which chose ordering over retry precisely because retry can starve.
+
+### Documentation
+
+About 20 corrections, several in text written during this work: the callback-contract sentence in `tracking-lifecycle.md` (see blocker 4), the dynamic-proxy classification claim, one decomposition row, and an unconditional `SyncRoot` torn-read claim that does not hold when a context has zero read interceptors. Shipped docs carry two measurably false behavioural claims (`registry.md` on derived properties creating reference edges, `connectors-monitoring.md` on cross-tree sharing), two samples that no longer compile (`blazor.md`, `connectors-opcua-client.md`), and a generator diagnostics surface still naming the removed `Context` and `SyncRoot` throughout.
+
+Convention violations introduced by this branch: hard wrapping in five `docs/tracking.md` paragraphs, em dashes in five test comments, and an issue reference in `ContextServiceResolutionTests.cs`.
+
+### Simplification
+
+`+2,132` production lines is `+1,078` executable, `+743` XML doc, `+130` rationale comments, `+170` blank. About 200 lines are uncontroversially removable (interface docs restating the design doc, a dead `AttachmentRevision` getter, an orphaned public overload, `ExceptionAggregation`, `ClearProvisionalAnchor` folding into `SetAnchor`). 255 lines of explicitly performance-only mechanism remain unpriced (`LifecycleScratch` 190, `StructuralValueScanner.Contains` 65); both can be priced with a compile-time toggle against rows that already exist. Two cost-table rows close: the `Enter`/`ExitStructuralWriteGate` seam is validated by writes at -8 percent, and inline single-edge storage passes on measured per-subject footprint. One row is stale: there is no `#if DEBUG` read-terminal duplication in the tree, and no `[Conditional("DEBUG")]` in production at all.
+
 ## Benchmark results, measured 2026-08-24
 
 Treatment `rewrite/single-context-impl` at `0c8d2fdf` against `bench/scl-base` at `4be50401`, which is master `0418410c` plus two benchmark-only commits so both arms compile identical benchmark source, verified by md5 on all files and by an empty `git diff master..HEAD -- ':!*Benchmark*'` on the base arm. Both arms share merge-base `0418410c`. Each arm ran separately, never concurrently, CPU pinned throughout.
