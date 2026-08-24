@@ -73,6 +73,15 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
                 var property = new PropertyReference(subject, metadata.Name);
                 if (value is null)
                 {
+                    // Same guard the reconciler applies at entry: a side-effecting user collection
+                    // enumerated by an earlier entry's reconcile runs at callback depth zero and
+                    // can release this subject mid-batch, and a baseline written for a subject the
+                    // graph no longer owns is never removed.
+                    if (!graph.IsOwned(subject))
+                    {
+                        return;
+                    }
+
                     graph.SetBaseline(property, null);
                 }
                 else

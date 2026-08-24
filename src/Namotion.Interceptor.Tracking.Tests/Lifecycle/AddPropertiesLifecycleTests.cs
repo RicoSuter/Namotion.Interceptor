@@ -559,6 +559,68 @@ public class AddPropertiesLifecycleTests
         Assert.Equal(0, publisherCalls);
     }
 
+    [Fact]
+    public void WhenACapturedCollectionReleasesTheAdmittingSubjectMidCommit_ThenNoBaselineEntrySurvives()
+    {
+        // Arrange: the trap collection enumerates benignly during component discovery and releases
+        // the admitting subject during the reconcile's occurrence collection, which is depth-zero
+        // user code holding the gate reentrantly. The reconcile then bails on its ownership check,
+        // and the batch's next captured value, a null, is committed by the admission directly.
+        var context = CreateContext();
+        var person = new Person { FirstName = "P" };
+        person.AttachToContext(context);
+        var subject = (IInterceptorSubject)person;
+        var child = new Person { FirstName = "C" };
+        var trap = new TrapEnumerable([child]);
+        trap.OnSecondEnumeration = () => person.DetachFromContext(context);
+
+        var batch = new[]
+        {
+            new SubjectPropertyMetadata(
+                "Trap", typeof(IEnumerable<Person>), [], _ => trap, null,
+                isIntercepted: true, isDynamic: true),
+            CreateStructuralProperty("Extra", _ => null)
+        };
+
+        // Act
+        subject.AddProperties(batch);
+
+        // Assert: no baseline entry survives for the released subject. GetBaseline cannot
+        // distinguish a committed null from no entry, so presence is asserted directly.
+        Assert.Equal(2, trap.EnumerationCount);
+        Assert.Null(subject.TryGetContext());
+        Assert.Null(child.TryGetContext());
+        var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
+        Assert.False(lifecycle.Graph.HasBaseline(new PropertyReference(subject, "Trap")));
+        Assert.False(lifecycle.Graph.HasBaseline(new PropertyReference(subject, "Extra")));
+    }
+
+    /// <summary>
+    /// A captured collection whose enumeration runs arbitrary code. The admission enumerates it
+    /// once during component discovery and a second time inside the reconcile's occurrence
+    /// collection; the release must fire on the second, because a release during discovery
+    /// detaches the subject before the property attach callbacks and fails the whole admission.
+    /// </summary>
+    private sealed class TrapEnumerable(IReadOnlyList<Person> items) : IEnumerable<Person>
+    {
+        public int EnumerationCount { get; private set; }
+
+        public Action? OnSecondEnumeration { get; set; }
+
+        public IEnumerator<Person> GetEnumerator()
+        {
+            EnumerationCount++;
+            if (EnumerationCount == 2)
+            {
+                OnSecondEnumeration?.Invoke();
+            }
+
+            return items.GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     private sealed class CountingMetadataSequence(IReadOnlyList<SubjectPropertyMetadata> inner)
         : IEnumerable<SubjectPropertyMetadata>
     {

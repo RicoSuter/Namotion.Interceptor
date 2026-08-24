@@ -116,6 +116,16 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     }
 
     /// <summary>
+    /// Whether a baseline entry exists at all: a committed null and a missing entry both read as
+    /// null through <see cref="GetBaseline"/>, and the released-subject regression tests must tell
+    /// them apart.
+    /// </summary>
+    public bool HasBaseline(PropertyReference property)
+    {
+        return _baselines.ContainsKey(property);
+    }
+
+    /// <summary>
     /// Whether the parent still commits an outgoing edge to the target through the given property.
     /// Every algorithm that reads incoming edges validates candidates through this: a reconcile
     /// commits the new property value before it updates the incoming records, so a stored incoming

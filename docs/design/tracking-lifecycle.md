@@ -63,13 +63,15 @@ Structural writes are routed at generation time: the generator emits `SetStructu
 
 An attached structural write follows this sequence in `InterceptorExecutor.SetStructuralPropertyValue`:
 
-1. Read the exact attached context and resolve its lifecycle's gate.
+1. Read the exact attached context, pin its context state with one volatile read, and resolve the lifecycle from that pinned state.
 2. Enter the lifecycle gate (`ILifecycleInterceptor.EnterStructuralWriteGate`).
 3. Enter the subject's attachment monitor.
 4. Revalidate the attached context under both locks; release and retry if it moved.
-5. Resolve and execute the ordinary cached write chain through the terminal.
+5. Resolve the ordinary cached write chain from the routing's pinned state, not a fresh read, and execute it through the terminal. A chain resolved from a fresh read could contain a lifecycle the routing did not see, whose `WriteProperty` would take the gate inside the attachment monitor and invert the lock order; a lifecycle registered after the pin is invisible to this write as a whole and is seen by the next write.
 
 A transient race with attach or detach therefore **orders** rather than throws; only a persistent conflict (the subject genuinely owned by another context) throws, before the backing field is written. An unattached subject enters only the attachment monitor, rechecks it is still unattached, and writes directly.
+
+When the attachment moves between the routing read and the lock acquisitions, the structural write retries rather than orders. The loop is livelock-free: every retry is caused by another thread completing an attachment transition, and each transition requires the lifecycle gate, so a retry is evidence of progress elsewhere rather than of mutual blocking. It is not starvation-free, and no attempt bound is enforced: sustained attach and detach churn on one subject, concurrent with structural writes to that same subject, could in principle starve a writer. That is a pathological workload rather than a plausible one, and the lock-order tests drive the loop at 3,000 iterations without observing it. If it is ever observed, the mitigation is to order rather than retry, which is a rework of the write protocol and not a tuning change.
 
 Inside the chain, `LifecycleInterceptor.WriteProperty` validates and claims the proposed new component before calling `next`, calls `next` exactly once, rereads the authoritative getter (which also serves normalizing setters), then reconciles committed edges: removals publish before additions, old occurrences in reverse order, new ones forward. `ReleaseUnusedClaims` compensates for a suppressed or throwing terminal and for normalizing setters that store a different graph than the validated one.
 
