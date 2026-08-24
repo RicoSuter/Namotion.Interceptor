@@ -18,8 +18,13 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// All topology changes are serialized by one private reentrant lock. Parent and reference-count
 /// reads deliberately do not take it: they read published per-subject state, because consumers call
 /// them from inside their own locks and from inside lifecycle callbacks.
+///
+/// Sealed because both the ordering seam and the default-lifecycle idempotence check key on this
+/// exact type: a subclass would silently unbind every [RunsBefore]/[RunsAfter] constraint naming
+/// <see cref="LifecycleInterceptor"/> and would satisfy the WithLifecycle() exists check without
+/// being the default lifecycle. Third parties extend through <see cref="ILifecycleInterceptor"/>.
 /// </remarks>
-public class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHandler
+public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHandler
 {
     private readonly IInterceptorSubjectContext _context;
     private readonly OwnershipGraph _graph;

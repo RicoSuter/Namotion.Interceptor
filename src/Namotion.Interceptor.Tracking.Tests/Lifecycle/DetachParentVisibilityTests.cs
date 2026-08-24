@@ -25,10 +25,13 @@ public class DetachParentVisibilityTests
     {
         // Arrange
         var observed = new List<int>();
+        // The probe is registered ahead of the lifecycle on purpose: only its [RunsAfter]
+        // constraint moves it behind the descent, so the slot it occupies is pinned by the
+        // attribute rather than by registration order.
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
-            .WithService(() => new LateParentProbe(observed), _ => false);
+            .WithService(() => new LateParentProbe(observed), _ => false)
+            .WithLifecycle();
 
         var root = new Person(context) { FirstName = "Root" };
         var child = new Person { FirstName = "Child" };
@@ -48,10 +51,13 @@ public class DetachParentVisibilityTests
         // Arrange: the case a source-scope walk depends on. The subject stays in the graph, so its
         // remaining ancestry has to stay resolvable while the removal is being published.
         var observed = new List<int>();
+        // The probe is registered ahead of the lifecycle on purpose: only its [RunsAfter]
+        // constraint moves it behind the descent, so the slot it occupies is pinned by the
+        // attribute rather than by registration order.
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle()
-            .WithService(() => new LateParentProbe(observed), _ => false);
+            .WithService(() => new LateParentProbe(observed), _ => false)
+            .WithLifecycle();
 
         var root = new Person(context) { FirstName = "Root" };
         var shared = new Person { FirstName = "Shared" };
