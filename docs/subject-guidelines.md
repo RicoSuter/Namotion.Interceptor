@@ -86,7 +86,7 @@ dept.Employees = [person1, person2];  // person1, person2 attached to graph
 dept.Employees = [person3];           // person1, person2 detached; person3 attached
 ```
 
-With `WithContextInheritance()`, attached subjects inherit the parent's context.
+Attached subjects inherit the graph's context. This is intrinsic to the lifecycle rather than a separate opt-in.
 
 ## ⚠️ Initialize All Properties in Constructors
 

@@ -46,29 +46,27 @@ var registry = context.TryGetService<SubjectRegistry>();
 
 Services are cached after first resolution. The cache is invalidated when services or fallback contexts change.
 
-## Fallback Contexts
+## One Context Per Subject
 
-Contexts can be linked in a hierarchy where child contexts inherit services from parent contexts:
+A subject belongs to exactly one context, and that context is what it resolves services through. There is no per-subject service registration, no subtree scoping, and no composition of one context onto another.
 
 ```csharp
-var parentContext = InterceptorSubjectContext
+var context = InterceptorSubjectContext
     .Create()
     .WithFullPropertyTracking();
 
-var childContext = InterceptorSubjectContext.Create();
-childContext.AddFallbackContext(parentContext);
-
-// childContext now has access to all services from parentContext
+var person = new Person(context);
+person.Children = [new Person { FirstName = "Alice" }];
 ```
 
-This is used internally by `WithContextInheritance()` to compose the context a subject is attached to onto that subject, so every subject in a graph resolves the same services.
+Alice is attached to the same context as her parent, so both resolve the same services. Attaching a subject into a graph attaches it to that graph's context; this is intrinsic to the lifecycle rather than a separate opt-in. Read `person.TryGetContext()` for the context a subject is attached to, or `GetContext()` when attachment is required.
 
-A service registered on a subject applies to that subject alone. Subjects it references resolve through the context they are attached to, not through it, so such a service does not reach them. Scoping a service to a subject's whole subtree is not supported: a subject belongs to exactly one context, and that is what it resolves through.
+A subject that has never been attached resolves nothing, and its property writes are not intercepted at all. That is why a subject built with a context-taking constructor is attached from construction.
 
-**Resolution order:**
-1. Services registered directly on the context
-2. Services from fallback contexts (recursively)
-3. Results are deduplicated and ordered
+**Resolution order** within the one context:
+
+1. Services registered on the context, deduplicated by instance
+2. Ordered by their `RunsFirst`, `RunsBefore` and `RunsAfter` attributes
 
 ## Service Ordering
 

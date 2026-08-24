@@ -44,7 +44,6 @@ app.Run();
 - `WithRegistry()` - Enables object graph navigation and dynamic properties in JSON output
 
 **Optional extensions:**
-- `WithParents()` - Required if using `GetJsonPath()` for JSON path resolution from child to root
 - `WithDataAnnotationValidation()` - Enables validation via data annotations
 - `WithLifecycle()` - Enables attach/detach callbacks
 - `WithHostedServices(builder.Services)` - Registers subjects implementing `BackgroundService`
@@ -296,8 +295,6 @@ var context = InterceptorSubjectContext
     .Create()
     .WithFullPropertyTracking()
     .WithRegistry()
-    .WithParents()
-    .WithLifecycle()
     .WithDataAnnotationValidation();
 
 // Create and register subject

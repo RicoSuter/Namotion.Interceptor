@@ -109,7 +109,7 @@ var person = new Person(context);
 person.Children = [new Person { FirstName = "Alice" }];  // Alice inherits the context automatically
 ```
 
-Inheritance requires `WithContextInheritance()` on the context, which is bundled into `WithFullPropertyTracking()`.
+Inheritance is intrinsic to the lifecycle, so any context with `WithLifecycle()`, which `WithFullPropertyTracking()` and `WithRegistry()` both install, does this.
 
 For the patterns that work, the patterns that don't (collection mutation, explicit interface implementation, abstract properties), and the rules around constructors and initialization, see the [Subject Design Guidelines](docs/subject-guidelines.md).
 

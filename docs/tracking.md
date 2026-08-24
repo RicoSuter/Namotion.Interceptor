@@ -287,12 +287,12 @@ This goes through the same pipeline as automatic recalculation: the getter is re
 
 ## Context Inheritance
 
-Automatically assigns the parent context to child subjects, ensuring they participate in the same tracking and interception pipeline:
+Attaching a subject into a graph attaches it to that graph's context, so it participates in the same tracking and interception pipeline. This is intrinsic to the lifecycle:
 
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithContextInheritance();
+    .WithLifecycle();
 
 var car = new Car(context);
 var tire = new Tire(); // No context assigned yet
@@ -518,8 +518,7 @@ until it is explicitly detached.
 ## Parent-Child Relationship Tracking
 
 Parent relationships come from the lifecycle itself, so any context with `WithLifecycle()` (included
-in `WithFullPropertyTracking()` and `WithRegistry()`) answers them. `WithParents()` is retained for
-compatibility and adds nothing:
+in `WithFullPropertyTracking()` and `WithRegistry()`) answers them:
 
 ```csharp
 var context = InterceptorSubjectContext
