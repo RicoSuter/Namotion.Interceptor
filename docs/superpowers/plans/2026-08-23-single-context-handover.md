@@ -132,7 +132,23 @@ One test fix was needed and only the integration gate could have found it: `Mqtt
 ## Still to run
 
 - **Connector Tester.** Hours, does not run in CI. Note `HeapMB` trends upward on master too, about 0.08 MB per cycle on mqtt-chaos, so a single-arm upward trend is never on its own a regression finding.
-- **Benchmarks**, per arm against `bench/scl-base` at `4be50401`. Requires the CPU pinned to 3.6GHz with no-turbo first; the machine boots throttled to 0.80GHz and anything measured before that is not decision-grade.
+- **Benchmarks**, per arm against `bench/scl-base` at `4be50401`. The CPU is pinned (governor `performance`, min and max both 3600000 on all 16 cores, `no_turbo` 1). Verify by reading the governor and `scaling_min_freq`, not the instantaneous `/proc/cpuinfo` MHz, which reads low on an idle core and is misleading.
+
+  Run **per arm, never concurrently**, directly rather than through the comparison script:
+
+  ```
+  dotnet run -c Release --project src/Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj -- \
+    --filter '*LifecycleOwnershipBenchmark*' '*ParentProjectionBenchmark*' '*ServiceOrderResolverBenchmark*'
+  ```
+
+  `ServiceOrderResolverBenchmark` is included deliberately as the subject-free control: it touches no subject and must not move between arms. **If the control moves, the two halves are not comparable and no other row means anything**, which is how two invalid comparisons were produced here before. BenchmarkDotNet rejects repeated `--filter` flags; multiple patterns go after one `--filter` as positional values.
+
+  What the numbers decide:
+  1. The threshold call on the five performance-only mechanisms in the plan's cost table, `LifecycleScratch` (~190 lines, pure allocation avoidance, no capability) being the largest and lazy parent activation the one that was unpriceable until `ParentProjectionBenchmark` existed.
+  2. Whether `GetOrAddSubjectId` still shows the spike's unexplained 15.4 percent. Stage 4 only removes `Data` entries, so the remaining candidate is the stage 3 interface widening; repository guidance says settle a movement that size with no known mechanism by diffing JIT output rather than by more runs.
+  3. Whether the ownership model costs what it should. The only measured performance datum so far is delegation depth falling from 21 hops to 1, from the stage 4 costing experiment; everything else is structural argument.
+
+  Never judge from one run: rows here have swung several percent between identical runs. Run the same comparison twice and quote both.
 
 ## Breaking changes, consolidated for the pull request
 
