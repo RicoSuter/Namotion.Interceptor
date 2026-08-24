@@ -69,7 +69,7 @@ Expected: 3,425 total, and no line from the second grep except the known flake `
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/Namotion.Interceptor.Generator/SubjectMetadata.cs src/Namotion.Interceptor.Generator/SubjectMetadataExtractor.cs
+git add src/Namotion.Interceptor.Generator/Models/SubjectMetadata.cs src/Namotion.Interceptor.Generator/SubjectMetadataExtractor.cs
 git commit -m "refactor: carry declared constructor signatures in generator metadata
 
 Mirroring a constructor needs its parameters, and the metadata recorded only
@@ -126,6 +126,14 @@ foreach (var constructor in metadata.Constructors)
     builder.AppendLine();
 }
 ```
+
+**Parameter shapes the metadata does not capture, decided here so they are not discovered mid-implementation.** `SubjectConstructorParameter` carries only a fully qualified type name and a name.
+
+- **Optional parameters lose their default on the mirror.** `Foo(A a, B b = null)` mirrors as `Foo(A a, B b, IInterceptorSubjectContext context)`. This is legal, creates no ambiguity, and dependency injection still satisfies the parameter from the container. It matters because the motivating case has one: `FluentStorageContainer` takes `ILogger<FluentStorageContainer>? logger = null`. If that logger type is not registered, `ActivatorUtilities` simply falls back to the original constructor, which is acceptable degradation rather than a failure.
+- **Skip any constructor with a `ref`, `out`, `in` or `params` parameter.** The metadata does not record those modifiers, so a mirror would either fail to compile or silently change the calling convention. Detect them during collection and omit the constructor from `Constructors` entirely, so `EmitConstructors` never sees it. No subject in this repository uses one.
+- **Primary constructors are not covered.** They are not `ConstructorDeclarationSyntax`, so `CollectConstructors` does not see them and no mirror is emitted. No subject in this repository uses one today. Record this as a known limitation in the commit message rather than expanding scope.
+
+While rewriting `EmitConstructors`, also subsume a pre-existing quirk if it is cheap: `DetectConstructorState` inspects only the FIRST declared constructor, so a type declaring `(int x)` before `()` is treated as having no parameterless constructor and gets no context constructor at all today. Mirroring every declared constructor makes that irrelevant for the mirrored forms, but check whether the parameterless path still misreads it.
 
 `MirrorsSignatureOf(other, constructor)` returns true when `other` has exactly `constructor`'s parameters followed by one `IInterceptorSubjectContext`. Write it as a small private static helper comparing the fully qualified type name lists. This is what makes a hand-written context constructor win over a generated one.
 
