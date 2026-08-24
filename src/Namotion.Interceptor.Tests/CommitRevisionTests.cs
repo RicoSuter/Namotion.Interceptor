@@ -47,7 +47,7 @@ public class CommitRevisionTests
     /// <summary>
     /// The guard for the invariant everything else rests on. The terminal increments the subject's
     /// counter with a plain <c>++</c>, which is only exclusive because the enclosing lock is that
-    /// subject's SyncRoot. Move that one statement outside the lock and concurrent writers share
+    /// subject's executor terminal lock. Move that one statement outside the lock and concurrent writers share
     /// revisions, the flush merging then picks the wrong survivor, and connectors mirror stale
     /// values. Every other test in this repository still passes with the statement moved out, so
     /// without this one the branch's central claim has no regression coverage at all.

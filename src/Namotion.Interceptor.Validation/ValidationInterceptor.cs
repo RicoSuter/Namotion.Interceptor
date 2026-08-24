@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using System.Collections.Immutable;
+using System.ComponentModel.DataAnnotations;
 using System.Text;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
@@ -17,7 +18,11 @@ public class ValidationInterceptor : IWriteInterceptor,
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        var validators = context.Property.Subject.Context.GetServices<IPropertyValidator>();
+        // The chain executing this write was resolved from the subject's attached context, so that
+        // context's validators are the ones that apply; an unattached subject runs no chain and is
+        // never validated.
+        var validators = context.Property.Subject.TryGetContext()?.GetServices<IPropertyValidator>()
+            ?? ImmutableArray<IPropertyValidator>.Empty;
 
         var validationContext = new PropertyValidationContext<TProperty>(context.Property, context.NewValue, context.Origin);
 

@@ -57,22 +57,18 @@ namespace Namotion.Interceptor
     }
     public interface IInterceptorSubject
     {
-        Namotion.Interceptor.IInterceptorSubjectContext Context { get; }
         [System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "property",
                 "key"})]
         System.Collections.Concurrent.ConcurrentDictionary<System.ValueTuple<string?, string>, object?> Data { get; }
         Namotion.Interceptor.Interceptors.IInterceptorExecutor Executor { get; }
         System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> Properties { get; }
-        object SyncRoot { get; }
         void AddProperties(System.Collections.Generic.IEnumerable<Namotion.Interceptor.SubjectPropertyMetadata> properties);
     }
     public interface IInterceptorSubjectContext
     {
-        bool AddFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context);
         void AddService<TService>(TService service);
         System.Collections.Immutable.ImmutableArray<TInterface> GetServices<TInterface>();
-        bool RemoveFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context);
         bool TryAddService<TService>(System.Func<TService> factory, System.Func<TService, bool> exists);
         TInterface? TryGetService<TInterface>();
     }
@@ -81,13 +77,10 @@ namespace Namotion.Interceptor
         void RaisePropertyChanged(string propertyName);
     }
     public interface ISingletonContextService<TContract> { }
-    public class InterceptorSubjectContext : Namotion.Interceptor.IInterceptorSubjectContext
+    public sealed class InterceptorSubjectContext : Namotion.Interceptor.IInterceptorSubjectContext
     {
-        public virtual bool AddFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public void AddService<TService>(TService service) { }
         public System.Collections.Immutable.ImmutableArray<TInterface> GetServices<TInterface>() { }
-        protected bool HasFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
-        public virtual bool RemoveFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public bool TryAddService<TService>(System.Func<TService> factory, System.Func<TService, bool> exists) { }
         public TInterface? TryGetService<TInterface>() { }
         public static Namotion.Interceptor.InterceptorSubjectContext Create() { }
@@ -101,6 +94,7 @@ namespace Namotion.Interceptor
     public static class InterceptorSubjectExtensions
     {
         public static void AttachToContext(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public static void AttachToContext(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context, Namotion.Interceptor.SubjectAnchorKind anchor) { }
         public static void DetachFromContext(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext GetContext(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static void SetData(this Namotion.Interceptor.IInterceptorSubject subject, string key, object? value) { }
@@ -185,7 +179,7 @@ namespace Namotion.Interceptor
 }
 namespace Namotion.Interceptor.Interceptors
 {
-    public interface IInterceptorExecutor : Namotion.Interceptor.IInterceptorSubjectContext
+    public interface IInterceptorExecutor
     {
         Namotion.Interceptor.SubjectAnchorKind Anchor { get; }
         Namotion.Interceptor.IInterceptorSubjectContext? AttachedContext { get; }
@@ -204,8 +198,6 @@ namespace Namotion.Interceptor.Interceptors
         void DetachSubjectFromContext(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context);
         void EnterStructuralWriteGate();
         void ExitStructuralWriteGate();
-        void OnContextComposed(Namotion.Interceptor.IInterceptorSubject subject);
-        void OnContextDecomposed(Namotion.Interceptor.IInterceptorSubject subject);
         bool TryAddProperties(Namotion.Interceptor.Interceptors.SubjectPropertyRegistrationContext registration);
     }
     public interface IMethodInterceptor
@@ -220,17 +212,15 @@ namespace Namotion.Interceptor.Interceptors
     {
         void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next);
     }
-    public sealed class InterceptorExecutor : Namotion.Interceptor.InterceptorSubjectContext, Namotion.Interceptor.IInterceptorSubjectContext, Namotion.Interceptor.Interceptors.IInterceptorExecutor
+    public sealed class InterceptorExecutor : Namotion.Interceptor.Interceptors.IInterceptorExecutor
     {
         public InterceptorExecutor(Namotion.Interceptor.IInterceptorSubject subject) { }
         public Namotion.Interceptor.SubjectAnchorKind Anchor { get; }
         public Namotion.Interceptor.IInterceptorSubjectContext? AttachedContext { get; }
         public long AttachmentRevision { get; }
-        public override bool AddFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public void AddProperties(Namotion.Interceptor.Interceptors.SubjectPropertyRegistrationContext registration) { }
         public TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         public object? InvokeMethod(string methodName, object?[] parameters, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod) { }
-        public override bool RemoveFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue) { }
         public bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue) { }
         public bool TryGetAttachment(out Namotion.Interceptor.IInterceptorSubjectContext? context, out Namotion.Interceptor.SubjectAnchorKind anchor, out long revision) { }

@@ -106,36 +106,13 @@ public class PerPropertySubscriptionLifecycleTests
         Assert.Equal(2, hits);
     }
 
-    [Fact]
-    public void WhenTwoAggregatedInterceptors_ThenListenerDeliversExactlyOnce()
-    {
-        // Arrange: a subject whose context aggregates two contexts that each register a change
-        // interceptor. Only the parent registers the lifecycle: a subject can only enter one
-        // context's graph under the exact-context ownership model, so aggregating two
-        // full-tracking contexts is no longer possible.
-        var parent = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        var childCtx = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
-        childCtx.AddFallbackContext(parent);
-        var person = new Person(childCtx);
-        var hits = 0;
-        using var s = new PropertyReference(person, nameof(Person.FirstName)).SubscribeInline((in SubjectPropertyChange _) => hits++);
-
-        // Act
-        person.FirstName = "John";
-
-        // Assert (dedup flag guarantees once, not twice)
-        Assert.Equal(1, hits);
-    }
 
     [Fact]
     public async Task WhenWatchedPropertyWrittenInTransaction_ThenListenerSilentDuringCaptureAndDeliversOnceAtCommit()
     {
         // Arrange: a single full-tracking, transaction-enabled context. This is the simplest case pinning
         // the target-side [RunsAfter] ordering (PropertyChangeInterceptor after SubjectTransactionInterceptor):
-        // staged writes stay silent during capture and replay once at commit. The aggregated counterpart is
-        // WhenAggregatedWithSingleTransactionContext...; only the symmetric aggregation (both contexts
-        // .WithTransactions()) is inexpressible, because capture's TryGetService<SubjectTransactionInterceptor>
-        // throws when two aggregated contexts each contribute one.
+        // staged writes stay silent during capture and replay once at commit.
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithTransactions();
         var person = new Person(context);
         var hits = 0;
@@ -157,41 +134,6 @@ public class PerPropertySubscriptionLifecycleTests
         Assert.Equal("John", person.FirstName);
     }
 
-    [Fact]
-    public async Task WhenAggregatedWithSingleTransactionContext_ThenStagedWritesStaySilentAndDeliverOnceAtCommit()
-    {
-        // Arrange: an ASYMMETRIC aggregation. A symmetric one (both contexts .WithTransactions()) cannot be
-        // expressed because capture resolves the interceptor via TryGetService, which throws when two
-        // aggregated contexts each contribute a SubjectTransactionInterceptor. Here only the parent fallback
-        // adds transactions, so SubjectTransactionInterceptor resolves to exactly one instance while
-        // PropertyChangeInterceptor aggregates to two (one per context). This pins the target-side
-        // [RunsAfter] ordering across aggregated change interceptors: neither aggregated instance leaks a
-        // staged write to a per-property listener during capture, and commit replay delivers exactly once.
-        // The child context contributes only a change interceptor: under the exact-context
-        // ownership model the subject enters one context's graph, so only the parent registers
-        // the lifecycle.
-        var child = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
-        var parent = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithTransactions();
-        child.AddFallbackContext(parent);
-        var person = new Person(child);
-        var hits = 0;
-        using var s = new PropertyReference(person, nameof(Person.FirstName)).SubscribeInline((in SubjectPropertyChange _) => hits++);
-
-        // Act & Assert
-        using (var transaction = await child.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
-        {
-            person.FirstName = "John";
-
-            // Staged during capture: neither aggregated PropertyChangeInterceptor reaches the listener.
-            Assert.Equal(0, hits);
-
-            await transaction.CommitAsync(CancellationToken.None);
-        }
-
-        // Delivered exactly once at commit replay despite two aggregated change interceptors.
-        Assert.Equal(1, hits);
-        Assert.Equal("John", person.FirstName);
-    }
 
     [Fact]
     public void WhenFirstObserverThrows_ThenLaterObserversAreSkippedAndQueueAlreadyDelivered()
@@ -375,8 +317,7 @@ public class PerPropertySubscriptionLifecycleTests
             .SubscribeInline((in SubjectPropertyChange change) =>
             {
                 var newChild = change.GetNewValue<Person?>();
-                childHadInterceptor = newChild is not null &&
-                    ((IInterceptorSubject)newChild).Context.TryGetService<PropertyChangeInterceptor>() is not null;
+                childHadInterceptor = newChild?.TryGetContext()?.TryGetService<PropertyChangeInterceptor>() is not null;
                 childWasRegistered = newChild?.TryGetRegisteredSubject() is not null;
             });
 
@@ -451,39 +392,6 @@ public class PerPropertySubscriptionLifecycleTests
         Assert.Null(child.TryGetRegisteredSubject());
     }
 
-    [Fact]
-    public void WhenAggregatedContextsAssignSubject_ThenNewChildIsAttachedAtCallbackTime()
-    {
-        // Arrange: the ordering edge must hold when a context aggregates a fallback context, so
-        // change interceptors resolve from more than one context. Only the parent registers the
-        // lifecycle: a subject enters exactly one context's graph under exact-context ownership.
-        var parentContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var childContext = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
-        childContext.AddFallbackContext(parentContext);
-        var root = new Person(childContext);
-        var child = new Person();
-        var childHits = 0;
-        using var childSubscription = new PropertyReference(child, nameof(Person.FirstName))
-            .SubscribeInline((in SubjectPropertyChange _) => childHits++);
-        using var subscription = new PropertyReference(root, nameof(Person.Mother))
-            .SubscribeInline((in SubjectPropertyChange change) =>
-            {
-                var newChild = change.GetNewValue<Person?>();
-                if (newChild is not null)
-                {
-                    newChild.FirstName = "set-on-appearance";
-                }
-            });
-
-        // Act
-        root.Mother = child;
-
-        // Assert: attachment happened before dispatch even with two aggregated interceptor and
-        // lifecycle instances, so the callback's write to the child is tracked. Asserted through
-        // delivery rather than service lookup, because aggregation resolves two instances.
-        Assert.Equal(1, childHits);
-        Assert.Equal("set-on-appearance", child.FirstName);
-    }
 
     [Fact]
     public void WhenInnerInterceptorVetoesWrite_ThenNoNotificationIsPublished()

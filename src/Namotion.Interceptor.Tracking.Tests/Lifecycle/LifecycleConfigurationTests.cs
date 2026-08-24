@@ -149,49 +149,6 @@ public class LifecycleConfigurationTests
         Assert.Equal(context.GetServices<ILifecycleInterceptor>(), child3.GetResolvedServices<ILifecycleInterceptor>());
     }
 
-    [Fact]
-    public void WhenAddingServiceToChild_ThenItAppliesToThatSubjectOnly()
-    {
-        // Arrange
-        var service1 = 1;
-        var service2 = 2;
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithService(() => service1, x => x == 1)
-            .WithLifecycle();
-
-        // Act
-        var person = new Person(context)
-        {
-            Mother = new Person
-            {
-                FirstName = "Mother",
-                Mother = new Person
-                {
-                    FirstName = "Grandmother"
-                }
-            }
-        };
-
-        ((IInterceptorSubject)person.Mother).Context
-            .WithService(() => service2, x => x == 2);
-
-        // Assert: every subject in the graph resolves the context's own service, and the service
-        // registered on one subject reaches that subject and nothing else. It used to reach the
-        // subjects below it as well, because they resolved through it; they now resolve through the
-        // context they are attached to.
-        Assert.Contains(1, ((IInterceptorSubject)person).Context.GetServices<int>());
-        Assert.DoesNotContain(2, ((IInterceptorSubject)person).Context.GetServices<int>());
-        Assert.Single(((IInterceptorSubject)person).Context.GetServices<LifecycleInterceptor>());
-
-        Assert.Contains(1, ((IInterceptorSubject)person.Mother!).Context.GetServices<int>());
-        Assert.Contains(2, ((IInterceptorSubject)person.Mother!).Context.GetServices<int>());
-
-        Assert.Contains(1, ((IInterceptorSubject)person.Mother!.Mother!).Context.GetServices<int>());
-        Assert.DoesNotContain(2, ((IInterceptorSubject)person.Mother!.Mother!).Context.GetServices<int>());
-        Assert.Single(((IInterceptorSubject)person.Mother!.Mother!).Context.GetServices<LifecycleInterceptor>());
-    }
 
     #endregion
 
@@ -326,14 +283,6 @@ public class LifecycleConfigurationTests
 
         public bool TryAddProperties(SubjectPropertyRegistrationContext registration)
             => throw new NotSupportedException();
-
-        public void OnContextComposed(IInterceptorSubject subject)
-        {
-        }
-
-        public void OnContextDecomposed(IInterceptorSubject subject)
-        {
-        }
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
             => next(ref context);

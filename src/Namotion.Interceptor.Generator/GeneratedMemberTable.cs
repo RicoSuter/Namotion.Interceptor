@@ -101,7 +101,7 @@ internal static class GeneratedMemberTable
     // TypeInitializationException on every compilation.
 
     /// <summary>
-    /// Five of IInterceptorSubject's six members, not all of them, and not enumerated from the
+    /// Three of IInterceptorSubject's four members, not all of them, and not enumerated from the
     /// compilation for that reason. Properties is deliberately left out: every subject emits its own
     /// explicit implementation of it, which always wins, so treating it as hijackable would report
     /// every legitimate generated hierarchy. The names cannot be nameof here, because the generator
@@ -109,7 +109,7 @@ internal static class GeneratedMemberTable
     /// pins them against the interface instead.
     /// </summary>
     private static readonly string[] HijackableInterfaceMembers =
-        ["Context", "Executor", "Data", "SyncRoot", "AddProperties"];
+        ["Executor", "Data", "AddProperties"];
 
     /// <summary>
     /// Derived from <see cref="AccessorHelpers"/> rather than repeated, so a fifth helper added there
@@ -176,7 +176,7 @@ internal static class GeneratedMemberTable
     /// </summary>
     /// <remarks>
     /// Deliberately name-only: any arity, no signature reasoning and no per-name exemption. Two
-    /// attempts to narrow it, on parameter count and by exempting Context/Data/SyncRoot, each let a
+    /// attempts to narrow it, on parameter count and by exempting interface members, each let a
     /// silent capture through. The cost is a false positive on a legitimate wrapper, reported as
     /// NI0006 and fixed by renaming. Full argument in docs/design/generator-supported-shapes.md.
     /// </remarks>

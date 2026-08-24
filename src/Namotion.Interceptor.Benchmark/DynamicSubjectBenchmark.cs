@@ -31,7 +31,7 @@ public class DynamicSubjectBenchmark
             .WithRegistry();
         
         var motor = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor), typeof(ISensor));
-        motor.Context.AddFallbackContext(_context);
+        motor.AttachToContext(_context);
         _motor = (IMotor)motor;
     }
     
@@ -48,7 +48,7 @@ public class DynamicSubjectBenchmark
     public void CreateDynamicSubject()
     {        
         var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor), typeof(ISensor));
-        subject.Context.AddFallbackContext(_iterationContext!);
+        subject.AttachToContext(_iterationContext!);
     }
     
     //[Benchmark]

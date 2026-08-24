@@ -350,22 +350,6 @@ public class SourceMonitorTests
     }
 
     [Fact]
-    public void WhenTwoMonitorsAreReachable_ThenGetSourceMonitorThrows()
-    {
-        // Arrange
-        // The singleton contract limits one context to one monitor, so a second monitor is only
-        // reachable through transitional fallback composition; resolution still refuses to pick
-        // one arbitrarily.
-        var parent = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithLifecycle().WithSourceMonitoring();
-        var child = InterceptorSubjectContext.Create().WithSourceMonitoring();
-        child.AddFallbackContext(parent);
-
-        // Act & Assert
-        var exception = Assert.Throws<InvalidOperationException>(() => child.GetSourceMonitor());
-        Assert.Contains("exactly one", exception.Message);
-    }
-
-    [Fact]
     public async Task WhenAStoppedSourceIsStartedAgain_ThenThePumpDoesNotRun()
     {
         // Arrange

@@ -9,7 +9,7 @@
 @inject SubjectPathResolver PathResolver
 @inject IServiceProvider ServiceProvider
 
-<TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
+<TrackingScope Context="Subject?.TryGetContext()" ShowDebugInfo="DeveloperMode.IsEnabled">
 @if (Subject != null)
 {
     @* Header - Fixed at top *@

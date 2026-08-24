@@ -41,10 +41,6 @@ public struct PropertyWriteContext<TProperty>
     // trigger's already-resolved value.
     private long _writeTimestamp;
 
-    // Set by the first PropertyChangeInterceptor instance that resolves this write's per-property
-    // observers (whether or not any were found), so outer aggregated instances skip resolution.
-    internal bool ArePropertyObserversResolved;
-
     // The terminal write action for this call. Threaded through the per-call context (which already
     // flows by ref to the end of the chain) instead of a ThreadStatic on the shared chain instance:
     // per-call state belongs on the per-call context, which is also robust against reentrant writes.
@@ -271,7 +267,7 @@ public struct PropertyWriteContext<TProperty>
 
         // A derived property's stored value is recomputed by its getter, never literally the sent value,
         // so a stamped origin never survives. Demoted without invoking the getter, which must not run
-        // here (this executes under the subject's SyncRoot).
+        // here (this executes under the executor's terminal lock).
         if (Property.Metadata.IsDerived)
         {
             return default;

@@ -40,47 +40,22 @@ public class ContextServiceResolutionTests
     }
     
     [Fact]
-    public void WhenCollectionHasSubCollection_ThenServicesAreInherited()
+    public void WhenTwoInstancesOfSameServiceTypeAreRegistered_ThenOrderingAttributeBindsAgainstAllInstances()
     {
-        // Arrange
-        var context1 = InterceptorSubjectContext.Create();
-        var context2 = InterceptorSubjectContext.Create();
-        
-        context2.AddFallbackContext(context1);
-
-        // Act
-        context1.AddService(1);
-        context1.AddService(2);
-        context2.AddService(3);
-
-        // Assert
-        Assert.Equal(2, context1.GetServices<int>().Count());
-        Assert.Equal(3, context2.GetServices<int>().Count());
-    }
-
-    [Fact]
-    public void WhenFallbackContextsRegisterSameServiceType_ThenOrderingAttributeBindsAgainstAllInstances()
-    {
-        // Arrange: the duplicate in the first fallback enumerates before the constrainer
-        // in the second, so last-index binding leaves it unordered (issue #380); relies on
-        // fallback enumeration following HashSet insertion order (true in practice, not contractual)
-        var parent = InterceptorSubjectContext.Create();
-        var fallback1 = InterceptorSubjectContext.Create();
-        var fallback2 = InterceptorSubjectContext.Create();
+        // Arrange: the first duplicate enumerates before the constrainer, so last-index binding
+        // would leave it unordered (issue #380).
+        var context = InterceptorSubjectContext.Create();
 
         var duplicate0 = new DuplicateOrderedService();
         var constrainer = new ConstrainerOrderedService();
         var duplicate1 = new DuplicateOrderedService();
 
-        fallback1.AddService(duplicate0);
-        fallback2.AddService(constrainer);
-        fallback2.AddService(duplicate1);
-
-        parent.AddFallbackContext(fallback1);
-        parent.AddFallbackContext(fallback2);
+        context.AddService(duplicate0);
+        context.AddService(constrainer);
+        context.AddService(duplicate1);
 
         // Act
-        var services = parent.GetServices<IOrderedTestService>();
+        var services = context.GetServices<IOrderedTestService>();
 
         // Assert: the constrainer precedes both duplicate instances
         Assert.Equal(3, services.Length);

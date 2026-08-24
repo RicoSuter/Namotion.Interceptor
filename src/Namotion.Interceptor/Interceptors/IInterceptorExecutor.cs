@@ -1,19 +1,17 @@
 namespace Namotion.Interceptor.Interceptors;
 
-// TODO: Get rid of the executor (IInterceptorExecutor/InterceptorExecutor) completely.
-// The Execute* methods are already gone from IInterceptorSubjectContext; this layer is the
-// remaining step.
-public interface IInterceptorExecutor : IInterceptorSubjectContext
+/// <summary>
+/// Runs a subject's interception and owns its exact context attachment: the one nullable attached
+/// context, the anchor, and the attachment revision with its compare-and-swap transitions. The
+/// executor is not a service container; services live on the attached
+/// <see cref="IInterceptorSubjectContext"/>, reachable through <see cref="AttachedContext"/>.
+/// </summary>
+public interface IInterceptorExecutor
 {
     /// <summary>
     /// Gets the one exact context this subject is attached to, or null when the subject is
     /// unattached.
     /// </summary>
-    /// <remarks>
-    /// Named <c>AttachedContext</c> rather than <c>Context</c> only because
-    /// <see cref="IInterceptorSubject.Context"/> still exists during the single-context transition
-    /// and returns the executor itself; it is renamed at the end of the cutover.
-    /// </remarks>
     IInterceptorSubjectContext? AttachedContext { get; }
 
     /// <summary>

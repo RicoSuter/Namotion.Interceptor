@@ -176,9 +176,6 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("        private IInterceptorExecutor? _context;");
         builder.AppendLine("        private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;");
         builder.AppendLine();
-        builder.AppendLine("        [JsonIgnore]");
-        builder.AppendLine("        IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);");
-        builder.AppendLine();
         // Explicit implementation for the same reason GetInstanceProperties is a method rather
         // than a property (see EmitHelperMethods): DynamicSubjectFactory turns every reflected
         // public or protected instance property into an intercepted subject property, so a
@@ -191,9 +188,6 @@ internal static class SubjectCodeGenerator
         builder.AppendLine();
         builder.AppendLine("        [JsonIgnore]");
         builder.AppendLine("        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;");
-        builder.AppendLine();
-        builder.AppendLine("        [JsonIgnore]");
-        builder.AppendLine("        object IInterceptorSubject.SyncRoot { get; } = new object();");
         builder.AppendLine();
         builder.AppendLine("        void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)");
         builder.AppendLine("        {");
@@ -292,7 +286,10 @@ internal static class SubjectCodeGenerator
         {
             builder.AppendLine($"        public {metadata.ClassName}(IInterceptorSubjectContext context) : this()");
             builder.AppendLine("        {");
-            builder.AppendLine("            ((IInterceptorSubject)this).Context.AddFallbackContext(context);");
+            // A provisional root anchor, not an explicit one: dependency injection selects this
+            // constructor for every subject it builds, and an explicit anchor would make each of
+            // them an unreleasable root. See SubjectAnchorKind.
+            builder.AppendLine("            InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAnchorKind.Provisional);");
             builder.AppendLine("        }");
             builder.AppendLine();
         }

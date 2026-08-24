@@ -234,40 +234,18 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     #region Ordered handler slot (the descent)
 
     /// <summary>
-    /// The lifecycle's slot in the ordered <see cref="ILifecycleHandler"/> fan-out: it composes the
-    /// context a subject was claimed for onto that subject, which is what drives the recursive
-    /// attach descent, and decomposes it again when the subject leaves. This slot is the public
-    /// ordering seam: a handler runs ahead of the descent with
-    /// <c>[RunsBefore(typeof(LifecycleInterceptor))]</c> and behind it with <c>[RunsAfter]</c>.
+    /// The lifecycle's slot in the ordered <see cref="ILifecycleHandler"/> fan-out: when an edge
+    /// pulls a subject into the graph, it seeds that subject's own structural properties, which is
+    /// the recursive attach descent. This slot is the public ordering seam: a handler runs ahead
+    /// of the descent with <c>[RunsBefore(typeof(LifecycleInterceptor))]</c> and behind it with
+    /// <c>[RunsAfter]</c>, and detach changes pass through it unhandled so that the same seam
+    /// orders both directions.
     /// </summary>
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        if (!change.Property.HasValue)
+        if (change is { IsContextAttach: true, Property: not null })
         {
-            return;
-        }
-
-        // The exact context the subject was claimed for, not the executor of the parent that
-        // happened to pull it in: composing a parent would chain one subject's resolution through
-        // another's. The `??` arm is the third-party path: a custom ILifecycleInterceptor need not
-        // claim subjects, so there may be no attached context to inherit and the parent's is the
-        // best available answer.
-        var inheritedContext = change.Subject.TryGetContext() ?? change.Property.Value.Subject.Context;
-        if (change.IsContextAttach)
-        {
-            if (!change.Subject.Context.AddFallbackContext(inheritedContext) &&
-                inheritedContext.TryGetService<ILifecycleInterceptor>() is { } lifecycle)
-            {
-                // Composing the context is what re-enters the lifecycle and discovers the subject's
-                // own component. A composition left behind by an earlier attach makes that a no-op,
-                // so the descent has to be entered directly instead; without it an attached parent
-                // keeps referencing children that never joined the graph.
-                lifecycle.OnContextComposed(change.Subject);
-            }
-        }
-        else if (change is { IsContextDetach: true, IsPropertyReferenceRemoved: true })
-        {
-            change.Subject.Context.RemoveFallbackContext(inheritedContext);
+            _attach.SeedChildrenIfNeeded(change.Subject);
         }
     }
 
@@ -307,13 +285,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             }
 
             ClaimComponentForRoot(subject, anchor);
-
-            // Composing the context onto the executor is what makes the graph resolve its services,
-            // and it is the transitional entry point that seeds and publishes the attach.
-            if (!subject.Context.AddFallbackContext(_context))
-            {
-                OnContextComposed(subject);
-            }
+            SeedAndAttachComponent(subject);
         }
     }
 
@@ -337,77 +309,28 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             if (ownership is null)
             {
                 _graph.ReleaseClaim(subject);
-                subject.Context.RemoveFallbackContext(_context);
                 return;
             }
 
             if (ownership.IncomingCount == 0 || !_reachability.IsAnchorReachable(subject, null))
             {
                 _release.ReleaseRoot(subject);
-
-                // Symmetric with the attach that composed it; a subject the edges still hold keeps
-                // resolving the context it is still in.
-                subject.Context.RemoveFallbackContext(_context);
             }
         }
     }
 
-    /// <inheritdoc />
-    public void OnContextComposed(IInterceptorSubject subject)
+    /// <summary>
+    /// Seeds and publishes a freshly claimed root's component. Runs under <see cref="_gate"/>.
+    /// </summary>
+    private void SeedAndAttachComponent(IInterceptorSubject subject)
     {
-        lock (_gate)
+        _attach.SeedAndAttachChildren(subject);
+
+        // A back edge inside the seeded component can attach the subject before this point, in
+        // which case it already published its context attach through that edge.
+        if (!_graph.IsOwned(subject))
         {
-            if (_graph.IsOwned(subject))
-            {
-                // The recursive descent: the subject already carries its incoming edge, so only its
-                // own structural properties still have to be seeded and published.
-                _attach.SeedChildrenIfNeeded(subject);
-                return;
-            }
-
-            if (subject.Executor.AttachedContext is null)
-            {
-                ClaimComponentForRoot(subject, SubjectAnchorKind.Provisional);
-            }
-            else if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
-            {
-                throw new InvalidOperationException(
-                    "The subject is owned by a different context and cannot join this graph. Detach it from that context first.");
-            }
-
-            _attach.SeedAndAttachChildren(subject);
-
-            // A back edge inside the seeded component can attach the subject before this point, in
-            // which case it already published its context attach through that edge.
-            if (!_graph.IsOwned(subject))
-            {
-                _attach.AttachRoot(subject);
-            }
-        }
-    }
-
-    /// <inheritdoc />
-    public void OnContextDecomposed(IInterceptorSubject subject)
-    {
-        lock (_gate)
-        {
-            var ownership = _graph.TryGetOwnership(subject);
-            if (ownership is null)
-            {
-                return;
-            }
-
-            // Decomposing the context that made the subject a provisional root gives that anchor up,
-            // which is the inverse of what composing it did. An explicit anchor is only ever cleared
-            // explicitly, and a subject an edge still holds stays.
-            _graph.ClearProvisionalAnchor(subject);
-            if (_graph.IsAnchored(subject) ||
-                (ownership.IncomingCount > 0 && _reachability.IsAnchorReachable(subject, null)))
-            {
-                return;
-            }
-
-            _release.ReleaseRoot(subject);
+            _attach.AttachRoot(subject);
         }
     }
 

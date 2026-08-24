@@ -6,20 +6,10 @@ namespace Namotion.Interceptor;
 public interface IInterceptorSubject
 {
     /// <summary>
-    /// Gets the sync root used to synchronize read/writes of property fields.
-    /// </summary>
-    object SyncRoot { get; }
-    
-    /// <summary>
-    /// Gets the interceptor collection.
-    /// </summary>
-    IInterceptorSubjectContext Context { get; }
-
-    /// <summary>
     /// Gets the executor that runs this subject's interception and owns its exact context
-    /// attachment. During the single-context transition this is the same object
-    /// <see cref="Context"/> returns; the transition ends with <see cref="Context"/> removed and
-    /// this member as the only access path.
+    /// attachment. Implementations publish exactly one executor per subject
+    /// (<see cref="InterceptorExecutor.GetOrCreate"/>), because the attachment state, the commit
+    /// revision and the terminal lock all live on it.
     /// </summary>
     IInterceptorExecutor Executor { get; }
 
@@ -32,7 +22,7 @@ public interface IInterceptorSubject
     /// Gets the reflected properties (should be cached).
     /// </summary>
     IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties { get; }
-    
+
     /// <summary>
     /// Adds additional properties to this subject (e.g. from an inheriting class or dynamic
     /// context). The call routes through <see cref="Executor"/>: on a subject attached to a
@@ -52,6 +42,6 @@ public interface IInterceptorSubject
     /// captured structural value belongs to a different context, or the call happened inside a
     /// lifecycle callback of another context.</exception>
     void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties);
-    
+
     // TODO(perf): Use span here?
 }

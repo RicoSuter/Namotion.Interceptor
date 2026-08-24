@@ -153,7 +153,7 @@ public class ParentAccessDuringLifecycleTests
         outerComponent.ChildComponent = innerComponent;
 
         // Now attach context - should trigger attach for all
-        ((IInterceptorSubject)simulation).Context.AddFallbackContext(context);
+        ((IInterceptorSubject)simulation).AttachToContext(context);
 
         // Assert: All components should have found their parents during attach
         Assert.Null(outerComponent.AttachException);

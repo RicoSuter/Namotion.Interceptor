@@ -53,8 +53,8 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                 // The extension, not this handler's own method: it also clears the subject's
                 // attached-services data, which a plain stop would leave behind (pinned by
                 // HostedServiceHandlerTests.WhenSubjectServiceIsDetached_ThenHostedServiceIsStopped).
-                // It re-resolves the handler through the subject's context, so a subject whose own
-                // context has already lost its fallback stops resolving one; that is pre-existing and
+                // It re-resolves the handler through the subject's attached context, so a subject
+                // already released from its context stops resolving one; that is pre-existing and
                 // narrower than losing the data cleanup.
                 change.Subject.DetachHostedService(attachedHostedService);
             }

@@ -12,7 +12,9 @@ public class DynamicSubject : IInterceptorSubject
 
     public DynamicSubject(IInterceptorSubjectContext context) : this()
     {
-        ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+        // A provisional root anchor, matching the generated context-taking constructor; see
+        // SubjectAnchorKind for why constructors do not create explicit roots.
+        this.AttachToContext(context, SubjectAnchorKind.Provisional);
     }
 
     public DynamicSubject()
@@ -25,12 +27,7 @@ public class DynamicSubject : IInterceptorSubject
         _properties = properties.ToFrozenDictionary(p => p.Name, p => p);
     }
     
-    [JsonIgnore] object IInterceptorSubject.SyncRoot { get; } = new();
-
-    [JsonIgnore]
-    IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
-
-    // Explicit implementation, like Context/Data/SyncRoot above: DynamicSubjectFactory reflects
+    // Explicit implementation, like Data below: DynamicSubjectFactory reflects
     // over GetProperties(Instance | Public | NonPublic) and turns every unknown property into an
     // intercepted subject property, so a public or protected Executor would become a phantom
     // property on every Castle-proxied subject.

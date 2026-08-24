@@ -98,7 +98,7 @@ public class InterceptorTests
 
         // Act
         var car = new Car(context);
-        ((IInterceptorSubject)car).Context.RemoveFallbackContext(context);
+        ((IInterceptorSubject)car).DetachFromContext(context);
 
         // Assert
         return Verify(logs);
@@ -135,16 +135,6 @@ public class InterceptorTests
             _logs = logs;
         }
 
-        public void OnContextComposed(IInterceptorSubject subject)
-        {
-            _logs.Add($"{_name}: Attached");
-        }
-
-        public void OnContextDecomposed(IInterceptorSubject subject)
-        {
-            _logs.Add($"{_name}: Detached");
-        }
-
         public bool TryAddProperties(SubjectPropertyRegistrationContext registration)
         {
             registration.Publish();
@@ -153,12 +143,12 @@ public class InterceptorTests
 
         public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
         {
-            OnContextComposed(subject);
+            _logs.Add($"{_name}: Attached");
         }
 
         public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
         {
-            OnContextDecomposed(subject);
+            _logs.Add($"{_name}: Detached");
         }
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)

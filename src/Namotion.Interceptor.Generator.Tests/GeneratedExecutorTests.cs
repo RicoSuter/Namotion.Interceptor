@@ -36,10 +36,9 @@ public class GeneratedExecutorTests
         var instance = (IInterceptorSubject)result.CreateInstance("Repro.Sample");
 
         // Assert: no simple-named Executor property exists at any accessibility, only the
-        // explicitly implemented slot, and during the transition it returns the executor Context
-        // already returns.
+        // explicitly implemented slot.
         Assert.Null(sampleType.GetProperty("Executor", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));
         Assert.NotNull(sampleType.GetProperty("Namotion.Interceptor.IInterceptorSubject.Executor", BindingFlags.Instance | BindingFlags.NonPublic));
-        Assert.Same(instance.Context, instance.Executor);
+        Assert.NotNull(instance.Executor);
     }
 }

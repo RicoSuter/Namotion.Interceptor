@@ -28,22 +28,20 @@ public class GeneratedMemberTableTests
     [Fact]
     public void WhenAnIInterceptorSubjectMemberNameIsTested_ThenTheNameSetClaimsIt()
     {
-        // Arrange: the five members NI0014 protects. The array holding them is private, so this reads
+        // Arrange: the three members NI0014 protects. The array holding them is private, so this reads
         // the name set derived from it. A typo there stops the real interface member name being
         // recognised, which is what fails here.
         // Act & Assert
-        Assert.True(GeneratedMemberTable.CollidesWithGeneratedMember(nameof(IInterceptorSubject.Context)));
         Assert.True(GeneratedMemberTable.CollidesWithGeneratedMember(nameof(IInterceptorSubject.Executor)));
         Assert.True(GeneratedMemberTable.CollidesWithGeneratedMember(nameof(IInterceptorSubject.Data)));
-        Assert.True(GeneratedMemberTable.CollidesWithGeneratedMember(nameof(IInterceptorSubject.SyncRoot)));
         Assert.True(GeneratedMemberTable.CollidesWithGeneratedMember(nameof(IInterceptorSubject.AddProperties)));
     }
 
     [Fact]
     public void WhenPropertiesIsTested_ThenItIsDeliberatelyAbsentFromTheNameSet()
     {
-        // Arrange & Act & Assert: IInterceptorSubject declares six members and the hijack rule covers
-        // five. Properties is left out because every subject emits its own explicit implementation of
+        // Arrange & Act & Assert: IInterceptorSubject declares four members and the hijack rule covers
+        // three. Properties is left out because every subject emits its own explicit implementation of
         // it, which always wins, so covering it would report every legitimate generated hierarchy.
         // Nothing else feeding this name set is called Properties, so its absence here is the
         // exclusion.

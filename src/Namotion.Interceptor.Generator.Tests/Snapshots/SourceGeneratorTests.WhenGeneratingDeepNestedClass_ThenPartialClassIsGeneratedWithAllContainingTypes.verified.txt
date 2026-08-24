@@ -39,9 +39,6 @@ namespace TestNamespace
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
         [JsonIgnore]
-        IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
-
-        [JsonIgnore]
         IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
 
         [JsonIgnore]
@@ -49,9 +46,6 @@ namespace TestNamespace
 
         [JsonIgnore]
         IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;
-
-        [JsonIgnore]
-        object IInterceptorSubject.SyncRoot { get; } = new object();
 
         void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
         {
@@ -77,7 +71,7 @@ namespace TestNamespace
 
         public DeepNestedSubject(IInterceptorSubjectContext context) : this()
         {
-            ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+            InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAnchorKind.Provisional);
         }
 
         private int _Value;

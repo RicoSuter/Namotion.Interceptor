@@ -59,7 +59,7 @@ public class DynamicSubjectTests
             .WithRegistry();
 
         var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor), typeof(ISensor));
-        subject.Context.AddFallbackContext(context);
+        subject.AttachToContext(context);
 
         // Act
         var registeredSubject = subject.TryGetRegisteredSubject()!;
@@ -85,7 +85,7 @@ public class DynamicSubjectTests
             .WithService(() => new TestInterceptor("b", logs), _ => false);
 
         var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor), typeof(ISensor));
-        subject.Context.AddFallbackContext(context);
+        subject.AttachToContext(context);
 
         var motor = (IMotor)subject;
         var sensor = (ISensor)subject;
@@ -96,7 +96,7 @@ public class DynamicSubjectTests
         var speed = motor.Speed;
         var temperature = sensor.Temperature;
         
-        subject.Context.RemoveFallbackContext(context);
+        subject.DetachFromContext(context);
 
         // Assert & Act (read)
         Assert.Equal(102, motor.Speed);
@@ -214,12 +214,12 @@ public class DynamicSubjectTests
         // Arrange
         var subject = (IInterceptorSubject)new DynamicSubject();
 
-        // Act & Assert: no simple-named Executor property exists at any accessibility, and during
-        // the transition the executor is the same object Context returns.
+        // Act & Assert: no simple-named Executor property exists at any accessibility, so the
+        // dynamic factory cannot turn it into a phantom intercepted property.
         Assert.Null(typeof(DynamicSubject).GetProperty(
             "Executor",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic));
-        Assert.Same(subject.Context, subject.Executor);
+        Assert.NotNull(subject.Executor);
     }
 
     public class TestLifecycleInterceptor(string name, List<string> logs) : ILifecycleInterceptor
@@ -230,24 +230,28 @@ public class DynamicSubjectTests
 
         public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
 
-        public void OnContextComposed(IInterceptorSubject subject) => logs.Add($"{name}: Attached");
-
-        public void OnContextDecomposed(IInterceptorSubject subject) => logs.Add($"{name}: Detached");
-
         public bool TryAddProperties(SubjectPropertyRegistrationContext registration)
         {
             registration.Publish();
             return true;
         }
 
+        // Attaches through the public raw seam, which is the whole third-party contract: no
+        // Core internals are needed to implement a lifecycle.
         public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
         {
-            OnContextComposed(subject);
+            var executor = subject.Executor;
+            executor.TryGetAttachment(out _, out _, out var revision);
+            executor.TryUpdateAttachment(revision, context, anchor, out _);
+            logs.Add($"{name}: Attached");
         }
 
         public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
         {
-            OnContextDecomposed(subject);
+            var executor = subject.Executor;
+            executor.TryGetAttachment(out _, out _, out var revision);
+            executor.TryUpdateAttachment(revision, null, SubjectAnchorKind.None, out _);
+            logs.Add($"{name}: Detached");
         }
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)

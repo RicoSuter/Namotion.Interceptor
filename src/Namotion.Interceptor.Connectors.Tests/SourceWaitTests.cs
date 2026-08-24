@@ -366,7 +366,7 @@ public class SourceWaitTests
         // every re-evaluation pass. An earlier version of this test drove the throw from a
         // one-shot diagnostic warning instead, which meant nothing threw on the second pass and
         // the test passed with the per-wait isolation removed.
-        var poisonWait = monitor.WaitForSynchronizationAsync(new PoisonAnchor(context), CancellationToken.None);
+        var poisonWait = monitor.WaitForSynchronizationAsync(new PoisonAnchor(), CancellationToken.None);
         Assert.False(poisonWait.IsCompleted);
 
         // A second, later wait whose own re-evaluation never touches the poison anchor: its scope
@@ -434,7 +434,7 @@ public class SourceWaitTests
         monitor.CompleteSourceRegistration();
 
         var hold = monitor.DeferWaitCompletion();
-        var poisonWait = monitor.WaitForSynchronizationAsync(new PoisonAnchor(context), CancellationToken.None);
+        var poisonWait = monitor.WaitForSynchronizationAsync(new PoisonAnchor(), CancellationToken.None);
         Assert.False(poisonWait.IsCompleted);
         Assert.Throws<InvalidOperationException>(() => hold.Dispose());
 
@@ -820,12 +820,8 @@ internal sealed class RecordingLoggerFactory(RecordingLogger logger) : ILoggerFa
 /// A throwing source would not work here: IsBranchSynchronized iterates the shared source list for
 /// every wait, so one poison source makes every wait's evaluation throw.
 /// </remarks>
-internal sealed class PoisonAnchor(IInterceptorSubjectContext context) : IInterceptorSubject
+internal sealed class PoisonAnchor : IInterceptorSubject
 {
-    public object SyncRoot { get; } = new();
-
-    public IInterceptorSubjectContext Context { get; } = context;
-
     Namotion.Interceptor.Interceptors.IInterceptorExecutor IInterceptorSubject.Executor =>
         throw new InvalidOperationException("scope walk is broken");
 

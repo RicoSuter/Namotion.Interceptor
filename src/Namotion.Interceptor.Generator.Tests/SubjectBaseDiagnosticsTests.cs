@@ -53,10 +53,8 @@ public class SubjectBaseDiagnosticsTests
                 private IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties
                     = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
 
-                IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
                 IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-                object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
 
                 public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -89,10 +87,8 @@ public class SubjectBaseDiagnosticsTests
                 public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; }
                     = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
 
-                IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
                 IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-                object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
 
                 public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -132,10 +128,8 @@ public class SubjectBaseDiagnosticsTests
 
                 protected int GetInstanceProperties(int unused) => unused;
 
-                IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
                 IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-                object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
 
                 public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -174,10 +168,8 @@ public class SubjectBaseDiagnosticsTests
 
                 protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;
 
-                IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
                 IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-                object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
 
                 public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -214,10 +206,8 @@ public class SubjectBaseDiagnosticsTests
                 public static IReadOnlyList<SubjectPropertyMetadata> DefaultProperties { get; }
                     = new List<SubjectPropertyMetadata>();
 
-                IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
                 IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-                object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
 
                 public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -254,10 +244,8 @@ public class SubjectBaseDiagnosticsTests
                 public static readonly IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties
                     = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
 
-                IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
                 IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-                object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
 
                 public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -297,10 +285,8 @@ public class SubjectBaseDiagnosticsTests
                 void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
                     => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
-                IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
                 IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-                object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;
 
                 void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -372,10 +358,8 @@ public class SubjectBaseDiagnosticsTests
                 void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
                     => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
-                IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
                 IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-                object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;
 
                 void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -468,10 +452,8 @@ public class SubjectBaseDiagnosticsTests
                 void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
                     => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
-                IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
                 IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-                object IInterceptorSubject.SyncRoot { get; } = new object();
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
 
                 void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -542,10 +524,8 @@ public class SubjectBaseDiagnosticsTests
                 public void RaisePropertyChanged(string propertyName)
                     => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
-                public IInterceptorSubjectContext Context => InterceptorExecutor.GetOrCreate(ref _context, this);
                 public IInterceptorExecutor Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                 public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
-                public object SyncRoot { get; } = new object();
                 public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => GetInstanceProperties() ?? DefaultProperties;
 
                 public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -590,12 +570,12 @@ public class SubjectBaseDiagnosticsTests
         """;
 
     /// <summary>
-    /// <see cref="PublicMemberBase"/> with a virtual Context, which is what an intermediate class
+    /// <see cref="PublicMemberBase"/> with a virtual Executor, which is what an intermediate class
     /// needs in order to override it rather than hide it.
     /// </summary>
-    private static readonly string VirtualContextBase = PublicMemberBase.Replace(
-        "public IInterceptorSubjectContext Context",
-        "public virtual IInterceptorSubjectContext Context");
+    private static readonly string VirtualExecutorBase = PublicMemberBase.Replace(
+        "public IInterceptorExecutor Executor",
+        "public virtual IInterceptorExecutor Executor");
 
     private const string GeneratedDerived = """
 
@@ -609,7 +589,7 @@ public class SubjectBaseDiagnosticsTests
         }
         """;
 
-    private const string ContextWrapperDerived = """
+    private const string ExecutorWrapperDerived = """
 
         namespace Repro
         {
@@ -618,7 +598,7 @@ public class SubjectBaseDiagnosticsTests
             {
                 public partial string Name { get; set; }
 
-                public string ContextWithoutInterceptor(string tag) => tag;
+                public string ExecutorWithoutInterceptor(string tag) => tag;
             }
         }
         """;
@@ -629,7 +609,7 @@ public class SubjectBaseDiagnosticsTests
         {
             public class Middle : HandBase
             {
-                public override IInterceptorSubjectContext Context => base.Context;
+                public override IInterceptorExecutor Executor => base.Executor;
             }
 
             [Namotion.Interceptor.Attributes.InterceptorSubject]
@@ -812,11 +792,12 @@ public class SubjectBaseDiagnosticsTests
     }
 
     [Fact]
-    public void WhenDerivedSubjectDeclaresAPublicSyncRoot_ThenNI0014IsReported()
+    public void WhenDerivedSubjectDeclaresAPublicData_ThenNI0014IsReported()
     {
-        // Arrange: this compiles clean today, because the derived class emits its own explicit
-        // implementation which wins. After the split it takes the interface slot.
+        // Arrange: the derived class re-lists the interface, so its public member takes the Data
+        // slot from the root's explicit implementation.
         const string source = """
+            using System.Collections.Concurrent;
             using Namotion.Interceptor;
             using Namotion.Interceptor.Attributes;
 
@@ -833,7 +814,7 @@ public class SubjectBaseDiagnosticsTests
                 {
                     public partial string LeafName { get; set; }
 
-                    public object SyncRoot { get; } = new object();
+                    public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
                 }
             }
             """;
@@ -846,11 +827,12 @@ public class SubjectBaseDiagnosticsTests
     }
 
     [Fact]
-    public void WhenRootSubjectDeclaresAPublicSyncRoot_ThenNoDiagnosticIsReported()
+    public void WhenRootSubjectDeclaresAPublicData_ThenNoDiagnosticIsReported()
     {
         // Arrange: interface mapping prefers a class's own explicit implementation over its own
         // public members, so the root is never hijacked by its own member.
         const string source = """
+            using System.Collections.Concurrent;
             using Namotion.Interceptor;
             using Namotion.Interceptor.Attributes;
 
@@ -861,7 +843,7 @@ public class SubjectBaseDiagnosticsTests
                 {
                     public partial string RootName { get; set; }
 
-                    public object SyncRoot { get; } = new object();
+                    public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
                 }
             }
             """;
@@ -907,10 +889,8 @@ public class SubjectBaseDiagnosticsTests
                     public static new IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; }
                         = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
 
-                    IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
                     IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                     ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-                    object IInterceptorSubject.SyncRoot { get; } = new object();
                     IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties
                         => FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
 
@@ -1004,10 +984,8 @@ public class SubjectBaseDiagnosticsTests
 
                     public static int DefaultProperties { get; } = 0;
 
-                    IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
                     IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                     ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-                    object IInterceptorSubject.SyncRoot { get; } = new object();
                     IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties
                         => FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
 
@@ -1130,29 +1108,30 @@ public class SubjectBaseDiagnosticsTests
     }
 
     [Fact]
-    public void WhenDerivedSubjectDeclaresAPublicSyncRoot_ThenTheInterfaceSlotIsReallyTaken()
+    public void WhenDerivedSubjectDeclaresAPublicData_ThenTheInterfaceSlotIsReallyTaken()
     {
-        // Arrange: the counterpart of the false positive cases. object SyncRoot { get; } matches the
-        // interface member exactly, so it is an implicit implementation and NI0014 is justified.
-        var source = LeafDeclaring("public object SyncRoot { get; } = new object();");
+        // Arrange: the counterpart of the false positive cases. The property matches the interface
+        // member exactly, so it is an implicit implementation and NI0014 is justified.
+        var source = LeafDeclaring(
+            "public System.Collections.Concurrent.ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();");
 
         // Act
         var result = GeneratorTestHost.RunForExecution(source);
         var instance = result.CreateInstance("Repro.LeafSubject");
-        var ownSyncRoot = instance.GetType().GetProperty("SyncRoot")!.GetValue(instance);
+        var ownData = instance.GetType().GetProperty("Data")!.GetValue(instance);
 
         // Assert
-        Assert.Same(ownSyncRoot, ((IInterceptorSubject)instance).SyncRoot);
+        Assert.Same(ownData, ((IInterceptorSubject)instance).Data);
         Assert.Contains(result.GeneratorDiagnostics, d => d.Id == "NI0014");
     }
 
     [Fact]
-    public void WhenDerivedSubjectHandWritesTheContextImplementation_ThenNI0014IsReported()
+    public void WhenDerivedSubjectHandWritesTheExecutorImplementation_ThenNI0014IsReported()
     {
         // Arrange: this compiles with no diagnostic and kills interception entirely, not only on
         // base declared properties, because writes still land in the backing fields.
         var source = LeafDeclaring(
-            "IInterceptorSubjectContext IInterceptorSubject.Context { get; } = InterceptorSubjectContext.Create();");
+            "Namotion.Interceptor.Interceptors.IInterceptorExecutor IInterceptorSubject.Executor => null!;");
 
         // Act
         var result = GeneratorTestHost.RunForExecution(source);
@@ -1302,7 +1281,7 @@ public class SubjectBaseDiagnosticsTests
     [Fact]
     public void WhenAWrapperIsNamedLikeAnExplicitlyImplementedInterfaceProperty_ThenNI0006IsReported()
     {
-        // Arrange: the deliberate inversion of an exemption for Context, Data and SyncRoot. Those are
+        // Arrange: the deliberate inversion of an exemption for the interface members. Those are
         // explicit interface properties in a generated root, where a method of the same name really
         // does collide with nothing, but the exemption was keyed on the name rather than on the base,
         // so it applied just as much to a hand-written base that exposes them publicly, where the
@@ -1323,13 +1302,13 @@ public class SubjectBaseDiagnosticsTests
     }
 
     [Fact]
-    public void WhenAWrapperWouldBeNamedContextOnABaseWithPublicMembers_ThenNI0006IsReportedAndNothingIsHidden()
+    public void WhenAWrapperWouldBeNamedExecutorOnABaseWithPublicMembers_ThenNI0006IsReportedAndNothingIsHidden()
     {
         // Arrange: the half of the exemption that was not merely unnecessary but unsound. This base
         // satisfies the contract with public members, which is the shape generator.md
-        // documents, so a "Context" wrapper hides the inherited public property. CS0108 lands in a
+        // documents, so an "Executor" wrapper hides the inherited public property. CS0108 lands in a
         // generated file the consumer cannot edit and fails any build with TreatWarningsAsErrors.
-        var source = PublicMemberBase + ContextWrapperDerived;
+        var source = PublicMemberBase + ExecutorWrapperDerived;
 
         // Act
         var result = GeneratorTestHost.Run(source);
@@ -1341,12 +1320,12 @@ public class SubjectBaseDiagnosticsTests
     }
 
     [Fact]
-    public void WhenAnIntermediateOverridesAPublicContext_ThenNoDiagnosticIsReportedAndWritesAreIntercepted()
+    public void WhenAnIntermediateOverridesAPublicExecutor_ThenNoDiagnosticIsReportedAndWritesAreIntercepted()
     {
         // Arrange: an override occupies the slot the overridden member already had, so it displaces
         // nothing, and virtual dispatch makes it the implementation rather than a replacement for
         // one. Reporting it was an NI0014, an error, on a hierarchy that builds and intercepts.
-        var source = VirtualContextBase + OverridingIntermediateDerived;
+        var source = VirtualExecutorBase + OverridingIntermediateDerived;
 
         var writeInterceptor = new RecordingWriteInterceptor();
         var context = InterceptorSubjectContext
@@ -1388,12 +1367,13 @@ public class SubjectBaseDiagnosticsTests
     }
 
     [Fact]
-    public void WhenAReferencedSubjectIsSubclassedByHandWithAPublicContext_ThenNI0014IsReportedAndWritesAreNotIntercepted()
+    public void WhenAReferencedSubjectIsSubclassedByHandWithAPublicExecutor_ThenNI0014IsReportedAndWritesAreNotIntercepted()
     {
         // Arrange: the hand-written class satisfies the contract by inheriting the referenced
         // subject's interception members, so it declares no explicit implementation of its own and its public
-        // Context wins the slot for every generated subclass. That is the silent interception loss
-        // in the shape the rule exists to prevent, and it produces no compiler diagnostic at all.
+        // Executor wins the slot for every generated subclass. The root's helpers keep reading the
+        // root's own field, which nothing populates through the hijacked slot, so interception is
+        // silently lost, and it produces no compiler diagnostic at all.
         const string librarySource = """
             using Namotion.Interceptor;
             using Namotion.Interceptor.Attributes;
@@ -1416,7 +1396,10 @@ public class SubjectBaseDiagnosticsTests
             {
                 public class Hand : Lib.LibRoot, IInterceptorSubject
                 {
-                    public IInterceptorSubjectContext Context { get; } = InterceptorSubjectContext.Create();
+                    private Namotion.Interceptor.Interceptors.IInterceptorExecutor? _own;
+
+                    public Namotion.Interceptor.Interceptors.IInterceptorExecutor Executor
+                        => Namotion.Interceptor.Interceptors.InterceptorExecutor.GetOrCreate(ref _own, this);
                 }
 
                 [InterceptorSubject]
@@ -1478,7 +1461,7 @@ public class SubjectBaseDiagnosticsTests
     }
 
     [Fact]
-    public void WhenAReferencedSubjectIsSubclassedByHandWithAnExplicitContext_ThenNI0014IsReportedAndWritesAreNotIntercepted()
+    public void WhenAReferencedSubjectIsSubclassedByHandWithAnExplicitExecutor_ThenNI0014IsReportedAndWritesAreNotIntercepted()
     {
         // Arrange: the explicit form of the hijack, and the only one a hand-written ancestor can
         // express, because C# requires the class to list the interface itself (CS0540) and listing it
@@ -1506,9 +1489,10 @@ public class SubjectBaseDiagnosticsTests
             {
                 public class Hand : Lib.LibRoot, IInterceptorSubject
                 {
-                    private readonly IInterceptorSubjectContext _own = InterceptorSubjectContext.Create();
+                    private Namotion.Interceptor.Interceptors.IInterceptorExecutor? _own;
 
-                    IInterceptorSubjectContext IInterceptorSubject.Context => _own;
+                    Namotion.Interceptor.Interceptors.IInterceptorExecutor IInterceptorSubject.Executor
+                        => Namotion.Interceptor.Interceptors.InterceptorExecutor.GetOrCreate(ref _own, this);
                 }
 
                 [InterceptorSubject]
@@ -1545,8 +1529,8 @@ public class SubjectBaseDiagnosticsTests
     public void WhenAHijackerSitsAboveTheContractProvider_ThenNI0014IsReportedAndWritesAreNotIntercepted()
     {
         // Arrange: Hand satisfies the contract by inheritance and declares nothing, so it is the
-        // contract provider and the scan used to stop there. The public Context that really takes the
-        // slot sits one class further up, where nothing ever looked.
+        // contract provider and the scan used to stop there. The public Executor that really takes
+        // the slot sits one class further up, where nothing ever looked.
         const string librarySource = """
             using Namotion.Interceptor;
             using Namotion.Interceptor.Attributes;
@@ -1569,9 +1553,10 @@ public class SubjectBaseDiagnosticsTests
             {
                 public class Middle : Lib.LibRoot, IInterceptorSubject
                 {
-                    private readonly IInterceptorSubjectContext _own = InterceptorSubjectContext.Create();
+                    private Namotion.Interceptor.Interceptors.IInterceptorExecutor? _own;
 
-                    public IInterceptorSubjectContext Context => _own;
+                    public Namotion.Interceptor.Interceptors.IInterceptorExecutor Executor
+                        => Namotion.Interceptor.Interceptors.InterceptorExecutor.GetOrCreate(ref _own, this);
                 }
 
                 public class Hand : Middle, IInterceptorSubject

@@ -15,10 +15,6 @@ public class SubjectAttachmentTests
 
         public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
 
-        public void OnContextComposed(IInterceptorSubject subject) => AttachCount++;
-
-        public void OnContextDecomposed(IInterceptorSubject subject) => DetachCount++;
-
         // No ownership work in the probe: publishing the metadata is the whole admission.
         public bool TryAddProperties(SubjectPropertyRegistrationContext registration)
         {
@@ -27,21 +23,23 @@ public class SubjectAttachmentTests
         }
 
         // A minimal faithful lifecycle: it applies the documented root-anchor rules through Core's
-        // own helpers and lets the fallback composition drive the counted attach and detach, which
-        // is what a real implementation does with its own graph work in between.
+        // own helpers and counts each policy entry, which is where a real implementation does its
+        // graph work.
         public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
         {
             InterceptorSubjectExtensions.ApplyRootAnchor(subject, context, anchor);
-            subject.Context.AddFallbackContext(context);
+            AttachCount++;
         }
 
+        // The probe tracks no structural edges, so its detach policy is the minimal one: clear the
+        // anchor, keep the attachment.
         public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
         {
             var executor = subject.Executor;
             executor.TryGetAttachment(out var attachedContext, out var anchor, out var revision);
             InterceptorSubjectExtensions.ValidateExplicitDetach(attachedContext, anchor, context);
             executor.TryUpdateAttachment(revision, attachedContext, SubjectAnchorKind.None, out _);
-            subject.Context.RemoveFallbackContext(context);
+            DetachCount++;
         }
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
@@ -253,23 +251,23 @@ public class SubjectAttachmentTests
     }
 
     [Fact]
-    public void WhenContextIsAddedThroughOldFallbackIdiom_ThenAttachedContextStaysNull()
+    public void WhenSubjectIsConstructedWithContext_ThenItIsProvisionallyAttached()
     {
-        // Arrange & Act: the constructor attaches through AddFallbackContext, the old model.
+        // Arrange & Act: the context-taking constructor routes through the context's lifecycle
+        // with a provisional anchor.
         var context = CreateContextWithProbe(out var probe);
         var subject = new Car(context);
         var executor = GetExecutor(subject);
 
-        // Assert: only the new extensions and the raw seam set the exact attachment.
+        // Assert
         Assert.Equal(1, probe.AttachCount);
-        Assert.Null(subject.TryGetContext());
-        Assert.Null(executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.None, executor.Anchor);
-        Assert.Equal(0, executor.AttachmentRevision);
+        Assert.Same(context, subject.TryGetContext());
+        Assert.Same(context, executor.AttachedContext);
+        Assert.Equal(SubjectAnchorKind.Provisional, executor.Anchor);
     }
 
     [Fact]
-    public void WhenAttachingSubjectAlreadyAttachedThroughOldFallbackIdiom_ThenLifecycleDoesNotRunAgain()
+    public void WhenAttachingSubjectConstructedWithContext_ThenAnchorIsPromotedToExplicit()
     {
         // Arrange
         var context = CreateContextWithProbe(out var probe);
@@ -279,10 +277,11 @@ public class SubjectAttachmentTests
         // Act
         subject.AttachToContext(context);
 
-        // Assert: the new state is set and the fallback half is a no-op because it is already present.
+        // Assert: the explicit attach promotes the constructor's provisional anchor, entering the
+        // lifecycle's policy a second time.
         Assert.Same(context, executor.AttachedContext);
         Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
-        Assert.Equal(1, probe.AttachCount);
+        Assert.Equal(2, probe.AttachCount);
     }
 
     [Fact]
@@ -319,8 +318,7 @@ public class SubjectAttachmentTests
         // backing write delegate that blocks keeps it held for as long as the test wants. The
         // attachment reads below only complete while it is held if they take no lock, which is
         // what lets consumers call them from inside their own locks without deadlocking.
-        var context = InterceptorSubjectContext.Create();
-        var subject = new Car(context);
+        var subject = new Car();
         var executor = GetExecutor(subject);
         using var insideCommit = new ManualResetEventSlim(false);
         using var resumeCommit = new ManualResetEventSlim(false);

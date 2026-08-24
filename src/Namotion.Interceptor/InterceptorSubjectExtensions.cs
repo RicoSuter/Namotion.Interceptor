@@ -5,21 +5,15 @@ namespace Namotion.Interceptor;
 public static class InterceptorSubjectExtensions
 {
     /// <summary>
-    /// Reads the subject's executor through <see cref="IInterceptorSubject.Executor"/>, which is
-    /// the access path that survives the single-context cutover. Publishes an executor on first
-    /// access; the attachment state lives on it, so an unattached subject needs one too.
-    /// </summary>
-    internal static IInterceptorExecutor GetExecutor(IInterceptorSubject subject)
-    {
-        return subject.Executor;
-    }
-
-    /// <summary>
     /// Gets the one exact context the subject is attached to, or null when it is unattached.
     /// </summary>
+    /// <remarks>
+    /// Reading <see cref="IInterceptorSubject.Executor"/> publishes an executor on first access;
+    /// the attachment state lives on it, so an unattached subject needs one too.
+    /// </remarks>
     public static IInterceptorSubjectContext? TryGetContext(this IInterceptorSubject subject)
     {
-        return GetExecutor(subject).AttachedContext;
+        return subject.Executor.AttachedContext;
     }
 
     /// <summary>
@@ -43,18 +37,38 @@ public static class InterceptorSubjectExtensions
     /// this context, or the subject or part of its component is attached to a different context.</exception>
     public static void AttachToContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
+        AttachToContext(subject, context, SubjectAnchorKind.Explicit);
+    }
+
+    /// <summary>
+    /// Attaches the subject to <paramref name="context"/> with the given root anchor, together
+    /// with every subject its structural properties reach. Context-taking constructors call this
+    /// with <see cref="SubjectAnchorKind.Provisional"/>, which anchors an unattached subject and
+    /// leaves an already attached one alone; see <see cref="SubjectAnchorKind"/> for how the two
+    /// anchors differ. Public because generated and dynamic context-taking constructors emit the
+    /// call from the consumer's assembly.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The anchor is
+    /// <see cref="SubjectAnchorKind.None"/>, the subject is already explicitly attached to this
+    /// context, or the subject or part of its component is attached to a different context.</exception>
+    public static void AttachToContext(this IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
+    {
+        if (anchor == SubjectAnchorKind.None)
+        {
+            throw new InvalidOperationException(
+                "An attach without a root anchor would be released by the next reachability decision.");
+        }
+
         var lifecycle = context.TryGetService<ILifecycleInterceptor>();
         if (lifecycle is not null)
         {
-            lifecycle.AttachSubjectToContext(subject, context, SubjectAnchorKind.Explicit);
+            lifecycle.AttachSubjectToContext(subject, context, anchor);
             return;
         }
 
-        ApplyRootAnchor(subject, context, SubjectAnchorKind.Explicit);
-
-        // Without a lifecycle the attach is root-only, but the context still has to become
-        // resolvable from the subject.
-        subject.Context.AddFallbackContext(context);
+        // Without a lifecycle the attach is root-only: publishing the exact context is what makes
+        // the context's services resolvable from the subject.
+        ApplyRootAnchor(subject, context, anchor);
     }
 
     /// <summary>
@@ -72,7 +86,7 @@ public static class InterceptorSubjectExtensions
             return;
         }
 
-        var executor = GetExecutor(subject);
+        var executor = subject.Executor;
         while (true)
         {
             // One coherent snapshot; a transition interleaved between it and the update fails the
@@ -85,8 +99,6 @@ public static class InterceptorSubjectExtensions
                 break;
             }
         }
-
-        subject.Context.RemoveFallbackContext(context);
     }
 
     /// <summary>
@@ -96,7 +108,7 @@ public static class InterceptorSubjectExtensions
     /// </summary>
     internal static void ApplyRootAnchor(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
     {
-        var executor = GetExecutor(subject);
+        var executor = subject.Executor;
         while (true)
         {
             executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out var revision);

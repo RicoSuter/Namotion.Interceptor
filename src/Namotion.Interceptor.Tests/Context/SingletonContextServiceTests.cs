@@ -127,26 +127,6 @@ public class SingletonContextServiceTests
         Assert.Same(service, Assert.Single(context.GetServices<IFirstContract>()));
     }
 
-    [Fact]
-    public void WhenSingletonContractIsReservedInFallbackContext_ThenLocalAddSucceeds()
-    {
-        // Arrange: reservations are per context, so only the directly registered services are
-        // validated and the fallback graph is not inspected.
-        var fallbackContext = InterceptorSubjectContext.Create();
-        var fallbackService = new FirstContractAuthority();
-        fallbackContext.AddService(fallbackService);
-
-        var context = InterceptorSubjectContext.Create();
-        context.AddFallbackContext(fallbackContext);
-
-        // Act
-        var localService = new CompetingFirstContractAuthority();
-        context.AddService(localService);
-
-        // Assert
-        Assert.Equal(2, context.GetServices<IFirstContract>().Length);
-    }
-
     private interface IFirstContract;
 
     private interface ISecondContract;

@@ -1,21 +1,33 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Cache;
 
 namespace Namotion.Interceptor.Interceptors;
 
-public sealed class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecutor
+public sealed class InterceptorExecutor : IInterceptorExecutor
 {
     private readonly IInterceptorSubject _subject;
 
     /// <summary>
     /// The subject this executor was constructed for. Exposed so the terminal write can assert that the
-    /// context's executor and the locked subject are the same pairing its plain increment relies on.
+    /// executor threaded through a write context and the subject being locked are the same pairing its
+    /// plain increment relies on.
     /// </summary>
     internal IInterceptorSubject Subject => _subject;
 
     /// <summary>
-    /// Monotonic per-subject commit counter. Incremented by the terminal write while the subject's
-    /// SyncRoot is held, so a plain increment is exclusive: no Interlocked needed. Dense over
-    /// committed writes and never reset, so it stays comparable across detach and reattach.
+    /// The terminal lock that serializes backing-field access of the subject, taken by the chain
+    /// terminals in <see cref="ReadInterceptorFactory{TProperty}"/> and
+    /// <see cref="WriteInterceptorFactory{TProperty}"/>. One executor is published per subject, so
+    /// this is a per-subject lock; without it a wide value type could be read while half written.
+    /// The innermost lock of the structural write order (see the note on <see cref="_attachmentLock"/>).
+    /// </summary>
+    internal readonly object SyncRoot = new();
+
+    /// <summary>
+    /// Monotonic per-subject commit counter. Incremented by the terminal write while this executor's
+    /// <see cref="SyncRoot"/> is held, so a plain increment is exclusive: no Interlocked needed. Dense
+    /// over committed writes and never reset, so it stays comparable across detach and reattach.
     ///
     /// It records commit order, it does not establish it: the lock is what serializes the commits, and
     /// this counter labels them afterwards. Consumers do order changes by comparing it (see the flush
@@ -107,7 +119,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
 
     /// <summary>
     /// Returns the subject's executor, publishing one on first access. Call it from the subject's
-    /// <see cref="IInterceptorSubject.Context"/> accessor, passing that subject's own backing field.
+    /// <see cref="IInterceptorSubject.Executor"/> accessor, passing that subject's own backing field.
     /// Public because the source generator emits the call into the consumer's assembly.
     /// </summary>
     /// <remarks>
@@ -131,14 +143,33 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
         return Interlocked.CompareExchange(ref context, created, null) ?? created;
     }
 
+    /// <summary>
+    /// The chains an executor runs when its subject's attached context cannot compile one: the
+    /// subject is unattached, or the attached context is a hand-rolled
+    /// <see cref="IInterceptorSubjectContext"/> implementation, which has no chain machinery.
+    /// Nothing intercepts in either case, so these are the zero-interceptor chains: a plain read,
+    /// and the terminal write with its commit bookkeeping.
+    /// </summary>
+    private static class UninterceptedChain<TProperty>
+    {
+        internal static readonly WriteAction<TProperty> Write =
+            WriteInterceptorFactory<TProperty>.Create(ImmutableArray<IWriteInterceptor>.Empty);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
     {
-        var context = new PropertyReadContext<TProperty>(new PropertyReference(_subject, propertyName));
-        return ExecuteInterceptedRead(ref context, readValue);
+        if (_attachedContext is not InterceptorSubjectContext attachedContext)
+        {
+            // The zero-interceptor read chain is the plain read, no terminal lock; see
+            // ReadInterceptorFactory.
+            return readValue(_subject);
+        }
+
+        var context = new PropertyReadContext<TProperty>(this, new PropertyReference(_subject, propertyName));
+        return attachedContext.ExecuteInterceptedRead(ref context, readValue);
     }
-    
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue)
     {
@@ -148,7 +179,15 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             currentValue,
             newValue);
 
-        ExecuteInterceptedWrite(ref context, writeValue);
+        if (_attachedContext is InterceptorSubjectContext attachedContext)
+        {
+            attachedContext.ExecuteInterceptedWrite(ref context, writeValue);
+        }
+        else
+        {
+            UninterceptedChain<TProperty>.Write(ref context, writeValue);
+        }
+
         return context.IsWritten;
     }
 
@@ -209,12 +248,13 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     /// </summary>
     private bool WriteStructuralValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue)
     {
-        if (_attachedContext is null && HasEmptyState)
+        var attachedContext = _attachedContext;
+        if (attachedContext is null)
         {
-            // Unattached and nothing composed: nothing intercepts this subject, so the write is a
-            // plain backing store, as cheap as the pre-executor short circuit in the generated
-            // helper. It still runs under the attachment monitor, so a concurrent attach either
-            // sees the committed value when it seeds or waits until this write is done.
+            // Unattached: nothing intercepts this subject, so the write is a plain backing store,
+            // as cheap as the pre-executor short circuit in the generated helper. It still runs
+            // under the attachment monitor, so a concurrent attach either sees the committed value
+            // when it seeds or waits until this write is done.
             writeValue(_subject, newValue);
             return true;
         }
@@ -225,7 +265,15 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             currentValue,
             newValue);
 
-        ExecuteInterceptedWrite(ref context, writeValue);
+        if (attachedContext is InterceptorSubjectContext contextImplementation)
+        {
+            contextImplementation.ExecuteInterceptedWrite(ref context, writeValue);
+        }
+        else
+        {
+            UninterceptedChain<TProperty>.Write(ref context, writeValue);
+        }
+
         return context.IsWritten;
     }
 
@@ -247,7 +295,15 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             newValue,
             rawTimestamp);
 
-        ExecuteInterceptedWrite(ref context, writeValue);
+        if (_attachedContext is InterceptorSubjectContext attachedContext)
+        {
+            attachedContext.ExecuteInterceptedWrite(ref context, writeValue);
+        }
+        else
+        {
+            UninterceptedChain<TProperty>.Write(ref context, writeValue);
+        }
+
         return context.IsWritten;
     }
 
@@ -290,40 +346,13 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public object? InvokeMethod(string methodName, object?[] parameters, Func<IInterceptorSubject, object?[], object?> invokeMethod)
     {
+        if (_attachedContext is not InterceptorSubjectContext attachedContext)
+        {
+            // The zero-interceptor invoke chain is the direct invocation; see MethodInvocationFactory.
+            return invokeMethod(_subject, parameters);
+        }
+
         var context = new MethodInvocationContext(_subject, methodName, parameters);
-        return ExecuteInterceptedInvoke(ref context, invokeMethod);
-    }
-
-    public override bool AddFallbackContext(IInterceptorSubjectContext context)
-    {
-        var result = base.AddFallbackContext(context);
-        if (result)
-        {
-            var array = context.GetServices<ILifecycleInterceptor>();
-            for (var index = 0; index < array.Length; index++)
-            {
-                var interceptor = array[index];
-                interceptor.OnContextComposed(_subject);
-            }
-        }
-
-        return result;
-    }
-
-    public override bool RemoveFallbackContext(IInterceptorSubjectContext context)
-    {
-        if (HasFallbackContext(context))
-        {
-            var array = context.GetServices<ILifecycleInterceptor>();
-            for (var index = 0; index < array.Length; index++)
-            {
-                var interceptor = array[index];
-                interceptor.OnContextDecomposed(_subject);
-            }
-
-            return base.RemoveFallbackContext(context);
-        }
-
-        return false;
+        return attachedContext.ExecuteInterceptedInvoke(ref context, invokeMethod);
     }
 }

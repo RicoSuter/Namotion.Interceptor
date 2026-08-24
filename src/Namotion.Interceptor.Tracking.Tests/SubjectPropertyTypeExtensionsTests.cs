@@ -186,8 +186,6 @@ public class SubjectPropertyTypeExtensionsTests
 
     private sealed class SelfReferentialSubjectCollection : IInterceptorSubject, IEnumerable<SelfReferentialSubjectCollection>
     {
-        public object SyncRoot => throw new NotSupportedException();
-        public IInterceptorSubjectContext Context => throw new NotSupportedException();
         public IInterceptorExecutor Executor => throw new NotSupportedException();
         public ConcurrentDictionary<(string? property, string key), object?> Data => throw new NotSupportedException();
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => throw new NotSupportedException();
@@ -199,8 +197,6 @@ public class SubjectPropertyTypeExtensionsTests
 
     private sealed class SelfReferentialSubjectDictionary : IInterceptorSubject, IEnumerable<KeyValuePair<string, SelfReferentialSubjectDictionary>>
     {
-        public object SyncRoot => throw new NotSupportedException();
-        public IInterceptorSubjectContext Context => throw new NotSupportedException();
         public IInterceptorExecutor Executor => throw new NotSupportedException();
         public ConcurrentDictionary<(string? property, string key), object?> Data => throw new NotSupportedException();
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => throw new NotSupportedException();
@@ -214,8 +210,6 @@ public class SubjectPropertyTypeExtensionsTests
     // Per IInterceptorSubject-wins rule, this must classify as Reference, not Dictionary.
     private sealed class HybridSubjectGenericDictionary : IInterceptorSubject, IDictionary<string, Person>
     {
-        public object SyncRoot => throw new NotSupportedException();
-        public IInterceptorSubjectContext Context => throw new NotSupportedException();
         public IInterceptorExecutor Executor => throw new NotSupportedException();
         public ConcurrentDictionary<(string? property, string key), object?> Data => throw new NotSupportedException();
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => throw new NotSupportedException();
@@ -243,14 +237,13 @@ public class SubjectPropertyTypeExtensionsTests
     // must classify as Reference, not Dictionary via the non-generic fallback.
     private sealed class HybridSubjectNonGenericDictionary : IInterceptorSubject, IDictionary
     {
-        public object SyncRoot => throw new NotSupportedException();
-        public IInterceptorSubjectContext Context => throw new NotSupportedException();
         public IInterceptorExecutor Executor => throw new NotSupportedException();
         public ConcurrentDictionary<(string? property, string key), object?> Data => throw new NotSupportedException();
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => throw new NotSupportedException();
         public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) => throw new NotSupportedException();
 
         public object? this[object key] { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public object SyncRoot => throw new NotSupportedException();
         public bool IsFixedSize => throw new NotSupportedException();
         public bool IsReadOnly => throw new NotSupportedException();
         public ICollection Keys => throw new NotSupportedException();
@@ -270,8 +263,6 @@ public class SubjectPropertyTypeExtensionsTests
     // must classify as Reference, not Collection.
     private sealed class HybridSubjectGenericList : IInterceptorSubject, IList<Person>
     {
-        public object SyncRoot => throw new NotSupportedException();
-        public IInterceptorSubjectContext Context => throw new NotSupportedException();
         public IInterceptorExecutor Executor => throw new NotSupportedException();
         public ConcurrentDictionary<(string? property, string key), object?> Data => throw new NotSupportedException();
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => throw new NotSupportedException();

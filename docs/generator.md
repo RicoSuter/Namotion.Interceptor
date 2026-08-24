@@ -574,15 +574,10 @@ public class TrackedEntityBase : IInterceptorSubject, INotifyPropertyChanged, IR
     void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
-    IInterceptorSubjectContext IInterceptorSubject.Context
-        => InterceptorExecutor.GetOrCreate(ref _context, this);
-
     IInterceptorExecutor IInterceptorSubject.Executor
         => InterceptorExecutor.GetOrCreate(ref _context, this);
 
     ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-
-    object IInterceptorSubject.SyncRoot { get; } = new object();
 
     IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties
         => GetInstanceProperties() ?? DefaultProperties;
@@ -641,8 +636,8 @@ public partial class Machine : TrackedEntityBase
 The list above is checked by looking at member signatures, which cannot see what the members do. Three requirements are behavioural, and a base class that gets one of them wrong passes every check and then misbehaves at runtime.
 
 1. **`AddProperties` must merge starting from `((IInterceptorSubject)this).Properties`**, not from its own `DefaultProperties` and not from its own backing field, and it must store the result in the field that `GetInstanceProperties()` returns. Merging from its own field drops the subclass's `DefaultProperties` on the first call, so the subject loses its own generated properties.
-2. **The three helpers must route through the same executor that `IInterceptorSubject.Context` publishes for that instance.** A base class that keeps a second executor for the helpers still compiles, and reproduces the exact bug that per hierarchy interception members were introduced to fix: writes look fine and no interceptor ever sees them.
-3. **`IInterceptorSubject.Context` must return an `IInterceptorExecutor` built for that instance.** `InterceptorExecutor` binds to its subject when it is constructed, and other parts of the library cast `Context` to `IInterceptorExecutor` without checking, so a borrowed or shared context misroutes every property reference.
+2. **The three helpers must route through the same executor that `IInterceptorSubject.Executor` publishes for that instance.** A base class that keeps a second executor for the helpers still compiles, and reproduces the exact bug that per hierarchy interception members were introduced to fix: writes look fine and no interceptor ever sees them.
+3. **`IInterceptorSubject.Executor` must return an executor built for that instance.** `InterceptorExecutor` binds to its subject when it is constructed, so a borrowed or shared executor misroutes every property reference.
 
 ### Writing a subclass by hand
 

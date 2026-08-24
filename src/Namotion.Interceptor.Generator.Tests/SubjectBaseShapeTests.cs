@@ -171,10 +171,8 @@ public class SubjectBaseShapeTests
                     void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
                         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
-                    IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
                     IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                     ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-                    object IInterceptorSubject.SyncRoot { get; } = new object();
                     IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;
 
                     void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -495,8 +493,6 @@ public class SubjectBaseShapeTests
                     public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
                         new Dictionary<string, SubjectPropertyMetadata>();
 
-                    public object SyncRoot { get; } = new object();
-                    public IInterceptorSubjectContext Context => throw new System.NotSupportedException();
                     public Namotion.Interceptor.Interceptors.IInterceptorExecutor Executor => throw new System.NotSupportedException();
                     public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
                     public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => DefaultProperties;
@@ -880,10 +876,8 @@ public class SubjectBaseShapeTests
 
                     void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
 
-                    IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
                     IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                     ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-                    object IInterceptorSubject.SyncRoot { get; } = new object();
                     IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
 
                     void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -973,21 +967,16 @@ public class SubjectBaseShapeTests
                     public static IReadOnlyDictionary<string, T> DefaultProperties { get; }
                         = FrozenDictionary<string, T>.Empty;
 
-                    IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
                     IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
                     ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
-                    object IInterceptorSubject.SyncRoot { get; } = new object();
                     IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties
                         => GetInstanceProperties() ?? FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
 
                     void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
                     {
-                        lock (((IInterceptorSubject)this).SyncRoot)
-                        {
-                            _properties = ((IInterceptorSubject)this).Properties
-                                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-                                .ToFrozenDictionary();
-                        }
+                        _properties = ((IInterceptorSubject)this).Properties
+                            .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                            .ToFrozenDictionary();
                     }
 
                     protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;

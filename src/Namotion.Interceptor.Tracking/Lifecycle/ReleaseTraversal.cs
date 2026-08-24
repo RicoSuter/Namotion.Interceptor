@@ -136,9 +136,7 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
             notifier.InvokeRemovedLifecycleHandlers(subject, change);
 
             // Only after the subject's own teardown callbacks completed, so they still resolve the
-            // context they are being torn down from. The composed fallback contexts are left alone:
-            // while the executor is still a context, they are what keeps a released subject's own
-            // writes intercepted, and the handler that composed one is the one that removes it.
+            // context they are being torn down from.
             graph.ReleaseClaim(subject);
 
             foreach (var (childProperty, occurrence) in children)

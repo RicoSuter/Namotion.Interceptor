@@ -37,10 +37,8 @@ public static class InterceptorSubjectContextExtensions
     }
 
     /// <summary>
-    /// Adds source monitoring to this context. Call it on the TREE ROOT context: a service added to
-    /// a subtree context is invisible to the root and to sibling subtrees, because context fallbacks
-    /// point child to parent and never sideways, so a subtree-placed monitor fragments the tree.
-    /// Implies WithLifecycle, whose parent tracking the branch-scoped wait needs.
+    /// Adds source monitoring to this context, the one context every subject of the tree is
+    /// attached to. Implies WithLifecycle, whose parent tracking the branch-scoped wait needs.
     /// </summary>
     public static IInterceptorSubjectContext WithSourceMonitoring(this IInterceptorSubjectContext context)
     {

@@ -614,10 +614,6 @@ public class AddPropertiesLifecycleTests
             };
         }
 
-        public object SyncRoot { get; } = new();
-
-        public IInterceptorSubjectContext Context => InterceptorExecutor.GetOrCreate(ref _context, this);
-
         public IInterceptorExecutor Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
 
         public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();

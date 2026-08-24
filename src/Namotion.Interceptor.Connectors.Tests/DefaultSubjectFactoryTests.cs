@@ -18,10 +18,6 @@ public class DefaultSubjectFactoryTests
             Injected = injected;
         }
         
-        object IInterceptorSubject.SyncRoot { get; } = new();
-
-        public IInterceptorSubjectContext Context { get; } = null!;
-
         IInterceptorExecutor IInterceptorSubject.Executor => null!;
 
         public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = null!;

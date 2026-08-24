@@ -17,10 +17,6 @@ public static class LifecycleInterceptorExtensions
     /// implementation, so this is not an ownership predicate: use
     /// <see cref="InterceptorSubjectExtensions.TryGetContext"/> for that.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The subject's context resolves more than one
-    /// built-in lifecycle, which happens when two contexts that each configure Tracking are
-    /// composed. A subject belongs to exactly one context's graph, so that configuration has no
-    /// answer.</exception>
     public static int GetReferenceCount(this IInterceptorSubject subject)
     {
         return subject.TryGetContext()?.TryGetLifecycleInterceptor()?.GetReferenceCount(subject) ?? 0;

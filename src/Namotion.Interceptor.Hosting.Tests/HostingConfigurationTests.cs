@@ -63,14 +63,6 @@ public class HostingConfigurationTests
         public bool TryAddProperties(SubjectPropertyRegistrationContext registration)
             => throw new NotSupportedException();
 
-        public void OnContextComposed(IInterceptorSubject subject)
-        {
-        }
-
-        public void OnContextDecomposed(IInterceptorSubject subject)
-        {
-        }
-
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
             => next(ref context);
     }

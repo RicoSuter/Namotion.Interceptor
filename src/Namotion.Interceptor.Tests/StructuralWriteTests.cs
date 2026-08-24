@@ -12,11 +12,12 @@ public class StructuralWriteTests
     private sealed class AttachmentTransitionInterceptor : IWriteInterceptor
     {
         public IInterceptorExecutor? Executor;
-        public IInterceptorSubjectContext? ContextToAttach;
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
         {
-            Assert.True(Executor!.TryUpdateAttachment(Executor.AttachmentRevision, ContextToAttach, SubjectAnchorKind.None, out _));
+            // Detach, the one transition legal from an attached state: the subject was attached to
+            // resolve this very chain, and a direct swap to another context is rejected by design.
+            Assert.True(Executor!.TryUpdateAttachment(Executor.AttachmentRevision, null, SubjectAnchorKind.None, out _));
             next(ref context);
         }
     }
@@ -112,7 +113,6 @@ public class StructuralWriteTests
         var subject = new Car(context);
         var executor = GetExecutor(subject);
         transitioning.Executor = executor;
-        transitioning.ContextToAttach = InterceptorSubjectContext.Create();
         var backingWritten = false;
 
         // Act
@@ -127,7 +127,7 @@ public class StructuralWriteTests
     }
 
     [Fact]
-    public void WhenConcurrentAttachRacesAStructuralWrite_ThenTheAttachWaitsAndBothComplete()
+    public void WhenConcurrentDetachRacesAStructuralWrite_ThenTheDetachWaitsAndBothComplete()
     {
         // Arrange: the writer pauses inside the chain while it holds the attachment monitor, so a
         // concurrent attachment transition must queue on that monitor instead of invalidating the
@@ -153,37 +153,36 @@ public class StructuralWriteTests
             }
         });
 
-        var attachStarting = new ManualResetEventSlim(false);
-        var attachCompleted = new ManualResetEventSlim(false);
-        var attacher = new Thread(() =>
+        var detachStarting = new ManualResetEventSlim(false);
+        var detachCompleted = new ManualResetEventSlim(false);
+        var detacher = new Thread(() =>
         {
             var revision = executor.AttachmentRevision;
-            attachStarting.Set();
-            executor.TryUpdateAttachment(
-                revision, InterceptorSubjectContext.Create(), SubjectAnchorKind.None, out _);
-            attachCompleted.Set();
+            detachStarting.Set();
+            executor.TryUpdateAttachment(revision, null, SubjectAnchorKind.None, out _);
+            detachCompleted.Set();
         });
 
-        // Act: start the attach while the writer is provably between entry and terminal.
+        // Act: start the detach while the writer is provably between entry and terminal.
         writer.Start();
         Assert.True(gate.ReachedChain.Wait(TimeSpan.FromSeconds(30)));
-        attacher.Start();
+        detacher.Start();
 
-        // The attach must not complete while the write holds the attachment monitor. Waiting for
-        // the attacher to reach the transition first keeps the negative wait from passing
+        // The detach must not complete while the write holds the attachment monitor. Waiting for
+        // the detacher to reach the transition first keeps the negative wait from passing
         // vacuously on a thread that never got scheduled.
-        Assert.True(attachStarting.Wait(TimeSpan.FromSeconds(30)));
-        Assert.False(attachCompleted.Wait(TimeSpan.FromMilliseconds(100)));
+        Assert.True(detachStarting.Wait(TimeSpan.FromSeconds(30)));
+        Assert.False(detachCompleted.Wait(TimeSpan.FromMilliseconds(100)));
 
         gate.ResumeWrite.Set();
         Assert.True(writer.Join(TimeSpan.FromSeconds(30)), "the structural write did not complete");
-        Assert.True(attacher.Join(TimeSpan.FromSeconds(30)), "the attachment transition did not complete");
+        Assert.True(detacher.Join(TimeSpan.FromSeconds(30)), "the attachment transition did not complete");
 
-        // Assert: the write committed and the attach landed after it.
+        // Assert: the write committed and the detach landed after it.
         Assert.Null(writerException);
         Assert.True(backingWritten);
-        Assert.True(attachCompleted.IsSet);
-        Assert.NotNull(executor.AttachedContext);
+        Assert.True(detachCompleted.IsSet);
+        Assert.Null(executor.AttachedContext);
     }
 
     [Fact]
@@ -197,7 +196,6 @@ public class StructuralWriteTests
         var subject = new Car(context);
         var executor = GetExecutor(subject);
         transitioning.Executor = executor;
-        transitioning.ContextToAttach = InterceptorSubjectContext.Create();
 
         // Act
         subject.Speed = 42;
