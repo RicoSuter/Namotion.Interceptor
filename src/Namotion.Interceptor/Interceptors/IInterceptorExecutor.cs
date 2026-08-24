@@ -84,14 +84,13 @@ public interface IInterceptorExecutor
     bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue);
 
     /// <summary>
-    /// Sets a structural (subject-referencing) property value. When the subject is attached to a
-    /// context with an <see cref="ILifecycleInterceptor"/>, the write enters that lifecycle's
-    /// structural write gate (<see cref="ILifecycleInterceptor.EnterStructuralWriteGate"/>) and
-    /// then the subject's attachment monitor before the interceptor chain is resolved, holds both
-    /// through the terminal, and
-    /// revalidates the attachment under the locks (releasing and retrying when it moved). An
-    /// unattached subject enters only the attachment monitor and writes without a lifecycle. A
-    /// racing attachment transition therefore orders against the write instead of failing it.
+    /// Sets a structural (subject-referencing) property value, coordinating with the lifecycle that
+    /// owns the subject so an attach or detach racing this write orders against it rather than
+    /// failing it. Only a persistent conflict, a subject genuinely owned by another context, throws,
+    /// and it throws before the backing field is written. An unattached subject writes without a
+    /// lifecycle. The lock order and the context-state pinning this relies on are documented once,
+    /// under "The Write Protocol" in docs/design/tracking-lifecycle.md, rather than restated here
+    /// where they drift out of date.
     /// </summary>
     /// <param name="propertyName">The name of the property to write.</param>
     /// <param name="newValue">The new value to set.</param>
