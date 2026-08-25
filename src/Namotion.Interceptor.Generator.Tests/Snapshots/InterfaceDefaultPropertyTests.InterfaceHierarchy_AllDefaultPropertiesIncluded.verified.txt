@@ -129,18 +129,6 @@ using System.Text.Json.Serialization;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        protected bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
-        {
-            if (_context is null)
-            {
-                setValue(this, newValue);
-                return true;
-            }
-
-            return _context.SetStructuralPropertyValue(propertyName, newValue, currentValue, setValue);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
         {
             return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);

@@ -199,17 +199,6 @@ public class SubjectBaseShapeTests
                         return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
                     }
 
-                    protected bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
-                    {
-                        if (_context is null)
-                        {
-                            setValue(this, newValue);
-                            return true;
-                        }
-
-                        return _context.SetStructuralPropertyValue(propertyName, newValue, currentValue, setValue);
-                    }
-
                     protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
                         => _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
                 }
@@ -993,17 +982,6 @@ public class SubjectBaseShapeTests
                         }
 
                         return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
-                    }
-
-                    protected bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
-                    {
-                        if (_context is null)
-                        {
-                            setValue(this, newValue);
-                            return true;
-                        }
-
-                        return _context.SetStructuralPropertyValue(propertyName, newValue, currentValue, setValue);
                     }
 
                     protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)

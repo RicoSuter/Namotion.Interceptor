@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using Castle.DynamicProxy;
 using Namotion.Interceptor.Interceptors;
-using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Dynamic;
 
@@ -84,20 +83,11 @@ public class DynamicSubjectFactory
                 var newValue = invocation.Arguments[0];
                 var currentValue = ReadProperty(propertyName, propertyType);
 
-                // Runtime routing uses the same classifier as the lifecycle, so a write takes
-                // the synchronized structural accessor exactly when the lifecycle would treat its
-                // declared type as subject-bearing; the generator's compile-time routing stays
-                // fail-closed because it cannot run this classifier.
-                if (propertyType.CanContainSubjects())
-                {
-                    context.SetStructuralPropertyValue(propertyName, newValue, currentValue,
-                        (_, value) => WriteProperty(propertyName, value));
-                }
-                else
-                {
-                    context.SetPropertyValue(propertyName, newValue, currentValue,
-                        (_, value) => WriteProperty(propertyName, value));
-                }
+                // The boxed TProperty routes the unified write entry structurally, which is the
+                // fail-closed side: a subject-bearing value gets the full protocol, a scalar one
+                // pays the gate on this already-proxied path.
+                context.SetPropertyValue(propertyName, newValue, currentValue,
+                    (_, value) => WriteProperty(propertyName, value));
 
                 invocation.ReturnValue = null;
             }

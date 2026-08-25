@@ -5,7 +5,6 @@ using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
-using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
@@ -349,20 +348,16 @@ public class RegisteredSubject
             return GetOrAddPropertyProjection(name, existingMetadata.Type, existingMetadata.Attributes);
         }
 
-        // A stored subject-bearing property writes through the synchronized structural
-        // accessor, like a generated structural setter would; a derived one stays scalar
-        // because a derived value never establishes edges, so the structural gate would
-        // protect nothing.
-        var isStructuralStore = type.CanContainSubjects() && attributes.All(a => a is not DerivedAttribute);
         Subject.AddProperties(new SubjectPropertyMetadata(
             name,
             type,
             attributes,
             getValue is not null ? s => s.Executor.GetPropertyValue(name, getValue) : null,
             setValue is not null
-                ? isStructuralStore
-                    ? (s, v) => s.Executor.SetStructuralPropertyValue(name, v, getValue?.Invoke(s), setValue)
-                    : (s, v) => s.Executor.SetPropertyValue(name, v, getValue?.Invoke(s), setValue)
+                // The boxed TProperty routes the unified write entry structurally, which is the
+                // fail-closed side: a subject-bearing value gets the full protocol, a scalar one
+                // pays the gate on this already-reflective path.
+                ? (s, v) => s.Executor.SetPropertyValue(name, v, getValue?.Invoke(s), setValue)
                 : null,
             isIntercepted: true,
             isDynamic: true));

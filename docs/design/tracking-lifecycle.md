@@ -59,9 +59,9 @@ An independently written forward-mark oracle lives in the test assembly (`Owners
 
 ## The Write Protocol
 
-Structural writes are routed at generation time: the generator emits `SetStructuralPropertyValue` only for properties whose declared type can contain subjects, classified fail-closed, so scalar setters carry no runtime check of any kind. Dynamic proxy setters classify at proxy construction.
+Structural writes are routed at runtime, inside the one `SetPropertyValue` entry: the routing flag lives next to the per-type chain index as a static readonly field per `TProperty` instantiation, so the scalar route pays one predictable branch and no classifier call, and both fields are read off one static base and threaded down into the chain lookup. The classification fails closed: it agrees with the lifecycle's declared-type classifier whenever `TProperty` is the declared property type, which holds by construction for generated setters, and a boxed `TProperty` (the dynamic proxy and reflective registry setters pass `object`) routes structurally. Hand-written setters therefore get the full protocol from the same call generated ones make, instead of silently skipping it by picking the wrong accessor.
 
-An attached structural write follows this sequence in `InterceptorExecutor.SetStructuralPropertyValue`:
+An attached structural write follows this sequence in the private structural branch of `InterceptorExecutor.SetPropertyValue`:
 
 1. Read the exact attached context, pin its context state with one volatile read, and resolve the lifecycle from that pinned state.
 2. Enter the lifecycle gate (`ILifecycleInterceptor.EnterStructuralWriteGate`).

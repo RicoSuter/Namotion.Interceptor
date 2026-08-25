@@ -318,13 +318,13 @@ public class SubjectAttachmentTests
         // backing write delegate that blocks keeps it held for as long as the test wants. The
         // attachment reads below only complete while it is held if they take no lock, which is
         // what lets consumers call them from inside their own locks without deadlocking.
-        var subject = new Car();
+        var subject = new StructuralHolder();
         var executor = GetExecutor(subject);
         using var insideCommit = new ManualResetEventSlim(false);
         using var resumeCommit = new ManualResetEventSlim(false);
         var commitResumedInTime = false;
 
-        var writer = new Thread(() => executor.SetStructuralPropertyValue<int>("Speed", 42, 0, (_, _) =>
+        var writer = new Thread(() => executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) =>
         {
             insideCommit.Set();
             commitResumedInTime = resumeCommit.Wait(TimeSpan.FromSeconds(10));

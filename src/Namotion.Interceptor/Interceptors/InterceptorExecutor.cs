@@ -185,6 +185,14 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue)
     {
+        // The routing flag and the chain index are two fields of one per-type static class, read
+        // together and threaded down, so a write pays for the generic statics access exactly once.
+        var propertyTypeIndex = InterceptorSubjectContext.PropertyTypeIndex<TProperty>.Value;
+        if (InterceptorSubjectContext.PropertyTypeIndex<TProperty>.IsStructural)
+        {
+            return SetStructuralPropertyValue(propertyName, newValue, currentValue, writeValue, propertyTypeIndex);
+        }
+
         var context = new PropertyWriteContext<TProperty>(
             this,
             new PropertyReference(_subject, propertyName),
@@ -198,13 +206,19 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         }
         else
         {
-            attachedContext.ExecuteInterceptedWrite(ref context, writeValue);
+            attachedContext.ExecuteInterceptedWrite(propertyTypeIndex, ref context, writeValue);
         }
 
         return context.IsWritten;
     }
 
-    public bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue)
+    /// <summary>
+    /// The structural branch of the unified <c>SetPropertyValue</c> entry above: coordinates with the
+    /// lifecycle that owns the subject so an attach or detach racing this write orders against it
+    /// rather than failing it. Kept out of the unified entry's body so the scalar route stays
+    /// small enough to inline.
+    /// </summary>
+    private bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, int propertyTypeIndex)
     {
         // Lock order and why the gate comes first: see the note on _attachmentLock. Holding the
         // monitor from before chain resolution through the terminal is what turns a racing
@@ -234,7 +248,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 {
                     if (ReferenceEquals(_attachedContext, attachedContext))
                     {
-                        return WriteStructuralValue(attachedContext, contextState, propertyName, newValue, currentValue, writeValue);
+                        return WriteStructuralValue(attachedContext, contextState, propertyName, newValue, currentValue, writeValue, propertyTypeIndex);
                     }
                 }
             }
@@ -250,7 +264,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                         // releases both and retries against the fresh attachment.
                         if (ReferenceEquals(_attachedContext, attachedContext))
                         {
-                            return WriteStructuralValue(attachedContext, contextState, propertyName, newValue, currentValue, writeValue);
+                            return WriteStructuralValue(attachedContext, contextState, propertyName, newValue, currentValue, writeValue, propertyTypeIndex);
                         }
                     }
                 }
@@ -275,7 +289,8 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         string propertyName,
         TProperty newValue,
         TProperty currentValue,
-        Action<IInterceptorSubject, TProperty> writeValue)
+        Action<IInterceptorSubject, TProperty> writeValue,
+        int propertyTypeIndex)
     {
         if (attachedContext is null || contextState is null)
         {
@@ -293,7 +308,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             currentValue,
             newValue);
 
-        attachedContext.ExecuteInterceptedWrite(contextState, ref context, writeValue);
+        attachedContext.ExecuteInterceptedWrite(contextState, propertyTypeIndex, ref context, writeValue);
         return context.IsWritten;
     }
 
@@ -315,6 +330,9 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             newValue,
             rawTimestamp);
 
+        // Deliberately never structural, unlike the public entry: the cascade targets derived
+        // properties, whose values never establish edges, and the trigger may already hold the
+        // attachment monitor, so entering the lifecycle gate here would invert the lock order.
         var attachedContext = _attachedContext;
         if (attachedContext is null)
         {
@@ -322,7 +340,8 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         }
         else
         {
-            attachedContext.ExecuteInterceptedWrite(ref context, writeValue);
+            attachedContext.ExecuteInterceptedWrite(
+                InterceptorSubjectContext.PropertyTypeIndex<TProperty>.Value, ref context, writeValue);
         }
 
         return context.IsWritten;

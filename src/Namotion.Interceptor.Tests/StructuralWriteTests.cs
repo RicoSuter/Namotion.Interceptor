@@ -4,6 +4,9 @@ namespace Namotion.Interceptor.Tests;
 
 public class StructuralWriteTests
 {
+    // The one SetPropertyValue entry routes on TProperty, so every structural scenario here
+    // writes a subject-typed property; the scalar comparisons write an int one.
+
     /// <summary>
     /// Performs an attachment transition through the raw seam from inside the write chain, while
     /// the executor holds the attachment monitor. The monitor is reentrant on the writing thread,
@@ -93,29 +96,32 @@ public class StructuralWriteTests
     }
 
     [Fact]
-    public void WhenAttachmentIsUnchanged_ThenStructuralWriteCommitsLikeSetPropertyValue()
+    public void WhenAttachmentIsUnchanged_ThenStructuralWriteCommitsLikeAScalarWrite()
     {
-        // Arrange: no write interceptor, so the zero-interceptor structural terminal runs.
+        // Arrange: no write interceptor, so the zero-interceptor structural terminal runs. The
+        // one SetPropertyValue entry routes on TProperty: the subject-typed write takes the
+        // structural protocol, the int one the scalar route.
         var context = InterceptorSubjectContext.Create();
-        var subject = new Car(context);
+        var subject = new StructuralHolder(context);
         var executor = GetExecutor(subject);
-        int? structuralValue = null;
+        StructuralHolder? structuralValue = null;
         int? scalarValue = null;
+        var child = new StructuralHolder();
 
         // Act
-        var structuralWritten = executor.SetStructuralPropertyValue("Speed", 42, 0, (_, value) => structuralValue = value);
-        var scalarWritten = executor.SetPropertyValue("Speed", 43, 42, (_, value) => scalarValue = value);
+        var structuralWritten = executor.SetPropertyValue("Child", child, null, (_, value) => structuralValue = value);
+        var scalarWritten = executor.SetPropertyValue("Count", 43, 0, (_, value) => scalarValue = value);
 
         // Assert: both routes committed, stamped write state, and consumed one commit revision each
         // from the same per-subject counter.
         Assert.True(structuralWritten);
         Assert.True(scalarWritten);
-        Assert.Equal(42, structuralValue);
+        Assert.Same(child, structuralValue);
         Assert.Equal(43, scalarValue);
 
-        var property = new PropertyReference((IInterceptorSubject)subject, "Speed");
+        var property = new PropertyReference((IInterceptorSubject)subject, "Child");
         Assert.True(property.TryGetWriteState(true, out var commitRevision, out _));
-        Assert.Equal(2, commitRevision);
+        Assert.Equal(1, commitRevision);
         Assert.Equal(2, ((InterceptorExecutor)executor).Revision);
     }
 
@@ -126,11 +132,11 @@ public class StructuralWriteTests
         var capturing = new RevisionCapturingInterceptor();
         var context = InterceptorSubjectContext.Create();
         context.AddService(capturing);
-        var subject = new Car(context);
+        var subject = new StructuralHolder(context);
         var executor = GetExecutor(subject);
 
         // Act
-        var written = executor.SetStructuralPropertyValue("Speed", 42, 0, (_, _) => { });
+        var written = executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => { });
 
         // Assert
         Assert.True(written);
@@ -147,18 +153,18 @@ public class StructuralWriteTests
         var transitioning = new AttachmentTransitionInterceptor();
         var context = InterceptorSubjectContext.Create();
         context.AddService(transitioning);
-        var subject = new Car(context);
+        var subject = new StructuralHolder(context);
         var executor = GetExecutor(subject);
         transitioning.Executor = executor;
         var backingWritten = false;
 
         // Act
-        var written = executor.SetStructuralPropertyValue("Speed", 42, 0, (_, _) => backingWritten = true);
+        var written = executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => backingWritten = true);
 
         // Assert
         Assert.True(written);
         Assert.True(backingWritten);
-        var property = new PropertyReference((IInterceptorSubject)subject, "Speed");
+        var property = new PropertyReference((IInterceptorSubject)subject, "Child");
         Assert.True(property.TryGetWriteState(true, out var commitRevision, out _));
         Assert.Equal(1, commitRevision);
     }
@@ -173,7 +179,7 @@ public class StructuralWriteTests
         var gate = new GatingWriteInterceptor();
         var context = InterceptorSubjectContext.Create();
         context.AddService(gate);
-        var subject = new Car(context);
+        var subject = new StructuralHolder(context);
         var executor = GetExecutor(subject);
         var backingWritten = false;
         Exception? writerException = null;
@@ -182,7 +188,7 @@ public class StructuralWriteTests
         {
             try
             {
-                executor.SetStructuralPropertyValue("Speed", 42, 0, (_, _) => backingWritten = true);
+                executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => backingWritten = true);
             }
             catch (Exception exception)
             {
@@ -236,23 +242,23 @@ public class StructuralWriteTests
         warmupGate.ResumeWrite.Set();
         var warmupContext = InterceptorSubjectContext.Create();
         warmupContext.AddService(warmupGate);
-        GetExecutor(new Car(warmupContext)).SetStructuralPropertyValue("Speed", 1, 0, (_, _) => { });
+        GetExecutor(new StructuralHolder(warmupContext)).SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => { });
 
         var gate = new GatingWriteInterceptor();
         var context = InterceptorSubjectContext.Create();
         context.AddService(gate);
-        var subject = new Car(context);
+        var subject = new StructuralHolder(context);
         var executor = GetExecutor(subject);
         var probe = new CountingLifecycleInterceptor();
 
         var monitorHolderCommitted = false;
         var monitorHolder = new Thread(() =>
-            executor.SetStructuralPropertyValue("Speed", 42, 0, (_, _) => monitorHolderCommitted = true));
+            executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => monitorHolderCommitted = true));
         monitorHolder.IsBackground = true;
 
         var racedWriteCommitted = false;
         var racedWriter = new Thread(() =>
-            executor.SetStructuralPropertyValue("Speed", 43, 42, (_, _) => racedWriteCommitted = true));
+            executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => racedWriteCommitted = true));
         racedWriter.IsBackground = true;
 
         // Act: the first write pauses inside its chain, holding the attachment monitor. The raced
@@ -294,7 +300,7 @@ public class StructuralWriteTests
 
         // The next write pins a fresh state and sees the probe on both sides: the routing enters
         // its gate and the chain runs it.
-        executor.SetStructuralPropertyValue("Speed", 44, 43, (_, _) => { });
+        executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => { });
         Assert.Equal(1, probe.GateEnterCount);
         Assert.Equal(1, probe.WritePropertyCount);
     }

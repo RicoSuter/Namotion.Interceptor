@@ -12,7 +12,6 @@ internal static class MemberNames
 {
     public const string GetPropertyValue = "GetPropertyValue";
     public const string SetPropertyValue = "SetPropertyValue";
-    public const string SetStructuralPropertyValue = "SetStructuralPropertyValue";
     public const string InvokeMethod = "InvokeMethod";
     public const string GetInstanceProperties = "GetInstanceProperties";
     public const string PropertyChanged = "PropertyChanged";
@@ -82,10 +81,6 @@ internal static class GeneratedMemberTable
             MemberNames.SetPropertyValue, TypeParameterCount: 1, ParameterCount: 4, RequiresParameterArray: false,
             AccessorHelperReturnKind.Boolean, RequiresLeadingString: true,
             "protected bool SetPropertyValue<TProperty>(string, TProperty, TProperty, Action<IInterceptorSubject, TProperty>)"),
-        new AccessorHelperShape(
-            MemberNames.SetStructuralPropertyValue, TypeParameterCount: 1, ParameterCount: 4, RequiresParameterArray: false,
-            AccessorHelperReturnKind.Boolean, RequiresLeadingString: true,
-            "protected bool SetStructuralPropertyValue<TProperty>(string, TProperty, TProperty, Action<IInterceptorSubject, TProperty>)"),
         new AccessorHelperShape(
             MemberNames.InvokeMethod, TypeParameterCount: 0, ParameterCount: 3, RequiresParameterArray: true,
             AccessorHelperReturnKind.Object, RequiresLeadingString: true,

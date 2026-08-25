@@ -19,7 +19,7 @@ public interface ILifecycleInterceptor :
     /// Enters the synchronization gate a structural write must hold before the subject's
     /// attachment monitor and before the write chain is resolved and executed. The gate is the
     /// outermost lock of the structural write order; the protocol is documented on
-    /// <see cref="IInterceptorExecutor.SetStructuralPropertyValue{TProperty}"/>.
+    /// <see cref="IInterceptorExecutor.SetPropertyValue{TProperty}"/>.
     /// </summary>
     /// <remarks>
     /// The gate must support reentrant acquisition on one thread (the lifecycle re-enters it from

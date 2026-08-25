@@ -75,6 +75,16 @@ public interface IInterceptorExecutor
 
     /// <summary>
     /// Sets a property value through the interceptor chain with the current value already known.
+    /// The write routes at runtime on <typeparamref name="TProperty"/>: a type that can contain
+    /// subjects takes the structural write protocol, coordinating with the lifecycle that owns the
+    /// subject so an attach or detach racing this write orders against it rather than failing it;
+    /// any other type writes without that synchronization. Only a persistent conflict, a subject
+    /// genuinely owned by another context, throws, and it throws before the backing field is
+    /// written. The classification fails closed: a <typeparamref name="TProperty"/> that is not
+    /// the declared property type (a boxed <c>object</c>, say) routes structurally. The lock order
+    /// and the context-state pinning the structural route relies on are documented once, under
+    /// "The Write Protocol" in docs/design/tracking-lifecycle.md, rather than restated here where
+    /// they drift out of date.
     /// </summary>
     /// <param name="propertyName">The name of the property to write.</param>
     /// <param name="newValue">The new value to set.</param>
@@ -82,22 +92,6 @@ public interface IInterceptorExecutor
     /// <param name="writeValue">A delegate that writes the new value to the backing field.</param>
     /// <returns>True if the value was written; false if the write was suppressed by an interceptor.</returns>
     bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue);
-
-    /// <summary>
-    /// Sets a structural (subject-referencing) property value, coordinating with the lifecycle that
-    /// owns the subject so an attach or detach racing this write orders against it rather than
-    /// failing it. Only a persistent conflict, a subject genuinely owned by another context, throws,
-    /// and it throws before the backing field is written. An unattached subject writes without a
-    /// lifecycle. The lock order and the context-state pinning this relies on are documented once,
-    /// under "The Write Protocol" in docs/design/tracking-lifecycle.md, rather than restated here
-    /// where they drift out of date.
-    /// </summary>
-    /// <param name="propertyName">The name of the property to write.</param>
-    /// <param name="newValue">The new value to set.</param>
-    /// <param name="currentValue">The current value of the property.</param>
-    /// <param name="writeValue">A delegate that writes the new value to the backing field.</param>
-    /// <returns>True if the value was written; false if the write was suppressed by an interceptor.</returns>
-    bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue);
 
     /// <summary>
     /// Invokes a method through the interceptor chain.

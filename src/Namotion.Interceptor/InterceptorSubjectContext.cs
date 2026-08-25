@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Cache;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Ordering;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor;
 
@@ -20,15 +21,26 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
     private static int _lastPropertyTypeIndex = -1;
 
     /// <summary>
-    /// A dense index per intercepted property type, so a compiled chain is found by indexing an
-    /// array instead of hashing a <see cref="Type"/>. Handed out process wide to keep the lookup a
-    /// plain array read; the cost is that an array is as long as the largest index its context has
-    /// seen rather than the number of types it uses.
+    /// The per-property-type statics of the write path: a dense index per intercepted property
+    /// type, so a compiled chain is found by indexing an array instead of hashing a
+    /// <see cref="Type"/>, and the structural classification of the type, so the unified write
+    /// entry routes without calling the classifier. The index is handed out process wide to keep
+    /// the lookup a plain array read; the cost is that an array is as long as the largest index
+    /// its context has seen rather than the number of types it uses. Internal because
+    /// <see cref="InterceptorExecutor"/> reads both fields off one static base and threads the
+    /// index down, so the write path pays for the generic statics access exactly once.
     /// </summary>
-    private static class PropertyTypeIndex<TProperty>
+    internal static class PropertyTypeIndex<TProperty>
     {
         // ReSharper disable once StaticMemberInGenericType
         internal static readonly int Value = Interlocked.Increment(ref _lastPropertyTypeIndex);
+
+        // Type-only classification agrees with the runtime authority (the lifecycle classifies
+        // from the declared property type) whenever TProperty is that declared type, which holds
+        // by construction for generated setters; anything else, boxed object included, fails
+        // closed to structural.
+        // ReSharper disable once StaticMemberInGenericType
+        internal static readonly bool IsStructural = typeof(TProperty).CanContainSubjects();
     }
 
     // Closed ISingletonContextService<TContract> interfaces per implementation type, discovered
@@ -204,22 +216,27 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
         return function(ref context, readValue);
     }
 
+    /// <summary>
+    /// Runs the write chain. <paramref name="propertyTypeIndex"/> is
+    /// <see cref="PropertyTypeIndex{TProperty}.Value"/>, read once by the executor's unified
+    /// entry and threaded down so this path never touches the generic statics again.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void ExecuteInterceptedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
+    internal void ExecuteInterceptedWrite<TProperty>(int propertyTypeIndex, ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
     {
-        ExecuteInterceptedWrite(Volatile.Read(ref _state), ref context, writeValue);
+        ExecuteInterceptedWrite(Volatile.Read(ref _state), propertyTypeIndex, ref context, writeValue);
     }
 
     /// <summary>
-    /// <see cref="ExecuteInterceptedWrite{TProperty}(ref PropertyWriteContext{TProperty}, Action{IInterceptorSubject, TProperty})"/>
+    /// <see cref="ExecuteInterceptedWrite{TProperty}(int, ref PropertyWriteContext{TProperty}, Action{IInterceptorSubject, TProperty})"/>
     /// against a pinned snapshot instead of the current state. The structural write passes the
     /// snapshot its routing decision read, so the chain cannot contain a lifecycle the routing
     /// did not see.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void ExecuteInterceptedWrite<TProperty>(ContextState state, ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
+    internal void ExecuteInterceptedWrite<TProperty>(ContextState state, int propertyTypeIndex, ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
     {
-        var action = GetWriteInterceptorFunction<TProperty>(state);
+        var action = GetWriteInterceptorFunction<TProperty>(state, propertyTypeIndex);
         action(ref context, writeValue);
     }
 
@@ -255,22 +272,22 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private WriteAction<TProperty> GetWriteInterceptorFunction<TProperty>(ContextState state)
+    private WriteAction<TProperty> GetWriteInterceptorFunction<TProperty>(ContextState state, int propertyTypeIndex)
     {
-        var cached = state.TryGetWriteFunction(PropertyTypeIndex<TProperty>.Value);
+        var cached = state.TryGetWriteFunction(propertyTypeIndex);
         if (cached is not null)
         {
             return (WriteAction<TProperty>)cached;
         }
 
-        return CreateWriteInterceptorFunction<TProperty>(state);
+        return CreateWriteInterceptorFunction<TProperty>(state, propertyTypeIndex);
     }
 
-    private WriteAction<TProperty> CreateWriteInterceptorFunction<TProperty>(ContextState state)
+    private WriteAction<TProperty> CreateWriteInterceptorFunction<TProperty>(ContextState state, int propertyTypeIndex)
     {
         var writeInterceptors = GetServicesFromState<IWriteInterceptor>(state);
         var action = WriteInterceptorFactory<TProperty>.Create(writeInterceptors);
-        state.SetWriteFunction(PropertyTypeIndex<TProperty>.Value, action);
+        state.SetWriteFunction(propertyTypeIndex, action);
         return action;
     }
 
