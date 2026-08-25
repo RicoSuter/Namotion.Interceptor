@@ -1,9 +1,10 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Connectors.Monitoring;
 
@@ -445,7 +446,17 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer,
             }
         }
 
-        ExceptionAggregation.ThrowIfAny(exceptions);
+        if (exceptions is { Count: 1 })
+        {
+            // ExceptionDispatchInfo preserves the original stack trace; a bare `throw exceptions[0]`
+            // resets it to this rethrow site, hiding where the exception actually came from.
+            ExceptionDispatchInfo.Capture(exceptions[0]).Throw();
+        }
+
+        if (exceptions is { Count: > 1 })
+        {
+            throw new AggregateException(exceptions);
+        }
     }
 
     private sealed class PendingWait(IInterceptorSubject anchor)

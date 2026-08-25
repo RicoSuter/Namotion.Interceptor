@@ -9,13 +9,6 @@ public static class PropertyReferenceExtensions
         return new PropertyReference(subject, propertyName);
     }
 
-    public static void SetPropertyValueWithInterception(this PropertyReference property, object? newValue,
-        object? currentValue, Action<IInterceptorSubject, object?> writeValue)
-    {
-        var executor = property.Subject.Executor;
-        executor.SetPropertyValue(property.Name, newValue, currentValue, writeValue);
-    }
-
     /// <summary>
     /// Cascade re-entry path: invokes the write chain with a pre-resolved raw timestamp so the
     /// new <see cref="PropertyWriteContext{TProperty}"/>'s cache is seeded directly. Bypasses
