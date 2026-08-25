@@ -40,8 +40,8 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
         // by construction for generated setters. A boxed object fails closed to structural, while
         // a TProperty narrowed below the declared type routes scalar and forfeits the pre-chain
         // seam (the lifecycle still self-acquires its gate inside the chain), which is why boxed
-        // callers route through the executor's declared-type entry rather than through this
-        // classification.
+        // callers (the registry's dynamic setters and the dynamic proxy) instantiate this entry
+        // with the declared type via a cached typed delegate rather than write as object.
         // ReSharper disable once StaticMemberInGenericType
         internal static readonly bool IsStructural = typeof(TProperty).CanContainSubjects();
     }

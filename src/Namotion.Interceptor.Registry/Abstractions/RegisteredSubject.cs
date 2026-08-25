@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
-using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
@@ -357,9 +356,10 @@ public class RegisteredSubject
                 // The value arrives boxed here, so a TProperty-routed write would classify every
                 // dynamic property as structural and put scalar writes (source telemetry, say)
                 // through the lifecycle gate on every update. The declared type is known at
-                // registration time, so the declared-type entry routes from it instead, agreeing
-                // with how the lifecycle classifies the property inside the chain.
-                ? (s, v) => ((InterceptorExecutor)s.Executor).SetPropertyValue(name, type, v, getValue?.Invoke(s), setValue)
+                // registration time, so the setter is built once to call the typed write entry
+                // with that type as the generic argument, agreeing with how the lifecycle
+                // classifies the property inside the chain.
+                ? TypedPropertyWriteFactory.CreateSetter(type, name, getValue, setValue)
                 : null,
             isIntercepted: true,
             isDynamic: true));

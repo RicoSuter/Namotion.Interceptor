@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 using Castle.DynamicProxy;
-using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Dynamic;
 
@@ -53,6 +52,7 @@ public class DynamicSubjectFactory
     private class DynamicSubjectInterceptor : IInterceptor
     {
         private readonly ConcurrentDictionary<string, object?> _propertyValues = new();
+        private readonly ConcurrentDictionary<string, Action<IInterceptorSubject, object?>> _propertySetters = new();
 
         public void Intercept(IInvocation invocation)
         {
@@ -80,15 +80,19 @@ public class DynamicSubjectFactory
                 var propertyName = invocation.Method.Name[4..];
                 var propertyType = invocation.Method.GetParameters().Single().ParameterType;
 
-                var newValue = invocation.Arguments[0];
-                var currentValue = ReadProperty(propertyName, propertyType);
-
                 // The value arrives boxed here, so a TProperty-routed write would classify
                 // every proxied property as structural; the intercepted setter carries the
-                // declared type, so the declared-type entry routes from it instead.
-                ((InterceptorExecutor)context).SetPropertyValue(propertyName, propertyType, newValue, currentValue,
-                    (_, value) => WriteProperty(propertyName, value));
+                // declared type, so a setter built once per property routes from it instead.
+                var setter = _propertySetters.GetOrAdd(
+                    propertyName,
+                    static (name, state) => TypedPropertyWriteFactory.CreateSetter(
+                        state.propertyType,
+                        name,
+                        _ => state.interceptor.ReadProperty(name, state.propertyType),
+                        (_, value) => state.interceptor.WriteProperty(name, value)),
+                    (interceptor: this, propertyType));
 
+                setter(subject, invocation.Arguments[0]);
                 invocation.ReturnValue = null;
             }
             else

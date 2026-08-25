@@ -15,8 +15,6 @@
         <InternalsVisibleTo Include="Namotion.Interceptor.Tests" />
         <InternalsVisibleTo Include="Namotion.Interceptor.Benchmark" />
         <InternalsVisibleTo Include="Namotion.Interceptor.Tracking" />
-        <InternalsVisibleTo Include="Namotion.Interceptor.Registry" />
-        <InternalsVisibleTo Include="Namotion.Interceptor.Dynamic" />
         <InternalsVisibleTo Include="Namotion.Interceptor.Connectors.Tests" />
     </ItemGroup>
 

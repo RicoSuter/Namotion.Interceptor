@@ -85,8 +85,8 @@ public interface IInterceptorExecutor
     /// <c>object</c> fails closed to the structural side, while explicitly narrowing
     /// <typeparamref name="TProperty"/> below the declared property type routes scalar and
     /// forfeits this entry's pre-chain coordination (the lifecycle still takes its own gate inside
-    /// the chain, so ownership stays consistent). Callers whose values travel boxed route through
-    /// the declared-type entry on <see cref="InterceptorExecutor"/> instead. The lock order
+    /// the chain, so ownership stays consistent). Callers whose values travel boxed instantiate
+    /// this entry with the declared property type via a cached typed delegate instead. The lock order
     /// and the context-state pinning the structural route relies on are documented once, under
     /// "The Write Protocol" in docs/design/tracking-lifecycle.md, rather than restated here where
     /// they drift out of date.
