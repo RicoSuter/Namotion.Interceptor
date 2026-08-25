@@ -305,3 +305,26 @@ Assembled from the stage commit messages; the PR description draws from this lis
 
 - `ContextInheritanceHandler` composed the parent context on a subject's first attach but decomposed the parent of the last detach, so for a subject with two or more distinct parents the composition survived the detach: a fully detached subject kept resolving the graph's lifecycle handlers and write pipeline, and the stale fallback could later close a delegation cycle that made every read and write throw, unrecoverable through the object model. Order-dependent; reproduces on the v0.9.1 tag; on v0.8.0 and earlier, which have no cycle detection, the same shape dies on an uncatchable StackOverflowException.
 - `ISubjectRegistry` carried no singleton contract (only the concrete `SubjectRegistry` did), so a custom registry implementation plus `WithRegistry()` silently installed a second registry that broke resolution at first use.
+
+## Open question: derived properties with a setter are stores, and this branch stops tracking them
+
+Raised on PR 494 as a review comment on `docs/registry.md:120`: "a derived property with setter/getter can also be a store of a subject and might need to participate in graph tracking?"
+
+It is a real regression, confirmed by reading master rather than reasoning.
+
+**What master did.** `LifecycleInterceptor` on master tests `entry.Value is { IsIntercepted: true } && entry.Value.Type.CanContainSubjects()` at lines 180 and 225. There is no `IsDerived` exclusion, so master established ownership edges for derived properties, including derived-with-setter stores.
+
+**What this branch does.** `OwnershipGraph.IsStructural` requires `IsDerived: false`, and `LifecycleInterceptor.WriteProperty` bails on `metadata.IsDerived` before any reconcile. The code comment justifies it as "a derived value is a projection of edges the stored properties already own".
+
+**Why the justification is incomplete.** It holds for a computed projection such as `Current => Tires[0]`, where excluding it correctly avoids double-counting a subject the collection already owns. It is false for a generated partial property with a setter. `DerivedSetterPerson` in the test models is exactly that shape: `[Derived] public partial string? Nickname { get; set; }` has a real backing field. Substitute a subject type and there is no stored property owning the value: the derived property IS the store.
+
+**The consequence is loud, not silent.** Decision 4's orphan check evaluates derived getters at attach, finds a subject the graph does not own, and throws `LifecycleContractViolationException`. So a consumer using `[Derived] partial Child? Current { get; set; }` goes from working on master to an exception here.
+
+**Two candidate fixes.**
+
+1. *Heuristic, available today.* `metadata.SetValue is not null` distinguishes the shapes, and `DerivedPropertyChangeHandler` already uses exactly that test for its "derived-with-setter" case. The rule becomes structural when `IsIntercepted && CanContainSubjects && (!IsDerived || SetValue is not null)`. Failure mode: a derived property whose setter decomposes into other stored properties (`set { Other.Child = value; }`) would create an edge and so would the underlying store, double-counting.
+2. *Precise, needs a metadata addition.* The generator knows whether a property has a backing field: `partial X { get; set; }` does, an expression-bodied `X => ...` does not. Carrying that in `SubjectPropertyMetadata` distinguishes store from projection exactly, with no heuristic.
+
+**Not yet done.** The three shapes (computed projection, derived partial with setter, decomposing setter) have not been probed on either arm. Establish the actual behaviour by experiment before choosing, because the first analysis of this area was wrong by treating all derived properties as projections.
+
+**Coverage gap this exposes.** No test covers a subject-typed derived property with a setter. That is why the exclusion landed without anything failing.
