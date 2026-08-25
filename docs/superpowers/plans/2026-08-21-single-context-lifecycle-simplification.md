@@ -117,7 +117,7 @@ That rule is only applicable at the end if each performance-only mechanism is na
 
 | Mechanism | Stage | Lines | Priced by | Status |
 |---|---|---:|---|---|
-| `LifecycleScratch` pooling | 4 | ~190 | bulk construction and removal rows | row exists, unmeasured |
+| `LifecycleScratch` pooling | 4 | ~190, plus ~110 in call-site try/finally | bulk construction and removal rows | **measured 2026-08-25 by intra-arm ablation: KEEP** |
 | Lazy parent activation | 4 | part of `SubjectOwnership` / `OwnershipGraph` | `ParentProjectionBenchmark`, inactive and active toggle rows | row exists on both arms, probe-verified |
 | Inline single-edge storage before list promotion | 4 | part of `SubjectOwnership` | single-parent attach and removal rows | row exists, unmeasured |
 | Separate `Contains` and `CollectOccurrences` paths | 4 | part of `StructuralValueScanner` | shared-parent removal, which drives reachability | row exists, unmeasured |
@@ -127,6 +127,16 @@ That rule is only applicable at the end if each performance-only mechanism is na
 The last one is a cost taken for API hygiene rather than performance: it adds one interface dispatch per attached structural write, against a path that already resolves a service, discovers a subtree, claims, reconciles and fans out callbacks. The expectation is that it does not register. It was kept on that basis, and the final numbers decide whether that was right. If it registers, the alternative is exposing the gate object again, which is cheap to do because nobody implements `ILifecycleInterceptor` and breaking an implementer-facing seam costs little.
 
 Also open from stage 4, and unresolved: `GetOrAddSubjectId` measured 15.4 percent slower on the spike, identically across all three reachability variants. Stage 4 only removes `Data` entries, so the remaining candidate is the stage 3 interface widening, and repository guidance says a movement that size with no known mechanism is settled by diffing JIT output rather than by more runs.
+
+### The `LifecycleScratch` row, closed 2026-08-25
+
+Priced by intra-arm ablation: every `Rent*` changed to allocate and every `Return` to a no-op, one file, no call site touched, then the same rows re-run on the same binary conditions.
+
+Timing decided nothing and was not allowed to. Unchanged code moved up to 8.2 percent between the two binaries, so every timing delta, including the apparent improvements from removing the pool, sat inside what the harness did to code the change cannot reach.
+
+Allocations decided it. Removing the pool costs 3 to 9 KB per operation on every graph mutation row, 20 KB on subtree attach and release, and 4 MB (22 percent) on bulk attach. `RemoveOneParentOfSharedChild` goes from 24 B to 4,008 B, a factor of 167. GC collections on the bulk path rise 29 percent Gen0, 41 percent Gen1 and 40 percent Gen2, so the scratch garbage is not staying in Gen0.
+
+Verdict **KEEP**. Under a CPU-time criterion the answer would have been DELETE; under this repository's stated priority, where allocations usually win because GC pressure compounds across the host, a deterministic 4x to 9x cut on the library's core hot path justifies roughly 300 mechanical lines. One cost the benchmark does not price, recorded rather than hidden: the pools are unbounded per-thread high-water marks, so a thread retains buffers sized to its largest ever operation.
 
 ### Benchmark rows this plan adds
 
