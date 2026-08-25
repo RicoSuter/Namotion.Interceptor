@@ -1,6 +1,7 @@
 ﻿using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Cache;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Interceptors;
 
@@ -203,6 +204,43 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         if (attachedContext is null)
         {
             UninterceptedChain<TProperty>.Write(ref context, writeValue);
+        }
+        else
+        {
+            attachedContext.ExecuteInterceptedWrite(propertyTypeIndex, ref context, writeValue);
+        }
+
+        return context.IsWritten;
+    }
+
+    /// <summary>
+    /// The boxed twin of the unified <c>SetPropertyValue</c> entry above, for callers whose values
+    /// travel as <see cref="object"/> because the compile-time property type is gone: the
+    /// registry's dynamic property setters and the dynamic proxy. Boxing must not decide the
+    /// routing: a <c>TProperty</c> of <see cref="object"/> fails closed to structural and would
+    /// put every scalar dynamic write through the lifecycle gate, so the routing comes from
+    /// <paramref name="declaredType"/>, which these callers know at registration time and which is
+    /// the same type the lifecycle classifies from inside the chain. The chain still runs as an
+    /// <see cref="object"/> chain either way, matching the boxed values.
+    /// </summary>
+    internal bool SetPropertyValue(string propertyName, Type declaredType, object? newValue, object? currentValue, Action<IInterceptorSubject, object?> writeValue)
+    {
+        var propertyTypeIndex = InterceptorSubjectContext.PropertyTypeIndex<object?>.Value;
+        if (declaredType.CanContainSubjects())
+        {
+            return SetStructuralPropertyValue(propertyName, newValue, currentValue, writeValue, propertyTypeIndex);
+        }
+
+        var context = new PropertyWriteContext<object?>(
+            this,
+            new PropertyReference(_subject, propertyName),
+            currentValue,
+            newValue);
+
+        var attachedContext = _attachedContext;
+        if (attachedContext is null)
+        {
+            UninterceptedChain<object?>.Write(ref context, writeValue);
         }
         else
         {

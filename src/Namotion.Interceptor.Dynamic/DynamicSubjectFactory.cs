@@ -83,10 +83,10 @@ public class DynamicSubjectFactory
                 var newValue = invocation.Arguments[0];
                 var currentValue = ReadProperty(propertyName, propertyType);
 
-                // The boxed TProperty routes the unified write entry structurally, which is the
-                // fail-closed side: a subject-bearing value gets the full protocol, a scalar one
-                // pays the gate on this already-proxied path.
-                context.SetPropertyValue(propertyName, newValue, currentValue,
+                // The value arrives boxed here, so a TProperty-routed write would classify
+                // every proxied property as structural; the intercepted setter carries the
+                // declared type, so the declared-type entry routes from it instead.
+                ((InterceptorExecutor)context).SetPropertyValue(propertyName, propertyType, newValue, currentValue,
                     (_, value) => WriteProperty(propertyName, value));
 
                 invocation.ReturnValue = null;

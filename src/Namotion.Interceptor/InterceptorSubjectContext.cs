@@ -37,8 +37,11 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
 
         // Type-only classification agrees with the runtime authority (the lifecycle classifies
         // from the declared property type) whenever TProperty is that declared type, which holds
-        // by construction for generated setters; anything else, boxed object included, fails
-        // closed to structural.
+        // by construction for generated setters. A boxed object fails closed to structural, while
+        // a TProperty narrowed below the declared type routes scalar and forfeits the pre-chain
+        // seam (the lifecycle still self-acquires its gate inside the chain), which is why boxed
+        // callers route through the executor's declared-type entry rather than through this
+        // classification.
         // ReSharper disable once StaticMemberInGenericType
         internal static readonly bool IsStructural = typeof(TProperty).CanContainSubjects();
     }
