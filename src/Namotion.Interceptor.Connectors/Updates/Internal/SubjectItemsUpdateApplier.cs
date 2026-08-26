@@ -226,7 +226,10 @@ internal static class SubjectItemsUpdateApplier
         SubjectUpdateApplyContext context)
     {
         var newItem = context.SubjectFactory.CreateCollectionSubject(property, indexOrKey);
-        SubjectUpdateApplier.AttachAsProvisionalRoot(newItem, parent);
+        // Provisional, so the population below runs registered and intercepted exactly as it
+        // will once assigned. The assignment provides the supporting edge that clears the
+        // anchor, so there is no detach ceremony.
+        newItem.AttachToContext(parent.GetContext(), SubjectAttachmentAnchorKind.Provisional);
         if (context.TryMarkAsProcessed(subjectId))
         {
             SubjectUpdateApplier.ApplyPropertyUpdates(newItem, properties, context);

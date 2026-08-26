@@ -143,7 +143,10 @@ internal static class SubjectUpdateApplier
             else
             {
                 var newItem = context.SubjectFactory.CreateSubject(property);
-                AttachAsProvisionalRoot(newItem, parent);
+                // Provisional, so the population below runs registered and intercepted exactly as it
+                // will once assigned. The assignment provides the supporting edge that clears the
+                // anchor, so there is no detach ceremony.
+                newItem.AttachToContext(parent.GetContext(), SubjectAttachmentAnchorKind.Provisional);
 
                 if (context.TryMarkAsProcessed(propertyUpdate.Id))
                 {
@@ -157,17 +160,6 @@ internal static class SubjectUpdateApplier
         {
             context.SetPropertyValue(property, propertyUpdate.Timestamp, null);
         }
-    }
-
-    /// <summary>
-    /// Attaches a freshly created item to the parent's context as a provisional root, so its
-    /// population runs registered and intercepted exactly as it will after the assignment. The
-    /// first supporting edge (the assignment that follows the population) clears the anchor, so
-    /// no detach ceremony is needed.
-    /// </summary>
-    internal static void AttachAsProvisionalRoot(IInterceptorSubject newItem, IInterceptorSubject parent)
-    {
-        newItem.AttachToContext(parent.GetContext(), SubjectAttachmentAnchorKind.Provisional);
     }
 
     private static object? ConvertValue(object? value, Type targetType)
