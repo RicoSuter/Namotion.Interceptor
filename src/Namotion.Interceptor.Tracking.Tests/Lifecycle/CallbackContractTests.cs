@@ -299,4 +299,20 @@ public class CallbackContractTests
             subject.EvaluationCount - evaluationsBeforeDetach >= DerivedPropertyChangeHandler.MaxStabilizationIterations,
             "the recalculation must re-evaluate up to the retry bound before declaring a genuine orphan");
     }
+
+    [Fact]
+    public void WhenADerivedPropertyWithASetterStoresAnUnattachedSubject_ThenItThrows()
+    {
+        // Arrange: a derived property with a generator-emitted backing field takes the
+        // derived-with-setter recalculation path instead of the getter-projection path, and is the
+        // sole store of whatever is assigned, so no other property can ever own the subject.
+        var context = CreateDerivedContext();
+        var subject = new StoringDerivedSubject(context);
+
+        // Act & Assert
+        var exception = Record.Exception(() => subject.Current = new Person { FirstName = "Orphan" });
+
+        Assert.IsType<LifecycleContractViolationException>(exception);
+        Assert.Contains(nameof(StoringDerivedSubject.Current), exception!.Message);
+    }
 }

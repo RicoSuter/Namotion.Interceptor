@@ -39,6 +39,8 @@ The anchor lives on the executor (`IInterceptorExecutor.Anchor`), never mirrored
 
 **The owned-subject map** (`OwnershipGraph._owned`): a `ConcurrentDictionary<IInterceptorSubject, SubjectOwnership>` keyed by reference equality. Concurrent so that gate-free readers (`GetParents()`, `GetReferenceCount()`) can find a record without the topology gate; only the gate holder mutates it.
 
+**Which properties carry edges** (`OwnershipGraph.IsStructural`): intercepted, not derived, and of a declared type that can contain subjects. The two exclusions answer different questions. Interception is generated only for partial properties, so every computed shape (an expression-bodied getter, an interface default) is already excluded before the derived test runs; what the derived test excludes is a store, a partial property with a backing field. `[Derived]` declares the value to be a function of other state, which makes the property a cache rather than the store of record, whether or not a field holds the result. A subject reachable only through a derived property is therefore never tracked, and `DerivedPropertyChangeHandler` rejects it with `LifecycleContractViolationException` rather than letting it go silently unowned. That rejection needs `WithDerivedPropertyChangeDetection()`, because nothing else ever evaluates a derived getter.
+
 **Property baselines are the committed outgoing edges.** The last reconciled value of every structural property is the outgoing truth: a subject commits an edge to a child exactly when the baseline of one of its structural properties still contains that child. There is no second outgoing representation, which removes the whole class of bugs where two representations disagree, and it is what makes the release descent and the reachability walk read the same relation.
 
 **Incoming edges** live on `SubjectOwnership`, occurrence-aware: each edge carries the property and the occurrence index or dictionary key, so `[a, a, b]` records two distinct edges for `a` and `GetReferenceCount()` answers 2. A single incoming edge is stored inline; a list is allocated only from the second edge.
@@ -107,6 +109,7 @@ Observed orders on a three-level chain: attach ahead of the descent `top, mid, l
 - A subject is unattached or owned by exactly one exact context, with at most one anchor.
 - Ownership is anchor-reachability over committed occurrence-aware edges; reference count is a projection, never a predicate.
 - Property baselines and committed outgoing edges are one representation.
+- A derived property never carries an edge: `[Derived]` declares a cache, not the store of record, whether or not a backing field holds the result.
 - Algorithms reading incoming edges validate against committed outgoing edges.
 - Release is deterministic first-visit from the removed edge; the owned map is never enumerated.
 - Reference-count reads are lock-free; parent reads are lock-free snapshot reads once the first call activates publication under the subject's leaf monitor; the lifecycle is the sole writer of parent state.
