@@ -332,10 +332,14 @@ public class RegisteredSubject
         {
             // The subject keeps its metadata across detach and reattach while Registry's
             // projection is rebuilt per attach, and initializers rerun their AddProperty on every
-            // attach, so a re-registration with the same shape is idempotent: the original
-            // registration's accessor delegates stay authoritative and the caller's are
-            // discarded, and no property attach callback runs for this call. A different shape
-            // is a genuine duplicate and is rejected like any duplicate metadata name.
+            // attach. Admission rejects a name the subject already carries, so without this the
+            // rerun would throw and no subject holding a dynamic property could reattach.
+            //
+            // The first registration wins and the caller's delegates are discarded, rather than
+            // the last: the metadata backs captured RegisteredSubjectProperty projections and the
+            // committed baselines keyed off it, so swapping accessors underneath a live subject
+            // would leave both resolving through delegates their registration never saw. A
+            // different shape is a genuine duplicate and is rejected like any duplicate name.
             if (existingMetadata.Type != type || !AttributesMatch(existingMetadata.Attributes, attributes))
             {
                 throw new InvalidOperationException(
