@@ -10,7 +10,7 @@ The generator turns a partial class carrying `[InterceptorSubject]` into interce
 
 `[InterceptorSubject]` on a `record` or `record struct` is a compile error (NI0003). This looks like an arbitrary restriction until you look at what the generator actually emits into a record.
 
-Every subject gets an auto-property backing field for `IInterceptorSubject.Data`, initialised with `= new()`, plus a lazily created `_executor` field assigned through `InterceptorExecutor.GetOrCreate(ref _executor, this)`. There is no `SyncRoot` backing field: the terminal lock lives on the executor, and a test asserts generated subjects allocate none. Two measured consequences follow if the containing type is a record:
+Every subject gets an auto-property backing field for `IInterceptorSubject.Data`, initialised with `= new()`, plus a lazily created `_executor` field assigned through `InterceptorExecutor.GetOrCreate(ref _executor, this)`. Two measured consequences follow if the containing type is a record:
 
 - **Records synthesise `Equals` over every instance field, including auto-property backing fields.** Since `Data` is initialised with `= new()`, every instance holds a distinct reference. No two record subjects are ever equal, not even two positional records constructed from identical arguments, because the synthesised equality check always finds that field unequal.
 - **The synthesised copy constructor is a shallow field copy.** `with` produces a clone that shares the original's `Data` reference and copies `_executor` verbatim. Because `_executor` is bound to the original instance the first time it was created, writes through the clone drive the original subject once `_executor` is non-null, which is any subject that has been used at all.

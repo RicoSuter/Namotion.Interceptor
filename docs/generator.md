@@ -445,8 +445,6 @@ The explicit form counts too, and the check does not treat it as safer. Because 
 
 Taking `Executor` is the severe case: the inherited helpers keep reading the root's field, which nothing populates any more, so interception stops without an error and the property values still look correct. NI0014 turns the whole shape into a build error, so this is caught at compile time.
 
-This is a behaviour change against per-subject emission. A derived subject declaring a public property matching `IInterceptorExecutor Executor { get; }` would have compiled cleanly when every class emitted its own explicit implementation, because a class's own explicit implementation wins over its own public member. It is now NI0014.
-
 ### A base class can hijack a slot later, without the consuming assembly being rebuilt
 
 NI0014 runs where the derived subject is compiled, so a member added to the base class afterwards is not seen. For that to matter, all four of the following have to hold:
