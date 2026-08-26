@@ -306,7 +306,9 @@ Assembled from the stage commit messages; the PR description draws from this lis
 - `ContextInheritanceHandler` composed the parent context on a subject's first attach but decomposed the parent of the last detach, so for a subject with two or more distinct parents the composition survived the detach: a fully detached subject kept resolving the graph's lifecycle handlers and write pipeline, and the stale fallback could later close a delegation cycle that made every read and write throw, unrecoverable through the object model. Order-dependent; reproduces on the v0.9.1 tag; on v0.8.0 and earlier, which have no cycle detection, the same shape dies on an uncatchable StackOverflowException.
 - `ISubjectRegistry` carried no singleton contract (only the concrete `SubjectRegistry` did), so a custom registry implementation plus `WithRegistry()` silently installed a second registry that broke resolution at first use.
 
-## Open question: derived properties with a setter are stores, and this branch stops tracking them
+## RESOLVED: derived properties with a setter are stores, and this branch deliberately stops tracking them
+
+> **This section is superseded.** It was written while the behaviour was believed to be a regression. It is not. The exclusion stays, and the reasoning below is wrong in one load-bearing step: it assumed the derived test excludes projections, when `isIntercepted` is emitted as `IsPartial` and therefore already excludes every computed shape before the derived test runs. The settled rule lives in `docs/generator.md`, `docs/design/tracking-lifecycle.md` and `OwnershipGraph.IsStructural`: `[Derived]` declares a cache, never the store of record, whether or not a backing field holds the result. Kept below only as a record of how the question was reached.
 
 Raised on PR 494 as a review comment on `docs/registry.md:120`: "a derived property with setter/getter can also be a store of a subject and might need to participate in graph tracking?"
 

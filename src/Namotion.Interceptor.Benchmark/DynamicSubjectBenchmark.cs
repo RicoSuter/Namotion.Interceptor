@@ -38,7 +38,9 @@ public class DynamicSubjectBenchmark
         _motor = (IMotor)motor;
     }
     
-    [IterationSetup]
+    // IterationSetup is intentionally not applied: it forces InvocationCount=1, which puts the
+    // nanosecond-scale read and write rows below timer resolution. Only CreateDynamicSubject
+    // needs a fresh context per iteration, and it stays disabled.
     public void IterationSetup()
     {
         _iterationContext = InterceptorSubjectContext
@@ -54,13 +56,13 @@ public class DynamicSubjectBenchmark
         subject.AttachToContext(_iterationContext!, SubjectAttachmentAnchorKind.Provisional);
     }
     
-    //[Benchmark]
+    [Benchmark]
     public void ReadDynamicProperty()
     {
         _ = _motor!.Speed;
     }
     
-    //[Benchmark]
+    [Benchmark]
     public void WriteDynamicProperty()
     {
         _motor!.Speed = 100;
