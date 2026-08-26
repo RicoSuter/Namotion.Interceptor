@@ -11,6 +11,7 @@ public class DynamicSubjectBenchmark
     private IInterceptorSubjectContext? _context;
     private IInterceptorSubjectContext? _iterationContext;
     private IMotor? _motor;
+    private int _writeCounter;
 
     public interface IMotor
     {
@@ -65,6 +66,9 @@ public class DynamicSubjectBenchmark
     [Benchmark]
     public void WriteDynamicProperty()
     {
-        _motor!.Speed = 100;
+        // A changing value on every invocation. Writing a constant lands equal to the stored
+        // value from the second call onward, and WithFullPropertyTracking installs the equality
+        // check, so the row would measure a suppressed write rather than a real one.
+        _motor!.Speed = ++_writeCounter;
     }
 }
