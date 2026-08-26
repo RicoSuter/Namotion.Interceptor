@@ -310,7 +310,7 @@ In `src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleInterceptor.cs`, add `C
 Both are unconditional, unlike `TryAddProperties`, which permits same-lifecycle reentry with `IsInsideAnyCallback && !Monitor.IsEntered(_gate)`. Explicit attach and detach have no supported reentrant case: even the same-lifecycle call runs a full claim, seed and attach descent mid-reconcile, which is the corruption the guard exists to prevent.
 
 ```csharp
-    public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
+    public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor)
     {
         CallbackReentrancyGuard.ThrowIfInsideCallback();
 

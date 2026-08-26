@@ -221,7 +221,7 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
             }
         }
 
-        if (!graph.TryClaimDiscovered(claimed, null, SubjectAnchorKind.None))
+        if (!graph.TryClaimDiscovered(claimed, null, SubjectAttachmentAnchorKind.None))
         {
             claimed.Clear();
             throw new InvalidOperationException(

@@ -25,7 +25,7 @@ public class SubjectAttachmentTests
         // A minimal faithful lifecycle: it applies the documented root-anchor rules through Core's
         // own helpers and counts each policy entry, which is where a real implementation does its
         // graph work.
-        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
+        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor)
         {
             InterceptorSubjectExtensions.ApplyRootAnchor(subject, context, anchor);
             AttachCount++;
@@ -38,7 +38,7 @@ public class SubjectAttachmentTests
             var executor = subject.Executor;
             executor.TryGetAttachment(out var attachedContext, out var anchor, out var revision);
             InterceptorSubjectExtensions.ValidateExplicitDetach(attachedContext, anchor, context);
-            executor.TryUpdateAttachment(revision, attachedContext, SubjectAnchorKind.None, out _);
+            executor.TryUpdateAttachment(revision, attachedContext, SubjectAttachmentAnchorKind.None, out _);
             DetachCount++;
         }
 
@@ -99,7 +99,7 @@ public class SubjectAttachmentTests
         Assert.Same(context, subject.TryGetContext());
         Assert.Same(context, subject.GetContext());
         Assert.Same(context, executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.Explicit, executor.AttachmentAnchor);
         Assert.Equal(1, probe.AttachCount);
     }
 
@@ -110,14 +110,14 @@ public class SubjectAttachmentTests
         var context = CreateContextWithProbe(out _);
         var subject = new Car();
         var executor = GetExecutor(subject);
-        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, context, SubjectAnchorKind.None, out _));
+        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, context, SubjectAttachmentAnchorKind.None, out _));
 
         // Act
         subject.AttachToContext(context);
 
         // Assert
         Assert.Same(context, executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.Explicit, executor.AttachmentAnchor);
     }
 
     [Fact]
@@ -127,14 +127,14 @@ public class SubjectAttachmentTests
         var context = CreateContextWithProbe(out _);
         var subject = new Car();
         var executor = GetExecutor(subject);
-        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, context, SubjectAnchorKind.Provisional, out _));
+        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, context, SubjectAttachmentAnchorKind.Provisional, out _));
 
         // Act
         subject.AttachToContext(context);
 
         // Assert
         Assert.Same(context, executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.Explicit, executor.AttachmentAnchor);
     }
 
     [Fact]
@@ -151,7 +151,7 @@ public class SubjectAttachmentTests
         Assert.Throws<InvalidOperationException>(() => subject.AttachToContext(context));
         Assert.Equal(revisionBefore, executor.AttachmentRevision);
         Assert.Same(context, executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.Explicit, executor.AttachmentAnchor);
         Assert.Equal(1, probe.AttachCount);
     }
 
@@ -170,7 +170,7 @@ public class SubjectAttachmentTests
         Assert.Throws<InvalidOperationException>(() => subject.AttachToContext(secondContext));
         Assert.Equal(revisionBefore, executor.AttachmentRevision);
         Assert.Same(firstContext, executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.Explicit, executor.AttachmentAnchor);
         Assert.Equal(1, firstProbe.AttachCount);
         Assert.Equal(0, secondProbe.AttachCount);
     }
@@ -190,7 +190,7 @@ public class SubjectAttachmentTests
 
         // Assert: only the anchor clears in this stage; the exact context is cleared once
         // structural edges become authoritative.
-        Assert.Equal(SubjectAnchorKind.None, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.None, executor.AttachmentAnchor);
         Assert.Same(context, executor.AttachedContext);
         Assert.True(executor.AttachmentRevision > revisionBefore);
         Assert.Equal(1, probe.DetachCount);
@@ -209,7 +209,7 @@ public class SubjectAttachmentTests
         Assert.Throws<InvalidOperationException>(() => subject.DetachFromContext(context));
         Assert.Equal(revisionBefore, executor.AttachmentRevision);
         Assert.Null(executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.None, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.None, executor.AttachmentAnchor);
         Assert.Equal(0, probe.DetachCount);
     }
 
@@ -220,14 +220,14 @@ public class SubjectAttachmentTests
         var context = CreateContextWithProbe(out var probe);
         var subject = new Car();
         var executor = GetExecutor(subject);
-        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, context, SubjectAnchorKind.Provisional, out _));
+        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, context, SubjectAttachmentAnchorKind.Provisional, out _));
         var revisionBefore = executor.AttachmentRevision;
 
         // Act & Assert
         Assert.Throws<InvalidOperationException>(() => subject.DetachFromContext(context));
         Assert.Equal(revisionBefore, executor.AttachmentRevision);
         Assert.Same(context, executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.Provisional, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.Provisional, executor.AttachmentAnchor);
         Assert.Equal(0, probe.DetachCount);
     }
 
@@ -246,7 +246,7 @@ public class SubjectAttachmentTests
         Assert.Throws<InvalidOperationException>(() => subject.DetachFromContext(otherContext));
         Assert.Equal(revisionBefore, executor.AttachmentRevision);
         Assert.Same(attachedContext, executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.Explicit, executor.AttachmentAnchor);
         Assert.Equal(0, probe.DetachCount);
     }
 
@@ -263,7 +263,7 @@ public class SubjectAttachmentTests
         Assert.Equal(1, probe.AttachCount);
         Assert.Same(context, subject.TryGetContext());
         Assert.Same(context, executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.Provisional, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.Provisional, executor.AttachmentAnchor);
     }
 
     [Fact]
@@ -280,7 +280,7 @@ public class SubjectAttachmentTests
         // Assert: the explicit attach promotes the constructor's provisional anchor, entering the
         // lifecycle's policy a second time.
         Assert.Same(context, executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.Explicit, executor.AttachmentAnchor);
         Assert.Equal(2, probe.AttachCount);
     }
 
@@ -334,13 +334,13 @@ public class SubjectAttachmentTests
 
         // Act: read from inside a lock the caller already holds, like consumers do.
         IInterceptorSubjectContext? attachedContext;
-        SubjectAnchorKind anchor;
+        SubjectAttachmentAnchorKind anchor;
         long revision;
         var callerLock = new object();
         lock (callerLock)
         {
             attachedContext = subject.TryGetContext();
-            anchor = executor.Anchor;
+            anchor = executor.AttachmentAnchor;
             revision = executor.AttachmentRevision;
         }
         resumeCommit.Set();
@@ -350,7 +350,7 @@ public class SubjectAttachmentTests
         // when they finished) and observed the pre-commit state.
         Assert.True(commitResumedInTime);
         Assert.Null(attachedContext);
-        Assert.Equal(SubjectAnchorKind.None, anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.None, anchor);
         Assert.Equal(0, revision);
     }
 
@@ -386,7 +386,7 @@ public class SubjectAttachmentTests
 
         // Assert
         Assert.Same(context, subject.TryGetContext());
-        Assert.Equal(SubjectAnchorKind.Explicit, subject.Executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.Explicit, subject.Executor.AttachmentAnchor);
         Assert.Null(((IInterceptorSubject)root.Child!).TryGetContext());
 
         // Act: the lifecycle-free detach clears the attachment entirely, because no edge model
@@ -395,7 +395,7 @@ public class SubjectAttachmentTests
 
         // Assert
         Assert.Null(subject.TryGetContext());
-        Assert.Equal(SubjectAnchorKind.None, subject.Executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.None, subject.Executor.AttachmentAnchor);
     }
 
     /// <summary>
@@ -430,6 +430,6 @@ public class SubjectAttachmentTests
         Assert.Equal(2, probe.AttachCount);
         Assert.Equal(1, probe.DetachCount);
         Assert.Same(context, executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.Explicit, executor.AttachmentAnchor);
     }
 }

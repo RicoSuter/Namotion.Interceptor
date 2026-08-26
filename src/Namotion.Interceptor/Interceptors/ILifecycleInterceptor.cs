@@ -52,11 +52,11 @@ public interface ILifecycleInterceptor :
     /// <param name="subject">The subject to attach.</param>
     /// <param name="context">The context to attach to; must be the context this interceptor owns.</param>
     /// <param name="anchor">The anchor to apply to <paramref name="subject"/>. Never
-    /// <see cref="SubjectAnchorKind.None"/>: an attach without an anchor would be released again by
+    /// <see cref="SubjectAttachmentAnchorKind.None"/>: an attach without an anchor would be released again by
     /// the next reachability decision.</param>
     /// <exception cref="InvalidOperationException">The subject already carries an explicit anchor,
     /// or the subject or part of its component is owned by a different context.</exception>
-    void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor);
+    void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor);
 
     /// <summary>
     /// Clears the subject's root anchor on <paramref name="context"/> and releases the subject when

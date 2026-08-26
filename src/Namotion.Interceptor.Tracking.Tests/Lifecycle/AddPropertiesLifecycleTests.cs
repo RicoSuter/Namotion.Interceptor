@@ -660,7 +660,7 @@ public class AddPropertiesLifecycleTests
     /// </summary>
     private sealed class ClaimTrapSubject : IInterceptorSubject
     {
-        private IInterceptorExecutor? _context;
+        private IInterceptorExecutor? _executor;
         private readonly Dictionary<string, SubjectPropertyMetadata> _properties;
 
         public Func<IInterceptorSubject, object?>? ChildGetter { get; set; }
@@ -676,7 +676,7 @@ public class AddPropertiesLifecycleTests
             };
         }
 
-        public IInterceptorExecutor Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
+        public IInterceptorExecutor Executor => InterceptorExecutor.GetOrCreate(ref _executor, this);
 
         public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
 

@@ -178,7 +178,7 @@ public class BaseClassInterceptionBehaviorTests
         // Assert: this is the allocation claim. Every extra level used to cost one
         // ConcurrentDictionary and one object per instance. SyncRoot is asserted absent because
         // the terminal lock moved onto the executor, so subjects no longer allocate one at all.
-        Assert.Equal(1, CountInstanceFields(leaf.GetType(), "_context"));
+        Assert.Equal(1, CountInstanceFields(leaf.GetType(), "_executor"));
         Assert.Equal(1, CountInstanceFields(leaf.GetType(), "_properties"));
         Assert.Equal(1, CountBackingFields(leaf.GetType(), "Data"));
         Assert.Equal(0, CountBackingFields(leaf.GetType(), "SyncRoot"));

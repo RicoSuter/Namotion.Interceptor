@@ -121,7 +121,7 @@ foreach (var constructor in metadata.Constructors)
     // Provisional, matching the parameterless form: dependency injection now selects this
     // constructor for every subject it builds, and an explicit anchor would make each an
     // unreleasable root.
-    builder.AppendLine("            InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAnchorKind.Provisional);");
+    builder.AppendLine("            InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAttachmentAnchorKind.Provisional);");
     builder.AppendLine("        }");
     builder.AppendLine();
 }

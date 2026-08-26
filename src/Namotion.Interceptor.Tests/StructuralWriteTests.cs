@@ -20,7 +20,7 @@ public class StructuralWriteTests
         {
             // Detach, the one transition legal from an attached state: the subject was attached to
             // resolve this very chain, and a direct swap to another context is rejected by design.
-            Assert.True(Executor!.TryUpdateAttachment(Executor.AttachmentRevision, null, SubjectAnchorKind.None, out _));
+            Assert.True(Executor!.TryUpdateAttachment(Executor.AttachmentRevision, null, SubjectAttachmentAnchorKind.None, out _));
             next(ref context);
         }
     }
@@ -77,7 +77,7 @@ public class StructuralWriteTests
         public bool TryAddProperties(SubjectPropertyRegistrationContext registration) =>
             throw new NotSupportedException("The probe admits no properties.");
 
-        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor) =>
+        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor) =>
             throw new NotSupportedException("The probe attaches no subjects.");
 
         public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context) =>
@@ -202,7 +202,7 @@ public class StructuralWriteTests
         {
             var revision = executor.AttachmentRevision;
             detachStarting.Set();
-            executor.TryUpdateAttachment(revision, null, SubjectAnchorKind.None, out _);
+            executor.TryUpdateAttachment(revision, null, SubjectAttachmentAnchorKind.None, out _);
             detachCompleted.Set();
         });
 

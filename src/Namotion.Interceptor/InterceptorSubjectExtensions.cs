@@ -29,7 +29,7 @@ public static class InterceptorSubjectExtensions
     /// <summary>
     /// Attaches the subject to <paramref name="context"/> with an explicit anchor, together with
     /// every subject its structural properties reach. Attaching a subject that is already attached
-    /// to the same context promotes its anchor to <see cref="SubjectAnchorKind.Explicit"/> without
+    /// to the same context promotes its anchor to <see cref="SubjectAttachmentAnchorKind.Explicit"/> without
     /// repeating its attach callbacks. An explicit anchor is never set twice and a subject never
     /// moves directly between contexts; both throw before any state change.
     /// </summary>
@@ -37,23 +37,23 @@ public static class InterceptorSubjectExtensions
     /// this context, or the subject or part of its component is attached to a different context.</exception>
     public static void AttachToContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
-        AttachToContext(subject, context, SubjectAnchorKind.Explicit);
+        AttachToContext(subject, context, SubjectAttachmentAnchorKind.Explicit);
     }
 
     /// <summary>
     /// Attaches the subject to <paramref name="context"/> with the given root anchor, together
     /// with every subject its structural properties reach. Context-taking constructors call this
-    /// with <see cref="SubjectAnchorKind.Provisional"/>, which anchors an unattached subject and
-    /// leaves an already attached one alone; see <see cref="SubjectAnchorKind"/> for how the two
+    /// with <see cref="SubjectAttachmentAnchorKind.Provisional"/>, which anchors an unattached subject and
+    /// leaves an already attached one alone; see <see cref="SubjectAttachmentAnchorKind"/> for how the two
     /// anchors differ. Public because generated and dynamic context-taking constructors emit the
     /// call from the consumer's assembly.
     /// </summary>
     /// <exception cref="InvalidOperationException">The anchor is
-    /// <see cref="SubjectAnchorKind.None"/>, the subject is already explicitly attached to this
+    /// <see cref="SubjectAttachmentAnchorKind.None"/>, the subject is already explicitly attached to this
     /// context, or the subject or part of its component is attached to a different context.</exception>
-    public static void AttachToContext(this IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
+    public static void AttachToContext(this IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor)
     {
-        if (anchor == SubjectAnchorKind.None)
+        if (anchor == SubjectAttachmentAnchorKind.None)
         {
             throw new InvalidOperationException(
                 "An attach without a root anchor would be released by the next reachability decision.");
@@ -94,7 +94,7 @@ public static class InterceptorSubjectExtensions
             executor.TryGetAttachment(out var attachedContext, out var anchor, out var revision);
             ValidateExplicitDetach(attachedContext, anchor, context);
 
-            if (executor.TryUpdateAttachment(revision, null, SubjectAnchorKind.None, out _))
+            if (executor.TryUpdateAttachment(revision, null, SubjectAttachmentAnchorKind.None, out _))
             {
                 break;
             }
@@ -106,7 +106,7 @@ public static class InterceptorSubjectExtensions
     /// attached to the same context. Shared by the lifecycle-free attach path and by lifecycle
     /// implementations that need the same strict rules.
     /// </summary>
-    internal static void ApplyRootAnchor(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
+    internal static void ApplyRootAnchor(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor)
     {
         var executor = subject.Executor;
         while (true)
@@ -117,7 +117,7 @@ public static class InterceptorSubjectExtensions
             // A provisional anchor is a construction-time default and only ever applies to a fresh
             // subject: applying it to an attached one would demote an explicit root or turn an
             // inherited subject into a root that nothing ever releases.
-            if (anchor == SubjectAnchorKind.Provisional && attachedContext is not null)
+            if (anchor == SubjectAttachmentAnchorKind.Provisional && attachedContext is not null)
             {
                 return;
             }
@@ -136,9 +136,9 @@ public static class InterceptorSubjectExtensions
     /// </summary>
     internal static void ValidateRootAnchor(
         IInterceptorSubjectContext? attachedContext,
-        SubjectAnchorKind currentAnchor,
+        SubjectAttachmentAnchorKind currentAnchor,
         IInterceptorSubjectContext context,
-        SubjectAnchorKind anchor)
+        SubjectAttachmentAnchorKind anchor)
     {
         if (attachedContext is not null && !ReferenceEquals(attachedContext, context))
         {
@@ -146,7 +146,7 @@ public static class InterceptorSubjectExtensions
                 "The subject is already attached to a different context. Detach it from that context first.");
         }
 
-        if (anchor == SubjectAnchorKind.Explicit && currentAnchor == SubjectAnchorKind.Explicit)
+        if (anchor == SubjectAttachmentAnchorKind.Explicit && currentAnchor == SubjectAttachmentAnchorKind.Explicit)
         {
             throw new InvalidOperationException(
                 "The subject is already explicitly attached to this context.");
@@ -159,10 +159,10 @@ public static class InterceptorSubjectExtensions
     /// </summary>
     internal static void ValidateExplicitDetach(
         IInterceptorSubjectContext? attachedContext,
-        SubjectAnchorKind anchor,
+        SubjectAttachmentAnchorKind anchor,
         IInterceptorSubjectContext context)
     {
-        if (anchor != SubjectAnchorKind.Explicit)
+        if (anchor != SubjectAttachmentAnchorKind.Explicit)
         {
             throw new InvalidOperationException("The subject has no explicit context anchor to detach.");
         }

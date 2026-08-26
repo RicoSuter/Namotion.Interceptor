@@ -141,7 +141,7 @@ public class InterceptorTests
             return true;
         }
 
-        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
+        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor)
         {
             _logs.Add($"{_name}: Attached");
         }

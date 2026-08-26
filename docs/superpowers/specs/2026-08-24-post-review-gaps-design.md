@@ -19,14 +19,14 @@ This gap predates the rewrite, but master papered over it: `RootManager` called 
 ```csharp
 public Foo(A a, B b, IInterceptorSubjectContext context) : this(a, b)
 {
-    InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAnchorKind.Provisional);
+    InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAttachmentAnchorKind.Provisional);
 }
 ```
 
 Rules:
 
 - Same accessibility as the constructor it mirrors.
-- `SubjectAnchorKind.Provisional`, matching the existing parameterless path. A subject built through a constructor is a root until a graph adopts it.
+- `SubjectAttachmentAnchorKind.Provisional`, matching the existing parameterless path. A subject built through a constructor is a root until a graph adopts it.
 - Skipped when the author already declares that exact signature, so a hand-written context constructor always wins.
 - The existing parameterless path is unchanged.
 

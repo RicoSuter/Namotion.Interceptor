@@ -34,7 +34,7 @@ public class DynamicSubjectBenchmark
 
         // Provisional, matching the anchor a context-taking constructor creates, which is the
         // shape the comparison base measures.
-        motor.AttachToContext(_context, SubjectAnchorKind.Provisional);
+        motor.AttachToContext(_context, SubjectAttachmentAnchorKind.Provisional);
         _motor = (IMotor)motor;
     }
     
@@ -51,7 +51,7 @@ public class DynamicSubjectBenchmark
     public void CreateDynamicSubject()
     {        
         var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor), typeof(ISensor));
-        subject.AttachToContext(_iterationContext!, SubjectAnchorKind.Provisional);
+        subject.AttachToContext(_iterationContext!, SubjectAttachmentAnchorKind.Provisional);
     }
     
     //[Benchmark]

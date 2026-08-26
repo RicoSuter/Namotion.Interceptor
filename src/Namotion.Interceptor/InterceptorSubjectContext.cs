@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Cache;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Ordering;
-using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor;
 

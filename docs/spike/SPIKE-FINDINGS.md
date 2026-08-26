@@ -324,7 +324,7 @@ P14 identified the multi-`SourceMonitor` paths. The rewrite found more: `PerProp
 The gate is one short-circuit in `LifecycleInterceptor.cs:566`:
 
 ```csharp
-var retained = ownership.Anchor != SubjectAnchorKind.None ||
+var retained = ownership.Anchor != SubjectAttachmentAnchorKind.None ||
                (count > 0 && IsReachableFromRoots(subject));
 ```
 

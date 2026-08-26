@@ -37,7 +37,7 @@ public class HandWrittenSubjectWriteTests
             return true;
         }
 
-        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
+        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor)
         {
             InterceptorSubjectExtensions.ApplyRootAnchor(subject, context, anchor);
         }
@@ -47,7 +47,7 @@ public class HandWrittenSubjectWriteTests
             var executor = subject.Executor;
             executor.TryGetAttachment(out var attachedContext, out var anchor, out var revision);
             InterceptorSubjectExtensions.ValidateExplicitDetach(attachedContext, anchor, context);
-            executor.TryUpdateAttachment(revision, attachedContext, SubjectAnchorKind.None, out _);
+            executor.TryUpdateAttachment(revision, attachedContext, SubjectAttachmentAnchorKind.None, out _);
         }
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)

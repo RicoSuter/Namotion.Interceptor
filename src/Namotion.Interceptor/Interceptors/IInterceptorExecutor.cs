@@ -21,9 +21,9 @@ public interface IInterceptorExecutor
 
     /// <summary>
     /// Gets what anchors the subject to <see cref="AttachedContext"/>. Always
-    /// <see cref="SubjectAnchorKind.None"/> when <see cref="AttachedContext"/> is null.
+    /// <see cref="SubjectAttachmentAnchorKind.None"/> when <see cref="AttachedContext"/> is null.
     /// </summary>
-    SubjectAnchorKind Anchor { get; }
+    SubjectAttachmentAnchorKind AttachmentAnchor { get; }
 
     /// <summary>
     /// Gets the attachment revision: monotonic per executor, incremented on every successful
@@ -35,11 +35,11 @@ public interface IInterceptorExecutor
     /// <summary>
     /// Applies an attachment transition with compare-and-swap semantics: succeeds only when
     /// <paramref name="expectedRevision"/> still equals <see cref="AttachmentRevision"/>, applies
-    /// <see cref="AttachedContext"/> and <see cref="Anchor"/> atomically and bumps the revision.
+    /// <see cref="AttachedContext"/> and <see cref="AttachmentAnchor"/> atomically and bumps the revision.
     /// This is the raw transition seam for lifecycle implementations outside this assembly.
     /// </summary>
     /// <remarks>
-    /// A null <paramref name="context"/> requires <see cref="SubjectAnchorKind.None"/>, and a
+    /// A null <paramref name="context"/> requires <see cref="SubjectAttachmentAnchorKind.None"/>, and a
     /// direct swap from one non-null context to a different non-null context is illegal (detach to
     /// null first); both are rejected before any state changes. Every successful call bumps the
     /// revision, even when it applies the values already in place.
@@ -51,10 +51,10 @@ public interface IInterceptorExecutor
     /// revision on failure so the caller can retry or give up.</param>
     /// <returns>True when the transition was applied; false when the expected revision was stale.</returns>
     /// <exception cref="InvalidOperationException">The requested state shape is illegal.</exception>
-    bool TryUpdateAttachment(long expectedRevision, IInterceptorSubjectContext? context, SubjectAnchorKind anchor, out long currentRevision);
+    bool TryUpdateAttachment(long expectedRevision, IInterceptorSubjectContext? context, SubjectAttachmentAnchorKind anchor, out long currentRevision);
 
     /// <summary>
-    /// Reads <see cref="AttachedContext"/>, <see cref="Anchor"/> and
+    /// Reads <see cref="AttachedContext"/>, <see cref="AttachmentAnchor"/> and
     /// <see cref="AttachmentRevision"/> as one coherent snapshot, taken under the executor's
     /// attachment monitor. Use this to observe the state a <see cref="TryUpdateAttachment"/>
     /// call should be based on; the individual getters are lock-free and coherent only on
@@ -64,7 +64,7 @@ public interface IInterceptorExecutor
     /// <param name="anchor">The anchor belonging to <paramref name="context"/>.</param>
     /// <param name="revision">The attachment revision the snapshot belongs to.</param>
     /// <returns>True when a context is attached. The out values are valid either way.</returns>
-    bool TryGetAttachment(out IInterceptorSubjectContext? context, out SubjectAnchorKind anchor, out long revision);
+    bool TryGetAttachment(out IInterceptorSubjectContext? context, out SubjectAttachmentAnchorKind anchor, out long revision);
 
     /// <summary>
     /// Gets a property value through the interceptor chain.

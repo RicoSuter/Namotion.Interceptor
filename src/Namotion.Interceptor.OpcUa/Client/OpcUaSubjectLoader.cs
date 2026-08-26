@@ -281,9 +281,7 @@ internal class OpcUaSubjectLoader
             // A provisional root: the asynchronous population below runs registered and
             // intercepted, and the assignment at the end provides the supporting edge that
             // clears the anchor, so no detach ceremony is needed.
-            var context = subject.GetContext();
-            context.GetService<ILifecycleInterceptor>()
-                .AttachSubjectToContext(subjectToLoad, context, SubjectAnchorKind.Provisional);
+            subjectToLoad.AttachToContext(subject.GetContext(), SubjectAttachmentAnchorKind.Provisional);
         }
 
         // Pre-attached children participate in the dedup cache too: any later sibling

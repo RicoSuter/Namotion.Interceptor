@@ -3,7 +3,7 @@ namespace Namotion.Interceptor;
 /// <summary>
 /// Describes what anchors a subject to its attached context.
 /// </summary>
-public enum SubjectAnchorKind
+public enum SubjectAttachmentAnchorKind
 {
     /// <summary>
     /// The subject carries no anchor. It is either unattached, or attached only through an

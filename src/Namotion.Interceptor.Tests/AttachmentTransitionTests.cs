@@ -17,7 +17,7 @@ public class AttachmentTransitionTests
 
         // Assert
         Assert.Null(executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.None, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.None, executor.AttachmentAnchor);
         Assert.Equal(0, executor.AttachmentRevision);
     }
 
@@ -30,14 +30,14 @@ public class AttachmentTransitionTests
         var revisionBefore = executor.AttachmentRevision;
 
         // Act
-        var success = executor.TryUpdateAttachment(revisionBefore, context, SubjectAnchorKind.Provisional, out var currentRevision);
+        var success = executor.TryUpdateAttachment(revisionBefore, context, SubjectAttachmentAnchorKind.Provisional, out var currentRevision);
 
         // Assert
         Assert.True(success);
         Assert.Equal(revisionBefore + 1, currentRevision);
         Assert.Equal(currentRevision, executor.AttachmentRevision);
         Assert.Same(context, executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.Provisional, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.Provisional, executor.AttachmentAnchor);
     }
 
     [Fact]
@@ -47,22 +47,22 @@ public class AttachmentTransitionTests
         var executor = CreateExecutor();
         var context = InterceptorSubjectContext.Create();
         var staleRevision = executor.AttachmentRevision;
-        Assert.True(executor.TryUpdateAttachment(staleRevision, context, SubjectAnchorKind.Explicit, out _));
+        Assert.True(executor.TryUpdateAttachment(staleRevision, context, SubjectAttachmentAnchorKind.Explicit, out _));
 
         // Act
-        var success = executor.TryUpdateAttachment(staleRevision, null, SubjectAnchorKind.None, out var currentRevision);
+        var success = executor.TryUpdateAttachment(staleRevision, null, SubjectAttachmentAnchorKind.None, out var currentRevision);
 
         // Assert
         Assert.False(success);
         Assert.Equal(executor.AttachmentRevision, currentRevision);
         Assert.Same(context, executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.Explicit, executor.AttachmentAnchor);
     }
 
     [Theory]
-    [InlineData(SubjectAnchorKind.Provisional)]
-    [InlineData(SubjectAnchorKind.Explicit)]
-    public void WhenContextIsNullWithAnAnchor_ThenTransitionThrowsBeforeAnyStateChange(SubjectAnchorKind anchor)
+    [InlineData(SubjectAttachmentAnchorKind.Provisional)]
+    [InlineData(SubjectAttachmentAnchorKind.Explicit)]
+    public void WhenContextIsNullWithAnAnchor_ThenTransitionThrowsBeforeAnyStateChange(SubjectAttachmentAnchorKind anchor)
     {
         // Arrange
         var executor = CreateExecutor();
@@ -72,7 +72,7 @@ public class AttachmentTransitionTests
         Assert.Throws<InvalidOperationException>(() => executor.TryUpdateAttachment(revisionBefore, null, anchor, out _));
         Assert.Equal(revisionBefore, executor.AttachmentRevision);
         Assert.Null(executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.None, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.None, executor.AttachmentAnchor);
     }
 
     [Fact]
@@ -82,15 +82,15 @@ public class AttachmentTransitionTests
         var executor = CreateExecutor();
         var firstContext = InterceptorSubjectContext.Create();
         var secondContext = InterceptorSubjectContext.Create();
-        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, firstContext, SubjectAnchorKind.Explicit, out _));
+        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, firstContext, SubjectAttachmentAnchorKind.Explicit, out _));
         var revisionBefore = executor.AttachmentRevision;
 
         // Act & Assert
         Assert.Throws<InvalidOperationException>(
-            () => executor.TryUpdateAttachment(revisionBefore, secondContext, SubjectAnchorKind.Explicit, out _));
+            () => executor.TryUpdateAttachment(revisionBefore, secondContext, SubjectAttachmentAnchorKind.Explicit, out _));
         Assert.Equal(revisionBefore, executor.AttachmentRevision);
         Assert.Same(firstContext, executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.Explicit, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.Explicit, executor.AttachmentAnchor);
     }
 
     [Fact]
@@ -103,18 +103,18 @@ public class AttachmentTransitionTests
 
         // Act & Assert: every successful transition bumps the revision, including across
         // detach and reattach, so revisions from before a detach stay comparable.
-        Assert.True(executor.TryUpdateAttachment(0, firstContext, SubjectAnchorKind.Explicit, out var afterAttach));
+        Assert.True(executor.TryUpdateAttachment(0, firstContext, SubjectAttachmentAnchorKind.Explicit, out var afterAttach));
         Assert.Equal(1, afterAttach);
 
-        Assert.True(executor.TryUpdateAttachment(afterAttach, null, SubjectAnchorKind.None, out var afterDetach));
+        Assert.True(executor.TryUpdateAttachment(afterAttach, null, SubjectAttachmentAnchorKind.None, out var afterDetach));
         Assert.Equal(2, afterDetach);
 
-        Assert.True(executor.TryUpdateAttachment(afterDetach, secondContext, SubjectAnchorKind.Provisional, out var afterReattach));
+        Assert.True(executor.TryUpdateAttachment(afterDetach, secondContext, SubjectAttachmentAnchorKind.Provisional, out var afterReattach));
         Assert.Equal(3, afterReattach);
 
         Assert.Equal(3, executor.AttachmentRevision);
         Assert.Same(secondContext, executor.AttachedContext);
-        Assert.Equal(SubjectAnchorKind.Provisional, executor.Anchor);
+        Assert.Equal(SubjectAttachmentAnchorKind.Provisional, executor.AttachmentAnchor);
     }
 
     [Fact]
@@ -124,10 +124,10 @@ public class AttachmentTransitionTests
         // so callers can rely on "revision unchanged" meaning "no transition attempt succeeded".
         var executor = CreateExecutor();
         var context = InterceptorSubjectContext.Create();
-        Assert.True(executor.TryUpdateAttachment(0, context, SubjectAnchorKind.None, out var firstRevision));
+        Assert.True(executor.TryUpdateAttachment(0, context, SubjectAttachmentAnchorKind.None, out var firstRevision));
 
         // Act
-        var success = executor.TryUpdateAttachment(firstRevision, context, SubjectAnchorKind.None, out var secondRevision);
+        var success = executor.TryUpdateAttachment(firstRevision, context, SubjectAttachmentAnchorKind.None, out var secondRevision);
 
         // Assert
         Assert.True(success);
@@ -143,19 +143,19 @@ public class AttachmentTransitionTests
 
         // Act
         var attachedBefore = executor.TryGetAttachment(out var contextBefore, out var anchorBefore, out var revisionBefore);
-        Assert.True(executor.TryUpdateAttachment(revisionBefore, context, SubjectAnchorKind.Provisional, out _));
+        Assert.True(executor.TryUpdateAttachment(revisionBefore, context, SubjectAttachmentAnchorKind.Provisional, out _));
         var attachedAfter = executor.TryGetAttachment(out var contextAfter, out var anchorAfter, out var revisionAfter);
 
         // Assert: the triple is read under one lock, so all three values belong together in
         // both snapshots.
         Assert.False(attachedBefore);
         Assert.Null(contextBefore);
-        Assert.Equal(SubjectAnchorKind.None, anchorBefore);
+        Assert.Equal(SubjectAttachmentAnchorKind.None, anchorBefore);
         Assert.Equal(0, revisionBefore);
 
         Assert.True(attachedAfter);
         Assert.Same(context, contextAfter);
-        Assert.Equal(SubjectAnchorKind.Provisional, anchorAfter);
+        Assert.Equal(SubjectAttachmentAnchorKind.Provisional, anchorAfter);
         Assert.Equal(revisionBefore + 1, revisionAfter);
     }
 
@@ -169,7 +169,7 @@ public class AttachmentTransitionTests
         var context = InterceptorSubjectContext.Create();
 
         // Act
-        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, context, SubjectAnchorKind.Provisional, out _));
+        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, context, SubjectAttachmentAnchorKind.Provisional, out _));
 
         // Assert
         Assert.Same(context, subject.TryGetContext());

@@ -238,7 +238,7 @@ public class DynamicSubjectTests
 
         // Attaches through the public raw seam, which is the whole third-party contract: no
         // Core internals are needed to implement a lifecycle.
-        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
+        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor)
         {
             var executor = subject.Executor;
             executor.TryGetAttachment(out _, out _, out var revision);
@@ -250,7 +250,7 @@ public class DynamicSubjectTests
         {
             var executor = subject.Executor;
             executor.TryGetAttachment(out _, out _, out var revision);
-            executor.TryUpdateAttachment(revision, null, SubjectAnchorKind.None, out _);
+            executor.TryUpdateAttachment(revision, null, SubjectAttachmentAnchorKind.None, out _);
             logs.Add($"{name}: Detached");
         }
 

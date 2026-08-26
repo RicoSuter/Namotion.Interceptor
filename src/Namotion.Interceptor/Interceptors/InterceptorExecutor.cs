@@ -1,7 +1,6 @@
 ﻿using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Cache;
-using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Interceptors;
 
@@ -62,7 +61,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     // tear.
     private readonly object _attachmentLock = new();
     private volatile InterceptorSubjectContext? _attachedContext;
-    private volatile SubjectAnchorKind _anchor;
+    private volatile SubjectAttachmentAnchorKind _anchor;
     private long _attachmentRevision;
 
     public InterceptorExecutor(IInterceptorSubject subject)
@@ -72,13 +71,13 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
 
     public IInterceptorSubjectContext? AttachedContext => _attachedContext;
 
-    public SubjectAnchorKind Anchor => _anchor;
+    public SubjectAttachmentAnchorKind AttachmentAnchor => _anchor;
 
     public long AttachmentRevision => Interlocked.Read(ref _attachmentRevision);
 
-    public bool TryUpdateAttachment(long expectedRevision, IInterceptorSubjectContext? context, SubjectAnchorKind anchor, out long currentRevision)
+    public bool TryUpdateAttachment(long expectedRevision, IInterceptorSubjectContext? context, SubjectAttachmentAnchorKind anchor, out long currentRevision)
     {
-        if (context is null && anchor != SubjectAnchorKind.None)
+        if (context is null && anchor != SubjectAttachmentAnchorKind.None)
         {
             throw new InvalidOperationException(
                 $"Cannot apply the anchor '{anchor}' without an attached context.");
@@ -119,7 +118,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         }
     }
 
-    public bool TryGetAttachment(out IInterceptorSubjectContext? context, out SubjectAnchorKind anchor, out long revision)
+    public bool TryGetAttachment(out IInterceptorSubjectContext? context, out SubjectAttachmentAnchorKind anchor, out long revision)
     {
         lock (_attachmentLock)
         {

@@ -127,10 +127,9 @@ public static class InterceptorHostingExtensions
         if (wasAdded)
         {
             var context = subject.TryGetContext();
-            var hostedServiceHandler = context?.TryGetService<HostedServiceHandler>();
-            if (hostedServiceHandler != null)
+            if (context?.TryGetService<HostedServiceHandler>() is { } hostedServiceHandler)
             {
-                await hostedServiceHandler.AttachHostedServiceAsync(hostedService, context!, cancellationToken);
+                await hostedServiceHandler.AttachHostedServiceAsync(hostedService, context, cancellationToken);
             }
         }
 

@@ -21,7 +21,7 @@ Stages 1 through 4 are done and committed.
 |---|---|
 | 1 | `LifecycleOwnershipBenchmark`, byte-identical to the comparison base arm |
 | 2 | `ISingletonContextService<TContract>` and singleton validation on `AddService`/`TryAddService` |
-| 3 | The additive attachment mechanism: exact context, `SubjectAnchorKind`, attachment revision with lock-free reads, the `TryUpdateAttachment` compare-and-swap seam, `TryGetContext`/`GetContext`/`AttachToContext`/`DetachFromContext`, the structural write route with its own terminal cache, and fail-closed generator routing |
+| 3 | The additive attachment mechanism: exact context, `SubjectAttachmentAnchorKind`, attachment revision with lock-free reads, the `TryUpdateAttachment` compare-and-swap seam, `TryGetContext`/`GetContext`/`AttachToContext`/`DetachFromContext`, the structural write route with its own terminal cache, and fail-closed generator routing |
 | 4 | Lifecycle ownership: occurrence-aware edges, backward-search reachability, deterministic release, lazy parent snapshots, decomposed into ten classes |
 | 6 | Absorbed into stage 3, as correction 3a specifies. Not a separate stage. |
 

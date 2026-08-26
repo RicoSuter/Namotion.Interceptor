@@ -167,9 +167,7 @@ internal static class SubjectUpdateApplier
     /// </summary>
     internal static void AttachAsProvisionalRoot(IInterceptorSubject newItem, IInterceptorSubject parent)
     {
-        var context = parent.GetContext();
-        context.GetService<ILifecycleInterceptor>()
-            .AttachSubjectToContext(newItem, context, SubjectAnchorKind.Provisional);
+        newItem.AttachToContext(parent.GetContext(), SubjectAttachmentAnchorKind.Provisional);
     }
 
     private static object? ConvertValue(object? value, Type targetType)

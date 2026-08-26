@@ -107,9 +107,9 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var metadata = property.Metadata;
         if (!metadata.Type.CanContainSubjects<TProperty>() || metadata.IsDerived || !metadata.IsIntercepted)
         {
-            // Scalar, derived or non-intercepted: never a graph edge. A derived value is a
-            // projection of edges the stored properties already own, so reconciling it would
-            // double-count every subject it exposes.
+            // Scalar, derived or non-intercepted: never a graph edge. [Derived] declares the
+            // value to be a function of other state, which makes the property a cache rather
+            // than the store of record, whether or not a backing field holds the result.
             next(ref context);
             return;
         }
@@ -176,7 +176,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             LifecycleScratch.Return(visited);
         }
 
-        if (!_graph.TryClaimDiscovered(claimed, null, SubjectAnchorKind.None))
+        if (!_graph.TryClaimDiscovered(claimed, null, SubjectAttachmentAnchorKind.None))
         {
             claimed.Clear();
             throw new InvalidOperationException(
@@ -254,7 +254,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     #region Explicit attach and detach
 
     /// <inheritdoc />
-    public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
+    public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor)
     {
         CallbackReentrancyGuard.ThrowIfInsideCallback();
 
@@ -263,7 +263,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             throw new InvalidOperationException("The subject cannot be attached through the lifecycle of another context.");
         }
 
-        if (anchor == SubjectAnchorKind.None)
+        if (anchor == SubjectAttachmentAnchorKind.None)
         {
             throw new InvalidOperationException("An attach without a root anchor would be released by the next reachability decision.");
         }
@@ -278,7 +278,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             {
                 // Already in this context: promote the anchor without repeating attach callbacks. A
                 // provisional request never promotes, it is only a construction-time default.
-                if (anchor != SubjectAnchorKind.Provisional)
+                if (anchor != SubjectAttachmentAnchorKind.Provisional)
                 {
                     _graph.SetAnchor(subject, anchor);
                 }
@@ -307,7 +307,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
             InterceptorSubjectExtensions.ValidateExplicitDetach(attachedContext, anchor, context);
 
-            _graph.SetAnchor(subject, SubjectAnchorKind.None);
+            _graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None);
 
             var ownership = _graph.TryGetOwnership(subject);
             if (ownership is null)
@@ -342,7 +342,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// Validates the component the subject opens up and claims every unattached subject in it, with
     /// the requested anchor on the root. Nothing is published, so a rejection leaves no residue.
     /// </summary>
-    private void ClaimComponentForRoot(IInterceptorSubject subject, SubjectAnchorKind anchor)
+    private void ClaimComponentForRoot(IInterceptorSubject subject, SubjectAttachmentAnchorKind anchor)
     {
         var visited = LifecycleScratch.RentSubjectSet();
         var unattached = LifecycleScratch.RentSubjectList();

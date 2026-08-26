@@ -173,7 +173,7 @@ internal static class SubjectCodeGenerator
             return;
         }
 
-        builder.AppendLine("        private IInterceptorExecutor? _context;");
+        builder.AppendLine("        private IInterceptorExecutor? _executor;");
         builder.AppendLine("        private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;");
         builder.AppendLine();
         // Explicit implementation for the same reason GetInstanceProperties is a method rather
@@ -181,7 +181,7 @@ internal static class SubjectCodeGenerator
         // public or protected instance property into an intercepted subject property, so a
         // non-explicit Executor would become a phantom property on every Castle-proxied subject.
         builder.AppendLine("        [JsonIgnore]");
-        builder.AppendLine("        IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);");
+        builder.AppendLine("        IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _executor, this);");
         builder.AppendLine();
         builder.AppendLine("        [JsonIgnore]");
         builder.AppendLine("        ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();");
@@ -288,8 +288,8 @@ internal static class SubjectCodeGenerator
             builder.AppendLine("        {");
             // A provisional root anchor, not an explicit one: dependency injection selects this
             // constructor for every subject it builds, and an explicit anchor would make each of
-            // them an unreleasable root. See SubjectAnchorKind.
-            builder.AppendLine("            InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAnchorKind.Provisional);");
+            // them an unreleasable root. See SubjectAttachmentAnchorKind.
+            builder.AppendLine("            InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAttachmentAnchorKind.Provisional);");
             builder.AppendLine("        }");
             builder.AppendLine();
         }
@@ -314,7 +314,7 @@ internal static class SubjectCodeGenerator
             // Provisional, matching the parameterless form above: dependency injection selects
             // this constructor for every subject it builds, and an explicit anchor would make each
             // an unreleasable root.
-            builder.AppendLine($"            InterceptorSubjectExtensions.AttachToContext(this, {contextParameterName}, SubjectAnchorKind.Provisional);");
+            builder.AppendLine($"            InterceptorSubjectExtensions.AttachToContext(this, {contextParameterName}, SubjectAttachmentAnchorKind.Provisional);");
             builder.AppendLine("        }");
             builder.AppendLine();
         }
@@ -531,27 +531,27 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
         builder.AppendLine($"        {HidingModifier(metadata, MemberNames.GetPropertyValue)}{modifier} TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)");
         builder.AppendLine("        {");
-        builder.AppendLine("            return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;");
+        builder.AppendLine("            return _executor is not null ? _executor.GetPropertyValue(propertyName, readValue)! : readValue(this)!;");
         builder.AppendLine("        }");
         builder.AppendLine();
         builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
         builder.AppendLine($"        {HidingModifier(metadata, MemberNames.SetPropertyValue)}{modifier} bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)");
         builder.AppendLine("        {");
-        builder.AppendLine("            if (_context is null)");
+        builder.AppendLine("            if (_executor is null)");
         builder.AppendLine("            {");
         builder.AppendLine("                setValue(this, newValue);");
         builder.AppendLine("                return true;");
         builder.AppendLine("            }");
         builder.AppendLine("            else");
         builder.AppendLine("            {");
-        builder.AppendLine("                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);");
+        builder.AppendLine("                return _executor.SetPropertyValue(propertyName, newValue, currentValue, setValue);");
         builder.AppendLine("            }");
         builder.AppendLine("        }");
         builder.AppendLine();
         builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
         builder.AppendLine($"        {HidingModifier(metadata, MemberNames.InvokeMethod)}{modifier} object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)");
         builder.AppendLine("        {");
-        builder.AppendLine("            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);");
+        builder.AppendLine("            return _executor is not null ? _executor.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);");
         builder.AppendLine("        }");
     }
 }

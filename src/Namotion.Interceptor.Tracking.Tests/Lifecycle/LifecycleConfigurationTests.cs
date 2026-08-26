@@ -275,7 +275,7 @@ public class LifecycleConfigurationTests
         {
         }
 
-        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
+        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor)
             => throw new NotSupportedException();
 
         public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)

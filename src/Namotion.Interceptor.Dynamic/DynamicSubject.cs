@@ -7,14 +7,14 @@ namespace Namotion.Interceptor.Dynamic;
 
 public class DynamicSubject : IInterceptorSubject
 {
-    private IInterceptorExecutor? _context;
+    private IInterceptorExecutor? _executor;
     private IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties;
 
     public DynamicSubject(IInterceptorSubjectContext context) : this()
     {
         // A provisional root anchor, matching the generated context-taking constructor; see
-        // SubjectAnchorKind for why constructors do not create explicit roots.
-        this.AttachToContext(context, SubjectAnchorKind.Provisional);
+        // SubjectAttachmentAnchorKind for why constructors do not create explicit roots.
+        this.AttachToContext(context, SubjectAttachmentAnchorKind.Provisional);
     }
 
     public DynamicSubject()
@@ -32,7 +32,7 @@ public class DynamicSubject : IInterceptorSubject
     // intercepted subject property, so a public or protected Executor would become a phantom
     // property on every Castle-proxied subject.
     [JsonIgnore]
-    IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _context, this);
+    IInterceptorExecutor IInterceptorSubject.Executor => InterceptorExecutor.GetOrCreate(ref _executor, this);
 
     [JsonIgnore] ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
 

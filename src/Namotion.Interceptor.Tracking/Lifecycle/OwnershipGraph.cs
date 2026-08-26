@@ -262,7 +262,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     public bool IsAnchored(IInterceptorSubject subject)
     {
         var executor = subject.Executor;
-        return executor.Anchor != SubjectAnchorKind.None && ReferenceEquals(executor.AttachedContext, Context);
+        return executor.AttachmentAnchor != SubjectAttachmentAnchorKind.None && ReferenceEquals(executor.AttachedContext, Context);
     }
 
     /// <summary>
@@ -270,7 +270,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     /// competing context owns it, which is a lost race rather than a caller error and is answered by
     /// releasing this operation's own claims.
     /// </summary>
-    public bool TryClaim(IInterceptorSubject subject, SubjectAnchorKind anchor)
+    public bool TryClaim(IInterceptorSubject subject, SubjectAttachmentAnchorKind anchor)
     {
         var executor = subject.Executor;
         while (true)
@@ -284,8 +284,8 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
                 }
 
                 // Already ours: never weaken the anchor a previous claim or an explicit attach set.
-                if (anchor == SubjectAnchorKind.None || currentAnchor == anchor ||
-                    currentAnchor == SubjectAnchorKind.Explicit)
+                if (anchor == SubjectAttachmentAnchorKind.None || currentAnchor == anchor ||
+                    currentAnchor == SubjectAttachmentAnchorKind.Explicit)
                 {
                     return true;
                 }
@@ -310,7 +310,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
                 return;
             }
 
-            if (executor.TryUpdateAttachment(revision, null, SubjectAnchorKind.None, out _))
+            if (executor.TryUpdateAttachment(revision, null, SubjectAttachmentAnchorKind.None, out _))
             {
                 return;
             }
@@ -327,12 +327,12 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
         while (true)
         {
             executor.TryGetAttachment(out var attachedContext, out var anchor, out var revision);
-            if (!ReferenceEquals(attachedContext, Context) || anchor != SubjectAnchorKind.Provisional)
+            if (!ReferenceEquals(attachedContext, Context) || anchor != SubjectAttachmentAnchorKind.Provisional)
             {
                 return;
             }
 
-            if (executor.TryUpdateAttachment(revision, Context, SubjectAnchorKind.None, out _))
+            if (executor.TryUpdateAttachment(revision, Context, SubjectAttachmentAnchorKind.None, out _))
             {
                 return;
             }
@@ -340,7 +340,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     }
 
     /// <summary>Promotes the subject's anchor, used by an explicit attach on an inherited subject.</summary>
-    public void SetAnchor(IInterceptorSubject subject, SubjectAnchorKind anchor)
+    public void SetAnchor(IInterceptorSubject subject, SubjectAttachmentAnchorKind anchor)
     {
         var executor = subject.Executor;
         while (true)
@@ -466,12 +466,12 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     /// Claims every discovered unattached subject. A lost race releases the claims this call made
     /// and reports failure, so the caller can throw before touching the backing property.
     /// </summary>
-    public bool TryClaimDiscovered(List<IInterceptorSubject> unattached, IInterceptorSubject? explicitRoot, SubjectAnchorKind rootAnchor)
+    public bool TryClaimDiscovered(List<IInterceptorSubject> unattached, IInterceptorSubject? explicitRoot, SubjectAttachmentAnchorKind rootAnchor)
     {
         for (var i = 0; i < unattached.Count; i++)
         {
             var subject = unattached[i];
-            var anchor = ReferenceEquals(subject, explicitRoot) ? rootAnchor : SubjectAnchorKind.None;
+            var anchor = ReferenceEquals(subject, explicitRoot) ? rootAnchor : SubjectAttachmentAnchorKind.None;
             if (TryClaim(subject, anchor))
             {
                 continue;

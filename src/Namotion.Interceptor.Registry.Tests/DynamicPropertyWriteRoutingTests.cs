@@ -39,7 +39,7 @@ public class DynamicPropertyWriteRoutingTests
             return true;
         }
 
-        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAnchorKind anchor)
+        public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor)
         {
             var executor = subject.Executor;
             executor.TryGetAttachment(out _, out _, out var revision);
@@ -50,7 +50,7 @@ public class DynamicPropertyWriteRoutingTests
         {
             var executor = subject.Executor;
             executor.TryGetAttachment(out _, out _, out var revision);
-            executor.TryUpdateAttachment(revision, null, SubjectAnchorKind.None, out _);
+            executor.TryUpdateAttachment(revision, null, SubjectAttachmentAnchorKind.None, out _);
         }
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)

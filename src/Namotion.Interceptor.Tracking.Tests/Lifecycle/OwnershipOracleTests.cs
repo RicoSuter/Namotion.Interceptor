@@ -124,7 +124,7 @@ public class OwnershipOracleTests
                 return $"{Name(subject)}.Children = []";
 
             case 4:
-                if (subject.TryGetContext() is null || ((IInterceptorSubject)subject).Executor.Anchor != SubjectAnchorKind.Explicit)
+                if (subject.TryGetContext() is null || ((IInterceptorSubject)subject).Executor.AttachmentAnchor != SubjectAttachmentAnchorKind.Explicit)
                 {
                     subject.AttachToContext(context);
                     return $"{Name(subject)}.AttachToContext()";
@@ -133,7 +133,7 @@ public class OwnershipOracleTests
                 return $"({Name(subject)} already explicit)";
 
             default:
-                if (((IInterceptorSubject)subject).Executor.Anchor == SubjectAnchorKind.Explicit)
+                if (((IInterceptorSubject)subject).Executor.AttachmentAnchor == SubjectAttachmentAnchorKind.Explicit)
                 {
                     subject.DetachFromContext(context);
                     return $"{Name(subject)}.DetachFromContext()";
@@ -204,7 +204,7 @@ public class OwnershipOracleTests
         foreach (var subject in universe)
         {
             var executor = ((IInterceptorSubject)subject).Executor;
-            if (executor.Anchor != SubjectAnchorKind.None && ReferenceEquals(executor.AttachedContext, context))
+            if (executor.AttachmentAnchor != SubjectAttachmentAnchorKind.None && ReferenceEquals(executor.AttachedContext, context))
             {
                 pending.Push(subject);
             }

@@ -158,7 +158,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public LifecycleInterceptor(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public event System.Action<Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange>? SubjectAttached;
         public event System.Action<Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange>? SubjectDetaching;
-        public void AttachSubjectToContext(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context, Namotion.Interceptor.SubjectAnchorKind anchor) { }
+        public void AttachSubjectToContext(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context, Namotion.Interceptor.SubjectAttachmentAnchorKind anchor) { }
         public void DetachSubjectFromContext(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public void EnterStructuralWriteGate() { }
         public void ExitStructuralWriteGate() { }

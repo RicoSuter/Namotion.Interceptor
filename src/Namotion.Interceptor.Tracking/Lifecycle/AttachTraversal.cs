@@ -53,7 +53,7 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
         }
         else
         {
-            if (!graph.TryClaim(subject, SubjectAnchorKind.None))
+            if (!graph.TryClaim(subject, SubjectAttachmentAnchorKind.None))
             {
                 throw new InvalidOperationException(
                     $"The subject '{subject.GetType().Name}' is owned by a different context and cannot join this graph.");
@@ -132,7 +132,7 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
     private void ConsumeProvisionalAnchor(IInterceptorSubject subject, PropertyReference property)
     {
         var executor = subject.Executor;
-        if (executor.Anchor != SubjectAnchorKind.Provisional || !ReferenceEquals(executor.AttachedContext, graph.Context))
+        if (executor.AttachmentAnchor != SubjectAttachmentAnchorKind.Provisional || !ReferenceEquals(executor.AttachedContext, graph.Context))
         {
             return;
         }

@@ -205,8 +205,8 @@ public class DynamicPropertyLifecycleTests
     public void WhenDynamicDerivedPropertyReturnsSubject_ThenItEstablishesNoOwnershipEdge()
     {
         // Arrange: a dynamic derived property that returns a subject reference (a computed "first
-        // child"). A derived value is a projection of edges the underlying stored properties
-        // already own, so it must not add another parent edge: only Children carries ownership.
+        // child"). [Derived] declares a cache rather than the store of record, so it must not add
+        // another parent edge: only Children carries ownership.
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
