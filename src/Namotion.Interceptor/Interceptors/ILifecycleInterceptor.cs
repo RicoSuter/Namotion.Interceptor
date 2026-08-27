@@ -10,6 +10,11 @@ namespace Namotion.Interceptor.Interceptors;
 /// A third-party implementation may store any graph representation and choose its own
 /// synchronization model. It observes structural writes through <see cref="IWriteInterceptor"/> and
 /// applies ownership through the raw executor transitions, so it needs no Tracking internals.
+///
+/// The seam covers ownership transitions only. Everything layered on top of them, the parent
+/// projection, the reference count, the attach and detach events, and therefore the registry and
+/// the connectors, binds to the built-in implementation rather than to this interface. Replacing
+/// it yields a working ownership model without those.
 /// </remarks>
 public interface ILifecycleInterceptor :
     IWriteInterceptor,
