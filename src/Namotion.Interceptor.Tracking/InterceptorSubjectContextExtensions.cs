@@ -19,8 +19,7 @@ public static class InterceptorSubjectContextExtensions
     public static IInterceptorSubjectContext WithFullPropertyTracking(this IInterceptorSubjectContext context)
     {
         // Lifecycle first, so a lifecycle conflict throws before any dependent service is
-        // published. Chain order is unaffected: every write interceptor here is pinned by its
-        // ordering attributes, not by registration order.
+        // published.
         return context
             .WithLifecycle()
             .WithEqualityCheck()

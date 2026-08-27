@@ -13,9 +13,6 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// Commit-owned synchronous local replay remains allowed, including property hooks, change handlers,
 /// and derived cascades initiated by that replay. This authorization does not extend into these callbacks.
 /// Disposed and terminal transactions are inactive and use normal property access semantics.
-///
-/// The writer slot is a singleton authority: the commit resolves exactly one writer, so every
-/// implementation reserves the slot on its context and a second registration throws.
 /// </remarks>
 public interface ITransactionWriter : ISingletonContextService<ITransactionWriter>
 {

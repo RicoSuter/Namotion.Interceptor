@@ -109,9 +109,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return;
         }
 
-        // This instance is the singleton transaction interceptor of the context whose chain is
-        // executing the write, which is the subject's attached context, so an instance comparison
-        // is the whole containment check.
+        // Singleton per context, so instance identity is context identity.
         if (!ReferenceEquals(this, transaction.Interceptor))
         {
             throw new InvalidOperationException(

@@ -16,11 +16,7 @@ namespace Namotion.Interceptor.Registry;
 /// ancestor of a subject already registered. Detach does not mirror that; see the design doc and
 /// "Handler Order Around the Descent" in docs/design/tracking-lifecycle.md.
 ///
-/// The registry is the singleton authority for <see cref="ISubjectRegistry"/> on its context: it
-/// holds the one projection every consumer navigates, so a second one would silently split that
-/// view. That is enforced rather than asserted, because each of the contracts it implements
-/// derives from <see cref="ISingletonContextService{TContract}"/>, which makes a competing
-/// registration on the same context throw. It remains a projection only; no registry state participates in ownership or reachability.
+/// A projection only: no registry state participates in ownership or reachability.
 /// </remarks>
 [RunsBefore(typeof(LifecycleInterceptor))]
 public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler

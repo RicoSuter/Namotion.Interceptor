@@ -2,8 +2,7 @@
 
 /// <summary>
 /// A registry which tracks subjects and their child subjects, property attributes and additional metadata.
-/// The singleton authority for the registry slot on its context: it holds the one projection every
-/// consumer navigates, so any implementation reserves the slot and a second registration throws.
+/// Holds the one projection every consumer navigates, so a second one would silently split that view.
 /// </summary>
 public interface ISubjectRegistry : ISingletonContextService<ISubjectRegistry>
 {
