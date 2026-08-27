@@ -19,10 +19,9 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// </remarks>
 [RunsBefore(typeof(LifecycleInterceptor))]
 // Outer of the change interceptor so the cascade recalculation runs after that interceptor has
-// dispatched: a triggering write is announced before the derived recalculations it causes. The
-// edge was only load-bearing when fallback aggregation could interleave instances from several
-// contexts; with one instance per chain the registration order already produces this nesting, so
-// the attribute is documentation of a required order rather than an active constraint.
+// dispatched: a triggering write is announced before the derived recalculations it causes.
+// Registration order already produces this nesting, so the attribute pins the required order
+// rather than correcting one.
 [RunsBefore(typeof(PropertyChangeInterceptor))]
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler,
     ISingletonContextService<DerivedPropertyChangeHandler>
