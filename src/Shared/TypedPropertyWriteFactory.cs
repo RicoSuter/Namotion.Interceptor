@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 
-namespace Namotion.Interceptor.Dynamic;
+namespace Namotion.Interceptor;
 
 /// <summary>
 /// Builds the boxed metadata setter of a dynamically registered property. The value arrives
@@ -9,10 +9,17 @@ namespace Namotion.Interceptor.Dynamic;
 /// as structural and put scalar writes through the lifecycle gate on every update. Instead the
 /// setter is built once per property, via one cached typed factory per declared type, to call
 /// the public typed write entry with the declared type as the generic argument, so the write
-/// routes and runs exactly like a generated property of that type. Duplicated from
-/// Namotion.Interceptor.Registry on purpose: the two assemblies share no reference besides the
-/// core, and these few lines are cheaper than new public surface there.
+/// routes and runs exactly like a generated property of that type.
 /// </summary>
+/// <remarks>
+/// One source file linked into every assembly that needs it, rather than a type in the core
+/// assembly: the consumers share no reference besides the core, and this is an implementation
+/// detail of dynamic property registration rather than a contract worth freezing as public API.
+///
+/// The generic instantiation is built at runtime, so a value-typed property is not Native AOT
+/// safe: the setter for a declared type the compiler never saw instantiated has no native code
+/// to call. Reference-typed properties are unaffected, because they share one instantiation.
+/// </remarks>
 internal static class TypedPropertyWriteFactory
 {
     private delegate Action<IInterceptorSubject, object?> SetterFactory(

@@ -119,5 +119,5 @@ public interface IInterceptorExecutor
     /// </summary>
     /// <param name="registration">The registration carrying the batch; its subject must be the
     /// subject this executor belongs to.</param>
-    void AddProperties(SubjectPropertyRegistrationContext registration);
+    void AddProperties(SubjectPropertyRegistration registration);
 }

@@ -525,7 +525,7 @@ public class AddPropertiesLifecycleTests
         var root = new Person(context) { FirstName = "R" };
         var subject = (IInterceptorSubject)root;
         var publisherCalls = 0;
-        var registration = new SubjectPropertyRegistrationContext(
+        var registration = new SubjectPropertyRegistration(
             subject, [CreateScalarProperty("A")], _ => publisherCalls++);
 
         // Act
@@ -546,9 +546,9 @@ public class AddPropertiesLifecycleTests
         var foreign = new Person(foreignContext) { FirstName = "F" };
         var publisherCalls = 0;
 
-        var duplicateRegistration = new SubjectPropertyRegistrationContext(
+        var duplicateRegistration = new SubjectPropertyRegistration(
             subject, [CreateScalarProperty("FirstName")], _ => publisherCalls++);
-        var foreignRegistration = new SubjectPropertyRegistrationContext(
+        var foreignRegistration = new SubjectPropertyRegistration(
             subject, [CreateStructuralProperty("Foreign", _ => foreign)], _ => publisherCalls++);
 
         // Act & Assert

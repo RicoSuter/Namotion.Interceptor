@@ -18,7 +18,7 @@ namespace Namotion.Interceptor.Interceptors;
 /// be exception-free and only assign the lookup. A continuation that mutates other state and then
 /// throws violates the publication contract and no rollback is attempted.
 /// </remarks>
-public sealed class SubjectPropertyRegistrationContext
+public sealed class SubjectPropertyRegistration
 {
     private readonly IEnumerable<SubjectPropertyMetadata> _properties;
     private readonly Action<IReadOnlyDictionary<string, SubjectPropertyMetadata>> _publishProperties;
@@ -32,7 +32,7 @@ public sealed class SubjectPropertyRegistrationContext
     /// <param name="properties">The caller's metadata sequence; see the class remarks for its contract.</param>
     /// <param name="publishProperties">The continuation that assigns the complete merged lookup;
     /// see the class remarks for its contract.</param>
-    public SubjectPropertyRegistrationContext(
+    public SubjectPropertyRegistration(
         IInterceptorSubject subject,
         IEnumerable<SubjectPropertyMetadata> properties,
         Action<IReadOnlyDictionary<string, SubjectPropertyMetadata>> publishProperties)

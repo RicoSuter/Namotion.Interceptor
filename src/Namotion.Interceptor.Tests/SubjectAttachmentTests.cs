@@ -16,7 +16,7 @@ public class SubjectAttachmentTests
         public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
 
         // No ownership work in the probe: publishing the metadata is the whole admission.
-        public bool TryAddProperties(SubjectPropertyRegistrationContext registration)
+        public bool TryAddProperties(SubjectPropertyRegistration registration)
         {
             registration.Publish();
             return true;

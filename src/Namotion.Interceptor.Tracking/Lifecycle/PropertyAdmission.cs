@@ -20,7 +20,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// </remarks>
 internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconciler reconciler, AttachTraversal attach)
 {
-    public void Admit(SubjectPropertyRegistrationContext registration)
+    public void Admit(SubjectPropertyRegistration registration)
     {
         var subject = registration.Subject;
         var batch = registration.GetProperties();
@@ -115,7 +115,7 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
     /// subject's pending context-attach publication snapshots the then-current property set and
     /// fans it out, new properties included; fanning out here would run them twice.
     /// </remarks>
-    public void AdmitUnowned(SubjectPropertyRegistrationContext registration)
+    public void AdmitUnowned(SubjectPropertyRegistration registration)
     {
         var subject = registration.Subject;
         if (!graph.AreBaselinesSeeded(subject))

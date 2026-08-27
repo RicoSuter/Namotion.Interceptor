@@ -281,7 +281,7 @@ public class LifecycleConfigurationTests
         public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
             => throw new NotSupportedException();
 
-        public bool TryAddProperties(SubjectPropertyRegistrationContext registration)
+        public bool TryAddProperties(SubjectPropertyRegistration registration)
             => throw new NotSupportedException();
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)

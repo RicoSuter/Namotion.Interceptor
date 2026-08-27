@@ -9,11 +9,6 @@ namespace Namotion.Interceptor;
 /// Used as a fast pre-filter to avoid unnecessary work on types that cannot hold subjects
 /// (e.g., primitives, strings, simple value types).
 /// </summary>
-/// <remarks>
-/// Lives in the Core assembly so that runtime write routing (the Dynamic proxy interceptor) and
-/// the lifecycle share one classifier, but keeps the Namotion.Interceptor.Tracking namespace it
-/// always had so no consumer using directive changes.
-/// </remarks>
 public static class SubjectPropertyTypeExtensions
 {
     // Cross-cache reads are safe under concurrent GetOrAdd because every classifier is a pure

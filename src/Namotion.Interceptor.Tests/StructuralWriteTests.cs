@@ -74,7 +74,7 @@ public class StructuralWriteTests
 
         public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
 
-        public bool TryAddProperties(SubjectPropertyRegistrationContext registration) =>
+        public bool TryAddProperties(SubjectPropertyRegistration registration) =>
             throw new NotSupportedException("The probe admits no properties.");
 
         public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor) =>

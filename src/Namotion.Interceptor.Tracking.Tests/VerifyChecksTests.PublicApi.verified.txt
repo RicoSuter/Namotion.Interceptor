@@ -165,7 +165,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Parent.SubjectParent> GetParents(Namotion.Interceptor.IInterceptorSubject subject) { }
         public int GetReferenceCount(Namotion.Interceptor.IInterceptorSubject subject) { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
-        public bool TryAddProperties(Namotion.Interceptor.Interceptors.SubjectPropertyRegistrationContext registration) { }
+        public bool TryAddProperties(Namotion.Interceptor.Interceptors.SubjectPropertyRegistration registration) { }
         public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
     }
     public static class LifecycleInterceptorExtensions

@@ -43,7 +43,7 @@ using System.Text.Json.Serialization;
 
         void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
         {
-            ((IInterceptorSubject)this).Executor.AddProperties(new SubjectPropertyRegistrationContext(
+            ((IInterceptorSubject)this).Executor.AddProperties(new SubjectPropertyRegistration(
                 this, properties, published => _properties = published));
         }
 

@@ -43,7 +43,7 @@ public class DynamicSubject : IInterceptorSubject
         // Routed through the executor so an attached subject's lifecycle can admit metadata,
         // ownership edges and property callbacks as one atomic publication.
         var subject = (IInterceptorSubject)this;
-        subject.Executor.AddProperties(new SubjectPropertyRegistrationContext(
+        subject.Executor.AddProperties(new SubjectPropertyRegistration(
             subject, properties, published => _properties = published));
     }
 }

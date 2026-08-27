@@ -348,7 +348,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     }
 
     /// <inheritdoc />
-    public void AddProperties(SubjectPropertyRegistrationContext registration)
+    public void AddProperties(SubjectPropertyRegistration registration)
     {
         if (!ReferenceEquals(registration.Subject, _subject))
         {

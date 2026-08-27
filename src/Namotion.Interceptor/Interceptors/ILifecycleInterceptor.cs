@@ -94,5 +94,5 @@ public interface ILifecycleInterceptor :
     /// another context (rejected before enumeration, because taking a second lifecycle gate there
     /// can deadlock against opposing callbacks), a property name is duplicated, or part of the
     /// captured component belongs to a different context.</exception>
-    bool TryAddProperties(SubjectPropertyRegistrationContext registration);
+    bool TryAddProperties(SubjectPropertyRegistration registration);
 }

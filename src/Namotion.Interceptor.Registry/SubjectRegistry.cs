@@ -18,7 +18,9 @@ namespace Namotion.Interceptor.Registry;
 ///
 /// The registry is the singleton authority for <see cref="ISubjectRegistry"/> on its context: it
 /// holds the one projection every consumer navigates, so a second one would silently split that
-/// view. It remains a projection only; no registry state participates in ownership or reachability.
+/// view. That is enforced rather than asserted, because each of the contracts it implements
+/// derives from <see cref="ISingletonContextService{TContract}"/>, which makes a competing
+/// registration on the same context throw. It remains a projection only; no registry state participates in ownership or reachability.
 /// </remarks>
 [RunsBefore(typeof(LifecycleInterceptor))]
 public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler

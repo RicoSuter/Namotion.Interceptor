@@ -31,7 +31,7 @@ public class HandWrittenSubjectWriteTests
 
         public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
 
-        public bool TryAddProperties(SubjectPropertyRegistrationContext registration)
+        public bool TryAddProperties(SubjectPropertyRegistration registration)
         {
             registration.Publish();
             return true;

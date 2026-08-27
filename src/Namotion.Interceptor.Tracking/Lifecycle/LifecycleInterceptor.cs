@@ -186,7 +186,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     }
 
     /// <inheritdoc />
-    public bool TryAddProperties(SubjectPropertyRegistrationContext registration)
+    public bool TryAddProperties(SubjectPropertyRegistration registration)
     {
         // Reject a cross-context callback before the gate and before the input is enumerated: a
         // thread inside another lifecycle's callback holds that lifecycle's gate, so blocking on

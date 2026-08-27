@@ -196,7 +196,7 @@ internal static class SubjectCodeGenerator
         // context merges from the interface's Properties, which is what lets this method live in
         // the root: the merge starts from the most derived DefaultProperties instead of this
         // class's own.
-        builder.AppendLine("            ((IInterceptorSubject)this).Executor.AddProperties(new SubjectPropertyRegistrationContext(");
+        builder.AppendLine("            ((IInterceptorSubject)this).Executor.AddProperties(new SubjectPropertyRegistration(");
         builder.AppendLine("                this, properties, published => _properties = published));");
         builder.AppendLine("        }");
         builder.AppendLine();

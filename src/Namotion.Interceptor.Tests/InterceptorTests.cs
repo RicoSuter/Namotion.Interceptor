@@ -135,7 +135,7 @@ public class InterceptorTests
             _logs = logs;
         }
 
-        public bool TryAddProperties(SubjectPropertyRegistrationContext registration)
+        public bool TryAddProperties(SubjectPropertyRegistration registration)
         {
             registration.Publish();
             return true;
