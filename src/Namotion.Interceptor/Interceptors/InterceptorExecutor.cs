@@ -188,7 +188,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         // The routing flag and the chain index are two fields of one per-type static class, read
         // together and threaded down, so a write pays for the generic statics access exactly once.
         var propertyTypeIndex = InterceptorSubjectContext.PropertyTypeIndex<TProperty>.Value;
-        if (InterceptorSubjectContext.PropertyTypeIndex<TProperty>.IsStructural)
+        if (InterceptorSubjectContext.PropertyTypeIndex<TProperty>.CanContainSubjects)
         {
             return SetStructuralPropertyValue(propertyName, newValue, currentValue, writeValue, propertyTypeIndex);
         }

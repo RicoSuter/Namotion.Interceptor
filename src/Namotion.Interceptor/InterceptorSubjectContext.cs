@@ -42,7 +42,7 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
         // callers (the registry's dynamic setters and the dynamic proxy) instantiate this entry
         // with the declared type via a cached typed delegate rather than write as object.
         // ReSharper disable once StaticMemberInGenericType
-        internal static readonly bool IsStructural = typeof(TProperty).CanContainSubjects();
+        internal static readonly bool CanContainSubjects = typeof(TProperty).CanContainSubjects();
     }
 
     // Closed ISingletonContextService<TContract> interfaces per implementation type, discovered
