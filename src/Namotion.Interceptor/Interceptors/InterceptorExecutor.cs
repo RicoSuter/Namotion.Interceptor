@@ -4,6 +4,11 @@ using Namotion.Interceptor.Cache;
 
 namespace Namotion.Interceptor.Interceptors;
 
+/// <summary>
+/// The built-in <see cref="IInterceptorExecutor"/>, one per subject and published on first access
+/// through <see cref="GetOrCreate"/>. It additionally owns the per-subject state the interface
+/// cannot express: the terminal lock, the commit revision, and the attachment monitor.
+/// </summary>
 public sealed class InterceptorExecutor : IInterceptorExecutor
 {
     private readonly IInterceptorSubject _subject;
@@ -64,17 +69,27 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     private volatile SubjectAttachmentAnchorKind _anchor;
     private long _attachmentRevision;
 
+    /// <summary>
+    /// Creates an executor for <paramref name="subject"/>. Prefer <see cref="GetOrCreate"/>, which
+    /// publishes exactly one executor per subject; a second instance would split the commit
+    /// revision and the terminal lock.
+    /// </summary>
+    /// <param name="subject">The subject this executor runs interception for.</param>
     public InterceptorExecutor(IInterceptorSubject subject)
     {
         _subject = subject;
     }
 
+    /// <inheritdoc />
     public IInterceptorSubjectContext? AttachedContext => _attachedContext;
 
+    /// <inheritdoc />
     public SubjectAttachmentAnchorKind AttachmentAnchor => _anchor;
 
+    /// <inheritdoc />
     public long AttachmentRevision => Interlocked.Read(ref _attachmentRevision);
 
+    /// <inheritdoc />
     public bool TryUpdateAttachment(long expectedRevision, IInterceptorSubjectContext? context, SubjectAttachmentAnchorKind anchor, out long currentRevision)
     {
         if (context is null && anchor != SubjectAttachmentAnchorKind.None)
@@ -118,6 +133,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         }
     }
 
+    /// <inheritdoc />
     public bool TryGetAttachment(out IInterceptorSubjectContext? context, out SubjectAttachmentAnchorKind anchor, out long revision)
     {
         lock (_attachmentLock)
@@ -167,6 +183,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             WriteInterceptorFactory<TProperty>.Create(ImmutableArray<IWriteInterceptor>.Empty);
     }
 
+    /// <inheritdoc />
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
     {
@@ -182,6 +199,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         return attachedContext.ExecuteInterceptedRead(ref context, readValue);
     }
 
+    /// <inheritdoc />
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue)
     {
@@ -386,6 +404,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         }
     }
 
+    /// <inheritdoc />
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public object? InvokeMethod(string methodName, object?[] parameters, Func<IInterceptorSubject, object?[], object?> invokeMethod)
     {
