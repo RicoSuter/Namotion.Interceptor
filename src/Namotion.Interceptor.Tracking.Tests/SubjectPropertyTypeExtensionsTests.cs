@@ -137,48 +137,6 @@ public class SubjectPropertyTypeExtensionsTests
         Assert.False(isDictionary);
     }
 
-    [Fact]
-    public void WhenGenericTPropertyIsPrimitive_ThenReturnsFalseWithoutCacheLookup()
-    {
-        // Arrange: the generic overload short-circuits on JIT-constant typeof(TProperty)
-        // checks for primitives, avoiding the ConcurrentDictionary lookup entirely.
-        var type = typeof(Person);
-
-        // Act & Assert
-        Assert.False(type.CanContainSubjects<int>());
-        Assert.False(type.CanContainSubjects<bool>());
-        Assert.False(type.CanContainSubjects<double>());
-        Assert.False(type.CanContainSubjects<long>());
-    }
-
-    [Fact]
-    public void WhenGenericTPropertyIsCommonValueType_ThenReturnsFalse()
-    {
-        // Arrange: non-primitive value types listed in the generic fast path.
-        var type = typeof(Person);
-
-        // Act & Assert
-        Assert.False(type.CanContainSubjects<decimal>());
-        Assert.False(type.CanContainSubjects<string>());
-        Assert.False(type.CanContainSubjects<DateTime>());
-        Assert.False(type.CanContainSubjects<DateTimeOffset>());
-        Assert.False(type.CanContainSubjects<TimeSpan>());
-        Assert.False(type.CanContainSubjects<Guid>());
-    }
-
-    [Fact]
-    public void WhenGenericTPropertyIsSubjectType_ThenFallsBackToRuntimeCheck()
-    {
-        // Arrange: TProperty is not a primitive/value type, so the generic fast path
-        // falls through to the runtime CanContainSubjects(Type) check.
-        var subjectType = typeof(Person);
-        var nonSubjectType = typeof(int);
-
-        // Act & Assert
-        Assert.True(subjectType.CanContainSubjects<Person>());
-        Assert.True(subjectType.CanContainSubjects<object>());
-        Assert.False(nonSubjectType.CanContainSubjects<object>());
-    }
 
     private sealed class NonSubjectPlainClass
     {

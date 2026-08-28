@@ -9,29 +9,21 @@ namespace Namotion.Interceptor.Registry.Tests;
 /// <see cref="RegisteredSubject.AddProperty"/>: their metadata setter loses the compile-time
 /// property type (values travel boxed), so the routing must come from the declared type given at
 /// registration. A scalar-declared dynamic property (source telemetry, say) must write on the
-/// scalar route without paying the lifecycle gate, while a subject-capable one must take the full
-/// structural protocol.
+/// scalar route, while a subject-capable one must take the structural protocol.
 /// </summary>
 public class DynamicPropertyWriteRoutingTests
 {
     /// <summary>
-    /// A minimal faithful lifecycle that counts gate entries and chain executions, so a test can
-    /// observe on which side of the structural routing a write ran.
+    /// A minimal faithful lifecycle that records its chain executions, the compile-time property
+    /// type of each, and whether the commit happened inside its next() frame, so a test can
+    /// observe which route a dynamic write took and that the lifecycle sits terminal-adjacent in
+    /// the compiled chain.
     /// </summary>
-    private sealed class GateCountingLifecycle : ILifecycleInterceptor
+    private sealed class ChainObservingLifecycle : ILifecycleInterceptor
     {
-        private readonly object _structuralWriteGate = new();
-
-        public int GateEnterCount;
-        public int WritePropertyCount;
-
-        public void EnterStructuralWriteGate()
-        {
-            Monitor.Enter(_structuralWriteGate);
-            Interlocked.Increment(ref GateEnterCount);
-        }
-
-        public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
+        public readonly List<Type> WrittenPropertyTypes = [];
+        public readonly List<bool> CommitObservations = [];
+        public List<string>? ExecutionLog;
 
         public bool TryAddProperties(SubjectPropertyRegistration registration)
         {
@@ -55,17 +47,28 @@ public class DynamicPropertyWriteRoutingTests
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
         {
-            Interlocked.Increment(ref WritePropertyCount);
+            ExecutionLog?.Add("lifecycle");
+            WrittenPropertyTypes.Add(typeof(TProperty));
+            next(ref context);
+            CommitObservations.Add(context.IsWritten);
+        }
+    }
+
+    private sealed class OrderRecordingInterceptor(List<string> log) : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            log.Add("recorder");
             next(ref context);
         }
     }
 
     [Fact]
-    public void WhenDynamicPropertyDeclaredTypeIsScalar_ThenWriteTakesNoLifecycleGate()
+    public void WhenDynamicPropertyDeclaredTypeIsScalar_ThenWriteRunsTheChainOnTheScalarRoute()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        var probe = new GateCountingLifecycle();
+        var probe = new ChainObservingLifecycle();
         context.AddService(probe);
 
         IInterceptorSubject person = new Person();
@@ -82,20 +85,25 @@ public class DynamicPropertyWriteRoutingTests
         // Act
         person.Properties["Temperature"].SetValue!(person, 42.0);
 
-        // Assert: the scalar declared type keeps the dynamic write off the structural protocol
-        // even though the value arrives boxed; the chain itself still runs.
-        Assert.Equal(0, probe.GateEnterCount);
-        Assert.Equal(1, probe.WritePropertyCount);
+        // Assert: the chain ran once with the declared scalar type even though the value arrived
+        // boxed, which is what keeps the dynamic write off the structural protocol: the cached
+        // typed delegate instantiated the write entry with the declared type, and that type
+        // routes scalar.
+        Assert.Equal([typeof(double)], probe.WrittenPropertyTypes);
+        Assert.Equal([true], probe.CommitObservations);
         Assert.Equal(42.0, storedValue);
     }
 
     [Fact]
-    public void WhenDynamicPropertyDeclaredTypeCanContainSubjects_ThenWriteTakesTheLifecycleGate()
+    public void WhenDynamicPropertyDeclaredTypeCanContainSubjects_ThenWriteTakesTheStructuralRouteWithTheLifecycleLast()
     {
-        // Arrange
+        // Arrange: the recorder registers after the lifecycle and carries no ordering attributes,
+        // so the chain partition must still execute it upstream of the lifecycle.
         var context = InterceptorSubjectContext.Create();
-        var probe = new GateCountingLifecycle();
+        var log = new List<string>();
+        var probe = new ChainObservingLifecycle { ExecutionLog = log };
         context.AddService(probe);
+        context.AddService<IWriteInterceptor>(new OrderRecordingInterceptor(log));
 
         IInterceptorSubject person = new Person();
         person.AttachToContext(context);
@@ -113,10 +121,13 @@ public class DynamicPropertyWriteRoutingTests
         // Act
         person.Properties["Buddy"].SetValue!(person, buddy);
 
-        // Assert: the subject-capable declared type takes the structural protocol, the gate
-        // before the chain, so a racing attach or detach orders against this write.
-        Assert.Equal(1, probe.GateEnterCount);
-        Assert.Equal(1, probe.WritePropertyCount);
+        // Assert: the subject-capable declared type takes the structural route (the chain ran
+        // with the declared type, not object), the lifecycle executed terminal-adjacent, and the
+        // commit happened inside its next() frame, which is the seam a racing attach or detach
+        // orders against.
+        Assert.Equal(["recorder", "lifecycle"], log);
+        Assert.Equal([typeof(Person)], probe.WrittenPropertyTypes);
+        Assert.Equal([true], probe.CommitObservations);
         Assert.Same(buddy, storedValue);
     }
 }

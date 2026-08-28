@@ -208,8 +208,9 @@ public class StructuralWriteLockOrderTests
     public void WhenDetachedSubjectTakesAStructuralWrite_ThenTheWriteLandsAndReattachDiscoversIt()
     {
         // Arrange: a subject that was attached and released again keeps its executor, so its
-        // structural writes take the unattached fast path: only the attachment monitor, no chain,
-        // no lifecycle. The value lands in the backing store and is discovered by the next attach.
+        // structural writes take the unattached route: the zero-interceptor chain, whose terminal
+        // commits under the null rule with no lifecycle work. The value lands in the backing
+        // store and is discovered by the next attach.
         var context = CreateContext();
         var root = new Person(context) { FirstName = "Root" };
         var child = new Person { FirstName = "Child" };

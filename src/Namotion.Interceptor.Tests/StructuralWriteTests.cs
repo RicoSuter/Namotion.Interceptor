@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+using Namotion.Interceptor.Cache;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tests;
@@ -8,13 +10,14 @@ public class StructuralWriteTests
     // writes a subject-typed property; the scalar comparisons write an int one.
 
     /// <summary>
-    /// Performs an attachment transition through the raw seam from inside the write chain, while
-    /// the executor holds the attachment monitor. The monitor is reentrant on the writing thread,
-    /// so this is the one shape that can transition the attachment mid-write.
+    /// Performs an attachment transition through the raw seam from inside the write chain,
+    /// deterministically on the writing thread itself, so the write is provably routed for an
+    /// attachment it no longer has when the terminal runs.
     /// </summary>
     private sealed class AttachmentTransitionInterceptor : IWriteInterceptor
     {
         public IInterceptorExecutor? Executor;
+        public bool? ObservedIsWritten;
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
         {
@@ -22,23 +25,29 @@ public class StructuralWriteTests
             // resolve this very chain, and a direct swap to another context is rejected by design.
             Assert.True(Executor!.TryUpdateAttachment(Executor.AttachmentRevision, null, SubjectAttachmentAnchorKind.None, out _));
             next(ref context);
+            ObservedIsWritten = context.IsWritten;
         }
     }
 
     /// <summary>
-    /// Pauses the writing thread inside the chain so the test thread can transition the attachment
-    /// while the write is provably between entry and terminal.
+    /// Pauses the writing thread inside the chain so the test thread can act while the write is
+    /// provably between entry and terminal, and records per execution whether that execution's
+    /// terminal committed, so an aborted attempt is visible as a non-committing chain execution.
     /// </summary>
     private sealed class GatingWriteInterceptor : IWriteInterceptor
     {
         public readonly ManualResetEventSlim ReachedChain = new(false);
         public readonly ManualResetEventSlim ResumeWrite = new(false);
+        public int Executions;
+        public readonly List<bool> CommitObservations = [];
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
         {
+            Interlocked.Increment(ref Executions);
             ReachedChain.Set();
             Assert.True(ResumeWrite.Wait(TimeSpan.FromSeconds(30)));
             next(ref context);
+            CommitObservations.Add(context.IsWritten);
         }
     }
 
@@ -53,26 +62,25 @@ public class StructuralWriteTests
         }
     }
 
+    private sealed class NoOpWriteInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+        }
+    }
+
     /// <summary>
-    /// Counts on which side of the structural routing decision this lifecycle ran: a gate entry
-    /// means the routing saw it, a chain execution means the compiled write chain contained it.
-    /// The graph entry points throw because the registering test never attaches or admits anything
-    /// through the probe, and a silent no-op there would hide a scenario defect.
+    /// A probe lifecycle for the late-registration scenarios: counts its chain executions and
+    /// records whether each of its next() calls committed, so a test observes both that the
+    /// compiled chain contained it and that the commit happened inside its frame. The graph entry
+    /// points throw because the registering test never attaches or admits anything through the
+    /// probe, and a silent no-op there would hide a scenario defect.
     /// </summary>
     private sealed class CountingLifecycleInterceptor : ILifecycleInterceptor
     {
-        private readonly object _structuralWriteGate = new();
-
-        public int GateEnterCount;
         public int WritePropertyCount;
-
-        public void EnterStructuralWriteGate()
-        {
-            Monitor.Enter(_structuralWriteGate);
-            Interlocked.Increment(ref GateEnterCount);
-        }
-
-        public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
+        public readonly List<bool> CommitObservations = [];
 
         public bool TryAddProperties(SubjectPropertyRegistration registration) =>
             throw new NotSupportedException("The probe admits no properties.");
@@ -87,6 +95,65 @@ public class StructuralWriteTests
         {
             Interlocked.Increment(ref WritePropertyCount);
             next(ref context);
+            CommitObservations.Add(context.IsWritten);
+        }
+    }
+
+    /// <summary>
+    /// Detaches the subject and re-attaches it to the opposite context on every chain execution,
+    /// before the terminal can evaluate its commit predicate, so every attempt of the write
+    /// aborts and re-routes. Registered on both contexts, this is the deliberate ping-pong shape
+    /// the attempt bound exists for.
+    /// </summary>
+    private sealed class PingPongTransitionInterceptor : IWriteInterceptor
+    {
+        public IInterceptorExecutor? Executor;
+        public IInterceptorSubjectContext? Other;
+        public int Transitions;
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            Assert.True(Executor!.TryUpdateAttachment(Executor.AttachmentRevision, null, SubjectAttachmentAnchorKind.None, out _));
+            Assert.True(Executor.TryUpdateAttachment(Executor.AttachmentRevision, Other, SubjectAttachmentAnchorKind.Explicit, out _));
+            Transitions++;
+            next(ref context);
+        }
+    }
+
+    /// <summary>
+    /// Moves the subject to the other context exactly once, forcing the write through one aborted
+    /// attempt whose retry commits through the other context's chain.
+    /// </summary>
+    private sealed class SingleTransitionInterceptor : IWriteInterceptor
+    {
+        public IInterceptorExecutor? Executor;
+        public IInterceptorSubjectContext? Other;
+        private bool _transitioned;
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (!_transitioned)
+            {
+                _transitioned = true;
+                Assert.True(Executor!.TryUpdateAttachment(Executor.AttachmentRevision, null, SubjectAttachmentAnchorKind.None, out _));
+                Assert.True(Executor.TryUpdateAttachment(Executor.AttachmentRevision, Other, SubjectAttachmentAnchorKind.Explicit, out _));
+            }
+
+            next(ref context);
+        }
+    }
+
+    private sealed class OriginCapturingInterceptor : IWriteInterceptor
+    {
+        public ChangeOriginKind? ObservedOriginKind;
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            if (context.IsWritten)
+            {
+                ObservedOriginKind = context.Origin.Kind;
+            }
         }
     }
 
@@ -147,9 +214,10 @@ public class StructuralWriteTests
     public void WhenAttachmentChangesBetweenEntryAndTerminal_ThenStructuralWriteStillCommits()
     {
         // Arrange: the interceptor transitions the attachment mid-chain, deterministically on the
-        // writing thread itself. The attachment monitor is reentrant on that thread, so this is
-        // the one shape that can move the attachment inside the protocol; it must order rather
-        // than fail, because the write was validated for the attachment it entered with.
+        // writing thread itself. The write was routed and validated for the attachment it entered
+        // with, so the terminal's null rule commits it in the same pass rather than failing it or
+        // re-routing: the subject is unattached at commit time, and the commit is ordered against
+        // any future claim by the attachment monitor.
         var transitioning = new AttachmentTransitionInterceptor();
         var context = InterceptorSubjectContext.Create();
         context.AddService(transitioning);
@@ -161,148 +229,269 @@ public class StructuralWriteTests
         // Act
         var written = executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => backingWritten = true);
 
-        // Assert
+        // Assert: single-pass commit-through, observed by the transitioning chain's own
+        // interceptor rather than only by the final state, so a retry-committed write (which
+        // would leave the first chain's IsWritten false) cannot pass.
         Assert.True(written);
         Assert.True(backingWritten);
+        Assert.True(transitioning.ObservedIsWritten);
         var property = new PropertyReference((IInterceptorSubject)subject, "Child");
         Assert.True(property.TryGetWriteState(true, out var commitRevision, out _));
         Assert.Equal(1, commitRevision);
     }
 
     [Fact]
-    public void WhenConcurrentDetachRacesAStructuralWrite_ThenTheDetachWaitsAndBothComplete()
+    public void WhenConcurrentDetachRacesAStructuralWrite_ThenTheDetachCompletesAndTheWriteCommitsUnattached()
     {
-        // Arrange: the writer pauses inside the chain while it holds the attachment monitor, so a
-        // concurrent attachment transition must queue on that monitor instead of invalidating the
-        // in-flight write. This is the ordering the deleted attachment-revision guard used to turn
-        // into an exception.
+        // Arrange: the writer pauses inside its chain. The write path holds no lock across the
+        // chain, so the raw detach must complete while the write is parked, and the parked write
+        // then commits through the terminal's null rule in the same pass: the writer neither
+        // throws nor loses the write, and no retry runs.
         var gate = new GatingWriteInterceptor();
         var context = InterceptorSubjectContext.Create();
         context.AddService(gate);
         var subject = new StructuralHolder(context);
         var executor = GetExecutor(subject);
         var backingWritten = false;
+        var written = false;
         Exception? writerException = null;
 
         var writer = new Thread(() =>
         {
             try
             {
-                executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => backingWritten = true);
+                written = executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => backingWritten = true);
             }
             catch (Exception exception)
             {
                 writerException = exception;
             }
         });
+        writer.IsBackground = true;
 
-        var detachStarting = new ManualResetEventSlim(false);
-        var detachCompleted = new ManualResetEventSlim(false);
-        var detacher = new Thread(() =>
-        {
-            var revision = executor.AttachmentRevision;
-            detachStarting.Set();
-            executor.TryUpdateAttachment(revision, null, SubjectAttachmentAnchorKind.None, out _);
-            detachCompleted.Set();
-        });
-
-        // Act: start the detach while the writer is provably between entry and terminal.
+        // Act: detach while the writer is provably between entry and terminal. The transition
+        // must succeed immediately; under the old scope it parked on the attachment monitor
+        // until the write completed.
         writer.Start();
         Assert.True(gate.ReachedChain.Wait(TimeSpan.FromSeconds(30)));
-        detacher.Start();
-
-        // The detach must not complete while the write holds the attachment monitor. Waiting for
-        // the detacher to reach the transition first keeps the negative wait from passing
-        // vacuously on a thread that never got scheduled.
-        Assert.True(detachStarting.Wait(TimeSpan.FromSeconds(30)));
-        Assert.False(detachCompleted.Wait(TimeSpan.FromMilliseconds(100)));
+        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, null, SubjectAttachmentAnchorKind.None, out _));
+        Assert.Null(executor.AttachedContext);
 
         gate.ResumeWrite.Set();
         Assert.True(writer.Join(TimeSpan.FromSeconds(30)), "the structural write did not complete");
-        Assert.True(detacher.Join(TimeSpan.FromSeconds(30)), "the attachment transition did not complete");
 
-        // Assert: the write committed and the detach landed after it.
+        // Assert
         Assert.Null(writerException);
+        Assert.True(written);
         Assert.True(backingWritten);
-        Assert.True(detachCompleted.IsSet);
+        Assert.Equal(1, gate.Executions);
+        Assert.Equal([true], gate.CommitObservations);
         Assert.Null(executor.AttachedContext);
     }
 
     [Fact]
-    public void WhenLifecycleIsRegisteredWhileAStructuralWriteWaitsForTheMonitor_ThenThatWriteSeesItNowhere()
+    public void WhenLifecycleIsRegisteredWhileAStructuralWriteIsInFlight_ThenTheWriteReRoutesAndCommitsThroughIt()
     {
-        // Arrange: the routing decision and the write chain must derive from one context state.
-        // A lifecycle registered between the routing resolution and the chain resolution would
-        // otherwise sit in the chain but not in the routing, and its WriteProperty would take the
-        // structural gate inside the attachment monitor, inverting the documented lock order.
-        //
-        // Warm up the whole no-lifecycle structural path first, so the raced writer below executes
-        // only jitted code between its start and the attachment monitor.
-        var warmupGate = new GatingWriteInterceptor();
-        warmupGate.ResumeWrite.Set();
-        var warmupContext = InterceptorSubjectContext.Create();
-        warmupContext.AddService(warmupGate);
-        GetExecutor(new StructuralHolder(warmupContext)).SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => { });
-
+        // Arrange: a chain resolved before a lifecycle registration carries no gate section, so
+        // committing it after the registration would bypass the gate a concurrent
+        // post-registration write holds. The terminal's currency check re-routes exactly that
+        // shape. The routing-equals-chain invariant stays pinned in its new form: within any
+        // single attempt the probe is in the chain if and only if the commit predicate accepted
+        // that attempt's state, so the probe-free attempt does not commit and the probe-carrying
+        // retry does.
         var gate = new GatingWriteInterceptor();
         var context = InterceptorSubjectContext.Create();
         context.AddService(gate);
         var subject = new StructuralHolder(context);
         var executor = GetExecutor(subject);
         var probe = new CountingLifecycleInterceptor();
+        var committed = false;
 
-        var monitorHolderCommitted = false;
-        var monitorHolder = new Thread(() =>
-            executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => monitorHolderCommitted = true));
-        monitorHolder.IsBackground = true;
+        var writer = new Thread(() =>
+            executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => committed = true));
+        writer.IsBackground = true;
 
-        var racedWriteCommitted = false;
-        var racedWriter = new Thread(() =>
-            executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => racedWriteCommitted = true));
-        racedWriter.IsBackground = true;
-
-        // Act: the first write pauses inside its chain, holding the attachment monitor. The raced
-        // write then resolves its routing (no lifecycle yet) and parks on that monitor.
-        monitorHolder.Start();
+        // Act: park the write inside its chain, which pins the attempt's chain to the
+        // pre-registration state, then register the probe lifecycle and resume.
+        writer.Start();
         Assert.True(gate.ReachedChain.Wait(TimeSpan.FromSeconds(30)));
-
-        racedWriter.Start();
-
-        // WaitSleepJoin is a positive observation of the park: the warmed-up path between Start
-        // and the monitor contains no other managed blocking point, and the gate-entry assert
-        // below catches the residual misordering where the park happened before the routing read.
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-        while ((racedWriter.ThreadState & System.Threading.ThreadState.WaitSleepJoin) == 0)
-        {
-            Assert.True(DateTime.UtcNow < deadline, "the raced writer never parked on the attachment monitor");
-            Thread.Yield();
-        }
-
-        // The registration lands after the raced write resolved its routing and before it resolves
-        // its chain, which is exactly the window the pinned state has to close.
         context.AddService(probe);
         gate.ResumeWrite.Set();
+        Assert.True(writer.Join(TimeSpan.FromSeconds(30)), "the raced write did not complete");
 
-        Assert.True(monitorHolder.Join(TimeSpan.FromSeconds(30)), "the monitor-holding write did not complete");
-        Assert.True(racedWriter.Join(TimeSpan.FromSeconds(30)), "the raced write did not complete");
-
-        // Assert: scenario validity first. Had the raced routing seen the probe, it would have
-        // entered the gate, and the run would prove nothing about the window.
-        Assert.True(probe.GateEnterCount == 0,
-            "the probe was registered before the raced write resolved its routing, so the race was not established");
-
-        // The raced write sees the late lifecycle nowhere: not in the routing (above) and not in
-        // the chain. A chain resolved from a fresh state instead of the routing's pinned state
-        // would have run the probe here, without its gate.
-        Assert.Equal(0, probe.WritePropertyCount);
-        Assert.True(monitorHolderCommitted);
-        Assert.True(racedWriteCommitted);
-
-        // The next write pins a fresh state and sees the probe on both sides: the routing enters
-        // its gate and the chain runs it.
-        executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => { });
-        Assert.Equal(1, probe.GateEnterCount);
+        // Assert: the first attempt executed its chain without committing (the aborted attempt is
+        // visible as a non-committing chain execution), and the retry committed through the probe
+        // exactly once.
+        Assert.Equal(2, gate.Executions);
+        Assert.Equal([false, true], gate.CommitObservations);
         Assert.Equal(1, probe.WritePropertyCount);
+        Assert.Equal([true], probe.CommitObservations);
+        Assert.True(committed);
+    }
+
+    [Fact]
+    public void WhenAPlainServiceIsRegisteredWhileAStructuralWriteIsInFlight_ThenTheWriteCommitsWithoutReRouting()
+    {
+        // Arrange: the counterpart scoping pin. A registration that changes the compiled write
+        // chain but carries no lock obligation (any service that is not a lifecycle) must leave
+        // the in-flight write alone: the already-resolved chain commits and never re-runs, and
+        // the late interceptor is seen by the next write.
+        var gate = new GatingWriteInterceptor();
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(gate);
+        var subject = new StructuralHolder(context);
+        var executor = GetExecutor(subject);
+        var committed = false;
+
+        var writer = new Thread(() => executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => committed = true));
+        writer.IsBackground = true;
+
+        // Act
+        writer.Start();
+        Assert.True(gate.ReachedChain.Wait(TimeSpan.FromSeconds(30)));
+        context.AddService(new NoOpWriteInterceptor());
+        gate.ResumeWrite.Set();
+        Assert.True(writer.Join(TimeSpan.FromSeconds(30)), "the write did not complete");
+
+        // Assert
+        Assert.True(committed);
+        Assert.Equal(1, gate.Executions);
+        Assert.Equal([true], gate.CommitObservations);
+    }
+
+    [Fact]
+    public void WhenTheSubjectMovesToAnotherContextMidChain_ThenTheWriteReRoutesThroughTheNewContextsChain()
+    {
+        // Arrange: a cross-thread transition to another context between routing and terminal. The
+        // old context's chain ran only the aborted, non-committing attempt (its interceptors
+        // dispatch nothing), and the retry commits through the new context's chain, whose
+        // interceptors observe the committed write.
+        var gate = new GatingWriteInterceptor();
+        var contextA = InterceptorSubjectContext.Create();
+        contextA.AddService(gate);
+        var observer = new RevisionCapturingInterceptor();
+        var contextB = InterceptorSubjectContext.Create();
+        contextB.AddService(observer);
+
+        var subject = new StructuralHolder(contextA);
+        var executor = GetExecutor(subject);
+        var committed = false;
+        var written = false;
+
+        var writer = new Thread(() =>
+        {
+            written = executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => committed = true);
+        });
+        writer.IsBackground = true;
+
+        // Act: move the subject while the write is parked mid-chain; a direct swap is rejected,
+        // so the raw transition detaches first.
+        writer.Start();
+        Assert.True(gate.ReachedChain.Wait(TimeSpan.FromSeconds(30)));
+        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, null, SubjectAttachmentAnchorKind.None, out _));
+        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, contextB, SubjectAttachmentAnchorKind.Explicit, out _));
+        gate.ResumeWrite.Set();
+        Assert.True(writer.Join(TimeSpan.FromSeconds(30)), "the write did not complete");
+
+        // Assert
+        Assert.True(written);
+        Assert.True(committed);
+        Assert.Equal(1, gate.Executions);
+        Assert.Equal([false], gate.CommitObservations);
+        Assert.Equal([1L], observer.Revisions);
+    }
+
+    [Fact]
+    public void WhenTheExpectedContextWasClearedAndTheSubjectIsReattached_ThenTheTerminalReRoutesInsteadOfCommitting()
+    {
+        // Arrange: pins the null rule's boundary at the terminal itself. The lifecycle's
+        // write-through arm clears ExpectedAttachedContext after observing a released subject, so
+        // a subject re-attached (even to the same context) before the commit must fail the
+        // predicate and re-route; committing would land a value the re-attach seeding already
+        // read past. This drives the terminal directly with the state that arm produces, because
+        // no seam exists between the arm and the terminal to park a thread in.
+        var context = InterceptorSubjectContext.Create();
+        var subject = new StructuralHolder(context);
+        var executor = (InterceptorExecutor)GetExecutor(subject);
+        var terminal = WriteInterceptorFactory<StructuralHolder?>.Create(ImmutableArray<IWriteInterceptor>.Empty);
+        var backingWritten = false;
+
+        var writeContext = new PropertyWriteContext<StructuralHolder?>(
+            executor, new PropertyReference((IInterceptorSubject)subject, "Child"), null, new StructuralHolder());
+        writeContext.IsStructuralRoute = true;
+        writeContext.ExpectedAttachedContext = null;
+
+        // Act: the subject is attached while the terminal expects it unattached.
+        terminal(ref writeContext, (_, _) => backingWritten = true);
+
+        // Assert
+        Assert.True(writeContext.AttachmentMoved);
+        Assert.False(writeContext.IsWritten);
+        Assert.False(backingWritten);
+        Assert.Equal(0, executor.Revision);
+    }
+
+    [Fact]
+    public void WhenAnInterceptorTransitionsTheSubjectOnEveryAttempt_ThenTheWriteThrowsAfterTheAttemptBound()
+    {
+        // Arrange: the deliberate ping-pong shape. Every attempt's chain moves the subject to the
+        // opposite context before the terminal, so every attempt aborts; the bounded loop must
+        // answer with the diagnostic instead of the silent unvalidated write-through this shape
+        // used to get.
+        var contextA = InterceptorSubjectContext.Create();
+        var contextB = InterceptorSubjectContext.Create();
+        var interceptorA = new PingPongTransitionInterceptor { Other = contextB };
+        var interceptorB = new PingPongTransitionInterceptor { Other = contextA };
+        contextA.AddService(interceptorA);
+        contextB.AddService(interceptorB);
+
+        var subject = new StructuralHolder(contextA);
+        var executor = GetExecutor(subject);
+        interceptorA.Executor = executor;
+        interceptorB.Executor = executor;
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, _) => { }));
+        Assert.Contains(nameof(StructuralHolder), exception.Message);
+        Assert.Contains("Child", exception.Message);
+        Assert.Equal(InterceptorExecutor.MaxWriteRouteAttempts, interceptorA.Transitions + interceptorB.Transitions);
+    }
+
+    [Fact]
+    public void WhenASourceStampedWriteIsForcedThroughOneAbort_ThenTheCommittedStateKeepsTheSourceOrigin()
+    {
+        // Arrange: one deterministic abort. The first context's interceptor moves the subject to
+        // the second context once, so the first attempt aborts and the retry commits through the
+        // other chain. The retry threads the already-consumed origin through instead of consuming
+        // the drained thread-static slot again, so the committed state still records the source.
+        var contextA = InterceptorSubjectContext.Create();
+        var contextB = InterceptorSubjectContext.Create();
+        var mover = new SingleTransitionInterceptor { Other = contextB };
+        contextA.AddService(mover);
+        var capturing = new OriginCapturingInterceptor();
+        contextB.AddService(capturing);
+
+        var subject = new StructuralHolder(contextA);
+        var executor = GetExecutor(subject);
+        mover.Executor = executor;
+
+        var child = new StructuralHolder();
+        var property = new PropertyReference((IInterceptorSubject)subject, "Child");
+        using var scope = PendingOrigin.Set(property, ChangeOrigin.FromSource(new object()), child);
+
+        // Act
+        var written = executor.SetPropertyValue("Child", child, null, (_, _) => { });
+
+        // Assert: the committing chain observed the source origin, and the write state counts the
+        // commit as a source commit (revision visible with source commits included, invisible
+        // without).
+        Assert.True(written);
+        Assert.Equal(ChangeOriginKind.FromSource, capturing.ObservedOriginKind);
+        Assert.True(property.TryGetWriteState(true, out var withSourceCommits, out _));
+        Assert.Equal(1, withSourceCommits);
+        Assert.True(property.TryGetWriteState(false, out var withoutSourceCommits, out _));
+        Assert.Equal(0, withoutSourceCommits);
     }
 
     [Fact]
@@ -346,10 +535,33 @@ public class StructuralWriteTests
     }
 
     [Fact]
-    public void WhenAttachedSubjectTakesAStructuralWrite_ThenItRunsTheChainUnderTheAttachmentMonitor()
+    public void WhenUnattachedStructuralWriteGoesThroughTheExecutor_ThenItConsumesACommitRevisionAndStampsWriteState()
     {
-        // Arrange: once a context is attached the write runs the ordinary chain inside the
-        // attachment monitor, so it consumes a commit revision and stamps write state.
+        // Arrange: a subject with a published executor but no context. The write runs the
+        // zero-interceptor chain rather than bypassing the terminal, so the commit revision and
+        // the write state publish exactly as on the scalar route, and a later attach's seeding
+        // can rank against the commit.
+        var subject = new StructuralHolder();
+        var executor = GetExecutor(subject);
+        StructuralHolder? structuralValue = null;
+
+        // Act
+        var written = executor.SetPropertyValue("Child", new StructuralHolder(), null, (_, value) => structuralValue = value);
+
+        // Assert
+        Assert.True(written);
+        Assert.NotNull(structuralValue);
+        Assert.Equal(1, ((InterceptorExecutor)executor).Revision);
+        var property = new PropertyReference((IInterceptorSubject)subject, "Child");
+        Assert.True(property.TryGetWriteState(true, out var commitRevision, out _));
+        Assert.Equal(1, commitRevision);
+    }
+
+    [Fact]
+    public void WhenAttachedSubjectTakesAStructuralWrite_ThenItConsumesACommitRevisionAndStampsWriteState()
+    {
+        // Arrange: once a context is attached the write runs the ordinary chain and its terminal,
+        // so it consumes a commit revision and stamps write state.
         var holder = new StructuralHolder(InterceptorSubjectContext.Create());
 
         // Act

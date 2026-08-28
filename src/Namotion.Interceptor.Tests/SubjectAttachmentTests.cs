@@ -9,11 +9,6 @@ public class SubjectAttachmentTests
         public int AttachCount;
         public int DetachCount;
 
-        private readonly object _structuralWriteGate = new();
-
-        public void EnterStructuralWriteGate() => Monitor.Enter(_structuralWriteGate);
-
-        public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
 
         // No ownership work in the probe: publishing the metadata is the whole admission.
         public bool TryAddProperties(SubjectPropertyRegistration registration)

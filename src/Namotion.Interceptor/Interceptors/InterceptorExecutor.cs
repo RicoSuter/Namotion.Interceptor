@@ -50,12 +50,15 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     // a volatile load, not a monitor).
     //
     // Lock order, stated once here and cross-referenced everywhere else: the structural write
-    // protocol is lifecycle gate, then _attachmentLock, then SyncRoot (the terminal). The gate
-    // must come first: a write that entered this monitor before the gate deadlocks against a
-    // removal that holds the gate and releases this subject's claim through this same monitor.
-    // The attachment transitions (TryUpdateAttachment, TryGetAttachment) take _attachmentLock
-    // alone and run no foreign code while holding it, so they are leaf acquisitions, and nothing
-    // enters _attachmentLock while holding a SyncRoot.
+    // protocol acquires lifecycle gate, then _attachmentLock, then SyncRoot, and no library path
+    // acquires in any other order. The write path holds no lock across the interceptor chain: the
+    // lifecycle takes the gate inside the chain (it is the last interceptor in every compiled
+    // write chain), and the terminal takes this monitor for the commit predicate and the commit
+    // only, releasing it before any re-route retries. The gate still orders before this monitor
+    // because claims and releases transition attachments through this monitor while holding the
+    // gate. The attachment transitions (TryUpdateAttachment, TryGetAttachment) take
+    // _attachmentLock alone and run no foreign code while holding it, so they are leaf
+    // acquisitions, and nothing enters _attachmentLock while holding a SyncRoot.
     //
     // Publication ordering, which the lock-free readers depend on: a transition stores the context
     // and the anchor first (volatile, so release) and the revision last with an atomic release
@@ -68,6 +71,27 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     private volatile InterceptorSubjectContext? _attachedContext;
     private volatile SubjectAttachmentAnchorKind _anchor;
     private long _attachmentRevision;
+
+    /// <summary>
+    /// The attachment monitor, exposed to the write terminal so the commit predicate and the
+    /// commit run under it as one section; see the lock order note on <see cref="_attachmentLock"/>.
+    /// </summary>
+    internal object AttachmentMonitor => _attachmentLock;
+
+    /// <summary>
+    /// The exact attached context as the write terminal's predicate reads it: the volatile field,
+    /// typed, without the interface indirection of <see cref="AttachedContext"/>.
+    /// </summary>
+    internal InterceptorSubjectContext? AttachedContextExact => _attachedContext;
+
+    /// <summary>
+    /// The bound on re-routed attempts of one logical write. A re-route needs a genuine
+    /// attachment transition of the subject (or the once-per-context lifecycle registration), so
+    /// exhausting the bound means user code is transitioning the subject on every attempt; the
+    /// same bound the derived-property stabilization loop applies to user-code-driven
+    /// instability.
+    /// </summary>
+    internal const int MaxWriteRouteAttempts = 100;
 
     /// <summary>
     /// Creates an executor for <paramref name="subject"/>. Prefer <see cref="GetOrCreate"/>, which
@@ -220,114 +244,140 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         var attachedContext = _attachedContext;
         if (attachedContext is null)
         {
-            UninterceptedChain<TProperty>.Write(ref context, writeValue);
+            WriteUnattachedScalarValue(ref context, writeValue);
         }
         else
         {
             attachedContext.ExecuteInterceptedWrite(propertyTypeIndex, ref context, writeValue);
         }
 
-        return context.IsWritten;
+        // A TProperty narrowed below a structural declared type can be re-routed by the
+        // lifecycle's arms or by the unattached arm's commit predicate; a true-scalar write
+        // never sets the flag, so this is one predicted branch on the hot path.
+        return context.AttachmentMoved
+            ? RetryScalarPropertyValue(propertyName, newValue, currentValue, writeValue, propertyTypeIndex, context.Attempted)
+            : context.IsWritten;
     }
 
     /// <summary>
-    /// The structural branch of the unified <c>SetPropertyValue</c> entry above: coordinates with the
-    /// lifecycle that owns the subject so an attach or detach racing this write orders against it
-    /// rather than failing it. Kept out of the unified entry's body so the scalar route stays
-    /// small enough to inline.
+    /// The scalar branch's unattached arm. The declared-type consult is what closes the
+    /// narrowed-unattached window: a write whose TProperty routes scalar but whose declared
+    /// property type is structural must still answer the commit predicate, or an attach racing
+    /// this write could seed past its commit and silently lose the edge. A true-scalar property
+    /// sets nothing and keeps the plain terminal, since attach seeding never reads scalar
+    /// properties.
     /// </summary>
-    private bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, int propertyTypeIndex)
+    private void WriteUnattachedScalarValue<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue)
     {
-        // Lock order and why the gate comes first: see the note on _attachmentLock. Holding the
-        // monitor from before chain resolution through the terminal is what turns a racing
-        // attachment transition into ordering: the transition waits on the monitor instead of
-        // invalidating an in-flight write.
-        //
-        // The routing decision (is there a lifecycle to gate on?) and the write chain both derive
-        // from one pinned context state. Pinning is what keeps them consistent: a chain resolved
-        // from a second, fresh read could contain a lifecycle the routing did not see, and its
-        // WriteProperty would take the gate inside the attachment monitor, inverting the lock
-        // order above.
-        while (true)
+        if (_subject.Properties.TryGetValue(context.Property.Name, out var metadata) &&
+            metadata.CanContainSubjects && !metadata.IsDerived)
         {
+            context.IsStructuralRoute = true;
+        }
+
+        UninterceptedChain<TProperty>.Write(ref context, writeValue);
+    }
+
+    /// <summary>
+    /// The scalar branch's bounded re-route loop, kept out of the inlined entry: it only runs for
+    /// narrowed structural writes whose attachment moved between routing and commit.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private bool RetryScalarPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, int propertyTypeIndex, AttemptedOrigin attempted)
+    {
+        for (var attempt = 2; attempt <= MaxWriteRouteAttempts; attempt++)
+        {
+            var context = new PropertyWriteContext<TProperty>(
+                this,
+                new PropertyReference(_subject, propertyName),
+                currentValue,
+                newValue,
+                in attempted);
+
             var attachedContext = _attachedContext;
-            var contextState = attachedContext?.PinState();
-            var lifecycle = attachedContext?.TryGetServiceFromState<ILifecycleInterceptor>(contextState!);
-            if (lifecycle is null)
+            if (attachedContext is null)
             {
-                // No lifecycle to order against: either the subject is unattached, or the pinned
-                // state has no lifecycle, so nothing downstream takes a topology gate for it. A
-                // lifecycle registered on the attached context after the pin is invisible to this
-                // write as a whole, routing and chain alike, and is seen by the next write, which
-                // pins a fresh state. One assumption remains: interceptors resolved through a
-                // lifecycle-free state must not take another context's lifecycle gate inside this
-                // chain.
-                lock (_attachmentLock)
-                {
-                    if (ReferenceEquals(_attachedContext, attachedContext))
-                    {
-                        return WriteStructuralValue(attachedContext, contextState, propertyName, newValue, currentValue, writeValue, propertyTypeIndex);
-                    }
-                }
+                WriteUnattachedScalarValue(ref context, writeValue);
             }
             else
             {
-                lifecycle.EnterStructuralWriteGate();
-                try
-                {
-                    lock (_attachmentLock)
-                    {
-                        // Revalidate under both locks: the attachment may have moved between the
-                        // lock-free read above and the acquisitions. Falling out of the lock scopes
-                        // releases both and retries against the fresh attachment.
-                        if (ReferenceEquals(_attachedContext, attachedContext))
-                        {
-                            return WriteStructuralValue(attachedContext, contextState, propertyName, newValue, currentValue, writeValue, propertyTypeIndex);
-                        }
-                    }
-                }
-                finally
-                {
-                    lifecycle.ExitStructuralWriteGate();
-                }
+                attachedContext.ExecuteInterceptedWrite(propertyTypeIndex, ref context, writeValue);
             }
+
+            if (!context.AttachmentMoved)
+            {
+                return context.IsWritten;
+            }
+
+            attempted = context.Attempted;
         }
+
+        throw CreateRouteAttemptsExhaustedException(propertyName);
     }
 
     /// <summary>
-    /// Commits a structural write while the caller holds the attachment monitor (and the lifecycle
-    /// gate when the routing found a lifecycle). <paramref name="attachedContext"/> and
-    /// <paramref name="contextState"/> are the routing snapshot pair, revalidated by the caller
-    /// under the monitor and null together exactly when the subject was unattached at routing
-    /// time; the chain resolves from that pinned state so it cannot disagree with the routing.
+    /// The structural branch of the unified <c>SetPropertyValue</c> entry above: coordinates with
+    /// the lifecycle that owns the subject so an attach or detach racing this write orders against
+    /// it rather than failing it. Kept out of the unified entry's body so the scalar route stays
+    /// small enough to inline.
     /// </summary>
-    private bool WriteStructuralValue<TProperty>(
-        InterceptorSubjectContext? attachedContext,
-        InterceptorSubjectContext.ContextState? contextState,
-        string propertyName,
-        TProperty newValue,
-        TProperty currentValue,
-        Action<IInterceptorSubject, TProperty> writeValue,
-        int propertyTypeIndex)
+    /// <remarks>
+    /// The executor holds no lock: topology atomicity lives with the lifecycle, which takes its
+    /// gate inside the chain (the partition makes it the last interceptor), and commit-versus-
+    /// transition atomicity lives with the terminal's commit predicate under the attachment
+    /// monitor. The chain still resolves from one pinned context state, so it cannot contain a
+    /// lifecycle the predicate's expectations did not see; a stale pin is answered at the
+    /// terminal, not by a second routing decision.
+    /// </remarks>
+    private bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, int propertyTypeIndex)
     {
-        if (attachedContext is null || contextState is null)
+        var attempted = default(AttemptedOrigin);
+        for (var attempt = 1; attempt <= MaxWriteRouteAttempts; attempt++)
         {
-            // Unattached: nothing intercepts this subject, so the write is a plain backing store,
-            // as cheap as the pre-executor short circuit in the generated helper. It still runs
-            // under the attachment monitor, so a concurrent attach either sees the committed value
-            // when it seeds or waits until this write is done.
-            writeValue(_subject, newValue);
-            return true;
+            // Each attempt constructs a fresh context, which is also the AttachmentMoved reset.
+            // The first attempt consumes the thread-static pending origin; retries thread the
+            // consumed origin through instead.
+            var context = attempt == 1
+                ? new PropertyWriteContext<TProperty>(this, new PropertyReference(_subject, propertyName), currentValue, newValue)
+                : new PropertyWriteContext<TProperty>(this, new PropertyReference(_subject, propertyName), currentValue, newValue, in attempted);
+            context.IsStructuralRoute = true;
+
+            var attachedContext = _attachedContext;
+            if (attachedContext is null)
+            {
+                // Unattached: the zero-interceptor chain, so the commit revision and the write
+                // state publish exactly as on the scalar route. ExpectedAttachedContext and
+                // ChainState stay null; the terminal's predicate orders the commit against a
+                // racing claim through the monitor.
+                UninterceptedChain<TProperty>.Write(ref context, writeValue);
+            }
+            else
+            {
+                context.ExpectedAttachedContext = attachedContext;
+                var contextState = attachedContext.PinState();
+                context.ChainState = contextState;
+                attachedContext.ExecuteInterceptedWrite(contextState, propertyTypeIndex, ref context, writeValue);
+            }
+
+            if (!context.AttachmentMoved)
+            {
+                return context.IsWritten;
+            }
+
+            attempted = context.Attempted;
         }
 
-        var context = new PropertyWriteContext<TProperty>(
-            this,
-            new PropertyReference(_subject, propertyName),
-            currentValue,
-            newValue);
+        throw CreateRouteAttemptsExhaustedException(propertyName);
+    }
 
-        attachedContext.ExecuteInterceptedWrite(contextState, propertyTypeIndex, ref context, writeValue);
-        return context.IsWritten;
+    private Exception CreateRouteAttemptsExhaustedException(string propertyName)
+    {
+        return new InvalidOperationException(
+            $"The write to property '{propertyName}' of the subject of type " +
+            $"'{_subject.GetType().FullName}' was re-routed {MaxWriteRouteAttempts} times without " +
+            "committing, because the subject's attachment kept transitioning between the routing " +
+            "decision and the commit. An interceptor that detaches and re-attaches the subject on " +
+            "every write attempt causes exactly this.");
     }
 
     /// <summary>

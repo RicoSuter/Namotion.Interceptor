@@ -56,7 +56,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool IsStructural(in SubjectPropertyMetadata metadata)
     {
-        return metadata is { IsIntercepted: true, IsDerived: false } && metadata.Type.CanContainSubjects();
+        return metadata is { IsIntercepted: true, IsDerived: false, CanContainSubjects: true };
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -464,10 +464,24 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     }
 
     /// <summary>
-    /// Claims every discovered unattached subject. A lost race releases the claims this call made
-    /// and reports failure, so the caller can throw before touching the backing property.
+    /// Claims every discovered unattached subject, then verifies each claimed subject's structural
+    /// getters once. Discovery reads the getters of unattached subjects with no synchronization,
+    /// so a value written into the component between discovery and the claim would otherwise be
+    /// claimed never or half: the verify pass rereads each newly claimed subject after its claim,
+    /// when no unobserved commit can land into it anymore (the terminal's commit predicate re-routes
+    /// a write whose subject was claimed meanwhile, and same-thread getters fold into this pass).
+    /// A subject the verify pass finds unattached is claimed and appended to
+    /// <paramref name="unattached"/>, so the caller's release and rollback paths cover it. A lost
+    /// race, in either pass, releases every claim this call made and reports failure, so the
+    /// caller can throw before touching the backing property.
     /// </summary>
-    public bool TryClaimDiscovered(List<IInterceptorSubject> unattached, IInterceptorSubject? explicitRoot, SubjectAttachmentAnchorKind rootAnchor)
+    /// <param name="unattached">The discovered unattached subjects; grows with what the verify
+    /// pass claims.</param>
+    /// <param name="visited">The discovery walk's visited set; the verify pass skips and extends
+    /// it, so each subject is verified at most once.</param>
+    /// <param name="explicitRoot">The subject that receives <paramref name="rootAnchor"/>.</param>
+    /// <param name="rootAnchor">The anchor for <paramref name="explicitRoot"/>.</param>
+    public bool TryClaimDiscovered(List<IInterceptorSubject> unattached, HashSet<IInterceptorSubject> visited, IInterceptorSubject? explicitRoot, SubjectAttachmentAnchorKind rootAnchor)
     {
         for (var i = 0; i < unattached.Count; i++)
         {
@@ -484,6 +498,65 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
             }
 
             return false;
+        }
+
+        // The worklist: entries appended below are claimed already, so processing the list by
+        // index visits every newly claimed subject exactly once, over the same getter surface the
+        // discovery walk reads. Termination follows from the discovery walk's own termination.
+        for (var i = 0; i < unattached.Count; i++)
+        {
+            var subject = unattached[i];
+            foreach (var entry in subject.Properties)
+            {
+                var metadata = entry.Value;
+                if (!IsStructural(metadata))
+                {
+                    continue;
+                }
+
+                var value = metadata.GetValue?.Invoke(subject);
+                if (value is null)
+                {
+                    continue;
+                }
+
+                var occurrences = LifecycleScratch.RentOccurrenceList();
+                try
+                {
+                    StructuralValueScanner.CollectOccurrences(metadata.Type, value, occurrences);
+                    foreach (var occurrence in occurrences)
+                    {
+                        var discovered = occurrence.Subject;
+                        if (visited.Contains(discovered))
+                        {
+                            continue;
+                        }
+
+                        var attachedContext = discovered.Executor.AttachedContext;
+                        if (ReferenceEquals(attachedContext, Context))
+                        {
+                            continue;
+                        }
+
+                        if (attachedContext is not null || !TryClaim(discovered, SubjectAttachmentAnchorKind.None))
+                        {
+                            foreach (var claimedSubject in unattached)
+                            {
+                                ReleaseClaim(claimedSubject);
+                            }
+
+                            return false;
+                        }
+
+                        visited.Add(discovered);
+                        unattached.Add(discovered);
+                    }
+                }
+                finally
+                {
+                    LifecycleScratch.Return(occurrences);
+                }
+            }
         }
 
         return true;

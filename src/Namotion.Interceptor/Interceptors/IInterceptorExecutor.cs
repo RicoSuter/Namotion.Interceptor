@@ -76,18 +76,21 @@ public interface IInterceptorExecutor
     /// <summary>
     /// Sets a property value through the interceptor chain with the current value already known.
     /// The write routes at runtime on <typeparamref name="TProperty"/>: a type that can contain
-    /// subjects takes the structural write protocol, coordinating with the lifecycle that owns the
-    /// subject so an attach or detach racing this write orders against it rather than failing it;
-    /// any other type writes without that synchronization. Only a persistent conflict, a subject
-    /// genuinely owned by another context, throws, and it throws before the backing field is
-    /// written. The classification follows <typeparamref name="TProperty"/> alone: a
-    /// <typeparamref name="TProperty"/> that can contain subjects routes structurally, so a boxed
-    /// <c>object</c> fails closed to the structural side, while explicitly narrowing
-    /// <typeparamref name="TProperty"/> below the declared property type routes scalar and
-    /// forfeits this entry's pre-chain coordination (the lifecycle still takes its own gate inside
-    /// the chain, so ownership stays consistent). Callers whose values travel boxed instantiate
-    /// this entry with the declared property type via a cached typed delegate instead. The lock order
-    /// and the context-state pinning the structural route relies on are documented once, under
+    /// subjects takes the structural write protocol, whose terminal commits only against the
+    /// attachment the chain was resolved for and otherwise re-routes the whole write against the
+    /// fresh attachment, so an attach or detach racing this write orders against it rather than
+    /// failing it; any other type writes without that synchronization. Only a persistent conflict,
+    /// a subject genuinely owned by another context, throws, and it throws before the backing
+    /// field is written; a write whose attachment keeps transitioning on every attempt throws
+    /// after a bounded number of re-routes. The routing follows <typeparamref name="TProperty"/>:
+    /// a <typeparamref name="TProperty"/> that can contain subjects routes structurally, so a
+    /// boxed <c>object</c> fails closed to the structural side, while explicitly narrowing
+    /// <typeparamref name="TProperty"/> below the declared property type routes scalar; the
+    /// lifecycle classifies on the declared type, so a narrowed write on an attached subject
+    /// still runs the full structural section inside the chain, and a narrowed write on an
+    /// unattached subject still answers the terminal's commit predicate. Callers whose values
+    /// travel boxed instantiate this entry with the declared property type via a cached typed
+    /// delegate instead. The lock scope and the re-route semantics are documented once, under
     /// "The Write Protocol" in docs/design/tracking-lifecycle.md, rather than restated here where
     /// they drift out of date.
     /// </summary>

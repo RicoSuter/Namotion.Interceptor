@@ -1,4 +1,6 @@
+using System.Reactive.Concurrency;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -6,12 +8,14 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 
 /// <summary>
-/// A third-party write interceptor with no ordering attributes registered after WithLifecycle runs
-/// downstream of LifecycleInterceptor, inside its next call, at callback depth zero and holding the
-/// lifecycle gate reentrantly. From there it can release the writing parent before the reconcile of
-/// the write it sits under is entered. These tests pin that such a release leaves nothing behind:
-/// no subject stays attached through an edge from the released parent, and no committed baseline
-/// survives for it.
+/// A third-party write interceptor with no ordering attributes runs upstream of
+/// LifecycleInterceptor (the chain partition compiles every lifecycle last), holding no lock, and
+/// can release the writing parent before the lifecycle runs. The write then flows through the
+/// lifecycle's write-through arm: no claims and no reconcile, but the terminal's null rule still
+/// commits it on the original chain. These tests pin that such a release leaves nothing behind
+/// (no subject stays attached through an edge from the released parent, no committed baseline
+/// survives for it) and that the commit still delivers change notification, which is exactly the
+/// delta an abort-and-retry answer to the released subject would silently drop.
 /// </summary>
 public class DownstreamWriteInterceptorReleaseTests
 {
@@ -20,7 +24,7 @@ public class DownstreamWriteInterceptorReleaseTests
     {
         // Arrange
         var interceptor = new ReleasingWriteInterceptor();
-        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var context = InterceptorSubjectContext.Create().WithLifecycle().WithPropertyChangeSubscriptions();
         context.AddService<IWriteInterceptor>(interceptor);
 
         var root = new Person(context) { FirstName = "R" };
@@ -30,8 +34,11 @@ public class DownstreamWriteInterceptorReleaseTests
         var child = new Person { FirstName = "C" };
         interceptor.Arm(parent, () => root.Father = null);
 
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+
         // Act: the interceptor removes the parent's last support before calling next, so the
-        // lifecycle's reconcile of this write starts on an already released parent.
+        // lifecycle meets an already released parent and takes the write-through arm.
         parent.Father = child;
 
         // Assert
@@ -40,6 +47,7 @@ public class DownstreamWriteInterceptorReleaseTests
         Assert.Null(child.TryGetContext());
         Assert.Empty(child.GetParents());
         AssertNoBaseline(context, parent);
+        AssertFatherChangeDelivered(changes, parent, child);
     }
 
     [Fact]
@@ -47,7 +55,7 @@ public class DownstreamWriteInterceptorReleaseTests
     {
         // Arrange
         var interceptor = new ReleasingWriteInterceptor();
-        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var context = InterceptorSubjectContext.Create().WithLifecycle().WithPropertyChangeSubscriptions();
         context.AddService<IWriteInterceptor>(interceptor);
 
         var parent = new Person { FirstName = "P" };
@@ -55,6 +63,9 @@ public class DownstreamWriteInterceptorReleaseTests
 
         var child = new Person { FirstName = "C" };
         interceptor.Arm(parent, () => parent.DetachFromContext(context));
+
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
 
         // Act
         parent.Father = child;
@@ -64,6 +75,21 @@ public class DownstreamWriteInterceptorReleaseTests
         Assert.Null(child.TryGetContext());
         Assert.Empty(child.GetParents());
         AssertNoBaseline(context, parent);
+        AssertFatherChangeDelivered(changes, parent, child);
+    }
+
+    /// <summary>
+    /// The notification parity pin: the write-through commit must fire the change event on the
+    /// chain that carried the write. The final-state asserts above pass even under a wrong null
+    /// rule (a retried zero-interceptor commit stores the same value), so this assertion is what
+    /// actually distinguishes the write-through arm.
+    /// </summary>
+    private static void AssertFatherChangeDelivered(List<SubjectPropertyChange> changes, Person parent, Person child)
+    {
+        Assert.Contains(changes, change =>
+            ReferenceEquals(change.Property.Subject, parent) &&
+            change.Property.Name == nameof(Person.Father) &&
+            ReferenceEquals(change.GetNewValue<Person?>(), child));
     }
 
     private static void AssertNoBaseline(IInterceptorSubjectContext context, Person parent)

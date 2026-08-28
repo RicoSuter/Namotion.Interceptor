@@ -46,13 +46,6 @@ public class HostingConfigurationTests
 
     private sealed class CustomLifecycle : ILifecycleInterceptor
     {
-        public void EnterStructuralWriteGate()
-        {
-        }
-
-        public void ExitStructuralWriteGate()
-        {
-        }
 
         public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor)
             => throw new NotSupportedException();

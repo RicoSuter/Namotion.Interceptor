@@ -224,11 +224,6 @@ public class DynamicSubjectTests
 
     public class TestLifecycleInterceptor(string name, List<string> logs) : ILifecycleInterceptor
     {
-        private readonly object _structuralWriteGate = new();
-
-        public void EnterStructuralWriteGate() => Monitor.Enter(_structuralWriteGate);
-
-        public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
 
         public bool TryAddProperties(SubjectPropertyRegistration registration)
         {

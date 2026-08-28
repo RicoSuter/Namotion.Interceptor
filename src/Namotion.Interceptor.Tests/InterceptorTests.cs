@@ -123,11 +123,6 @@ public class InterceptorTests
         private readonly string _name;
         private readonly List<string> _logs;
 
-        private readonly object _structuralWriteGate = new();
-
-        public void EnterStructuralWriteGate() => Monitor.Enter(_structuralWriteGate);
-
-        public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
 
         public TestLifecycleInterceptor(string name, List<string> logs)
         {

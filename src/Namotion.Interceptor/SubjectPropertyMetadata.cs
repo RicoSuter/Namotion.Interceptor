@@ -46,7 +46,15 @@ public readonly record struct SubjectPropertyMetadata
     /// Gets a value indicating whether the property is marked as derived (has DerivedAttribute).
     /// </summary>
     public bool IsDerived { get; }
-    
+
+    /// <summary>
+    /// Gets a value indicating whether the declared property type can contain interceptor
+    /// subjects. Precomputed at construction so per-write classification is a field read
+    /// instead of a cache lookup, and so the classification follows the declared type even
+    /// when a write's compile-time type is narrower.
+    /// </summary>
+    public bool CanContainSubjects { get; }
+
     /// <summary>
     /// Gets a value indicating whether the getter or setter of the property is public (true for dynamic properties).
     /// </summary>
@@ -112,6 +120,7 @@ public readonly record struct SubjectPropertyMetadata
         IsIntercepted = isIntercepted;
         IsDynamic = isDynamic;
         IsDerived = attributes.Any(a => a is DerivedAttribute);
+        CanContainSubjects = type.CanContainSubjects();
         PropertyInfo = propertyInfo;
         IsPublic =
             PropertyInfo is null ||

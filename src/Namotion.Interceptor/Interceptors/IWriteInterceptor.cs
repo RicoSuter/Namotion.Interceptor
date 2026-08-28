@@ -61,6 +61,40 @@ public struct PropertyWriteContext<TProperty>
     /// </summary>
     internal long Revision;
 
+    // The per-write terminal protocol state, one attempt each: the executor's route constructs a
+    // fresh context per attempt, which is also what resets AttachmentMoved between attempts.
+
+    /// <summary>
+    /// Whether the terminal must run the commit predicate under the subject's attachment monitor.
+    /// This field is the only gating rule: the terminal consults no metadata. Set by the
+    /// executor's structural branch always, and by the scalar branch's unattached arm when the
+    /// declared property type is structural and not derived; never set by the attached scalar arm
+    /// or the cascade re-entry path, which keeps an aborted cascade impossible by construction.
+    /// </summary>
+    internal bool IsStructuralRoute;
+
+    /// <summary>
+    /// The exact context the executor's routing read observed, null on the unattached arms. The
+    /// lifecycle's write-through arm overwrites it to null when the subject left the context
+    /// mid-chain, so a cross-thread re-attach before the commit fails the predicate and re-routes
+    /// instead of landing a value the re-attach seeding already read past.
+    /// </summary>
+    internal InterceptorSubjectContext? ExpectedAttachedContext;
+
+    /// <summary>
+    /// The pinned context state the chain was resolved from, null on the unattached arms. The
+    /// terminal's currency check compares it against the context's current state, but re-routes
+    /// only when the delta carries a lock obligation: a lifecycle the chain does not contain.
+    /// </summary>
+    internal InterceptorSubjectContext.ContextState? ChainState;
+
+    /// <summary>
+    /// Set by the lifecycle's re-route arm or by a failed commit predicate; answered by the
+    /// executor's bounded retry loop, which re-routes the whole write against the fresh
+    /// attachment.
+    /// </summary>
+    internal bool AttachmentMoved;
+
     /// <summary>
     /// Set by the cascade re-entry constructor, where <see cref="NewValue"/> is already the
     /// stabilized getter output. Stops <see cref="GetFinalValue"/> from re-invoking the getter,
@@ -111,6 +145,12 @@ public struct PropertyWriteContext<TProperty>
     public ChangeOrigin Origin => _attempted.Origin;
 
     /// <summary>
+    /// The attempted origin as carried by this context, read by the executor's retry loop so a
+    /// re-routed attempt keeps the origin the first attempt consumed from the thread-static slot.
+    /// </summary>
+    internal AttemptedOrigin Attempted => _attempted;
+
+    /// <summary>
     /// Constructs a write context and, as a side effect, consumes the thread-static pending
     /// origin stamp for this property (see <see cref="PendingOrigin"/>). Any direct construction
     /// (tests, benchmarks, not just the interceptor chain) drains the pending stamp for the
@@ -150,6 +190,22 @@ public struct PropertyWriteContext<TProperty>
         FinalValueIsNewValue = true;
         _writeTimestamp = rawTimestamp;
         PendingOrigin.TryConsume(in property, out _attempted);
+    }
+
+    /// <summary>
+    /// Internal constructor for the executor's re-routed attempts: threads the first attempt's
+    /// already-consumed origin through instead of consuming the thread-static slot again, which
+    /// the first attempt's construction has already drained.
+    /// </summary>
+    internal PropertyWriteContext(InterceptorExecutor executor, PropertyReference property, TProperty currentValue, TProperty newValue, in AttemptedOrigin attempted)
+    {
+        Executor = executor;
+        Property = property;
+        CurrentValue = currentValue;
+        NewValue = newValue;
+        IsWritten = false;
+        _writeTimestamp = 0;
+        _attempted = attempted;
     }
 
     /// <summary>

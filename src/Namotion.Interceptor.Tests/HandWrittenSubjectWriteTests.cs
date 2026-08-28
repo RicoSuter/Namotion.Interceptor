@@ -7,29 +7,22 @@ namespace Namotion.Interceptor.Tests;
 /// <summary>
 /// Pins the write protocol for subjects written by hand instead of generated: their setters call
 /// the one <see cref="IInterceptorExecutor.SetPropertyValue{TProperty}"/> entry, and the runtime
-/// routing must give a subject-typed property the structural protocol (the lifecycle gate before
-/// the chain) without the author choosing an accessor.
+/// routing must give a subject-typed property the structural protocol without the author choosing
+/// an accessor.
 /// </summary>
 public class HandWrittenSubjectWriteTests
 {
     /// <summary>
-    /// A minimal faithful lifecycle that counts gate entries and chain executions, so a test can
-    /// observe on which side of the structural routing a write ran.
+    /// A minimal faithful lifecycle that records its chain executions, the compile-time property
+    /// type of each, and whether the commit happened inside its next() frame, so a test can
+    /// observe which route a write took and that the lifecycle sits terminal-adjacent in the
+    /// compiled chain.
     /// </summary>
-    private sealed class GateCountingLifecycle : ILifecycleInterceptor
+    private sealed class ChainObservingLifecycle : ILifecycleInterceptor
     {
-        private readonly object _structuralWriteGate = new();
-
-        public int GateEnterCount;
-        public int WritePropertyCount;
-
-        public void EnterStructuralWriteGate()
-        {
-            Monitor.Enter(_structuralWriteGate);
-            Interlocked.Increment(ref GateEnterCount);
-        }
-
-        public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
+        public readonly List<Type> WrittenPropertyTypes = [];
+        public readonly List<bool> CommitObservations = [];
+        public List<string>? ExecutionLog;
 
         public bool TryAddProperties(SubjectPropertyRegistration registration)
         {
@@ -52,7 +45,18 @@ public class HandWrittenSubjectWriteTests
 
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
         {
-            Interlocked.Increment(ref WritePropertyCount);
+            ExecutionLog?.Add("lifecycle");
+            WrittenPropertyTypes.Add(typeof(TProperty));
+            next(ref context);
+            CommitObservations.Add(context.IsWritten);
+        }
+    }
+
+    private sealed class OrderRecordingInterceptor(List<string> log) : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            log.Add("recorder");
             next(ref context);
         }
     }
@@ -113,12 +117,16 @@ public class HandWrittenSubjectWriteTests
     }
 
     [Fact]
-    public void WhenHandWrittenSetterAssignsASubjectTypedProperty_ThenTheWriteTakesTheLifecycleGate()
+    public void WhenHandWrittenSetterAssignsASubjectTypedProperty_ThenTheLifecycleRunsLastAndWrapsTheCommit()
     {
-        // Arrange
+        // Arrange: the recorder registers after the lifecycle and carries no ordering attributes,
+        // so the resolver leaves it after the lifecycle; the chain partition must still execute
+        // it upstream, keeping the lifecycle terminal-adjacent.
         var context = InterceptorSubjectContext.Create();
-        var probe = new GateCountingLifecycle();
+        var log = new List<string>();
+        var probe = new ChainObservingLifecycle { ExecutionLog = log };
         context.AddService(probe);
+        context.AddService<IWriteInterceptor>(new OrderRecordingInterceptor(log));
         var subject = new HandWrittenSubject();
         ((IInterceptorSubject)subject).AttachToContext(context);
         var child = new HandWrittenSubject();
@@ -126,19 +134,22 @@ public class HandWrittenSubjectWriteTests
         // Act
         subject.Child = child;
 
-        // Assert: the write entered the structural protocol (gate before the chain), not just the
-        // chain. A write that skips the gate still runs the chain, so both counters are needed.
-        Assert.Equal(1, probe.GateEnterCount);
-        Assert.Equal(1, probe.WritePropertyCount);
+        // Assert: the subject-typed write ran the chain with the declared type (the structural
+        // route), the lifecycle executed last despite the recorder's later registration, and the
+        // commit happened inside the lifecycle's next() frame, which is the structural protocol's
+        // synchronization seam.
+        Assert.Equal(["recorder", "lifecycle"], log);
+        Assert.Equal([typeof(HandWrittenSubject)], probe.WrittenPropertyTypes);
+        Assert.Equal([true], probe.CommitObservations);
         Assert.Same(child, subject.Child);
     }
 
     [Fact]
-    public void WhenHandWrittenSetterAssignsAScalarProperty_ThenTheWriteTakesNoLifecycleGate()
+    public void WhenHandWrittenSetterAssignsAScalarProperty_ThenTheWriteRunsTheChainOnTheScalarRoute()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        var probe = new GateCountingLifecycle();
+        var probe = new ChainObservingLifecycle();
         context.AddService(probe);
         var subject = new HandWrittenSubject();
         ((IInterceptorSubject)subject).AttachToContext(context);
@@ -146,9 +157,11 @@ public class HandWrittenSubjectWriteTests
         // Act
         subject.Count = 42;
 
-        // Assert: the scalar route never pays for the structural protocol.
-        Assert.Equal(0, probe.GateEnterCount);
-        Assert.Equal(1, probe.WritePropertyCount);
+        // Assert: the write ran the chain once with the scalar compile-time type, which is what
+        // routes it off the structural protocol; the declared-type classification for narrowed
+        // writes is the lifecycle's own job inside the chain.
+        Assert.Equal([typeof(int)], probe.WrittenPropertyTypes);
+        Assert.Equal([true], probe.CommitObservations);
         Assert.Equal(42, subject.Count);
     }
 }

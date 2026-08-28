@@ -21,30 +21,6 @@ public static class SubjectPropertyTypeExtensions
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryTypeCache = new();
 
     /// <summary>
-    /// Checks whether a property can contain subjects, using both a JIT-constant fast path
-    /// via <typeparamref name="TProperty"/> and a runtime fallback via the declared
-    /// <paramref name="type"/>. <typeparamref name="TProperty"/> is a hint: it may be
-    /// <c>object</c> when values are boxed through non-generic paths (this applies to
-    /// <c>TProperty</c> throughout the interceptor interfaces, not just here).
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool CanContainSubjects<TProperty>(this Type type)
-    {
-        if (typeof(TProperty).IsPrimitive ||
-            typeof(TProperty) == typeof(decimal) ||
-            typeof(TProperty) == typeof(string) ||
-            typeof(TProperty) == typeof(DateTime) ||
-            typeof(TProperty) == typeof(DateTimeOffset) ||
-            typeof(TProperty) == typeof(TimeSpan) ||
-            typeof(TProperty) == typeof(Guid))
-        {
-            return false;
-        }
-
-        return type.CanContainSubjects();
-    }
-
-    /// <summary>
     /// Returns true if the given type could potentially contain or be an <see cref="IInterceptorSubject"/>.
     /// Results are cached per type for O(1) lookups after the first call.
     /// </summary>

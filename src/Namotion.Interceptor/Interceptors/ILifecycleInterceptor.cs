@@ -10,6 +10,9 @@ namespace Namotion.Interceptor.Interceptors;
 /// A third-party implementation may store any graph representation and choose its own
 /// synchronization model. It observes structural writes through <see cref="IWriteInterceptor"/> and
 /// applies ownership through the raw executor transitions, so it needs no Tracking internals.
+/// Whatever synchronization it takes for a structural write, it takes itself, from inside the
+/// write chain: the chain compiler places every <see cref="ILifecycleInterceptor"/> last, so
+/// nothing registered runs downstream of it, and Core enters no lifecycle lock on its behalf.
 ///
 /// The seam covers ownership transitions only. Everything layered on top of them, the parent
 /// projection, the reference count, the attach and detach events, and therefore the registry and
@@ -20,31 +23,6 @@ public interface ILifecycleInterceptor :
     IWriteInterceptor,
     ISingletonContextService<ILifecycleInterceptor>
 {
-    /// <summary>
-    /// Enters the synchronization gate a structural write must hold before the subject's
-    /// attachment monitor and before the write chain is resolved and executed. The gate is the
-    /// outermost lock of the structural write order; the protocol is documented on
-    /// <see cref="IInterceptorExecutor.SetPropertyValue{TProperty}"/>.
-    /// </summary>
-    /// <remarks>
-    /// The gate must support reentrant acquisition on one thread (the lifecycle re-enters it from
-    /// inside the write chain). The built-in lifecycle enters its per-context topology lock. An
-    /// enter/exit pair rather than an exposed lock object, so a consumer cannot take the gate with
-    /// an idiomatic-looking <c>lock</c> statement and hang the process against a structural write.
-    ///
-    /// Who enters it is a fixed convention: Core enters the gate around chain-executing
-    /// operations (the structural write seam), while the lifecycle enters it itself inside its
-    /// own entry points (attach, detach, property admission). A new lifecycle entry point follows
-    /// the second form; a new chain-executing operation the first.
-    /// </remarks>
-    void EnterStructuralWriteGate();
-
-    /// <summary>
-    /// Exits the gate entered by <see cref="EnterStructuralWriteGate"/>. Call from a finally block
-    /// paired with that enter.
-    /// </summary>
-    void ExitStructuralWriteGate();
-
     /// <summary>
     /// Attaches the subject to <paramref name="context"/> with the given root anchor, together with
     /// every subject its structural properties reach.

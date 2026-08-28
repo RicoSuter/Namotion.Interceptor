@@ -36,11 +36,14 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
 
         // Type-only classification agrees with the runtime authority (the lifecycle classifies
         // from the declared property type) whenever TProperty is that declared type, which holds
-        // by construction for generated setters. A boxed object fails closed to structural, while
-        // a TProperty narrowed below the declared type routes scalar and forfeits the pre-chain
-        // seam (the lifecycle still self-acquires its gate inside the chain), which is why boxed
-        // callers (the registry's dynamic setters and the dynamic proxy) instantiate this entry
-        // with the declared type via a cached typed delegate rather than write as object.
+        // by construction for generated setters. A boxed object fails closed to structural. A
+        // TProperty narrowed below the declared type routes scalar here, but the lifecycle's
+        // declared-type classification still runs its full gate section for it on attached
+        // subjects, and the unattached scalar arm consults the declared type so the terminal's
+        // commit predicate orders such a write against a racing attach; boxed callers (the
+        // registry's dynamic setters and the dynamic proxy) still instantiate this entry with the
+        // declared type via a cached typed delegate so scalar dynamic writes stay off the
+        // structural route entirely.
         // ReSharper disable once StaticMemberInGenericType
         internal static readonly bool CanContainSubjects = typeof(TProperty).CanContainSubjects();
     }
@@ -106,6 +109,7 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
             // Validated against the re-read state, so a contract a reentrant factory published
             // cannot be doubled by the factory's own product.
             ValidateSingletonContracts(state.Services, service);
+            ValidateWriteChainOrdering(state.Services, service);
             PublishState(new ContextState(state.Services.Add(service!)));
         }
 
@@ -118,6 +122,7 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             var state = Volatile.Read(ref _state);
             ValidateSingletonContracts(state.Services, service);
+            ValidateWriteChainOrdering(state.Services, service);
             PublishState(new ContextState(state.Services.Add(service!)));
         }
     }
@@ -178,6 +183,80 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
             $"Cannot add service '{offendingService.GetType().FullName}': the singleton contract " +
             $"'{contractType.FullName}' is already reserved by service " +
             $"'{existingService.GetType().FullName}' registered on this context.");
+    }
+
+    /// <summary>
+    /// Throws when a registration would place an <see cref="IWriteInterceptor"/> after an
+    /// <see cref="ILifecycleInterceptor"/> by ordering attribute. Every compiled write chain runs
+    /// the lifecycle last, so an interceptor ordered after it would execute inside the topology
+    /// gate, where any blocking operation can deadlock against an opposing gate holder. Checked
+    /// at registration rather than chain compile time because compilation is lazy and would
+    /// surface the diagnostic from an unrelated first write. [RunsBefore] on a write interceptor
+    /// naming a lifecycle is never rejected: it requests exactly the position the chain partition
+    /// guarantees.
+    /// </summary>
+    private static void ValidateWriteChainOrdering(ImmutableArray<object> services, object? service)
+    {
+        switch (service)
+        {
+            case ILifecycleInterceptor:
+            {
+                var lifecycleType = service.GetType();
+                var (runsBefore, _) = ServiceOrderResolver.GetDeclaredOrdering(lifecycleType);
+                foreach (var existingService in services)
+                {
+                    if (existingService is not IWriteInterceptor || existingService is ILifecycleInterceptor)
+                    {
+                        continue;
+                    }
+
+                    var existingType = existingService.GetType();
+                    var (_, existingRunsAfter) = ServiceOrderResolver.GetDeclaredOrdering(existingType);
+                    if (Array.IndexOf(existingRunsAfter, lifecycleType) >= 0)
+                    {
+                        throw CreateWriteChainOrderingException(existingType, lifecycleType);
+                    }
+
+                    if (Array.IndexOf(runsBefore, existingType) >= 0)
+                    {
+                        throw CreateWriteChainOrderingException(existingType, lifecycleType);
+                    }
+                }
+
+                break;
+            }
+
+            case IWriteInterceptor:
+            {
+                var interceptorType = service.GetType();
+                var (_, runsAfter) = ServiceOrderResolver.GetDeclaredOrdering(interceptorType);
+                if (runsAfter.Length == 0)
+                {
+                    return;
+                }
+
+                foreach (var existingService in services)
+                {
+                    if (existingService is ILifecycleInterceptor &&
+                        Array.IndexOf(runsAfter, existingService.GetType()) >= 0)
+                    {
+                        throw CreateWriteChainOrderingException(interceptorType, existingService.GetType());
+                    }
+                }
+
+                break;
+            }
+        }
+    }
+
+    private static InvalidOperationException CreateWriteChainOrderingException(Type writeInterceptorType, Type lifecycleType)
+    {
+        return new InvalidOperationException(
+            $"The write interceptor '{writeInterceptorType.FullName}' is ordered after the " +
+            $"lifecycle '{lifecycleType.FullName}', but the lifecycle runs last in every compiled " +
+            "write chain: an interceptor downstream of it would execute inside the topology gate, " +
+            "where a blocking operation can deadlock against an opposing gate holder. Remove the " +
+            "ordering; interceptors without one already run before the lifecycle.");
     }
 
     public TInterface? TryGetService<TInterface>()
@@ -288,9 +367,63 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
     private WriteAction<TProperty> CreateWriteInterceptorFunction<TProperty>(ContextState state, int propertyTypeIndex)
     {
         var writeInterceptors = GetServicesFromState<IWriteInterceptor>(state);
-        var action = WriteInterceptorFactory<TProperty>.Create(writeInterceptors);
+        var action = WriteInterceptorFactory<TProperty>.Create(PartitionLifecycleLast(writeInterceptors));
         state.SetWriteFunction(propertyTypeIndex, action);
         return action;
+    }
+
+    /// <summary>
+    /// Makes the lifecycle the last interceptor of every compiled write chain: all other write
+    /// interceptors in resolved order, then the lifecycle instances. Applies only to write-chain
+    /// compilation; <see cref="GetServices{TInterface}"/> keeps the resolver order. The partition
+    /// exists so no registered interceptor can run inside the lifecycle's gate section, where a
+    /// blocking operation can deadlock against an opposing gate holder; attributes are not used
+    /// because they are class-level and would also move the lifecycle's ILifecycleHandler slot,
+    /// breaking the handler seam ordered around it.
+    /// </summary>
+    private static ImmutableArray<IWriteInterceptor> PartitionLifecycleLast(ImmutableArray<IWriteInterceptor> interceptors)
+    {
+        // Every first-party interceptor orders before the lifecycle, so the common resolved order
+        // is already partitioned and compiles without an extra allocation.
+        var firstLifecycleIndex = -1;
+        for (var i = 0; i < interceptors.Length; i++)
+        {
+            if (interceptors[i] is ILifecycleInterceptor)
+            {
+                if (firstLifecycleIndex < 0)
+                {
+                    firstLifecycleIndex = i;
+                }
+            }
+            else if (firstLifecycleIndex >= 0)
+            {
+                return PartitionLifecycleLastSlow(interceptors);
+            }
+        }
+
+        return interceptors;
+    }
+
+    private static ImmutableArray<IWriteInterceptor> PartitionLifecycleLastSlow(ImmutableArray<IWriteInterceptor> interceptors)
+    {
+        var partitioned = ImmutableArray.CreateBuilder<IWriteInterceptor>(interceptors.Length);
+        foreach (var interceptor in interceptors)
+        {
+            if (interceptor is not ILifecycleInterceptor)
+            {
+                partitioned.Add(interceptor);
+            }
+        }
+
+        foreach (var interceptor in interceptors)
+        {
+            if (interceptor is ILifecycleInterceptor)
+            {
+                partitioned.Add(interceptor);
+            }
+        }
+
+        return partitioned.MoveToImmutable();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

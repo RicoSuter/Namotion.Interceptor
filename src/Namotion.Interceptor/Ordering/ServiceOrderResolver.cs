@@ -258,4 +258,15 @@ internal static class ServiceOrderResolver
             t.GetCustomAttribute<RunsLastAttribute>() is not null
         ));
     }
+
+    /// <summary>
+    /// The declared [RunsBefore] and [RunsAfter] targets of a service type, from the same cache
+    /// the resolver orders by, so registration-time validation matches the resolver's own
+    /// exact-type semantics.
+    /// </summary>
+    internal static (Type[] RunsBefore, Type[] RunsAfter) GetDeclaredOrdering(Type type)
+    {
+        var info = GetOrderInfo(type);
+        return (info.RunsBefore, info.RunsAfter);
+    }
 }

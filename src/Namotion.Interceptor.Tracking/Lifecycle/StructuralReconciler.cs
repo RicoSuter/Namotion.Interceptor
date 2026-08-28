@@ -41,10 +41,10 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
 
             if (!graph.IsOwned(property.Subject))
             {
-                // Code running downstream of the lifecycle at callback depth zero (a third-party
-                // write interceptor, a hand-written terminal, a dynamic getter reread, or a
-                // side-effecting user collection enumerated just above) holds the gate reentrantly
-                // and can release the writing parent before this point. That release already
+                // User code running inside the gate section at callback depth zero (a
+                // hand-written terminal setter, a dynamic getter reread, or a side-effecting
+                // user collection enumerated just above) holds the gate reentrantly and can
+                // release the writing parent before this point. That release already
                 // collected this property's children through the old baseline, so nothing may
                 // continue on the parent's behalf: committing the new baseline would recreate an
                 // entry that no later release ever removes, and the addition loop would attach

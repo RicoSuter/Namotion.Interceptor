@@ -37,10 +37,11 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
 
     // One reentrant topology lock per lifecycle, which is one per context because the lifecycle is a
     // singleton contract, and the outermost lock of the structural write order (see the executor's
-    // _attachmentLock note for the full order). Reentrancy is required: the structural write
-    // protocol enters the gate in Core (through EnterStructuralWriteGate, before the chain is
-    // resolved) and this interceptor enters it again from inside the chain, and a same-lifecycle
-    // callback re-enters it through TryAddProperties (the dynamic-property-initializer case).
+    // _attachmentLock note for the full order). Only this interceptor enters it: for a structural
+    // write from inside the chain, where it is the last interceptor by the chain partition, so no
+    // registered interceptor ever runs while it is held. Reentrancy is required because a
+    // same-lifecycle callback re-enters it through TryAddProperties (the
+    // dynamic-property-initializer case).
     private readonly Lock _gate = new();
 
     /// <summary>
@@ -86,28 +87,18 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     #region Structural writes
 
     /// <inheritdoc />
-    public void EnterStructuralWriteGate()
-    {
-        _gate.Enter();
-    }
-
-    /// <inheritdoc />
-    public void ExitStructuralWriteGate()
-    {
-        _gate.Exit();
-    }
-
-    /// <inheritdoc />
     /// <remarks>
-    /// Scalar properties never take the topology lock. A structural property validates and claims the
-    /// whole component the proposed value opens up before the backing writer runs, so a write that
-    /// would pull in a subject of another context fails before the property changes.
+    /// Scalar properties never take the topology lock; the classification is the declared property
+    /// type, so a write whose compile-time type is narrower than a structural declared type still
+    /// runs the full section. A structural property validates and claims the whole component the
+    /// proposed value opens up before the backing writer runs, so a write that would pull in a
+    /// subject of another context fails before the property changes.
     /// </remarks>
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         var property = context.Property;
         var metadata = property.Metadata;
-        if (!metadata.Type.CanContainSubjects<TProperty>() || metadata.IsDerived || !metadata.IsIntercepted)
+        if (!metadata.CanContainSubjects || metadata.IsDerived || !metadata.IsIntercepted)
         {
             // Scalar, derived or non-intercepted: never a graph edge. [Derived] declares the
             // value to be a function of other state, which makes the property a cache rather
@@ -119,47 +110,93 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         CallbackReentrancyGuard.ThrowIfInsideCallback();
 
         var subject = property.Subject;
-        if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
+        var attachedContext = subject.Executor.AttachedContext;
+        if (ReferenceEquals(attachedContext, _context))
         {
-            // Not this lifecycle's subject: either unattached, or owned by another context whose own
-            // lifecycle reconciles this write.
+            lock (_gate)
+            {
+                // Re-check under the gate: every lifecycle-mediated transition of this context's
+                // subjects holds the gate, so inside it the arm is stable against them. A raw SPI
+                // transition can still land, which the terminal's commit predicate answers.
+                attachedContext = subject.Executor.AttachedContext;
+                if (ReferenceEquals(attachedContext, _context))
+                {
+                    WriteOwnedProperty(ref context, next, property, metadata, subject);
+                    return;
+                }
+
+                if (attachedContext is not null)
+                {
+                    context.AttachmentMoved = true;
+                    return;
+                }
+            }
+
+            // Released while this write waited for the gate: fall through to the write-through
+            // arm, outside the gate.
+        }
+        else if (attachedContext is not null)
+        {
+            // The chain belongs to a context the subject has left; the executor's retry runs the
+            // current owner's chain and protocol.
+            context.AttachmentMoved = true;
+            return;
+        }
+
+        // The write-through arm: the subject is unattached, either because this thread's own
+        // upstream interceptor released it or because a cross-thread transition landed. No claims
+        // and no reconcile, matching the reconcile-entry semantics for a released parent, but the
+        // terminal still commits under the null rule so notification and derived recalculation
+        // fire on this same chain. Expected must be nulled first: if it stayed this context, a
+        // cross-thread re-attach before the commit would satisfy the predicate and land a value
+        // the re-attach seeding already read past.
+        context.ExpectedAttachedContext = null;
+        next(ref context);
+    }
+
+    /// <summary>
+    /// The gate section of a structural write on a subject this context owns. Runs under
+    /// <see cref="_gate"/>.
+    /// </summary>
+    private void WriteOwnedProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next, PropertyReference property, in SubjectPropertyMetadata metadata, IInterceptorSubject subject)
+    {
+        if (!_graph.IsOwned(subject))
+        {
             next(ref context);
             return;
         }
 
-        lock (_gate)
+        var claimed = LifecycleScratch.RentSubjectList();
+        try
         {
-            if (!_graph.IsOwned(subject))
+            ClaimProposedComponent(metadata.Type, context.NewValue, claimed);
+
+            next(ref context);
+
+            if (context is { IsWritten: true, AttachmentMoved: false })
             {
-                next(ref context);
-                return;
-            }
-
-            var claimed = LifecycleScratch.RentSubjectList();
-            try
-            {
-                ClaimProposedComponent(metadata.Type, context.NewValue, claimed);
-
-                next(ref context);
-
                 // The authoritative getter output rather than the proposed value: a normalizing or
-                // derived setter may store a different graph than the caller passed.
+                // derived setter may store a different graph than the caller passed. Skipped when
+                // the terminal aborted: an aborted attempt committed nothing to reconcile, and the
+                // executor re-routes the whole write.
                 var getValue = metadata.GetValue;
                 _reconciler.Reconcile(property, metadata, getValue is not null ? getValue(subject) : context.NewValue);
             }
-            finally
-            {
-                // Claims that never became ownership are handed back; see
-                // OwnershipGraph.ReleaseUnusedClaims for what leaves them behind.
-                _graph.ReleaseUnusedClaims(claimed);
-                LifecycleScratch.Return(claimed);
-            }
+        }
+        finally
+        {
+            // Claims that never became ownership are handed back, aborted attempts included; see
+            // OwnershipGraph.ReleaseUnusedClaims for what leaves them behind.
+            _graph.ReleaseUnusedClaims(claimed);
+            LifecycleScratch.Return(claimed);
         }
     }
 
     /// <summary>
     /// Validates every subject the proposed value reaches against this context and claims the
-    /// unattached ones, before the backing writer runs.
+    /// unattached ones, before the backing writer runs. The visited set stays alive across the
+    /// claim so <see cref="OwnershipGraph.TryClaimDiscovered"/> can verify the claimed subjects'
+    /// getters against it; returning it earlier would clear it (the pool clears on return).
     /// </summary>
     private void ClaimProposedComponent(Type declaredType, object? proposedValue, List<IInterceptorSubject> claimed)
     {
@@ -172,18 +209,18 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         try
         {
             _graph.DiscoverComponent(declaredType, proposedValue, visited, claimed);
+
+            if (!_graph.TryClaimDiscovered(claimed, visited, null, SubjectAttachmentAnchorKind.None))
+            {
+                claimed.Clear();
+                throw new InvalidOperationException(
+                    "Another context claimed a subject of the assigned graph while this write was validating it. " +
+                    "The write was rejected before reaching the backing field.");
+            }
         }
         finally
         {
             LifecycleScratch.Return(visited);
-        }
-
-        if (!_graph.TryClaimDiscovered(claimed, null, SubjectAttachmentAnchorKind.None))
-        {
-            claimed.Clear();
-            throw new InvalidOperationException(
-                "Another context claimed a subject of the assigned graph while this write was validating it. " +
-                "The write was rejected before reaching the backing field.");
         }
     }
 
@@ -351,7 +388,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         try
         {
             _graph.DiscoverComponent(subject, visited, unattached);
-            if (!_graph.TryClaimDiscovered(unattached, subject, anchor))
+            if (!_graph.TryClaimDiscovered(unattached, visited, subject, anchor))
             {
                 throw new InvalidOperationException(
                     "Another context claimed a subject of this graph while the attach was validating it.");

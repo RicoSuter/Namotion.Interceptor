@@ -317,6 +317,13 @@ public class RegisteredSubject
     /// <summary>
     /// Adds a dynamic property with backing data to the subject.
     /// </summary>
+    /// <remarks>
+    /// The stored <paramref name="setValue"/> delegate executes at the write terminal, under the
+    /// subject's attachment monitor and terminal lock (and, for a structural write on a lifecycle
+    /// context, inside the topology gate). It must therefore be fast, must not block, and must
+    /// not take a lifecycle gate of any context: doing so inverts the documented lock order and
+    /// can deadlock a concurrent structural operation.
+    /// </remarks>
     /// <param name="name">The name of the property.</param>
     /// <param name="type">The property type.</param>
     /// <param name="getValue">The get method.</param>
