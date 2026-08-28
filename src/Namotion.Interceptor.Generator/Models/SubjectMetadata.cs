@@ -24,7 +24,8 @@ internal sealed record SubjectMetadata(
 /// </summary>
 internal sealed record SubjectConstructor(
     string Accessibility,
-    IReadOnlyList<SubjectConstructorParameter> Parameters);
+    IReadOnlyList<SubjectConstructorParameter> Parameters,
+    bool IsObsolete);
 
 internal sealed record SubjectConstructorParameter(
     string FullyQualifiedTypeName,

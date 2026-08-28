@@ -864,14 +864,14 @@ internal static class SubjectMetadataExtractor
 
                 // An obsolete constructor is never mirrored: the mirror's ": this(...)" chain
                 // would reference it from the generated file, raising CS0618 (or CS0619 with
-                // error: true) in code the consumer does not own. Resolved through the semantic
-                // model so an alias, the "Attribute" suffix and qualified spellings are all
-                // caught, not just the literal identifier "Obsolete".
-                if (SymbolExtensions.HasAttribute(
-                        constructor.AttributeLists, KnownTypes.ObsoleteAttribute, declarationModel, cancellationToken))
-                {
-                    continue;
-                }
+                // error: true) in code the consumer does not own. It is still collected, because
+                // the emit side matches each mirror it is about to write against the declared
+                // signatures; an obsolete constructor already carrying a mirror's shape would
+                // otherwise collide with it as CS0111 in a file the consumer cannot edit.
+                // Resolved through the semantic model so an alias, the "Attribute" suffix and
+                // qualified spellings are all caught, not just the literal identifier "Obsolete".
+                var isObsolete = SymbolExtensions.HasAttribute(
+                    constructor.AttributeLists, KnownTypes.ObsoleteAttribute, declarationModel, cancellationToken);
 
                 var parameters = CollectConstructorParameters(constructor, declarationModel);
                 if (parameters is null)
@@ -881,7 +881,8 @@ internal static class SubjectMetadataExtractor
 
                 constructors.Add(new SubjectConstructor(
                     GetAccessModifier(constructor.Modifiers),
-                    parameters));
+                    parameters,
+                    isObsolete));
             }
         }
 

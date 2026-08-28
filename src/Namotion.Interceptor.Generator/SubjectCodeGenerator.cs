@@ -331,6 +331,13 @@ internal static class SubjectCodeGenerator
             return false;
         }
 
+        // An obsolete constructor is collected only so the collision check below can see its
+        // signature; chaining a mirror to it would raise CS0618 in the generated file.
+        if (constructor.IsObsolete)
+        {
+            return false;
+        }
+
         // A constructor that already ends in a context parameter would mirror into a two-context
         // signature that helps nobody.
         if (constructor.Parameters.Count > 0 &&

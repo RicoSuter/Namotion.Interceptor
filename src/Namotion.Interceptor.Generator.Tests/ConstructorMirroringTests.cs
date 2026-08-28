@@ -265,6 +265,48 @@ public class ConstructorMirroringTests
     }
 
     [Fact]
+    public void WhenAnObsoleteConstructorAlreadyHasTheMirroredSignature_ThenNoDuplicateIsEmitted()
+    {
+        // Arrange: the mirror of Service(int) is Service(int, IInterceptorSubjectContext), which is
+        // the signature the obsolete constructor already declares. Emitting it anyway is CS0111 in
+        // a generated file the consumer cannot edit, so the collision check has to see obsolete
+        // constructors even though they are never mirrored themselves.
+        const string source = """
+            using System;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class Service
+                {
+                    public Service(int x)
+                    {
+                    }
+
+                    [Obsolete("use the mirror")]
+                    public Service(int x, IInterceptorSubjectContext context)
+                    {
+                    }
+
+                    public partial string Name { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunForExecution(source);
+
+        // Assert
+        Assert.Empty(result.CompilationErrors);
+
+        var serviceType = result.LoadAssembly().GetType("Repro.Service");
+        Assert.NotNull(serviceType);
+        Assert.NotNull(serviceType.GetConstructor([typeof(int), typeof(IInterceptorSubjectContext)]));
+    }
+
+    [Fact]
     public void WhenAConstructorIsObsoleteAsError_ThenNoMirrorIsEmitted()
     {
         // Arrange: with error: true the chained reference is CS0619, a hard error in every build.
