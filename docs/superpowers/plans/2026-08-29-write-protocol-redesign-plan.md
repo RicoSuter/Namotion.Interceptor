@@ -25,14 +25,19 @@ Two standing assumptions are now void and must be re-opened, not inherited:
 
 Measured at `9aa506f3` versus `master`. Phase 0 re-derives these exactly and freezes them; the handover's numbers were taken at a different commit and disagree slightly.
 
-| Budget | Today | Target |
+| Budget | Today (net vs master) | Target |
 |---|---|---|
-| Production lines (93 files, excl. tests/samples/benchmarks) | +4744 / -2021, **net +2723** | Below net +2723. Meaningfully below is the signal the design is right. |
-| Write-protocol core (the named files) | +1690 / -426, **net +1264** | Well below. This is the part being replaced by one rule. |
-| Tests | +8329 / -4297, net +4032 | Grows. Tests are the asset, not the cost. |
-| Public API delta vs master | To be enumerated in Phase 0 | Zero, minus rows that survive the "absolutely necessary" test. |
-| Consumer concepts (see below) | To be counted in Phase 0 | At or below master's count. |
+| Production, all (100 files) | **+2731** | At or below. |
+| Write-protocol core (17 files) | **+2111** | Near +800. This is the part being replaced by one rule. |
+| Production, everything else (83 files) | **+620** | Unchanged. Uncriticised, and reverting parity rows may reduce it. |
+| Tests (148 files) | +4032 | Grows. Tests are the asset, not the cost. |
+| Public API snapshots (4 files) | **+19** | Toward zero. Every surviving line needs a written argument. |
+| Consumer concepts | To be counted in Phase 0 | At or below master's count. |
 | Connector special handling | 3 sites | **Zero.** Enforced by deletion in Phase 0. |
+
+The decomposition is the finding, and it reframes the whole budget. The write-protocol core is +2111 of the +2731; the other 83 production files come to +620 between them. **The part under redesign is the diff.** A core landing near +800 puts production near +1400, about half of today. That is the target; +2731 is merely the ceiling.
+
+Exact commands and the frozen measurement live beside this plan in the campaign scratch, so any later claim of "no growth" can be re-derived rather than believed.
 
 ### The concept ledger
 
