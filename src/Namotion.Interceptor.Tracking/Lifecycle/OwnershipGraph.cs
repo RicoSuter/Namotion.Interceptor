@@ -339,7 +339,8 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
         }
     }
 
-    /// <summary>Promotes the subject's anchor, used by an explicit attach on an inherited subject.</summary>
+    /// <summary>Sets the subject's anchor: promoted by an explicit attach on an inherited subject,
+    /// and cleared to <see cref="SubjectAttachmentAnchorKind.None"/> by an explicit detach.</summary>
     public void SetAnchor(IInterceptorSubject subject, SubjectAttachmentAnchorKind anchor)
     {
         var executor = subject.Executor;

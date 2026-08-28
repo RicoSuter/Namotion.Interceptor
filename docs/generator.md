@@ -51,6 +51,19 @@ public Person(IInterceptorSubjectContext context) : this()
 
 If a parameterless constructor already exists, only the context constructor is generated.
 
+Every other declared constructor is mirrored by one that appends an `IInterceptorSubjectContext` parameter, chains to the original and attaches the subject provisionally:
+
+```csharp
+public Person(string name, IInterceptorSubjectContext context) : this(name)
+{
+    InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAttachmentAnchorKind.Provisional);
+}
+```
+
+Without it, a subject whose only constructor takes dependencies has no context-taking constructor at all, and dependency injection hands back a permanently detached subject that reports nothing and does nothing.
+
+A constructor you declare yourself always wins: the mirror is skipped when its exact signature already exists. It is also skipped for a constructor that is `static`, carries `[Obsolete]`, already ends in a context parameter, or takes a pointer or a `ref`, `out`, `in`, `params` or `scoped` parameter. The mirror carries parameter types and names only, so optional defaults, parameter attributes and nullable reference annotations are not reproduced on it. In every skipped case there is no diagnostic, so a subject built through that constructor stays detached.
+
 ### Property Implementations
 
 For each partial property, the generator creates:
@@ -592,9 +605,10 @@ public class TrackedEntityBase : IInterceptorSubject, INotifyPropertyChanged, IR
         => GetInstanceProperties() ?? DefaultProperties;
 
     void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
-        => _properties = ((IInterceptorSubject)this).Properties
-            .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-            .ToFrozenDictionary();
+    {
+        ((IInterceptorSubject)this).Executor.AddProperties(new SubjectPropertyRegistration(
+            this, properties, published => _properties = published));
+    }
 
     public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; }
         = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
@@ -632,13 +646,13 @@ public partial class Machine : TrackedEntityBase
 
 The list above is checked by looking at member signatures, which cannot see what the members do. Three requirements are behavioural, and a base class that gets one of them wrong passes every check and then misbehaves at runtime.
 
-1. **`AddProperties` must merge starting from `((IInterceptorSubject)this).Properties`**, not from its own `DefaultProperties` and not from its own backing field, and it must store the result in the field that `GetInstanceProperties()` returns. Merging from its own field drops the subclass's `DefaultProperties` on the first call, so the subject loses its own generated properties.
-2. **The four helpers must route through the same executor that `IInterceptorSubject.Executor` publishes for that instance.** A base class that keeps a second executor for the helpers still compiles, and reproduces the exact bug that per hierarchy interception members were introduced to fix: writes look fine and no interceptor ever sees them.
+1. **`AddProperties` must hand the batch to `((IInterceptorSubject)this).Executor.AddProperties`**, passing a `SubjectPropertyRegistration` whose publish callback stores into the field that `GetInstanceProperties()` returns. Merging the dictionary directly still compiles and still makes the properties visible, but it bypasses the lifecycle: no ownership edges, no `IPropertyLifecycleHandler.AttachProperty`, no registry entry, and a duplicate name silently overwrites instead of throwing. Nothing reports it. The registration performs the merge itself, starting from `((IInterceptorSubject)this).Properties` so it picks up the most derived `DefaultProperties` rather than this class's own.
+2. **The three helpers that reach the executor must route through the same one `IInterceptorSubject.Executor` publishes for that instance.** A base class that keeps a second executor for the helpers still compiles, and reproduces the exact bug that per hierarchy interception members were introduced to fix: writes look fine and no interceptor ever sees them.
 3. **`IInterceptorSubject.Executor` must return an executor built for that instance.** `InterceptorExecutor` binds to its subject when it is constructed, so a borrowed or shared executor misroutes every property reference.
 
 ### Writing a subclass by hand
 
-A hand-written class can derive from a generated subject and implement intercepted properties itself by calling the same five protected members the generated code uses. They are generated implementation detail: they are documented so this scenario is usable, not as a stable API.
+A hand-written class can derive from a generated subject and implement intercepted properties itself by calling the same four protected members the generated code uses. They are generated implementation detail: they are documented so this scenario is usable, not as a stable API.
 
 Such a class has no generated `DefaultProperties`, so it has to register its own property metadata by calling `((IInterceptorSubject)this).AddProperties(...)`. **That registration has to happen before the first intercepted write**, not merely somewhere in the class. The base class's generated `Subject(IInterceptorSubjectContext context)` constructor publishes the context before the subclass constructor body runs, so a write in that body already reaches the interceptor chain, and the chain throws `InvalidOperationException` when it looks up a property name that was never registered.
 
@@ -685,4 +699,4 @@ public class CustomDevice : Device
 
 One thing to avoid anywhere below a subject: do not declare a member named `GetPropertyValue`, `SetPropertyValue`, `InvokeMethod` or `GetInstanceProperties` for something else, and do not implement `IInterceptorSubject.Executor`, `Data` or `AddProperties` yourself. Either one takes over what the base class provides. Where a generated subject declares such a member, or sits below a class that does, the generator reports NI0013 or NI0014.
 
-A hand-written class with no subject below it is not scanned by the generator at all, so no NI0013 reaches it. The compiler covers that case instead. The five helpers are `protected`, so a member that genuinely hides one of them is CS0108, and `TreatWarningsAsErrors` turns that into a build error: a method with the same signature as one of the five, or a field, property or event named `InvokeMethod` or `GetInstanceProperties`, the two helpers that are not generic. Add `new` where the hiding is intended, or rename the member. An overload that differs in signature stays silent, and there it is also harmless, because the generated calls sit in the subject's own file above such a class. See [Hierarchy Hazards](generator.md#hierarchy-hazards) for why it matters.
+A hand-written class with no subject below it is not scanned by the generator at all, so no NI0013 reaches it. The compiler covers that case instead. The four helpers are `protected`, so a member that genuinely hides one of them is CS0108, and `TreatWarningsAsErrors` turns that into a build error: a method with the same signature as one of the four, or a field, property or event named `InvokeMethod` or `GetInstanceProperties`, the two helpers that are not generic. Add `new` where the hiding is intended, or rename the member. An overload that differs in signature stays silent, and there it is also harmless, because the generated calls sit in the subject's own file above such a class. See [Hierarchy Hazards](generator.md#hierarchy-hazards) for why it matters.

@@ -9,7 +9,8 @@ namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
 /// Handles derived property tracking and automatic recalculation using dependency recording.
-/// Requires LifecycleInterceptor to be added after this interceptor.
+/// Runs ahead of LifecycleInterceptor in the chain, pinned by its [RunsBefore] attributes rather
+/// than by registration order.
 /// </summary>
 /// <remarks>
 /// Deadlock safety: locks are acquired on per-property <see cref="DerivedPropertyData"/> objects.

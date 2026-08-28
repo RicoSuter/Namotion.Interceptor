@@ -55,7 +55,8 @@ internal static class CallbackReentrancyGuard
         return default;
     }
 
-    /// <summary>Called on entry of the lifecycle's structural write protocol.</summary>
+    /// <summary>Called on entry of every topology mutation: the structural write protocol, an
+    /// explicit attach and an explicit detach.</summary>
     public static void ThrowIfInsideCallback()
     {
         if (IsInsideAnyCallback)

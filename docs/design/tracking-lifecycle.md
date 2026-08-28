@@ -17,7 +17,7 @@ An anchor marks a subject as a root of its context. There are two kinds:
 
 The independent-support rule is what makes ordinary graph building safe. Clearing on the first edge of any kind is unsound: `child.Parent = root` would consume the root's own anchor and the next removal anywhere would release the whole graph. In a mutually referencing pair the first-constructed subject keeps its anchor; that is the same outcome as any root the caller constructed and never removed.
 
-The anchor lives on the executor (`IInterceptorExecutor.Anchor`), never mirrored into graph state, so it cannot drift from the attachment it belongs to.
+The anchor lives on the executor (`IInterceptorExecutor.AttachmentAnchor`), never mirrored into graph state, so it cannot drift from the attachment it belongs to.
 
 ## Decomposition
 
@@ -86,7 +86,7 @@ The total order is **lifecycle gate → attachment monitor → SyncRoot**, with 
 - **SyncRoot** is the executor's internal per-subject terminal lock, pairing the backing write with revision increment and write-state publication. The zero-interceptor read chain takes no lock; removing SyncRoot from the write terminal would permit torn reads of value types wider than 64 bits.
 - The **`SubjectOwnership` monitor** is a per-subject leaf lock guarding the incoming-edge record and the parent snapshot. The lifecycle takes it under the gate for every edge mutation; the first `GetParents()` on a subject takes it without the gate, from any thread, to activate parent publication. Nothing foreign runs while it is held and the type never leaves the assembly, so it cannot participate in an ordering cycle.
 
-Taking the attachment monitor before the gate deadlocks: a structural write holding a child's monitor would wait for the gate while a parent removal holding the gate reaches `ReleaseClaim(child)` and waits for that monitor. The lock-order tests inject exactly this inversion and fail with a bounded join rather than hanging.
+Taking the attachment monitor before the gate deadlocks: a structural write holding a child's monitor would wait for the gate while a parent removal holding the gate reaches `ReleaseClaim(child)` and waits for that monitor. The lock-order tests drive both directions concurrently under bounded joins, so an inversion reaching production fails a join instead of hanging the suite. They exercise the correct order rather than injecting the inverted one, so they catch a regression in the production order, not a hypothetical one.
 
 `GetParents()` and `GetReferenceCount()` never take the lifecycle gate: `GetReferenceCount()` is a plain volatile read, and `GetParents()` is a lock-free snapshot read except for the first call on a subject, which takes that subject's `SubjectOwnership` monitor to activate publication. `SourceMonitor` holds its own lock across a graph walk that calls `GetParents()` and is also called from inside the gate, so a gate-taking read would deadlock.
 

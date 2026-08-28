@@ -122,7 +122,7 @@ For each partial property, the generator expands the declaration into a real get
 Concretely, for each `[InterceptorSubject]` class the generator emits:
 
 - A backing field paired with the expanded getter and setter for every partial property.
-- A constructor accepting `IInterceptorSubjectContext` (when no user constructor exists).
+- A constructor accepting `IInterceptorSubjectContext`, plus a mirror of every constructor you declare with that parameter appended.
 - `IInterceptorSubject`, `INotifyPropertyChanged`, and `IRaisePropertyChanged` implementations.
 - Static metadata describing the class's properties.
 
@@ -338,7 +338,7 @@ var context = InterceptorSubjectContext
 builder.Services.AddSingleton(new Sensor(context));
 builder.Services.AddMqttSubjectClientSource<Sensor>(
     brokerHost: "mqtt.example.com",
-    pathProviderName: "mqtt",
+    connectorName: "mqtt",
     topicPrefix: "sensors/room1");
 
 var host = builder.Build();

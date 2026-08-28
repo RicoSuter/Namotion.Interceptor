@@ -1,4 +1,4 @@
-﻿using System.Collections.Frozen;
+using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -28,9 +28,11 @@ public class RegisteredSubject
     [JsonIgnore] public IInterceptorSubject Subject { get; }
 
     /// <summary>
-    /// Gets the current reference count (number of parent references).
-    /// Returns 0 if subject is not attached or lifecycle tracking is not enabled.
+    /// Gets the current reference count (number of parent references), or 0 when the subject is
+    /// not attached, because no edge can point at an unattached subject.
     /// </summary>
+    /// <exception cref="InvalidOperationException">The subject is attached to a context with no
+    /// lifecycle, which cannot answer the question rather than answering it with zero.</exception>
     public int ReferenceCount => Subject.GetReferenceCount();
 
     /// <summary>
@@ -370,19 +372,13 @@ public class RegisteredSubject
 
         var property = GetOrAddPropertyProjection(name, type, attributes);
 
-        // An attached subject's admission already invoked the property lifecycle callbacks, and
-        // SubjectRegistry.AttachProperty created this projection from inside that fan-out; only an
-        // unattached subject still needs the explicit call. This residual manual path goes with
-        // the rest of the manual projection maintenance when admission takes it over completely.
-        // The synthetic null-to-value write that used to follow is gone: the admission itself
-        // captures and commits the initial structural value, so the write had become a no-op
-        // chain traversal that could only throw, through the callback write guard, when a
-        // lifecycle handler added a structural property.
-        if (Subject.TryGetContext() is null)
-        {
-            Subject.AttachSubjectProperty(property.Reference);
-        }
-
+        // No explicit callback fan-out here. An attached subject's admission already invoked the
+        // property lifecycle callbacks, and SubjectRegistry.AttachProperty created this projection
+        // from inside that fan-out. An unattached subject resolves no context and therefore no
+        // handlers, so there is nothing to notify. The synthetic null-to-value write that used to
+        // follow is gone too: the admission itself captures and commits the initial structural
+        // value, so the write had become a no-op chain traversal that could only throw, through
+        // the callback write guard, when a lifecycle handler added a structural property.
         return property;
     }
 

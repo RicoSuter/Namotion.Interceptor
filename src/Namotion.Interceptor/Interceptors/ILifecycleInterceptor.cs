@@ -52,7 +52,9 @@ public interface ILifecycleInterceptor :
     /// <remarks>
     /// The whole prospective component is validated and claimed before any callback runs, so a
     /// rejected attach leaves no residue. A subject already owned by <paramref name="context"/> is
-    /// promoted to <paramref name="anchor"/> without repeating its attach callbacks.
+    /// promoted to <paramref name="anchor"/> without repeating its attach callbacks, except for a
+    /// <see cref="SubjectAttachmentAnchorKind.Provisional"/> request, which is a construction-time
+    /// default and never demotes an anchor already in place.
     /// </remarks>
     /// <param name="subject">The subject to attach.</param>
     /// <param name="context">The context to attach to; must be the context this interceptor owns.</param>

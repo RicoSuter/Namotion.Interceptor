@@ -1,4 +1,4 @@
-﻿using System.Collections.Immutable;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -14,7 +14,7 @@ namespace Namotion.Interceptor.Registry;
 /// attached subtree, so a subject is registered before the descent reaches its children. That holds
 /// at every level, so while attaching, any handler running at or behind this one finds every
 /// ancestor of a subject already registered. Detach does not mirror that; see the design doc and
-/// "Handler Order Around the Descent" in docs/design/tracking-lifecycle.md.
+/// "Handler Order" in docs/design/tracking-lifecycle.md.
 ///
 /// A projection only: no registry state participates in ownership or reachability.
 /// </remarks>
