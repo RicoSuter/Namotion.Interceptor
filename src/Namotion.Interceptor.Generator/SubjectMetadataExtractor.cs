@@ -879,10 +879,16 @@ internal static class SubjectMetadataExtractor
                     continue;
                 }
 
+                // Carried because a generated constructor chaining to this one has to repeat the
+                // attribute; without it the chain is CS9039.
+                var setsRequiredMembers = SymbolExtensions.HasAttribute(
+                    constructor.AttributeLists, KnownTypes.SetsRequiredMembersAttribute, declarationModel, cancellationToken);
+
                 constructors.Add(new SubjectConstructor(
                     GetAccessModifier(constructor.Modifiers),
                     parameters,
-                    isObsolete));
+                    isObsolete,
+                    setsRequiredMembers));
             }
         }
 

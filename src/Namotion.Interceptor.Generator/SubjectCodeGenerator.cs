@@ -284,6 +284,7 @@ internal static class SubjectCodeGenerator
         // Generate constructor with context parameter if we have or will have a parameterless constructor
         if (metadata.HasOrWillHaveParameterlessConstructor)
         {
+            EmitSetsRequiredMembers(builder, metadata.Constructors.FirstOrDefault(c => c.Parameters.Count == 0));
             builder.AppendLine($"        public {metadata.ClassName}(IInterceptorSubjectContext context) : this()");
             builder.AppendLine("        {");
             // A provisional root anchor, not an explicit one: dependency injection selects this
@@ -309,6 +310,7 @@ internal static class SubjectCodeGenerator
             var declaredParameters = parameters.Length > 0 ? parameters + ", " : "";
             var arguments = string.Join(", ", constructor.Parameters.Select(p => p.Name));
 
+            EmitSetsRequiredMembers(builder, constructor);
             builder.AppendLine($"        {constructor.Accessibility} {metadata.ClassName}({declaredParameters}IInterceptorSubjectContext {contextParameterName}) : this({arguments})");
             builder.AppendLine("        {");
             // Provisional, matching the parameterless form above: dependency injection selects
@@ -317,6 +319,19 @@ internal static class SubjectCodeGenerator
             builder.AppendLine($"            InterceptorSubjectExtensions.AttachToContext(this, {contextParameterName}, SubjectAttachmentAnchorKind.Provisional);");
             builder.AppendLine("        }");
             builder.AppendLine();
+        }
+    }
+
+    /// <summary>
+    /// Repeats [SetsRequiredMembers] on a generated constructor whose ": this(...)" chain targets
+    /// <paramref name="chainedConstructor"/>, which C# requires (CS9039). Emitting it
+    /// unconditionally would instead tell callers the required members are already initialised.
+    /// </summary>
+    private static void EmitSetsRequiredMembers(StringBuilder builder, SubjectConstructor? chainedConstructor)
+    {
+        if (chainedConstructor?.SetsRequiredMembers == true)
+        {
+            builder.AppendLine("        [global::System.Diagnostics.CodeAnalysis.SetsRequiredMembers]");
         }
     }
 

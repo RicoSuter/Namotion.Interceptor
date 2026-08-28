@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -443,5 +444,141 @@ public class ConstructorMirroringTests
         var serviceType = result.LoadAssembly().GetType("Repro.Service");
         Assert.NotNull(serviceType);
         Assert.NotNull(serviceType.GetConstructor([typeof(string), typeof(IInterceptorSubjectContext)]));
+    }
+
+    [Fact]
+    public void WhenAMirroredConstructorSetsRequiredMembers_ThenTheMirrorCarriesTheAttribute()
+    {
+        // Arrange: the mirror chains with ": this(...)", and C# requires a constructor chaining to
+        // a [SetsRequiredMembers] constructor to repeat the attribute (CS9039).
+        const string source = """
+            using System.Diagnostics.CodeAnalysis;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                public class Dependency
+                {
+                }
+
+                [InterceptorSubject]
+                public partial class Service
+                {
+                    public required int Threshold { get; set; }
+
+                    [SetsRequiredMembers]
+                    public Service(Dependency dependency)
+                    {
+                        Threshold = 1;
+                    }
+
+                    public partial string Name { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunForExecution(source);
+
+        // Assert
+        Assert.Empty(result.CompilationErrors);
+
+        var assembly = result.LoadAssembly();
+        var serviceType = assembly.GetType("Repro.Service");
+        Assert.NotNull(serviceType);
+        var dependencyType = assembly.GetType("Repro.Dependency");
+        Assert.NotNull(dependencyType);
+
+        var mirror = serviceType.GetConstructor([dependencyType, typeof(IInterceptorSubjectContext)]);
+        Assert.NotNull(mirror);
+        Assert.NotNull(mirror.GetCustomAttribute<SetsRequiredMembersAttribute>());
+    }
+
+    [Fact]
+    public void WhenTheParameterlessConstructorSetsRequiredMembers_ThenTheContextConstructorCarriesTheAttribute()
+    {
+        // Arrange: the context form of the parameterless constructor chains the same way.
+        const string source = """
+            using System.Diagnostics.CodeAnalysis;
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class Service
+                {
+                    public required int Threshold { get; set; }
+
+                    [SetsRequiredMembers]
+                    public Service()
+                    {
+                        Threshold = 1;
+                    }
+
+                    public partial string Name { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunForExecution(source);
+
+        // Assert
+        Assert.Empty(result.CompilationErrors);
+
+        var serviceType = result.LoadAssembly().GetType("Repro.Service");
+        Assert.NotNull(serviceType);
+
+        var contextConstructor = serviceType.GetConstructor([typeof(IInterceptorSubjectContext)]);
+        Assert.NotNull(contextConstructor);
+        Assert.NotNull(contextConstructor.GetCustomAttribute<SetsRequiredMembersAttribute>());
+    }
+
+    [Fact]
+    public void WhenAMirroredConstructorDoesNotSetRequiredMembers_ThenTheMirrorDoesNotCarryTheAttribute()
+    {
+        // Arrange: adding the attribute unconditionally would tell every caller of the mirror that
+        // the required members are already initialised, which silently disables the enforcement.
+        const string source = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                public class Dependency
+                {
+                }
+
+                [InterceptorSubject]
+                public partial class Service
+                {
+                    public required int Threshold { get; set; }
+
+                    public Service(Dependency dependency)
+                    {
+                    }
+
+                    public partial string Name { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunForExecution(source);
+
+        // Assert
+        Assert.Empty(result.CompilationErrors);
+
+        var assembly = result.LoadAssembly();
+        var serviceType = assembly.GetType("Repro.Service");
+        Assert.NotNull(serviceType);
+        var dependencyType = assembly.GetType("Repro.Dependency");
+        Assert.NotNull(dependencyType);
+
+        var mirror = serviceType.GetConstructor([dependencyType, typeof(IInterceptorSubjectContext)]);
+        Assert.NotNull(mirror);
+        Assert.Null(mirror.GetCustomAttribute<SetsRequiredMembersAttribute>());
     }
 }
