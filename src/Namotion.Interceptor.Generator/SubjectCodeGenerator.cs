@@ -380,7 +380,8 @@ internal static class SubjectCodeGenerator
     private static string UnusedParameterName(string baseName, SubjectConstructor constructor)
     {
         var name = baseName;
-        while (constructor.Parameters.Any(p => p.Name == name))
+        // Parameter names keep their escape, and "@context" names the same parameter as "context".
+        while (constructor.Parameters.Any(p => p.Name.TrimStart('@') == name))
         {
             name += "_";
         }

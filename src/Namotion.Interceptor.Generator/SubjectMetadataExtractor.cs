@@ -924,9 +924,11 @@ internal static class SubjectMetadataExtractor
                 return null;
             }
 
+            // Text rather than ValueText: the latter drops the escape from a verbatim identifier,
+            // so a parameter named "@event" would be re-emitted as the keyword "event".
             parameters.Add(new SubjectConstructorParameter(
                 parameterType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                parameter.Identifier.ValueText));
+                parameter.Identifier.Text));
         }
 
         return parameters;
