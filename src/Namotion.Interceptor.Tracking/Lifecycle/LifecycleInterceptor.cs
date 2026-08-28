@@ -41,7 +41,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     // protocol enters the gate in Core (through EnterStructuralWriteGate, before the chain is
     // resolved) and this interceptor enters it again from inside the chain, and a same-lifecycle
     // callback re-enters it through TryAddProperties (the dynamic-property-initializer case).
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
 
     /// <summary>
     /// Raised when a subject is attached to the object graph.
@@ -86,13 +86,13 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// <inheritdoc />
     public void EnterStructuralWriteGate()
     {
-        Monitor.Enter(_gate);
+        _gate.Enter();
     }
 
     /// <inheritdoc />
     public void ExitStructuralWriteGate()
     {
-        Monitor.Exit(_gate);
+        _gate.Exit();
     }
 
     /// <inheritdoc />
@@ -194,7 +194,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         // too: they are published under the same gate, so the deadlock shape is identical. A
         // same-lifecycle callback already holds this gate reentrantly and is the supported
         // dynamic-property-initializer case.
-        if (CallbackReentrancyGuard.IsInsideAnyCallback && !Monitor.IsEntered(_gate))
+        if (CallbackReentrancyGuard.IsInsideAnyCallback && !_gate.IsHeldByCurrentThread)
         {
             throw new InvalidOperationException(
                 "AddProperties on a subject owned by another context is not supported from a " +
