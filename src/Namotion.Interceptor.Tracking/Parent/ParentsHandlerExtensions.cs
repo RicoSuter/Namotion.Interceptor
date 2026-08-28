@@ -62,8 +62,8 @@ public static class ParentsHandlerExtensions
     /// An empty result is not a test for "this subject is a root". It also answers for an
     /// unattached subject, and for a subject inside its own release, because the release drops the
     /// ownership record before it runs any detach callback, so a getter evaluated from one sees no
-    /// parents while the subject is still attached. Decide root-ness from the anchor, not from
-    /// emptiness.
+    /// parents while the subject is still attached. Decide root-ness from the anchor instead, with
+    /// <see cref="InterceptorSubjectExtensions.IsAnchoredRoot"/>.
     ///
     /// The order of the entries is unspecified and history-dependent: only the set of occurrences,
     /// each with its property and its index or key, is meaningful.

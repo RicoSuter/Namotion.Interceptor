@@ -14,7 +14,8 @@ public static class LifecycleInterceptorExtensions
     /// Gets the number of active incoming structural edge occurrences of the subject. A subject
     /// listed twice in one collection counts two. Returns 0 for an unattached subject and for an
     /// anchored root that no edge points at, so this is not an ownership predicate: use
-    /// <see cref="InterceptorSubjectExtensions.TryGetContext"/> for that.
+    /// <see cref="InterceptorSubjectExtensions.TryGetContext"/> to test attachment and
+    /// <see cref="InterceptorSubjectExtensions.IsAnchoredRoot"/> to test root-ness.
     /// </summary>
     /// <exception cref="InvalidOperationException">The subject is attached to a context that has
     /// no <see cref="LifecycleInterceptor"/>, which cannot answer the question rather than
