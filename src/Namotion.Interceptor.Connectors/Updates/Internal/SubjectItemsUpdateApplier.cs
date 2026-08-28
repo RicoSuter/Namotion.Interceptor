@@ -230,10 +230,21 @@ internal static class SubjectItemsUpdateApplier
         // will once assigned. The assignment provides the supporting edge that clears the
         // anchor, so there is no detach ceremony.
         newItem.AttachToContext(parent.GetContext(), SubjectAttachmentAnchorKind.Provisional);
-        if (context.TryMarkAsProcessed(subjectId))
+        try
         {
-            SubjectUpdateApplier.ApplyPropertyUpdates(newItem, properties, context);
+            if (context.TryMarkAsProcessed(subjectId))
+            {
+                SubjectUpdateApplier.ApplyPropertyUpdates(newItem, properties, context);
+            }
         }
+        catch
+        {
+            // The caller's assignment is what consumes the provisional anchor, so a throw before
+            // returning leaves an anchored root of the parent's context that nothing releases.
+            SubjectUpdateApplier.ReleaseUnconsumedRoot(newItem, parent);
+            throw;
+        }
+
         return newItem;
     }
 }

@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Mapping;
@@ -289,11 +289,35 @@ internal class OpcUaSubjectLoader
         // branch above, rather than creating a parallel subject.
         subjectsByNodeId.TryAdd(nodeId, subjectToLoad);
 
-        await LoadSubjectAsync(subjectToLoad, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
-
-        if (isNewSubject)
+        try
         {
-            property.SetValueFromSource(_source, null, null, subjectToLoad);
+            await LoadSubjectAsync(subjectToLoad, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+
+            if (isNewSubject)
+            {
+                property.SetValueFromSource(_source, null, null, subjectToLoad);
+            }
+        }
+        catch
+        {
+            // The assignment above is what consumes the provisional anchor. Without it the subject
+            // stays an anchored root of the client's context, registered and unreleasable, and a
+            // cancelled load is routine here: reconnect and shutdown both cancel one.
+            ReleaseUnconsumedRoot(subjectToLoad, subject);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Releases a subject that was attached as a provisional root but never received the edge that
+    /// would have consumed the anchor. Does nothing once an edge has consumed it, which is the
+    /// case when the failure happened after the assignment.
+    /// </summary>
+    private static void ReleaseUnconsumedRoot(IInterceptorSubject candidate, IInterceptorSubject parent)
+    {
+        if (candidate.IsAnchoredRoot())
+        {
+            candidate.DetachFromContext(parent.GetContext());
         }
     }
 

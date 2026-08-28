@@ -37,7 +37,7 @@ public class SubjectAttachmentTests
         {
             var executor = subject.Executor;
             executor.TryGetAttachment(out var attachedContext, out var anchor, out var revision);
-            InterceptorSubjectExtensions.ValidateExplicitDetach(attachedContext, anchor, context);
+            InterceptorSubjectExtensions.ValidateDetach(attachedContext, anchor, context);
             executor.TryUpdateAttachment(revision, attachedContext, SubjectAttachmentAnchorKind.None, out _);
             DetachCount++;
         }
@@ -214,20 +214,41 @@ public class SubjectAttachmentTests
     }
 
     [Fact]
-    public void WhenDetachingSubjectWithProvisionalAnchor_ThenThrowsBeforeAnyStateChange()
+    public void WhenDetachingSubjectWithProvisionalAnchor_ThenTheAnchorIsCleared()
     {
-        // Arrange
+        // Arrange: a caller that created a provisional root and then failed to give it a
+        // supporting edge needs a way to undo it, which is the connector failure path.
         var context = CreateContextWithProbe(out var probe);
         var subject = new Car();
         var executor = GetExecutor(subject);
         Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, context, SubjectAttachmentAnchorKind.Provisional, out _));
         var revisionBefore = executor.AttachmentRevision;
 
+        // Act
+        subject.DetachFromContext(context);
+
+        // Assert: validation admits the call, so it reaches the lifecycle, whose policy here is to
+        // clear the anchor and keep the attachment.
+        Assert.Equal(1, probe.DetachCount);
+        Assert.Equal(SubjectAttachmentAnchorKind.None, executor.AttachmentAnchor);
+        Assert.True(executor.AttachmentRevision > revisionBefore);
+    }
+
+    [Fact]
+    public void WhenDetachingSubjectWhoseAnchorWasAlreadyConsumed_ThenThrowsBeforeAnyStateChange()
+    {
+        // Arrange: an edge has adopted the subject, so there is no anchor left to clear and the
+        // subject is held by the graph rather than by the caller.
+        var context = CreateContextWithProbe(out var probe);
+        var subject = new Car();
+        var executor = GetExecutor(subject);
+        Assert.True(executor.TryUpdateAttachment(executor.AttachmentRevision, context, SubjectAttachmentAnchorKind.None, out _));
+        var revisionBefore = executor.AttachmentRevision;
+
         // Act & Assert
         Assert.Throws<InvalidOperationException>(() => subject.DetachFromContext(context));
         Assert.Equal(revisionBefore, executor.AttachmentRevision);
         Assert.Same(context, executor.AttachedContext);
-        Assert.Equal(SubjectAttachmentAnchorKind.Provisional, executor.AttachmentAnchor);
         Assert.Equal(0, probe.DetachCount);
     }
 

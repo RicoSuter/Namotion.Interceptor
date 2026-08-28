@@ -56,7 +56,9 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// <summary>
     /// Raised when a subject is about to be detached from the object graph.
     /// Fires BEFORE ILifecycleHandler.HandleLifecycleChange (symmetric with SubjectAttached which fires AFTER).
-    /// At this point, the full object graph is still accessible.
+    /// The subject's ownership record and baselines are already gone by this point, so GetParents()
+    /// answers empty and GetReferenceCount() answers zero; the subject still resolves its context,
+    /// which is what the teardown callbacks need.
     /// Handlers must be exception-free and fast (invoked inside lock).
     /// </summary>
     public event Action<SubjectLifecycleChange>? SubjectDetaching
@@ -305,7 +307,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         {
             var executor = subject.Executor;
             executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
-            InterceptorSubjectExtensions.ValidateExplicitDetach(attachedContext, anchor, context);
+            InterceptorSubjectExtensions.ValidateDetach(attachedContext, anchor, context);
 
             _graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None);
 

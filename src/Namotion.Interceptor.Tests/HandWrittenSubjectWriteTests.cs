@@ -46,7 +46,7 @@ public class HandWrittenSubjectWriteTests
         {
             var executor = subject.Executor;
             executor.TryGetAttachment(out var attachedContext, out var anchor, out var revision);
-            InterceptorSubjectExtensions.ValidateExplicitDetach(attachedContext, anchor, context);
+            InterceptorSubjectExtensions.ValidateDetach(attachedContext, anchor, context);
             executor.TryUpdateAttachment(revision, attachedContext, SubjectAttachmentAnchorKind.None, out _);
         }
 

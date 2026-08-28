@@ -148,12 +148,22 @@ internal static class SubjectUpdateApplier
                 // anchor, so there is no detach ceremony.
                 newItem.AttachToContext(parent.GetContext(), SubjectAttachmentAnchorKind.Provisional);
 
-                if (context.TryMarkAsProcessed(propertyUpdate.Id))
+                try
                 {
-                    ApplyPropertyUpdates(newItem, itemProperties, context);
-                }
+                    if (context.TryMarkAsProcessed(propertyUpdate.Id))
+                    {
+                        ApplyPropertyUpdates(newItem, itemProperties, context);
+                    }
 
-                context.SetPropertyValue(property, propertyUpdate.Timestamp, newItem);
+                    context.SetPropertyValue(property, propertyUpdate.Timestamp, newItem);
+                }
+                catch
+                {
+                    // The assignment consumes the provisional anchor; without it the item stays an
+                    // anchored root of the parent's context that nothing will ever release.
+                    ReleaseUnconsumedRoot(newItem, parent);
+                    throw;
+                }
             }
         }
         else
@@ -170,5 +180,18 @@ internal static class SubjectUpdateApplier
             JsonElement jsonElement => jsonElement.Deserialize(targetType),
             _ => value
         };
+    }
+
+    /// <summary>
+    /// Releases an item that was attached as a provisional root but never received the edge that
+    /// would have consumed the anchor. Does nothing once an edge has consumed it, so it is safe on
+    /// a failure path that may or may not have reached the assignment.
+    /// </summary>
+    internal static void ReleaseUnconsumedRoot(IInterceptorSubject item, IInterceptorSubject parent)
+    {
+        if (item.IsAnchoredRoot())
+        {
+            item.DetachFromContext(parent.GetContext());
+        }
     }
 }

@@ -97,11 +97,17 @@ public static class InterceptorSubjectExtensions
     }
 
     /// <summary>
-    /// Clears the subject's explicit anchor on <paramref name="context"/>. The subject stays
-    /// attached while a structural edge still holds it, and is released once nothing does.
+    /// Clears the subject's root anchor on <paramref name="context"/>. The subject stays attached
+    /// while a structural edge still holds it, and is released once nothing does.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The subject carries no explicit anchor, or its
-    /// explicit anchor is on a different context.</exception>
+    /// <remarks>
+    /// Either anchor kind can be cleared. A provisional anchor is detachable so that a caller who
+    /// created a provisional root and then failed to give it a supporting edge can undo it; once an
+    /// edge has consumed the anchor there is nothing to detach and the call is rejected, which is
+    /// what <see cref="IsAnchoredRoot"/> answers ahead of the call.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The subject carries no anchor, or its anchor is
+    /// on a different context.</exception>
     public static void DetachFromContext(this IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
         var lifecycle = context.TryGetService<ILifecycleInterceptor>();
@@ -117,7 +123,7 @@ public static class InterceptorSubjectExtensions
             // One coherent snapshot; a transition interleaved between it and the update fails the
             // compare-and-swap below and retries against the fresh state.
             executor.TryGetAttachment(out var attachedContext, out var anchor, out var revision);
-            ValidateExplicitDetach(attachedContext, anchor, context);
+            ValidateDetach(attachedContext, anchor, context);
 
             if (executor.TryUpdateAttachment(revision, null, SubjectAttachmentAnchorKind.None, out _))
             {
@@ -182,19 +188,19 @@ public static class InterceptorSubjectExtensions
     /// Rejects an explicit detach that has no explicit anchor to clear, or clears one on another
     /// context.
     /// </summary>
-    internal static void ValidateExplicitDetach(
+    internal static void ValidateDetach(
         IInterceptorSubjectContext? attachedContext,
         SubjectAttachmentAnchorKind anchor,
         IInterceptorSubjectContext context)
     {
-        if (anchor != SubjectAttachmentAnchorKind.Explicit)
+        if (anchor == SubjectAttachmentAnchorKind.None)
         {
-            throw new InvalidOperationException("The subject has no explicit context anchor to detach.");
+            throw new InvalidOperationException("The subject has no context anchor to detach.");
         }
 
         if (!ReferenceEquals(attachedContext, context))
         {
-            throw new InvalidOperationException("The subject's explicit anchor is on a different context.");
+            throw new InvalidOperationException("The subject's anchor is on a different context.");
         }
     }
 

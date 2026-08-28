@@ -128,7 +128,7 @@ public class CallbackContractTests
             }), _ => false);
 
         // Explicit attach, not a context constructor: a constructed subject carries a Provisional
-        // anchor, and ValidateExplicitDetach already rejects detaching one with a plain
+        // anchor, and ValidateDetach already rejects detaching one with a plain
         // InvalidOperationException, so the test would pass pre-fix for the wrong reason.
         pinned = new Person { FirstName = "P" };
         pinned.AttachToContext(context);
