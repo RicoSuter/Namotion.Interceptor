@@ -78,7 +78,9 @@ internal static class SubjectMetadataExtractor
             }
         }
 
-        var className = typeDeclaration.Identifier.ValueText;
+        // Text keeps the escape on a verbatim identifier: the name is re-emitted as the partial
+        // declaration, as every cast and as each generated constructor's name.
+        var className = typeDeclaration.Identifier.Text;
 
         // Use the symbol rather than the syntax modifiers: a top-level class without a modifier
         // defaults to internal, a nested one to private.

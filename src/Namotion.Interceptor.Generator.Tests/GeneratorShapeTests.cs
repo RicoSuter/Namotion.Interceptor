@@ -806,4 +806,29 @@ namespace Repro
         // Assert
         Assert.Empty(generated.CompilationErrors);
     }
+
+    [Fact]
+    public void WhenTheSubjectClassNameIsAnEscapedKeyword_ThenGeneratedCodeCompiles()
+    {
+        // Arrange: the class name is restated on the generated partial declaration, on every cast
+        // and on each generated constructor.
+        const string source = """
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class @class
+                {
+                    public partial string Name { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var generated = GeneratorTestHost.Run(source);
+
+        // Assert
+        Assert.Empty(generated.CompilationErrors);
+    }
 }

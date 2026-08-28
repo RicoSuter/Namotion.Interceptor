@@ -58,7 +58,9 @@ internal static class SubjectCodeGenerator
             ? ""
             : metadata.NamespaceName + ".";
 
-        return $"{namespacePrefix}{containingTypesPath}{metadata.ClassName}.g.cs";
+        // The escape is dropped for the hint name only: AddSource rejects '@', and "@class" and
+        // "class" cannot name two different types, so uniqueness survives.
+        return $"{namespacePrefix}{containingTypesPath}{metadata.ClassName}.g.cs".Replace("@", "");
     }
 
     private static void EmitFileHeader(StringBuilder builder)
