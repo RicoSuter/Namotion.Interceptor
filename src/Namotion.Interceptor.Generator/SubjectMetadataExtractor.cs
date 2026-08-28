@@ -171,9 +171,11 @@ internal static class SubjectMetadataExtractor
         var parent = node.Parent;
         while (parent is TypeDeclarationSyntax typeDeclaration)
         {
+            // Text keeps the escape on a verbatim identifier: the generated file reopens every
+            // containing type by name.
             types.Insert(0, new ContainingType(
                 GetTypeKeyword(typeDeclaration),
-                typeDeclaration.Identifier.ValueText));
+                typeDeclaration.Identifier.Text));
             parent = parent.Parent;
         }
         return types.ToArray();

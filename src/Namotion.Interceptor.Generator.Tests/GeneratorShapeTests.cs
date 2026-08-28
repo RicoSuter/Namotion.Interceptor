@@ -831,4 +831,30 @@ namespace Repro
         // Assert
         Assert.Empty(generated.CompilationErrors);
     }
+    [Fact]
+    public void WhenAContainingTypeNameIsAnEscapedKeyword_ThenGeneratedCodeCompiles()
+    {
+        // Arrange: the generated file reopens every containing type by name.
+        const string source = """
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                public partial class @class
+                {
+                    [InterceptorSubject]
+                    public partial class Service
+                    {
+                        public partial string Name { get; set; }
+                    }
+                }
+            }
+            """;
+
+        // Act
+        var generated = GeneratorTestHost.Run(source);
+
+        // Assert
+        Assert.Empty(generated.CompilationErrors);
+    }
 }
