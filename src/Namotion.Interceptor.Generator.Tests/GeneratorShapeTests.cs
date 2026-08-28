@@ -777,4 +777,33 @@ namespace Repro
         Assert.Contains(skipped, diagnostic => diagnostic.GetMessage().Contains("PullWithoutInterceptor"));
         Assert.Contains(skipped, diagnostic => diagnostic.GetMessage().Contains("MixWithoutInterceptor"));
     }
+
+    [Fact]
+    public void WhenAnInterceptedMethodParameterIsAnEscapedKeyword_ThenGeneratedCodeCompiles()
+    {
+        // Arrange: the wrapper restates the parameter list, so dropping the escape emits the
+        // keyword "event" where an identifier belongs.
+        const string source = """
+            using Namotion.Interceptor.Attributes;
+
+            namespace Repro
+            {
+                [InterceptorSubject]
+                public partial class Service
+                {
+                    public void DoWorkWithoutInterceptor(string @event)
+                    {
+                    }
+
+                    public partial string Name { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var generated = GeneratorTestHost.Run(source);
+
+        // Assert
+        Assert.Empty(generated.CompilationErrors);
+    }
 }

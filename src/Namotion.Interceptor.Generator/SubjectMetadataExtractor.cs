@@ -519,9 +519,11 @@ internal static class SubjectMetadataExtractor
 
                 var returnType = GetFullTypeName(method.ReturnType, declarationModel);
 
+                // Text keeps the escape on a verbatim identifier; the wrapper restates the name
+                // in declaration and argument position, where the unescaped keyword cannot parse.
                 var parameters = method.ParameterList.Parameters
                     .Select(p => new ParameterMetadata(
-                        p.Identifier.ValueText,
+                        p.Identifier.Text,
                         GetFullTypeName(p.Type, declarationModel) ?? "object"))
                     .ToList();
 
