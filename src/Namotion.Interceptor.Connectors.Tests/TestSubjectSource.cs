@@ -35,8 +35,11 @@ public sealed class TestSubjectSource : SubjectSourceBase
     public Task CompleteResumeForTestAsync(int resumeEpoch, CancellationToken cancellationToken) =>
         CompleteResumeAsync(resumeEpoch, cancellationToken);
 
-    /// <summary>Exposes the protected AbortResume seam for tests, returning whether it cleared the gate.</summary>
-    public bool AbortResumeForTest(int resumeEpoch) => AbortResume(resumeEpoch);
+    /// <summary>Exposes the protected TryEndResume seam for tests, returning whether it cleared the gate.</summary>
+    public bool TryEndResumeForTest(int resumeEpoch) => TryEndResume(resumeEpoch);
+
+    /// <summary>Exposes the resume gate's state for tests.</summary>
+    public bool IsResumeGateHeldForTest => IsResumeGateHeld;
 
     public int WriteBatchSizeOverride { get; init; }
 

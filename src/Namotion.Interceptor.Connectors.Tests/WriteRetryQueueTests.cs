@@ -457,6 +457,46 @@ public class WriteRetryQueueTests
         Assert.Empty(drained);
     }
 
+    [Fact]
+    public async Task WhenAFlushThatWillSendItsOwnBatchRunsWhileAFlushIsInFlight_ThenItWaitsForTheFlush()
+    {
+        // Arrange: the queue reads empty from the moment a flush moves its batch into the scratch
+        // buffer, well before that batch reaches the peer. A caller that goes on to send a newer batch
+        // must not take that as "nothing is in flight", or the two batches race to the peer and the
+        // older parked value can land after the newer one that supersedes it.
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = new Mock<ISubjectSource>();
+        var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completeWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        sourceMock
+            .Setup(source => source.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+            {
+                writeStarted.SetResult();
+                await completeWrite.Task;
+                return WriteResult.Success;
+            });
+
+        queue.Enqueue(CreateChanges(1));
+
+        // Act - the idle drain takes the parked write and blocks inside the send, holding the gate
+        var idleDrain = queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        await writeStarted.Task;
+
+        var handlerFlush = queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - the queue reads empty here, so only the gate can hold this back
+        Assert.True(queue.IsEmpty);
+        Assert.False(handlerFlush.IsCompleted,
+            "A flush that will send its own batch must wait for the in-flight flush to land.");
+
+        completeWrite.SetResult();
+        Assert.True(await idleDrain);
+        Assert.True(await handlerFlush);
+    }
+
     private static SubjectPropertyChange CreateChange(int id)
     {
         var subjectMock = new Mock<IInterceptorSubject>();

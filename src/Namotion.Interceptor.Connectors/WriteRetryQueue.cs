@@ -98,26 +98,27 @@ internal sealed class WriteRetryQueue : IDisposable
     /// Flushes pending writes from the queue to the source.
     /// Returns true if flush succeeded (or queue was empty), false if flush failed.
     /// </summary>
+    /// <remarks>
+    /// Always takes the flush gate, including on an empty queue. The queue reads empty from the moment a
+    /// concurrent flush moves a batch into the scratch buffer, well before that batch reaches the peer,
+    /// so a lock-free empty return would let a caller that goes on to send its own newer batch race the
+    /// older one to the peer. On the steady-state path, where nothing is flushing, that costs one
+    /// uncontended acquisition per batch and never suspends.
+    /// </remarks>
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     public async ValueTask<bool> FlushAsync(ISubjectSource source, CancellationToken cancellationToken)
     {
-        if (IsEmpty)
+        switch (await TryEnterFlushGateAsync(cancellationToken).ConfigureAwait(false))
         {
-            return true;
-        }
+            case FlushGateEntry.Cancelled:
+                // Something may still be queued, so the caller must not send past it.
+                return false;
 
-        try
-        {
-            await _flushSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error acquiring flush semaphore");
-            return false;
+            case FlushGateEntry.Disposed:
+                // Nothing is pending and nothing ever will be, so there is nothing for a caller to be
+                // ordered behind. Reported as success so it still attempts its own write, which fails
+                // cleanly against a disposed transport rather than being parked into a dead queue.
+                return true;
         }
 
         try
@@ -138,6 +139,15 @@ internal sealed class WriteRetryQueue : IDisposable
             var totalFlushed = 0;
             while (true)
             {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    // Checked per batch, not only when entering: the loop drains until the queue is
+                    // empty, and an abandoned flush would otherwise keep sending onto a connection the
+                    // source has already replaced. Whatever is still queued stays queued, and reporting
+                    // failure keeps the caller from sending its own batch ahead of it.
+                    return false;
+                }
+
                 // Dequeue up to buffer size
                 int count;
                 lock (_lock)
@@ -195,7 +205,7 @@ internal sealed class WriteRetryQueue : IDisposable
         }
         finally
         {
-            try { _flushSemaphore.Release(); } catch { /* might be disposed already */ }
+            ExitFlushGate();
         }
     }
 
@@ -205,29 +215,18 @@ internal sealed class WriteRetryQueue : IDisposable
     /// each change's old value with the current (post-reconnection) value and re-applies locally if non-conflicting.
     /// </summary>
     /// <remarks>
-    /// Takes the same flush semaphore as <see cref="FlushAsync"/> so the two cannot interleave: without
-    /// it, this drain can run while a flush is holding a batch in its scratch buffer, and if that flush
-    /// then fails, its requeue puts those stale values back at the front of the queue after the reconcile
-    /// has already judged them, moving a property backwards.
-    /// <para>
-    /// Guards the semaphore acquisition and release the same way <see cref="FlushAsync"/> does: the
-    /// queue can be disposed while a reconcile is still in flight, and without the guard that races into
-    /// an exception here instead of the empty-result return the caller already handles.
-    /// </para>
+    /// Takes the same flush gate as <see cref="FlushAsync"/> so the two cannot interleave: without it,
+    /// this drain can run while a flush is holding a batch in its scratch buffer, and if that flush then
+    /// fails, its requeue puts those stale values back at the front of the queue after the reconcile has
+    /// already judged them, moving a property backwards. That is also why it does not skip an empty
+    /// queue: empty here does not mean nothing is in flight.
     /// </remarks>
     public async Task<SubjectPropertyChange[]> DrainForLocalReapplyAsync(CancellationToken cancellationToken)
     {
-        try
+        // Both failure modes yield the same empty result the caller already handles: there is nothing to
+        // reapply either way.
+        if (await TryEnterFlushGateAsync(cancellationToken).ConfigureAwait(false) != FlushGateEntry.Acquired)
         {
-            await _flushSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            return [];
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error acquiring flush semaphore");
             return [];
         }
 
@@ -243,8 +242,58 @@ internal sealed class WriteRetryQueue : IDisposable
         }
         finally
         {
-            try { _flushSemaphore.Release(); } catch { /* might be disposed already */ }
+            ExitFlushGate();
         }
+    }
+
+    /// <summary>What happened when a caller tried to take the flush gate.</summary>
+    private enum FlushGateEntry
+    {
+        /// <summary>Taken, and the caller must release it with <see cref="ExitFlushGate"/>.</summary>
+        Acquired,
+
+        /// <summary>Not taken because the caller's token fired. Work may still be pending.</summary>
+        Cancelled,
+
+        /// <summary>Not taken because the queue is disposed. Nothing is pending and nothing will be.</summary>
+        Disposed,
+    }
+
+    /// <summary>
+    /// Takes the gate that serializes every operation which moves entries out of the queue.
+    /// </summary>
+    /// <remarks>
+    /// Reported rather than thrown: the queue is disposed with its source, so a flush or a reconcile
+    /// still in flight races that disposal, and both callers have a "did not run" result to return.
+    /// The two failure modes are kept apart because they do not mean the same thing to a caller that
+    /// goes on to write.
+    /// </remarks>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<FlushGateEntry> TryEnterFlushGateAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _flushSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return FlushGateEntry.Acquired;
+        }
+        catch (OperationCanceledException)
+        {
+            return FlushGateEntry.Cancelled;
+        }
+        catch (ObjectDisposedException)
+        {
+            return FlushGateEntry.Disposed;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Error acquiring the write retry queue's flush gate.");
+            return FlushGateEntry.Disposed;
+        }
+    }
+
+    private void ExitFlushGate()
+    {
+        try { _flushSemaphore.Release(); } catch { /* might be disposed already */ }
     }
 
     private int RequeueChanges(ReadOnlySpan<SubjectPropertyChange> changes)

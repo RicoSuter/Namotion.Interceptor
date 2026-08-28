@@ -294,7 +294,8 @@ public class SubjectSourceRetryQueueTests
             var newerEpoch = source.BeginResumeForTest();
 
             // The older resume completes first; its completion must not release the gate the newer
-            // resume still owns.
+            // resume still owns. Satisfied here by CompleteResumeAsync's ownership guard rather than by
+            // TryEndResume's atomicity, which WhenAResumeEndsWhileANewerOneIsStarting covers instead.
             await source.CompleteResumeForTestAsync(olderEpoch, CancellationToken.None);
 
             var depthBeforeWrite = source.Diagnostics.OutboundRetries.Depth;
@@ -326,9 +327,232 @@ public class SubjectSourceRetryQueueTests
     }
 
     [Fact]
+    public async Task WhenAnOlderResumeCompletesAfterANewerOneHasStarted_ThenItDoesNotSendTheParkedWrites()
+    {
+        // Arrange: a write is parked under the older resume, then a newer resume takes the gate over
+        // before the older one completes. The newer resume has not loaded the peer's state yet, so the
+        // older one has nothing to judge the parked write against and must not send it: reconciling
+        // here would flush it onto the replacement connection ahead of its initial-state load.
+        var (source, person, gate, receivedWrites) = await StartPumpAsync();
+        try
+        {
+            var olderEpoch = source.BeginResumeForTest();
+            person.FirstName = "Parked";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundRetries.Depth > 0,
+                message: "The write was not parked while the resume gate was set.");
+
+            var newerEpoch = source.BeginResumeForTest();
+
+            // Act
+            await source.CompleteResumeForTestAsync(olderEpoch, CancellationToken.None);
+
+            // Assert: the reconcile's send arm runs inside the await above, so the write would already
+            // be recorded here if the superseded resume had judged and flushed it.
+            lock (gate)
+            {
+                Assert.DoesNotContain("FirstName=Parked", receivedWrites);
+            }
+
+            Assert.False(source.Diagnostics.OutboundRetries.Depth == 0,
+                "The parked write must stay queued for the resume that owns the gate.");
+
+            // The owning resume is what judges and delivers it.
+            await source.CompleteResumeForTestAsync(newerEpoch, CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                lock (gate)
+                {
+                    return receivedWrites.Contains("FirstName=Parked");
+                }
+            }, message: "The parked write should reach the source once the owning resume completes.");
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheGateIsAlreadyOpen_ThenACompletingResumeStillJudgesTheParkedWrites()
+    {
+        // Arrange: the attempt loop holds a resume while the connector's own reconnect loop opens and
+        // then abandons a second one, which is what ReconnectAndResumeAsync's catch arms do when the
+        // reconnect fails. The gate is open again and no resume owns it, so the attempt loop's own
+        // completion is the only thing left that can judge what it parked. Deferring to "whoever owns
+        // the gate" here would leave the entries unjudged for the idle drain to flush raw.
+        var (source, person, gate, receivedWrites) = await StartPumpAsync();
+        try
+        {
+            var attemptEpoch = source.BeginResumeForTest();
+            person.FirstName = "Parked";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.OutboundRetries.Depth > 0,
+                message: "The write was not parked while the resume gate was set.");
+
+            var reconnectEpoch = source.BeginResumeForTest();
+            Assert.True(source.TryEndResumeForTest(reconnectEpoch));
+            Assert.False(source.IsResumeGateHeldForTest);
+
+            // Act
+            await source.CompleteResumeForTestAsync(attemptEpoch, CancellationToken.None);
+
+            // Assert: the reconcile's send arm runs inline, so no wait is needed and the idle drain
+            // cannot be what delivered it.
+            lock (gate)
+            {
+                Assert.Contains("FirstName=Parked", receivedWrites);
+            }
+
+            Assert.Equal(0, source.Diagnostics.OutboundRetries.Depth);
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public void WhenTwoResumesOpenAtOnce_ThenTheNewerOneOwnsTheGate()
+    {
+        // Arrange: taking an epoch and publishing it are two steps, so two resumes opening together can
+        // take 5 and 6 and publish in the other order, leaving the older one owning the gate while the
+        // newer reconnect is the live one. No shipped connector calls BeginResume concurrently, but the
+        // gate's contract is that two loops may hold it, so the invariant is pinned here rather than
+        // left to the first connector that does.
+        //
+        // Probabilistic, and written to be sound rather than complete: it never fails on correct code.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        using var source = new TestSubjectSource(person, context, NullLogger.Instance);
+
+        const int iterations = 20_000;
+        var first = 0;
+        var second = 0;
+
+        using var barrier = new Barrier(2);
+        var opener = new Thread(() =>
+        {
+            for (var i = 0; i < iterations; i++)
+            {
+                barrier.SignalAndWait();
+                Volatile.Write(ref second, source.BeginResumeForTest());
+                barrier.SignalAndWait();
+            }
+        });
+
+        opener.Start();
+
+        for (var iteration = 0; iteration < iterations; iteration++)
+        {
+            barrier.SignalAndWait();
+            Volatile.Write(ref first, source.BeginResumeForTest());
+            barrier.SignalAndWait();
+
+            // Act & Assert: whichever took the higher epoch must be the one holding the gate, so ending
+            // that resume is what clears it.
+            var newest = Math.Max(Volatile.Read(ref first), Volatile.Read(ref second));
+            Assert.True(source.TryEndResumeForTest(newest),
+                $"The older of two concurrent resumes ended up owning the gate (iteration {iteration}).");
+        }
+
+        opener.Join();
+    }
+
+    [Fact]
+    public void WhenTheEpochIsZero_ThenEndingTheResumeReportsNoOwnership()
+    {
+        // Arrange: zero is what a connector's reconnect loop carries before its first BeginResume, and
+        // BeginResume never hands it out. A cleared gate also reads as zero, so an unguarded compare
+        // would let that carried zero match it and report ownership it never had.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        using var source = new TestSubjectSource(person, context, NullLogger.Instance);
+
+        // Act & Assert
+        Assert.False(source.TryEndResumeForTest(0));
+
+        var epoch = source.BeginResumeForTest();
+        Assert.False(source.TryEndResumeForTest(0));
+        Assert.True(source.TryEndResumeForTest(epoch));
+    }
+
+    [Fact]
+    public void WhenAResumeEndsWhileANewerOneIsStarting_ThenItNeverClearsTheNewerResumesGate()
+    {
+        // Arrange: ending a resume has to test ownership and clear the gate as one step. Split into a
+        // read and a write, a BeginResume landing between them has its gate cleared by the older
+        // resume, which leaves outbound delivery open for the whole of the newer reconnect.
+        //
+        // Probabilistic by nature, so it is written to be sound rather than complete: it can miss the
+        // interleaving on an unlucky scheduler, but it never fails on correct code. The read-then-write
+        // version it guards against was caught in roughly 7 of 20000 iterations.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        using var source = new TestSubjectSource(person, context, NullLogger.Instance);
+
+        const int iterations = 20_000;
+        var olderEpoch = 0;
+
+        // Two long-lived threads rather than a fresh pair per iteration: the interleaving comes from the
+        // barrier releasing both at the same instant, not from thread creation.
+        using var barrier = new Barrier(3);
+
+        var ender = new Thread(() =>
+        {
+            for (var i = 0; i < iterations; i++)
+            {
+                barrier.SignalAndWait();
+                source.TryEndResumeForTest(Volatile.Read(ref olderEpoch));
+                barrier.SignalAndWait();
+            }
+        });
+
+        var beginner = new Thread(() =>
+        {
+            for (var i = 0; i < iterations; i++)
+            {
+                barrier.SignalAndWait();
+                source.BeginResumeForTest();
+                barrier.SignalAndWait();
+            }
+        });
+
+        ender.Start();
+        beginner.Start();
+
+        for (var iteration = 0; iteration < iterations; iteration++)
+        {
+            Volatile.Write(ref olderEpoch, source.BeginResumeForTest());
+            barrier.SignalAndWait();
+            barrier.SignalAndWait();
+
+            // Act & Assert: the newer BeginResume is the last write to the gate in this iteration, so
+            // an open gate here can only mean the older resume cleared one it no longer owned.
+            Assert.True(source.IsResumeGateHeldForTest,
+                $"An older resume cleared the gate a concurrent BeginResume had taken (iteration {iteration}).");
+        }
+
+        ender.Join();
+        beginner.Join();
+    }
+
+    [Fact]
     public async Task WhenTheGateClearsBetweenTheEnqueueAndTheSecondRead_ThenTheSelfHealSendsTheParkedWriteWithNoFurtherWrite()
     {
-        // Arrange: a live pump with the resume gate held. AfterResumeGateObservedForTest fires between
+        // Arrange: a live pump with the resume gate held. AfterResumeGateObserved fires between
         // the retry-queue enqueue and the second gate read inside WriteChangesViaRetryQueueAsync, which
         // has no other externally observable synchronization point, so clearing the gate from inside it
         // reproduces the TOCTOU window the self-heal exists for: the write parks while the gate still
@@ -338,11 +562,11 @@ public class SubjectSourceRetryQueueTests
         var resumeEpoch = source.BeginResumeForTest();
 
         var hookRan = 0;
-        source.AfterResumeGateObservedForTest = () =>
+        source.AfterResumeGateObserved = () =>
         {
             if (Interlocked.Exchange(ref hookRan, 1) == 0)
             {
-                source.AbortResumeForTest(resumeEpoch);
+                source.TryEndResumeForTest(resumeEpoch);
             }
         };
 
@@ -363,7 +587,7 @@ public class SubjectSourceRetryQueueTests
         }
         finally
         {
-            source.AfterResumeGateObservedForTest = null;
+            source.AfterResumeGateObserved = null;
             await source.StopAsync(CancellationToken.None);
         }
     }
