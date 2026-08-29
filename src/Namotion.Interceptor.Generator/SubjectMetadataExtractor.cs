@@ -78,7 +78,9 @@ internal static class SubjectMetadataExtractor
             }
         }
 
-        var className = typeDeclaration.Identifier.ValueText;
+        // Text keeps the escape on a verbatim identifier: the name is re-emitted as the partial
+        // declaration, as every cast and as each generated constructor's name.
+        var className = typeDeclaration.Identifier.Text;
 
         // Use the symbol rather than the syntax modifiers: a top-level class without a modifier
         // defaults to internal, a nested one to private.
@@ -169,9 +171,11 @@ internal static class SubjectMetadataExtractor
         var parent = node.Parent;
         while (parent is TypeDeclarationSyntax typeDeclaration)
         {
+            // Text keeps the escape on a verbatim identifier: the generated file reopens every
+            // containing type by name.
             types.Insert(0, new ContainingType(
                 GetTypeKeyword(typeDeclaration),
-                typeDeclaration.Identifier.ValueText));
+                typeDeclaration.Identifier.Text));
             parent = parent.Parent;
         }
         return types.ToArray();
@@ -519,9 +523,11 @@ internal static class SubjectMetadataExtractor
 
                 var returnType = GetFullTypeName(method.ReturnType, declarationModel);
 
+                // Text keeps the escape on a verbatim identifier; the wrapper restates the name
+                // in declaration and argument position, where the unescaped keyword cannot parse.
                 var parameters = method.ParameterList.Parameters
                     .Select(p => new ParameterMetadata(
-                        p.Identifier.ValueText,
+                        p.Identifier.Text,
                         GetFullTypeName(p.Type, declarationModel) ?? "object"))
                     .ToList();
 
@@ -879,10 +885,16 @@ internal static class SubjectMetadataExtractor
                     continue;
                 }
 
+                // Carried because a generated constructor chaining to this one has to repeat the
+                // attribute; without it the chain is CS9039.
+                var setsRequiredMembers = SymbolExtensions.HasAttribute(
+                    constructor.AttributeLists, KnownTypes.SetsRequiredMembersAttribute, declarationModel, cancellationToken);
+
                 constructors.Add(new SubjectConstructor(
                     GetAccessModifier(constructor.Modifiers),
                     parameters,
-                    isObsolete));
+                    isObsolete,
+                    setsRequiredMembers));
             }
         }
 
@@ -924,9 +936,11 @@ internal static class SubjectMetadataExtractor
                 return null;
             }
 
+            // Text rather than ValueText: the latter drops the escape from a verbatim identifier,
+            // so a parameter named "@event" would be re-emitted as the keyword "event".
             parameters.Add(new SubjectConstructorParameter(
                 parameterType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                parameter.Identifier.ValueText));
+                parameter.Identifier.Text));
         }
 
         return parameters;
