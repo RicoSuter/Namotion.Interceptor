@@ -5,17 +5,6 @@ namespace Namotion.Interceptor.Connectors.Tests;
 
 public class SourceOwnershipManagerTests
 {
-    [Fact]
-    public void WhenASourceIsDeclared_ThenItIsAuthoritativeButAPlainConnectorIsNot()
-    {
-        // A source represents an external system that holds the truth, so it is authoritative and its
-        // inbound values are not validated. A connector is not: server-role connectors apply a remote
-        // peer's write into a model the peer does not own, and that stays untrusted input.
-        // Act & Assert
-        Assert.True(typeof(IAuthoritativeRemote).IsAssignableFrom(typeof(ISubjectSource)));
-        Assert.False(typeof(IAuthoritativeRemote).IsAssignableFrom(typeof(ISubjectConnector)));
-        Assert.False(typeof(IAuthoritativeRemote).IsAssignableFrom(typeof(SubjectConnectorBase)));
-    }
 
     [Fact]
     public void ClaimSource_WhenNotOwned_ReturnsTrue()

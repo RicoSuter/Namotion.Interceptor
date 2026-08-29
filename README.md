@@ -26,7 +26,7 @@ Namotion.Interceptor is structured as Core, Tracking, Validation, Registry, Conn
 
 1. **Core**: `[InterceptorSubject]`, the source generator, and the read/write interceptor pipeline. Everything else plugs into this.
 2. **Tracking**: observable and queue-based change streams, derived property recalculation, lifecycle attach/detach, transactions.
-3. **Validation**: data-annotation and custom property validators that reject invalid writes before they reach your model, except values an authoritative source sent or confirmed, which the model mirrors rather than vetoes.
+3. **Validation**: data-annotation and custom property validators that reject invalid writes before they reach your model.
 4. **Registry**: runtime subject and property discovery, property metadata via attributes, dynamic properties, stable subject IDs.
 5. **Connectors**: bidirectional synchronization with external systems (MQTT, OPC UA, WebSocket).
 6. **Integrations**: host frameworks (ASP.NET Core, Blazor, GraphQL, MCP) that surface subjects through familiar APIs.
@@ -244,7 +244,7 @@ For source-bound properties, `WithSourceTransactions()` writes to the external s
 
 ## Validation
 
-The Validation package rejects invalid writes before they reach the backing field, except values an authoritative source sent or confirmed (see [Validation](docs/validation.md#validation-is-scoped-to-local-writes)). Standard .NET data-annotation attributes like `[Required]`, `[MaxLength]`, and `[Range]` work out of the box once you add `WithDataAnnotationValidation()` to the context. Invalid writes throw `ValidationException` and the property keeps its previous value.
+The Validation package rejects invalid writes before they reach the backing field. Standard .NET data-annotation attributes like `[Required]`, `[MaxLength]`, and `[Range]` work out of the box once you add `WithDataAnnotationValidation()` to the context. Invalid writes throw `ValidationException` and the property keeps its previous value.
 
 ```csharp
 [InterceptorSubject]

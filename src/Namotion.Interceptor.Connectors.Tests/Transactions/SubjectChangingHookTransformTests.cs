@@ -1,12 +1,9 @@
-using System.ComponentModel.DataAnnotations;
 using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Transactions;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
-using Namotion.Interceptor.Validation;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.Tests.Transactions;
@@ -263,87 +260,5 @@ public class SubjectChangingHookTransformTests : TransactionTestBase
         Assert.Single(valueChanges);
         Assert.Equal(100, valueChanges[0].GetNewValue<int>());
         Assert.Same(sourceMock.Object, valueChanges[0].Origin.Source);
-    }
-
-    [Fact]
-    public void WhenAHookTransformsAStampedValue_ThenItIsValidatedBecauseItIsEffectivelyLocal()
-    {
-        // Arrange: the validator rejects anything above 50, and the hook clamps above 100.
-        var validator = new MaxValueValidator(50);
-        var context = CreateContextWithMaxValueValidation(validator);
-        var device = new ClampingDevice(context);
-        var sourceMock = CreateSucceedingSource();
-
-        // Act & Assert: the source sends 150, the hook stores 100, so the value is locally computed
-        // and publishes as Local. It flows back out to the source, so it must be validated even
-        // though the write entered the chain stamped FromSource.
-        Assert.Throws<ValidationException>(() =>
-            new PropertyReference(device, nameof(ClampingDevice.Value))
-                .SetValueFromSource(sourceMock.Object, null, null, 150));
-
-        Assert.Equal(0, device.Value);
-
-        // The validator must be told the origin the interceptor decided on. Handing it FromSource here
-        // would let a validator that opts out of non-local writes skip the write the gate just caught.
-        Assert.Equal([ChangeOriginKind.Local], validator.SeenOrigins);
-    }
-
-    [Fact]
-    public void WhenAStampedValueIsStoredUntransformed_ThenValidationIsSkipped()
-    {
-        // Arrange: same validator, but a value the hook leaves alone, so the source stamp survives.
-        var validator = new MaxValueValidator(50);
-        var context = CreateContextWithMaxValueValidation(validator);
-        var device = new ClampingDevice(context);
-        var sourceMock = CreateSucceedingSource();
-
-        // Act: 60 exceeds the validator's limit but not the hook's clamp, so it is stored exactly as
-        // the source sent it.
-        new PropertyReference(device, nameof(ClampingDevice.Value))
-            .SetValueFromSource(sourceMock.Object, null, null, 60);
-
-        // Assert: the source owns this value, so the model mirrors it rather than vetoing it, and the
-        // validator was never consulted.
-        Assert.Equal(60, device.Value);
-        Assert.Empty(validator.SeenOrigins);
-    }
-
-    private static IInterceptorSubjectContext CreateContextWithMaxValueValidation(MaxValueValidator validator)
-    {
-        return InterceptorSubjectContext
-            .Create()
-            .WithRegistry()
-            .WithTransactions()
-            .WithFullPropertyTracking()
-            .WithSourceTransactions()
-            .WithPropertyValidation()
-            .WithService<IPropertyValidator>(() => validator);
-    }
-
-    /// <summary>
-    /// Rejects any <see cref="ClampingDevice.Value"/> above the configured maximum, and records the
-    /// origin it was handed, so a test can check that the interceptor reports the origin it actually
-    /// decided on rather than the one the caller declared.
-    /// </summary>
-    private sealed class MaxValueValidator(int maximum) : IPropertyValidator
-    {
-        public List<ChangeOriginKind> SeenOrigins { get; } = [];
-
-        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
-        {
-            if (context.Property.Name != nameof(ClampingDevice.Value))
-            {
-                return [];
-            }
-
-            SeenOrigins.Add(context.Origin.Kind);
-
-            if (context.Value is int value && value > maximum)
-            {
-                return [new ValidationResult($"Value {value} exceeds {maximum}.")];
-            }
-
-            return [];
-        }
     }
 }

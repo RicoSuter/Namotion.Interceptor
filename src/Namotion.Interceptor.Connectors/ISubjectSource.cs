@@ -22,7 +22,7 @@ namespace Namotion.Interceptor.Connectors;
 /// appears in the stream, and branch-scoped waits covering it complete vacuously.
 /// </para>
 /// </remarks>
-public interface ISubjectSource : ISubjectConnector, IAuthoritativeRemote
+public interface ISubjectSource : ISubjectConnector
 {
     /// <summary>
     /// Gets the maximum number of property changes that can be applied in a single batch (0 = no limit).

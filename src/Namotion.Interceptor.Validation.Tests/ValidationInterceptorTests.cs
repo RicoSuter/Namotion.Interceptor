@@ -50,55 +50,10 @@ public class ValidationInterceptorTests
     }
 
     [Fact]
-    public void WhenOriginIsFromSource_ThenValidatorIsNotInvokedAtAll()
-    {
-        // Arrange: a validator that rejects unconditionally, so only the skip can let the write through.
-        var validator = new RecordingValidator(nameof(Person.LastName));
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithPropertyValidation()
-            .WithFullPropertyTracking()
-            .WithService<IPropertyValidator>(() => validator);
-
-        var person = new Person(context);
-        var source = new AuthoritativeTestRemote();
-
-        // Act
-        new PropertyReference(person, nameof(Person.LastName))
-            .SetValueFromSource(source, null, null, "anything");
-
-        // Assert: the value lands, and the skip happened before validator resolution.
-        Assert.Equal("anything", person.LastName);
-        Assert.Empty(validator.SeenOrigins);
-    }
-
-    [Fact]
-    public void WhenOriginIsFromSource_ThenDataAnnotationsAreNotEnforced()
-    {
-        // Arrange: FirstName carries [MaxLength(4)].
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithPropertyValidation()
-            .WithDataAnnotationValidation()
-            .WithFullPropertyTracking();
-
-        var person = new Person(context);
-        var source = new AuthoritativeTestRemote();
-
-        // Act: a source sends a value the local annotation would reject.
-        new PropertyReference(person, nameof(Person.FirstName))
-            .SetValueFromSource(source, null, null, "Suter");
-
-        // Assert: the model mirrors the source rather than diverging from it.
-        Assert.Equal("Suter", person.FirstName);
-    }
-
-    [Fact]
     public void WhenSourceWriteTriggersDerivedRecalculation_ThenTheDerivedWriteIsStillValidated()
     {
-        // Arrange: the source write itself skips validation, but FullName depends on LastName and its
-        // recalculation is a local write, so it keeps its veto. Documented behavior, pinned here
-        // because the asymmetry is easy to break by accident.
+        // Arrange: FullName depends on LastName, and its recalculation is a separate locally computed
+        // write, so it reports Local rather than inheriting the inbound origin.
         var validator = new RecordingValidator(nameof(Person.FullName));
         var context = InterceptorSubjectContext
             .Create()
@@ -107,7 +62,7 @@ public class ValidationInterceptorTests
             .WithService<IPropertyValidator>(() => validator);
 
         var person = new Person(context);
-        var source = new AuthoritativeTestRemote();
+        var source = new object();
 
         // Act & Assert
         Assert.Throws<ValidationException>(() =>
@@ -116,16 +71,15 @@ public class ValidationInterceptorTests
 
         Assert.Equal([ChangeOriginKind.Local], validator.SeenOrigins);
 
-        // The asymmetry this test is named for: the source write itself was never vetoed, it landed.
+        // The trigger write itself was not vetoed by this validator, which is scoped to FullName.
         Assert.Equal("anything", person.LastName);
     }
 
     [Fact]
-    public void WhenOriginIsAPeerWriteRatherThanAnAuthoritativeSource_ThenValidationStillApplies()
+    public void WhenOriginIsFromSource_ThenValidationStillApplies()
     {
-        // Arrange: server-role connectors stamp a remote peer's write the same way a client source
-        // stamps an inbound value, but there the local model is the truth and the peer is untrusted
-        // input, so it keeps its veto. Such a connector is not an ISubjectSource and so is unmarked.
+        // Arrange: an inbound value from a source is validated like any other write. Rejecting it
+        // leaves the model disagreeing with its source, which is reported rather than repaired.
         var validator = new RecordingValidator(nameof(Person.LastName));
         var context = InterceptorSubjectContext
             .Create()
@@ -144,9 +98,6 @@ public class ValidationInterceptorTests
         Assert.Null(person.LastName);
         Assert.Equal([ChangeOriginKind.FromSource], validator.SeenOrigins);
     }
-
-    /// <summary>Stands in for a client-role source, whose external system holds the truth.</summary>
-    private sealed class AuthoritativeTestRemote : IAuthoritativeRemote;
 
     /// <summary>
     /// Rejects every write to one property and records the origin of each write it is asked about for

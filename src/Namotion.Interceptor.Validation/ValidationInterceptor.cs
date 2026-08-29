@@ -8,15 +8,16 @@ namespace Namotion.Interceptor.Validation;
 
 /// <summary>
 /// Interceptor that validates property values using registered validators before writing.
-/// Skipped only where the model is not the authority for the value: a value an authoritative remote sent
-/// (<see cref="ChangeOriginKind.FromSource"/> from an <see cref="IAuthoritativeRemote"/>) or a value a
-/// source confirmed (<see cref="ChangeOriginKind.Confirmed"/>) are applied unvalidated, because that
-/// party already holds them and rejecting them would diverge the model rather than repair anything.
-/// A write a server-role connector accepted from a remote peer is stamped the same way but is not
-/// authoritative, so it stays untrusted input and keeps its validation.
-/// A local commit replay is still validated, since a rejection there is cleanly recoverable, which is
-/// why this runs before the transaction interceptor: a local write is validated at capture and again
-/// when the commit replays it.
+/// Every write is validated except one: a value a source confirmed during a transaction commit
+/// (<see cref="ChangeOriginKind.Confirmed"/>) is applied unvalidated, because it is the model's own
+/// value returning after a source accepted it. It already passed validation when the transaction
+/// captured it, so re-checking is redundant, and a rejection would make the commit revert a write
+/// the source has taken.
+/// Inbound values from a source are validated like any other write. A rejection leaves the model
+/// disagreeing with its source, which is reported rather than repaired; see the validation
+/// documentation.
+/// Runs before the transaction interceptor so a local write is validated at capture as well as when
+/// the commit replays it.
 /// </summary>
 [RunsBefore(typeof(SubjectTransactionInterceptor))]
 public class ValidationInterceptor : IWriteInterceptor
@@ -24,20 +25,13 @@ public class ValidationInterceptor : IWriteInterceptor
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        // Only local writes are validated. A non-local origin means an external system already holds
-        // this value, so rejecting it cannot cleanly undo anything: the commit would revert an
-        // accepted source write (a visible flap), or an inbound apply would simply leave the model
-        // diverged from its source. Placed before validator resolution so the inbound apply path
-        // does no validation work at all.
-        // The EFFECTIVE origin, not context.Origin: a hook that transformed a stamped value produces
-        // a locally computed value that publishes as Local and flows outbound, so it must be validated.
-        // Confirmed is skipped unconditionally: that is our own value returning after a source accepted
-        // it, so rejecting it would revert an accepted write whatever the source is. FromSource is
-        // skipped only for an authoritative source, because a server-role connector stamps a remote
-        // peer's write the same way, and there our model is the truth and the peer is untrusted input.
+        // A confirmed value is the model's own value returning after a source accepted it, so it has
+        // already been validated once at capture and rejecting it now would revert an accepted write.
+        // The EFFECTIVE origin, not context.Origin: if a hook transformed the value on the way in, the
+        // stored value is no longer what the source confirmed, so it is locally computed and validated.
+        // Placed before validator resolution so a confirmed replay does no validation work at all.
         var origin = context.GetEffectiveOrigin();
-        if (origin.Kind == ChangeOriginKind.Confirmed ||
-            (origin.Kind == ChangeOriginKind.FromSource && origin.Source is IAuthoritativeRemote))
+        if (origin.Kind == ChangeOriginKind.Confirmed)
         {
             next(ref context);
             return;
@@ -45,10 +39,8 @@ public class ValidationInterceptor : IWriteInterceptor
 
         var validators = context.Property.Subject.Context.GetServices<IPropertyValidator>();
 
-        // The effective origin, not context.Origin. A hook-transformed inbound value is reported as
-        // Local, which is what it is, rather than as the FromSource the caller declared: reporting the
-        // latter would let a validator that opts out of non-local writes skip the very write the gate
-        // above decided to catch. A peer write is reported as FromSource, which is also what it is.
+        // The effective origin, not context.Origin: a hook-transformed inbound value is reported as
+        // Local, which is what it is, rather than as the origin the caller declared.
         var validationContext = new PropertyValidationContext<TProperty>(
             context.Property, context.NewValue, origin);
 

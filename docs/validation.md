@@ -1,22 +1,20 @@
 # Validation
 
-The `Namotion.Interceptor.Validation` package provides automatic property validation using Data Annotations or custom validators. Validation runs when properties are written, except where the model is not the authority for the value, throwing a `ValidationException` if the new value is invalid.
+The `Namotion.Interceptor.Validation` package provides automatic property validation using Data Annotations or custom validators. Validation runs when properties are written, throwing a `ValidationException` if the new value is invalid.
 
-## Validation is scoped to local writes
+## What is not validated
 
-Validation is skipped only where the model is not the authority for the value. Two cases qualify: a value an authoritative source sent (`FromSource` from an `ISubjectSource`), and a value a source confirmed through a transaction commit (`Confirmed`). Everything else is validated.
+Every property write is validated except one: a value a source confirmed during a transaction commit (`Confirmed`). That value is the model's own. It already passed validation when the transaction captured it, so re-checking is redundant, and rejecting it now would make the commit revert a write the source has already accepted, which other subscribers of that source observe as a value flap.
 
-For an authoritative source the external system holds the truth and the subject is a replica of it, so a value it sent is outside the model's control. Rejecting it cannot cleanly undo anything: it would simply leave the model diverged from its source. A confirmed commit value is the model's own value returning after a source accepted it, so rejecting that would make the transaction revert an accepted write, which other subscribers of that source observe as a value flap.
+One consequence follows from that exemption: a partially failed `BestEffort` commit can leave the model in a state its own validators would reject, because the changes a source accepted are applied without being re-checked against the ones that failed. That is the intended trade.
 
-One consequence follows from skipping a confirmed value: a partially failed `BestEffort` commit can leave the model in a state its own validators would reject, because the changes a source accepted are applied without being re-checked against the ones that failed. That is the intended trade, since re-checking them would make the commit revert a write the source already accepted.
+**Everything else keeps its veto, including values a source sends inbound.** A validator is a statement about your model's invariants, and they hold whatever the write's provenance. The cost is that rejecting an inbound value leaves the model holding the old value while the source holds the new one, and nothing reconciles that today, so the disagreement lasts until the property changes again or the connection reloads. Expect a rejected inbound value to show up as a model that disagrees with its source.
 
-**Writes from a remote peer stay validated.** Server-role connectors, the OPC UA and MQTT servers and the WebSocket server handler, stamp an incoming peer write the same way a client source stamps an inbound value. There the local model is the authority and the peer is untrusted input, so that write keeps its veto. The distinction is carried by `IAuthoritativeRemote`, which `ISubjectSource` implements, so every real source is authoritative without opting in and anything else is treated as untrusted. A custom connector that applies peer writes should not implement `ISubjectSource`.
+The exemption uses the write's *effective* origin rather than the origin the caller declared, so a confirmed value that an `OnChanging` hook transformed on the way in is no longer what the source confirmed, is therefore locally computed, and is validated.
 
-Local writes keep their veto, which is where protective rules belong. Rejecting user input, forbidding application writes to a source-driven property, and permission checks are all local-write rejections and are unaffected. So is a local transaction's commit replay, which is still validated because a rejection there is cleanly recoverable: the change is reported as failed and the model keeps its old value. The built-in `SourceTransactionWriter` marks every change a source accepted, so an accepted value never reaches this path. A custom `ITransactionWriter` may decline to mark, which its contract permits, and gives up that guarantee.
+A derived property that recalculates because of an inbound write is a separate, locally computed write, so it runs validators too. That is not a veto: a derived property's value is stored before its change is published, so a validator that throws there does not reject the value, it only suppresses that change notification and the remainder of the cascade, while the getter keeps returning the new value. Do not rely on a validator to guard a derived property.
 
-One consequence is worth spelling out: an inbound source write skips validation, but a derived property that recalculates because of it is a separate, locally computed write, so that recalculation still runs validators. This is not a veto. A derived property's value is stored before its change is published, so a validator that throws there does not reject the value, it only suppresses that change notification and the remainder of the cascade, while the getter keeps returning the new value. The connector reports the exception, but what it does next differs: connectors that apply change by change, such as the OPC UA subscription and polling paths, continue with the next change, while connectors that apply a whole graph update abandon the remainder of that update. Do not rely on a validator to guard a derived property.
-
-The decision uses the write's *effective* origin rather than the origin the caller declared. If an `OnChanging` hook transforms an incoming value, a clamp for example, the stored value is no longer the value the source sent, so it was computed locally: it publishes as `Local`, flows back out to bound sources, and is validated. This covers transforms that run before the write context is built, which is where `OnChanging` hooks run. A write interceptor ordered after validation can still change a value afterwards, and validation cannot see that. A validator can therefore reject a transformed inbound value, which leaves the model diverged from its source. That is a modeling bug worth surfacing rather than hiding, because the alternative is pushing a value your own validator rejects back out to the source.
+When a validator rejects an inbound write, the connector reports the exception, but what it does next differs: connectors that apply change by change, such as the OPC UA subscription and polling paths, continue with the next change, while connectors that apply a whole graph update abandon the remainder of that update.
 
 Note that this describes the write interceptor. Code that resolves `IPropertyValidator` and invokes it directly, such as the ASP.NET Core update endpoint, is validating local input before writing and is unaffected.
 
@@ -126,7 +124,7 @@ public class NoSwearWordsValidator : IPropertyValidator
 }
 ```
 
-The `PropertyValidationContext` carries the property, the new value, and the effective `Origin` of the write. It is never the origin of an authoritative source, since those writes are not validated at all: it is either `Local`, or `FromSource` for a write a server-role connector accepted from a remote peer. See [validation is scoped to local writes](#validation-is-scoped-to-local-writes). Because the context is passed by `in`, implementations must return a collection instead of using `yield`.
+The `PropertyValidationContext` carries the property, the new value, and the effective `Origin` of the write, which is either `Local` or `FromSource`. It is never `Confirmed`, because a confirmed value is not validated. See [what is not validated](#what-is-not-validated). Because the context is passed by `in`, implementations must return a collection instead of using `yield`.
 
 Register your custom validator:
 
@@ -157,7 +155,7 @@ var context = InterceptorSubjectContext
     .WithService<IPropertyValidator>(() => new MyCustomValidator());
 ```
 
-Data Annotations and custom validators all run on each validated property write, which is every write except the two skipped above. If any validator returns errors, the write is rejected.
+Data Annotations and custom validators all run on each validated property write, which is every write except the one skipped above. If any validator returns errors, the write is rejected.
 
 ## Dynamic Properties
 

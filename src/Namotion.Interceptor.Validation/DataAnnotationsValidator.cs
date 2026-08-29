@@ -18,7 +18,7 @@ public class DataAnnotationsValidator : IPropertyValidator
         }
 
         // Slow path: has attributes, must box for .NET Validator API. Origin is not inspected here:
-        // ValidationInterceptor never invokes validators for a value an authoritative remote sent.
+        // ValidationInterceptor never invokes validators for a value a source confirmed.
         return ValidateCore(property, context.Value);
     }
 

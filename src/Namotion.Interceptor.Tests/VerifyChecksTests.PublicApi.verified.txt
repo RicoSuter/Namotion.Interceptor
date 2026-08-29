@@ -55,7 +55,6 @@ namespace Namotion.Interceptor
         FromSource = 1,
         Confirmed = 2,
     }
-    public interface IAuthoritativeRemote { }
     public interface IInterceptorSubject
     {
         Namotion.Interceptor.IInterceptorSubjectContext Context { get; }

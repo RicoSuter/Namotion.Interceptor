@@ -482,7 +482,7 @@ Apply pending[MotorSpeed] = 150:
     → Notifications fired
 ```
 
-**A change replays with the origin it was captured with.** The walkthrough above is a plain local transaction, so both changes replay as `Local` and are validated. Two kinds of change replay non-local and therefore skip validation: one that a source accepted during this commit, which the transaction writer marks `Confirmed`, and one captured from an inbound apply by an authoritative remote, where `SetValueFromSource` was called inside the transaction and the change stays `FromSource`. A peer write captured the same way is not authoritative and stays validated. The distinction is per change, not per property and not per transaction: a single commit can mix changes that skip replay validation with changes that do not. See [Validation](validation.md#validation-is-scoped-to-local-writes).
+**A change a source confirmed is not re-validated on replay.** The walkthrough above is a plain local transaction, so both changes replay as `Local` and are validated. A change a source accepted during the commit is marked `Confirmed` by the transaction writer and skips validation, because the model already validated it at capture and rejecting it would revert an accepted write. The distinction is per change, not per property and not per transaction: a single commit can mix confirmed changes that skip replay validation with local ones that do not. See [Validation](validation.md#what-is-not-validated).
 
 **Why insertion order matters:** If `MotorSpeed` were committed before `MaxAllowedSpeed`, the validator would read `MaxAllowedSpeed = 100` from the real model and reject the write.
 
