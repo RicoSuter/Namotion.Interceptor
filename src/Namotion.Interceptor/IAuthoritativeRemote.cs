@@ -10,6 +10,8 @@ namespace Namotion.Interceptor;
 /// It exists separately because the same stamping API carries writes in the opposite direction:
 /// a server-role connector stamps a remote peer's write into a model that the peer does not own.
 /// Such a connector is not a source, does not carry this marker, and its writes stay untrusted
-/// input. Anything unmarked is therefore treated as untrusted, which is the safe default.
+/// input. An unmarked remote is therefore treated as untrusted, which is the safe default. The marker
+/// governs inbound values only: a value a source confirmed during a transaction commit is the model's
+/// own value returning, so it is never re-validated whatever the confirming party is.
 /// </remarks>
 public interface IAuthoritativeRemote;

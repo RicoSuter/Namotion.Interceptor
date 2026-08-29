@@ -8,9 +8,12 @@ namespace Namotion.Interceptor.Validation;
 
 /// <summary>
 /// Interceptor that validates property values using registered validators before writing.
-/// Runs only for locally originated writes: values a source sent (<see cref="ChangeOriginKind.FromSource"/>)
-/// or confirmed (<see cref="ChangeOriginKind.Confirmed"/>) are applied unvalidated, because the external
-/// system already holds them and rejecting them would diverge the model rather than repair anything.
+/// Skipped only where the model is not the authority for the value: a value an authoritative remote sent
+/// (<see cref="ChangeOriginKind.FromSource"/> from an <see cref="IAuthoritativeRemote"/>) or a value a
+/// source confirmed (<see cref="ChangeOriginKind.Confirmed"/>) are applied unvalidated, because that
+/// party already holds them and rejecting them would diverge the model rather than repair anything.
+/// A write a server-role connector accepted from a remote peer is stamped the same way but is not
+/// authoritative, so it stays untrusted input and keeps its validation.
 /// A local commit replay is still validated, since a rejection there is cleanly recoverable, which is
 /// why this runs before the transaction interceptor: a local write is validated at capture and again
 /// when the commit replays it.

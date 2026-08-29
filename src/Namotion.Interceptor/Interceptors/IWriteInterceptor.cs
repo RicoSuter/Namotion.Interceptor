@@ -279,7 +279,7 @@ public struct PropertyWriteContext<TProperty>
     /// Cheap for local writes, which short-circuit before any comparison.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ChangeOrigin GetEffectiveOrigin()
+    public readonly ChangeOrigin GetEffectiveOrigin()
     {
         if (_attempted.Origin.Kind == ChangeOriginKind.Local)
         {

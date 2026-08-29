@@ -144,7 +144,7 @@ Origin is stamped per write at the apply call (`SetValueFromSource`, `ApplySubje
 
 Values an authoritative source sent or confirmed are not validated, so a validator cannot reject them. Two related writes are still validated: one a server-role connector accepted from a remote peer, which is untrusted input rather than truth, and a derived property recalculating because of an inbound write, which is locally computed. See [Validation](validation.md#validation-is-scoped-to-local-writes).
 
-A write's origin moves through a lifecycle: it starts as a pending stamp set by the apply call (`SetValueFromSource`, `ApplySubjectUpdate`), becomes the attempted origin carried by the write while interceptors and validators run (this is what `PropertyValidationContext.Origin` exposes), and is finalized at the actual write, where a stamped origin whose stored value does not equal the sent value is demoted to `Local`; published changes always carry the finalized origin.
+A write's origin moves through a lifecycle: it starts as a pending stamp set by the apply call (`SetValueFromSource`, `ApplySubjectUpdate`), becomes the attempted origin carried by the write while interceptors run (validators instead receive the effective origin, see [Validation](validation.md#validation-is-scoped-to-local-writes)), and is finalized at the actual write, where a stamped origin whose stored value does not equal the sent value is demoted to `Local`; published changes always carry the finalized origin.
 
 ### Change Batching and Merging
 

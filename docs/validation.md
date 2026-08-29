@@ -1,12 +1,14 @@
 # Validation
 
-The `Namotion.Interceptor.Validation` package provides automatic property validation using Data Annotations or custom validators. Validation runs when properties are written **locally**, throwing a `ValidationException` if the new value is invalid.
+The `Namotion.Interceptor.Validation` package provides automatic property validation using Data Annotations or custom validators. Validation runs when properties are written, except where the model is not the authority for the value, throwing a `ValidationException` if the new value is invalid.
 
 ## Validation is scoped to local writes
 
 Validation is skipped only where the model is not the authority for the value. Two cases qualify: a value an authoritative source sent (`FromSource` from an `ISubjectSource`), and a value a source confirmed through a transaction commit (`Confirmed`). Everything else is validated.
 
 For an authoritative source the external system holds the truth and the subject is a replica of it, so a value it sent is outside the model's control. Rejecting it cannot cleanly undo anything: it would simply leave the model diverged from its source. A confirmed commit value is the model's own value returning after a source accepted it, so rejecting that would make the transaction revert an accepted write, which other subscribers of that source observe as a value flap.
+
+One consequence follows from skipping a confirmed value: a partially failed `BestEffort` commit can leave the model in a state its own validators would reject, because the changes a source accepted are applied without being re-checked against the ones that failed. That is the intended trade, since re-checking them would make the commit revert a write the source already accepted.
 
 **Writes from a remote peer stay validated.** Server-role connectors, the OPC UA and MQTT servers and the WebSocket server handler, stamp an incoming peer write the same way a client source stamps an inbound value. There the local model is the authority and the peer is untrusted input, so that write keeps its veto. The distinction is carried by `IAuthoritativeRemote`, which `ISubjectSource` implements, so every real source is authoritative without opting in and anything else is treated as untrusted. A custom connector that applies peer writes should not implement `ISubjectSource`.
 
@@ -155,7 +157,7 @@ var context = InterceptorSubjectContext
     .WithService<IPropertyValidator>(() => new MyCustomValidator());
 ```
 
-Data Annotations and custom validators all run on each property write. If any validator returns errors, the write is rejected.
+Data Annotations and custom validators all run on each validated property write, which is every write except the two skipped above. If any validator returns errors, the write is rejected.
 
 ## Dynamic Properties
 
