@@ -143,6 +143,13 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
             // context they are being torn down from.
             graph.ReleaseClaim(subject);
 
+            // The marker exists to tell an attached-but-unowned subject that is being released from
+            // one that is being attached, and handing the claim back ends that ambiguity: the
+            // subject is attached to nothing now. Clearing it here rather than only in the finally
+            // keeps it from covering the children drain below, which is no longer this subject's
+            // window at all. The finally still clears it for the paths that never reach this line.
+            graph.ClearReleasing(subject);
+
             foreach (var (childProperty, occurrence) in children)
             {
                 RemoveEdge(occurrence.Subject, childProperty, occurrence.Index);
