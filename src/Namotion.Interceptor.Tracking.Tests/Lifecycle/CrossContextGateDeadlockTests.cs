@@ -102,8 +102,11 @@ public class CrossContextGateDeadlockTests
         // Assert: both callbacks reached the cross write, so a timeout cannot pass by serializing.
         Assert.Equal(2, Volatile.Read(ref rendezvousReached));
 
-        // Both operations must terminate. A cross-context write from a callback may legitimately be
-        // rejected, but it must be rejected rather than block on the other context's gate.
+        // Termination is necessary but not sufficient. The remedy is that the cross-context write is
+        // rejected, so both assertions are made: completion first, because a deadlock reports better
+        // as a timeout than as a null exception, and then the rejection itself. Asserting the
+        // rejection is what stops this test passing if the deadlock disappears because the gate
+        // stopped being held here rather than because the write became guarded.
         Assert.True(firstCompleted && secondCompleted,
             "probable ABBA deadlock on two lifecycle gates: the first attach " +
             $"{(firstCompleted ? "completed" : "did not complete")} and the second attach " +
@@ -166,9 +169,16 @@ public class CrossContextGateDeadlockTests
     /// write chain is resolved and the interceptor runs inside it.
     ///
     /// The rendezvous is artificial, because it lines both interceptors up inside their own gates at
-    /// the same time; the acquisition order they then take is the production one. Whether such a
-    /// cross-context write should succeed or be rejected is a design choice, so this asserts only
-    /// that both operations terminate.
+    /// the same time; the acquisition order they then take is the production one.
+    ///
+    /// Like the callback half above, this asserts the rejection and not merely that both operations
+    /// terminate. The distinction matters here: the gate is currently entered around the whole write
+    /// chain, so an interceptor moved to the other side of the lifecycle still holds it, but if
+    /// entering the gate ever moves inside the lifecycle then an interceptor outside it would hold
+    /// nothing, both writes would simply complete, and a termination-only assertion would pass while
+    /// proving nothing. The expected exception type follows the contract that a second transaction on
+    /// one thread is rejected; a design that rejects with a different type makes this a one-line
+    /// update rather than a finding.
     /// </summary>
     [Fact]
     [Trait("Category", "Concurrency")]
@@ -219,5 +229,8 @@ public class CrossContextGateDeadlockTests
             "probable ABBA deadlock on two lifecycle gates: the first structural write " +
             $"{(firstCompleted ? "completed" : "did not complete")} and the second structural write " +
             $"{(secondCompleted ? "completed" : "did not complete")} within {JoinTimeout.TotalSeconds:F0} seconds");
+
+        Assert.IsType<LifecycleContractViolationException>(firstInterceptor.CrossContextWriteException);
+        Assert.IsType<LifecycleContractViolationException>(secondInterceptor.CrossContextWriteException);
     }
 }

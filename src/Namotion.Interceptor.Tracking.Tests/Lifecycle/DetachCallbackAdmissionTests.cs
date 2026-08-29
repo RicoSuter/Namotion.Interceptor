@@ -54,6 +54,14 @@ public class DetachCallbackAdmissionTests
         var car = new Car(context) { Name = "C" };
         departingTire = car.Tires[0];
 
+        // Precondition, not incidental: the admission arm this test is about is reachable only
+        // because a subject with no structural property counts as fully seeded, so its baselines
+        // being dropped by the release does not divert the admission into its early return. Giving
+        // this model a structural property would take the other arm, publish no edge, and leave
+        // every assertion below satisfied without anything being exercised.
+        Assert.DoesNotContain(((IInterceptorSubject)departingTire).Properties.Values,
+            property => OwnershipGraph.IsStructural(property));
+
         // Act: dropping every tire releases the departing one and runs its detach callback.
         car.Tires = [];
 

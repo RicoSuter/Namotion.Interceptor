@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -72,6 +73,13 @@ public class OwnershipChangeStreamTests
         }
     }
 
+    private static object? GetCommittedBaseline(
+        IInterceptorSubjectContext context, IInterceptorSubject subject, string propertyName)
+    {
+        var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
+        return lifecycle.Graph.GetBaseline(new PropertyReference(subject, propertyName));
+    }
+
     private static IInterceptorSubjectContext CreateContext(LifecycleChangeStreamRecorder recorder)
     {
         return InterceptorSubjectContext
@@ -141,6 +149,11 @@ public class OwnershipChangeStreamTests
     /// Records existing behavior for the keyed reconcile, which matches occurrences by key rather
     /// than by ordinal and walks the old occurrences in reverse. The subject is therefore orphaned
     /// on the last key in enumeration order, and the first key is drained from inside that release.
+    ///
+    /// Which key that is rests on <see cref="Dictionary{TKey,TValue}"/> enumerating in insertion
+    /// order for a dictionary that has had no removals. That is a framework implementation detail
+    /// rather than one of this codebase, so a different dictionary type here would legitimately
+    /// swap the two keys below without anything in the lifecycle having changed.
     /// </summary>
     [Fact]
     public void WhenEveryKeyedOccurrenceOfOneSubjectIsRemovedInOneWrite_ThenTheDetachCarriesTheLastEnumeratedKey()
@@ -260,6 +273,8 @@ public class OwnershipChangeStreamTests
 
         var admissionRan = false;
         Exception? admissionException = null;
+        var hostReferenceCountAtAdmission = -1;
+        object? childrenBaselineAtAdmission = null;
         recorder.OnChange = change =>
         {
             if (!change.IsContextDetach || !ReferenceEquals(change.Subject, sibling))
@@ -268,6 +283,8 @@ public class OwnershipChangeStreamTests
             }
 
             admissionRan = true;
+            hostReferenceCountAtAdmission = ((IInterceptorSubject)host).GetReferenceCount();
+            childrenBaselineAtAdmission = GetCommittedBaseline(context, root, nameof(Person.Children));
             admissionException = Record.Exception(() => ((IInterceptorSubject)host).AddProperties(
                 new SubjectPropertyMetadata(
                     "Adopted", typeof(Person), [], _ => provisionalRoot, null,
@@ -279,9 +296,14 @@ public class OwnershipChangeStreamTests
         // Act
         root.Children = [];
 
-        // Assert: the nested admission really ran and was accepted, so this pins the intended path.
+        // Assert: the nested admission really ran, was accepted, and ran inside the window it needs.
+        // The window is the disagreement itself: the host still carries the incoming edge that the
+        // committed value has already stopped listing. Both halves are asserted, because the whole
+        // shape depends on the host being released after the sibling rather than before it.
         Assert.True(admissionRan, "the detach callback for the released sibling never ran");
         Assert.Null(admissionException);
+        Assert.Equal(1, hostReferenceCountAtAdmission);
+        Assert.Empty(Assert.IsType<Person[]>(childrenBaselineAtAdmission));
 
         // Asserted ahead of the stream because it is the sharper consequence: the adopted subject
         // keeps the anchor it arrived with, so losing its only edge a moment later leaves it an
