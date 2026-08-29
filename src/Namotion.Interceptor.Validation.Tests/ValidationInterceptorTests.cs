@@ -31,44 +31,80 @@ public class ValidationInterceptorTests
     }
 
     [Fact]
-    public void WhenValueComesFromSource_ThenProvenanceAwareValidatorCanSkipStrictValidation()
+    public void WhenOriginIsLocal_ThenValidatorIsInvokedAndRejects()
     {
         // Arrange
+        var validator = new RecordingValidator();
         var context = InterceptorSubjectContext
             .Create()
             .WithPropertyValidation()
             .WithFullPropertyTracking()
-            .WithService<IPropertyValidator>(() => new LocalOnlyValidator());
+            .WithService<IPropertyValidator>(() => validator);
+
+        var person = new Person(context);
+
+        // Act & Assert
+        Assert.Throws<ValidationException>(() => person.LastName = "anything");
+        Assert.Null(person.LastName);
+        Assert.Equal([ChangeOriginKind.Local], validator.SeenOrigins);
+    }
+
+    [Fact]
+    public void WhenOriginIsFromSource_ThenValidatorIsNotInvokedAtAll()
+    {
+        // Arrange: a validator that rejects unconditionally, so only the skip can let the write through.
+        var validator = new RecordingValidator();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithPropertyValidation()
+            .WithFullPropertyTracking()
+            .WithService<IPropertyValidator>(() => validator);
 
         var person = new Person(context);
         var source = new object();
 
-        // Act & Assert - a local write of "invalid" is rejected
-        Assert.Throws<ValidationException>(() => person.LastName = "invalid");
-        Assert.Null(person.LastName);
-
-        // Act & Assert - the same value applied from a source is accepted
+        // Act
         new PropertyReference(person, nameof(Person.LastName))
-            .SetValueFromSource(source, null, null, "invalid");
-        Assert.Equal("invalid", person.LastName);
+            .SetValueFromSource(source, null, null, "anything");
+
+        // Assert: the value lands, and the skip happened before validator resolution.
+        Assert.Equal("anything", person.LastName);
+        Assert.Empty(validator.SeenOrigins);
+    }
+
+    [Fact]
+    public void WhenOriginIsFromSource_ThenDataAnnotationsAreNotEnforced()
+    {
+        // Arrange: FirstName carries [MaxLength(4)].
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithPropertyValidation()
+            .WithDataAnnotationValidation()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        var source = new object();
+
+        // Act: a source sends a value the local annotation would reject.
+        new PropertyReference(person, nameof(Person.FirstName))
+            .SetValueFromSource(source, null, null, "Suter");
+
+        // Assert: the model mirrors the source rather than diverging from it.
+        Assert.Equal("Suter", person.FirstName);
     }
 
     /// <summary>
-    /// Rejects the value "invalid" only for locally originated writes; writes whose origin is a
-    /// source (or a transaction confirmation) are accepted, so provenance decides strictness.
+    /// Rejects every write and records the origin of each write it was asked about, so a test can
+    /// assert not just that a value landed but that the validator was never consulted.
     /// </summary>
-    private sealed class LocalOnlyValidator : IPropertyValidator
+    private sealed class RecordingValidator : IPropertyValidator
     {
+        public List<ChangeOriginKind> SeenOrigins { get; } = [];
+
         public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
         {
-            if (context.Origin.Kind == ChangeOriginKind.Local &&
-                context.Value is string stringValue &&
-                stringValue == "invalid")
-            {
-                return [new ValidationResult("Local writes may not set the value 'invalid'.")];
-            }
-
-            return [];
+            SeenOrigins.Add(context.Origin.Kind);
+            return [new ValidationResult("Rejected unconditionally.")];
         }
     }
 }
