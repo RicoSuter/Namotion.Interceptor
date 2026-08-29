@@ -55,10 +55,11 @@ public interface IInterceptorExecutor
 
     /// <summary>
     /// Reads <see cref="AttachedContext"/>, <see cref="AttachmentAnchor"/> and
-    /// <see cref="AttachmentRevision"/> as one coherent snapshot, taken under the executor's
-    /// attachment monitor. Use this to observe the state a <see cref="TryUpdateAttachment"/>
-    /// call should be based on; the individual getters are lock-free and coherent only on
-    /// their own.
+    /// <see cref="AttachmentRevision"/> as one coherent snapshot: all three come from the same
+    /// attachment state, so they can never be combined across a transition. Lock-free, and the
+    /// only way to observe more than one of the three coherently, since reading the individual
+    /// getters in sequence pairs values from whichever states happened to be current. Use it to
+    /// observe the state a <see cref="TryUpdateAttachment"/> call should be based on.
     /// </summary>
     /// <param name="context">The attached context, or null when unattached.</param>
     /// <param name="anchor">The anchor belonging to <paramref name="context"/>.</param>

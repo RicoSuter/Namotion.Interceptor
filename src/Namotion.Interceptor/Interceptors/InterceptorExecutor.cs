@@ -44,30 +44,30 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     /// </summary>
     internal long Revision;
 
-    // The exact attachment state. Writes are serialized by a private monitor rather than SyncRoot
-    // so that transitioning the attachment never contends with ordinary property writes; reads are
-    // lock-free (the context read is the ownership predicate across the codebase, so it must cost
-    // a volatile load, not a monitor).
+    // The exact attachment state, held as one immutable object. Writes are serialized by a private
+    // monitor rather than SyncRoot so that transitioning the attachment never contends with
+    // ordinary property writes; reads are lock-free (the context read is the ownership predicate
+    // across the codebase, so it must cost a volatile load, not a monitor).
+    //
+    // One reference rather than three fields, because the three are decided on together: an anchor
+    // is only meaningful against the context it anchors to, and the revision is the compare-and-swap
+    // token for exactly the state it labels. Three separately volatile fields are each coherent and
+    // jointly not, so a lock-free reader landing between two stores observes a combination no
+    // committed state ever had, such as a non-None anchor with no context. Publishing the whole
+    // triple with the single volatile store below leaves a reader the new state or the previous one
+    // and nothing in between, which is also why the revision needs no Interlocked.Read on the
+    // 32-bit runtimes netstandard2.0 reaches: it is a readonly field of an object that the
+    // reference store already published.
     //
     // Lock order, stated once here and cross-referenced everywhere else: the structural write
     // protocol is lifecycle gate, then _attachmentLock, then SyncRoot (the terminal). The gate
     // must come first: a write that entered this monitor before the gate deadlocks against a
     // removal that holds the gate and releases this subject's claim through this same monitor.
-    // The attachment transitions (TryUpdateAttachment, TryGetAttachment) take _attachmentLock
-    // alone and run no foreign code while holding it, so they are leaf acquisitions, and nothing
-    // enters _attachmentLock while holding a SyncRoot.
-    //
-    // Publication ordering, which the lock-free readers depend on: a transition stores the context
-    // and the anchor first (volatile, so release) and the revision last with an atomic release
-    // store. A reader that pairs a revision with subsequently read fields can therefore see fields
-    // that are NEWER than that revision, never older, and the compare-and-swap in
-    // TryUpdateAttachment rejects exactly that case. The revision is 64-bit, so it is read with
-    // Interlocked.Read: netstandard2.0 also targets 32-bit runtimes, where a plain long load can
-    // tear.
+    // The attachment transition (TryUpdateAttachment) takes _attachmentLock alone and runs no
+    // foreign code while holding it, so it is a leaf acquisition, and nothing enters
+    // _attachmentLock while holding a SyncRoot.
     private readonly object _attachmentLock = new();
-    private volatile InterceptorSubjectContext? _attachedContext;
-    private volatile SubjectAttachmentAnchorKind _anchor;
-    private long _attachmentRevision;
+    private volatile AttachmentState _attachment = AttachmentState.Unattached;
 
     /// <summary>
     /// Creates an executor for <paramref name="subject"/>. Prefer <see cref="GetOrCreate"/>, which
@@ -81,13 +81,13 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     }
 
     /// <inheritdoc />
-    public IInterceptorSubjectContext? AttachedContext => _attachedContext;
+    public IInterceptorSubjectContext? AttachedContext => _attachment.Context;
 
     /// <inheritdoc />
-    public SubjectAttachmentAnchorKind AttachmentAnchor => _anchor;
+    public SubjectAttachmentAnchorKind AttachmentAnchor => _attachment.Anchor;
 
     /// <inheritdoc />
-    public long AttachmentRevision => Interlocked.Read(ref _attachmentRevision);
+    public long AttachmentRevision => _attachment.Revision;
 
     /// <inheritdoc />
     public bool TryUpdateAttachment(long expectedRevision, IInterceptorSubjectContext? context, SubjectAttachmentAnchorKind anchor, out long currentRevision)
@@ -112,23 +112,21 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
 
         lock (_attachmentLock)
         {
-            if (_attachmentRevision != expectedRevision)
+            var current = _attachment;
+            if (current.Revision != expectedRevision)
             {
-                currentRevision = _attachmentRevision;
+                currentRevision = current.Revision;
                 return false;
             }
 
-            if (context is not null && _attachedContext is not null && !ReferenceEquals(_attachedContext, context))
+            if (context is not null && current.Context is not null && !ReferenceEquals(current.Context, context))
             {
                 throw new InvalidOperationException(
                     "Cannot attach the subject directly to a different context. Detach it to null first.");
             }
 
-            // Fields first, revision last; see the publication ordering note on the fields above.
-            _attachedContext = (InterceptorSubjectContext?)context;
-            _anchor = anchor;
-            currentRevision = _attachmentRevision + 1;
-            Interlocked.Exchange(ref _attachmentRevision, currentRevision);
+            currentRevision = current.Revision + 1;
+            _attachment = new AttachmentState((InterceptorSubjectContext?)context, anchor, currentRevision);
             return true;
         }
     }
@@ -136,13 +134,11 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     /// <inheritdoc />
     public bool TryGetAttachment(out IInterceptorSubjectContext? context, out SubjectAttachmentAnchorKind anchor, out long revision)
     {
-        lock (_attachmentLock)
-        {
-            context = _attachedContext;
-            anchor = _anchor;
-            revision = _attachmentRevision;
-            return context is not null;
-        }
+        var attachment = _attachment;
+        context = attachment.Context;
+        anchor = attachment.Anchor;
+        revision = attachment.Revision;
+        return context is not null;
     }
 
     /// <summary>
@@ -187,7 +183,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
     {
-        var attachedContext = _attachedContext;
+        var attachedContext = _attachment.Context;
         if (attachedContext is null)
         {
             // The zero-interceptor read chain is the plain read, no terminal lock; see
@@ -217,7 +213,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             currentValue,
             newValue);
 
-        var attachedContext = _attachedContext;
+        var attachedContext = _attachment.Context;
         if (attachedContext is null)
         {
             UninterceptedChain<TProperty>.Write(ref context, writeValue);
@@ -250,7 +246,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         // order above.
         while (true)
         {
-            var attachedContext = _attachedContext;
+            var attachedContext = _attachment.Context;
             var contextState = attachedContext?.PinState();
             var lifecycle = attachedContext?.TryGetServiceFromState<ILifecycleInterceptor>(contextState!);
             if (lifecycle is null)
@@ -264,7 +260,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 // chain.
                 lock (_attachmentLock)
                 {
-                    if (ReferenceEquals(_attachedContext, attachedContext))
+                    if (ReferenceEquals(_attachment.Context, attachedContext))
                     {
                         return WriteStructuralValue(attachedContext, contextState, propertyName, newValue, currentValue, writeValue, propertyTypeIndex);
                     }
@@ -280,7 +276,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                         // Revalidate under both locks: the attachment may have moved between the
                         // lock-free read above and the acquisitions. Falling out of the lock scopes
                         // releases both and retries against the fresh attachment.
-                        if (ReferenceEquals(_attachedContext, attachedContext))
+                        if (ReferenceEquals(_attachment.Context, attachedContext))
                         {
                             return WriteStructuralValue(attachedContext, contextState, propertyName, newValue, currentValue, writeValue, propertyTypeIndex);
                         }
@@ -351,7 +347,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         // Deliberately never structural, unlike the public entry: the cascade targets derived
         // properties, whose values never establish edges, and the trigger may already hold the
         // attachment monitor, so entering the lifecycle gate here would invert the lock order.
-        var attachedContext = _attachedContext;
+        var attachedContext = _attachment.Context;
         if (attachedContext is null)
         {
             UninterceptedChain<TProperty>.Write(ref context, writeValue);
@@ -384,13 +380,13 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         // disagree with the routing.
         while (true)
         {
-            var attachedContext = _attachedContext;
+            var attachedContext = _attachment.Context;
             var lifecycle = attachedContext?.TryGetService<ILifecycleInterceptor>();
             if (lifecycle is null)
             {
                 lock (_attachmentLock)
                 {
-                    if (ReferenceEquals(_attachedContext, attachedContext))
+                    if (ReferenceEquals(_attachment.Context, attachedContext))
                     {
                         registration.Publish();
                         return;
@@ -408,7 +404,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public object? InvokeMethod(string methodName, object?[] parameters, Func<IInterceptorSubject, object?[], object?> invokeMethod)
     {
-        var attachedContext = _attachedContext;
+        var attachedContext = _attachment.Context;
         if (attachedContext is null)
         {
             // The zero-interceptor invoke chain is the direct invocation; see MethodInvocationFactory.
@@ -417,5 +413,29 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
 
         var context = new MethodInvocationContext(_subject, methodName, parameters);
         return attachedContext.ExecuteInterceptedInvoke(ref context, invokeMethod);
+    }
+
+    /// <summary>
+    /// The attachment triple as one immutable value: the exact attached context, the anchor that
+    /// holds the subject there, and the revision labelling that state. Published by a single
+    /// volatile reference store, which is what makes the three coherent for a lock-free reader.
+    /// </summary>
+    private sealed class AttachmentState
+    {
+        /// <summary>The state every executor starts in, shared because it carries no identity.</summary>
+        internal static readonly AttachmentState Unattached = new(null, SubjectAttachmentAnchorKind.None, 0);
+
+        internal AttachmentState(InterceptorSubjectContext? context, SubjectAttachmentAnchorKind anchor, long revision)
+        {
+            Context = context;
+            Anchor = anchor;
+            Revision = revision;
+        }
+
+        internal readonly InterceptorSubjectContext? Context;
+
+        internal readonly SubjectAttachmentAnchorKind Anchor;
+
+        internal readonly long Revision;
     }
 }
