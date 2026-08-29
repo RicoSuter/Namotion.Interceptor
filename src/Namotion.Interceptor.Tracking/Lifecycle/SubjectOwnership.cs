@@ -190,6 +190,26 @@ internal sealed class SubjectOwnership
     }
 
     /// <summary>
+    /// Reads the single committed incoming edge of a subject that has exactly one, and reports false
+    /// for every other count. Lets a caller that only needs the one-edge case read it without
+    /// copying the edges out.
+    /// </summary>
+    public bool TryGetSingleIncoming(out PropertyReference property)
+    {
+        lock (this)
+        {
+            if (_incomingCount != 1)
+            {
+                property = default;
+                return false;
+            }
+
+            property = _firstProperty;
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Copies every committed incoming edge into the target list, so a caller can drain them
     /// without holding this monitor while it publishes callbacks.
     /// </summary>
