@@ -16,6 +16,12 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// an edge, which is what decides whether a subject is released on the removal that orphans it or
 /// several removals later.
 ///
+/// Both callers of the walk are covered. Release asks whether a subject that lost an edge is still
+/// held; anchor adoption asks whether a new edge's parent is supported independently of the
+/// subject's own provisional anchor. The adoption case reaches the same window only through a
+/// nested operation, and there the predicate decides the final graph state rather than only the
+/// order in which it is announced.
+///
 /// Notification order is contract, so these tests exist to make a change to it a deliberate decision
 /// rather than an accident. A failure here is not automatically a defect: it means the published
 /// order moved, and the new order has to be reviewed and the expectation updated on purpose.
@@ -28,6 +34,12 @@ public class OwnershipChangeStreamTests
         private readonly List<string> _changes = [];
 
         public IReadOnlyList<string> Changes => _changes;
+
+        /// <summary>
+        /// Runs after the change has been recorded, so anything a nested operation publishes is
+        /// appended behind the change that triggered it rather than in front of it.
+        /// </summary>
+        public Action<SubjectLifecycleChange>? OnChange { get; set; }
 
         public void Clear() => _changes.Clear();
 
@@ -56,6 +68,7 @@ public class OwnershipChangeStreamTests
 
             var edge = change.Property is { } property ? $"{property.Name}[{change.Index ?? "-"}]" : "-";
             _changes.Add($"{change.Subject} {string.Join(", ", transitions)} {edge} references={change.ReferenceCount}");
+            OnChange?.Invoke(change);
         }
     }
 
@@ -212,6 +225,79 @@ public class OwnershipChangeStreamTests
             "B edge removed, detached Children[1] references=0",
             "A edge removed Children[0] references=0",
             "A edge removed, detached Mother[-] references=0"
+        ], recorder.Changes);
+    }
+
+    /// <summary>
+    /// Records existing behavior for the walk's second caller, anchor adoption, which reaches the
+    /// same stale-edge window only through a nested operation. An outer reconcile is midway through
+    /// its removal pass, so the collection's baseline no longer lists the host but the host's
+    /// incoming record still exists. A detach callback fired by an earlier removal adds a dynamic
+    /// property to that host, which is the supported dynamic-property-initializer case: the thread
+    /// already holds the topology gate, so the admission is admitted rather than rejected. The
+    /// admission attaches an edge to a subject that carries a provisional anchor, and adoption then
+    /// walks up from the host through its dead incoming edge.
+    ///
+    /// Unlike the release-side cases above, the predicate decides more than the announcement order
+    /// here: if that dead edge counted as support, the provisional anchor would be consumed, and the
+    /// subject would then be released when the host is released a moment later instead of surviving
+    /// as an anchored root.
+    /// </summary>
+    [Fact]
+    public void WhenANestedAdmissionAdoptsAProvisionalRootUnderAStaleAncestorEdge_ThenTheAnchorSurvives()
+    {
+        // Arrange: the host sits at the lower index so the sibling is released first and its detach
+        // callback runs while the host is still owned through an edge the baseline has already dropped.
+        var recorder = new LifecycleChangeStreamRecorder();
+        var context = CreateContext(recorder);
+        var root = new Person { FirstName = "R" };
+        ((IInterceptorSubject)root).AttachToContext(context);
+        var host = new Person { FirstName = "H" };
+        var sibling = new Person { FirstName = "S" };
+        root.Children = [host, sibling];
+
+        var provisionalRoot = new Person(context) { FirstName = "D" };
+
+        var admissionRan = false;
+        Exception? admissionException = null;
+        recorder.OnChange = change =>
+        {
+            if (!change.IsContextDetach || !ReferenceEquals(change.Subject, sibling))
+            {
+                return;
+            }
+
+            admissionRan = true;
+            admissionException = Record.Exception(() => ((IInterceptorSubject)host).AddProperties(
+                new SubjectPropertyMetadata(
+                    "Adopted", typeof(Person), [], _ => provisionalRoot, null,
+                    isIntercepted: true, isDynamic: true)));
+        };
+
+        recorder.Clear();
+
+        // Act
+        root.Children = [];
+
+        // Assert: the nested admission really ran and was accepted, so this pins the intended path.
+        Assert.True(admissionRan, "the detach callback for the released sibling never ran");
+        Assert.Null(admissionException);
+
+        // Asserted ahead of the stream because it is the sharper consequence: the adopted subject
+        // keeps the anchor it arrived with, so losing its only edge a moment later leaves it an
+        // anchored root instead of releasing it. A dead ancestor edge counting as support would
+        // change the committed graph, not only the order in which changes are announced.
+        Assert.True(((IInterceptorSubject)provisionalRoot).IsAnchoredRoot(),
+            "the provisional anchor was consumed by an ancestor edge the committed value no longer holds");
+        Assert.Same(context, ((IInterceptorSubject)provisionalRoot).TryGetContext());
+        Assert.Null(((IInterceptorSubject)host).TryGetContext());
+
+        Assert.Equal(
+        [
+            "S edge removed, detached Children[1] references=0",
+            "D edge added Adopted[-] references=1",
+            "H edge removed, detached Children[0] references=0",
+            "D edge removed Adopted[-] references=0"
         ], recorder.Changes);
     }
 }
