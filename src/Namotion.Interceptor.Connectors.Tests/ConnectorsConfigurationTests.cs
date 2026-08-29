@@ -30,18 +30,20 @@ public class ConnectorsConfigurationTests
     }
 
     [Fact]
-    public void WhenACustomTransactionWriterIsRegistered_ThenWithSourceTransactionsThrows()
+    public void WhenACustomTransactionWriterIsRegistered_ThenWithSourceTransactionsKeepsIt()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var customWriter = new StubTransactionWriter();
         context.AddService<ITransactionWriter>(customWriter);
 
-        // Act & Assert: the default writer is not silently skipped, because the commit would then
-        // quietly run against a writer the configuration was not written for.
-        var exception = Assert.Throws<InvalidOperationException>(() => context.WithSourceTransactions());
-        Assert.Contains("singleton contract", exception.Message);
+        // Act: first writer wins, so no default writer is constructed beside the custom one and the
+        // writer slot's singleton contract is never contested.
+        context.WithSourceTransactions();
+
+        // Assert
         Assert.Same(customWriter, Assert.Single(context.GetServices<ITransactionWriter>()));
+        Assert.Single(context.GetServices<SubjectTransactionInterceptor>());
     }
 
     [Fact]

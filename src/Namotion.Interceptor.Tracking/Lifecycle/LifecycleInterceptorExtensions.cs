@@ -17,28 +17,14 @@ public static class LifecycleInterceptorExtensions
     /// <see cref="InterceptorSubjectExtensions.TryGetContext"/> to test attachment and a non-None
     /// <see cref="Interceptors.IInterceptorExecutor.AttachmentAnchor"/> to test root-ness.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The subject is attached to a context that has
-    /// no <see cref="LifecycleInterceptor"/>, which cannot answer the question rather than
-    /// answering it with zero.</exception>
     public static int GetReferenceCount(this IInterceptorSubject subject)
     {
-        var context = subject.TryGetContext();
-        if (context is null)
-        {
-            // Zero is the answer here rather than a stand-in for one: no edge can point at an
-            // unattached subject, because an attached parent would have pulled it into the context.
-            return 0;
-        }
-
-        return context.TryGetLifecycleInterceptor()?.GetReferenceCount(subject)
-            ?? throw MissingLifecycle(subject, "reference counting");
-    }
-
-    private static InvalidOperationException MissingLifecycle(IInterceptorSubject subject, string feature)
-    {
-        return new InvalidOperationException(
-            $"LifecycleInterceptor not configured for the context of '{subject.GetType().Name}'. " +
-            $"Call WithLifecycle() on the context to enable {feature}.");
+        // Zero is the answer in both fallbacks rather than a stand-in for one. No edge can point at
+        // an unattached subject, because an attached parent would have pulled it into the context.
+        // On a context with no lifecycle, the only subject that can be attached is one anchored to
+        // that context directly: nothing propagates the context along an edge, and a lifecycle
+        // cannot be registered behind an attach, so such a subject is a root and has no edge either.
+        return subject.TryGetContext()?.TryGetLifecycleInterceptor()?.GetReferenceCount(subject) ?? 0;
     }
 
     /// <summary>

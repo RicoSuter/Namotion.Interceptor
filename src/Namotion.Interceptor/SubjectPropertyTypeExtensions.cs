@@ -2,7 +2,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 
-namespace Namotion.Interceptor;
+namespace Namotion.Interceptor.Tracking;
 
 /// <summary>
 /// Cached type checks for determining whether a property type can contain interceptor subjects.

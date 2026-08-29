@@ -57,7 +57,9 @@ public static class ParentsHandlerExtensions
     /// The first call on a subject activates parent publication for it, so a consumer that never
     /// asks pays nothing. An unattached subject returns empty, which is the answer rather than a
     /// stand-in for one: no edge can point at it, because an attached parent would have pulled it
-    /// into the context.
+    /// into the context. The same holds on a context with no lifecycle, where the only subject that
+    /// can be attached is one anchored to that context directly: nothing propagates the context
+    /// along an edge, and a lifecycle cannot be registered behind an attach.
     ///
     /// An empty result is not a test for "this subject is a root". It also answers for an
     /// unattached subject, and for a subject inside its own release, because the release drops the
@@ -68,20 +70,8 @@ public static class ParentsHandlerExtensions
     /// The order of the entries is unspecified and history-dependent: only the set of occurrences,
     /// each with its property and its index or key, is meaningful.
     /// </remarks>
-    /// <exception cref="InvalidOperationException">The subject is attached to a context that has
-    /// no <see cref="LifecycleInterceptor"/>, which cannot answer the question rather than
-    /// answering it with an empty result.</exception>
     public static ImmutableArray<SubjectParent> GetParents(this IInterceptorSubject subject)
     {
-        var context = subject.TryGetContext();
-        if (context is null)
-        {
-            return [];
-        }
-
-        return context.TryGetLifecycleInterceptor()?.GetParents(subject)
-            ?? throw new InvalidOperationException(
-                $"LifecycleInterceptor not configured for the context of '{subject.GetType().Name}'. " +
-                "Call WithLifecycle() on the context to enable parent tracking.");
+        return subject.TryGetContext()?.TryGetLifecycleInterceptor()?.GetParents(subject) ?? [];
     }
 }

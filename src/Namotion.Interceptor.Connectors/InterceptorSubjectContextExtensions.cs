@@ -19,9 +19,9 @@ public static class InterceptorSubjectContextExtensions
     /// Automatically registers WithTransactions() if not already registered.
     /// </summary>
     /// <remarks>
-    /// Idempotent for the default writer. A custom <see cref="ITransactionWriter"/> registered on
-    /// the same context conflicts through the writer slot's singleton contract, so this call then
-    /// throws instead of silently leaving the commit on a foreign writer.
+    /// Idempotent, and first writer wins: a custom <see cref="ITransactionWriter"/> already on the
+    /// context keeps the slot and no default writer is constructed, so composing this call with a
+    /// hand-written writer stays a working configuration.
     /// </remarks>
     /// <param name="context">The interceptor subject context to configure.</param>
     /// <returns>The same context instance for method chaining.</returns>
@@ -31,7 +31,7 @@ public static class InterceptorSubjectContextExtensions
             .WithTransactions()
             .TryAddService<ITransactionWriter>(
                 () => new SourceTransactionWriter(),
-                writer => writer is SourceTransactionWriter);
+                _ => true);
 
         return context;
     }
