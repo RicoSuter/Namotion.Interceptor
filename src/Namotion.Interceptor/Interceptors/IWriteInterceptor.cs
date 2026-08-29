@@ -110,7 +110,10 @@ public struct PropertyWriteContext<TProperty>
     /// origin (what the caller declared when setting the pending origin); when the terminal write lands (the same
     /// point <see cref="IsWritten"/> becomes true) it is finalized: a stamped origin whose
     /// final value differs from the sent value becomes Local, because the stored value was
-    /// computed locally rather than taken from the source.
+    /// computed locally rather than taken from the source. An interceptor deciding how to treat a
+    /// write should therefore call <see cref="GetEffectiveOrigin"/> rather than read this directly:
+    /// a hook that transformed a stamped value leaves this reading FromSource while the write is
+    /// already, in effect, Local.
     /// </summary>
     public ChangeOrigin Origin => _attempted.Origin;
 
@@ -261,8 +264,20 @@ public struct PropertyWriteContext<TProperty>
             : NewValue;
     }
 
+    /// <summary>
+    /// Gets the origin this write would publish with if the value currently in the context were the
+    /// one stored: a stamped origin survives only while the value still equals the one the source
+    /// sent, and otherwise resolves to Local, because the value was computed locally.
+    /// </summary>
+    /// <remarks>
+    /// Prefer this over <see cref="Origin"/> when deciding how to treat a write, because
+    /// <see cref="Origin"/> is only the attempted origin until the terminal write lands. The answer
+    /// is effective as of the call: an interceptor further down the chain can still change the value
+    /// and with it the origin, and <see cref="FinalizeOrigin"/> settles it at the terminal write.
+    /// Cheap for local writes, which short-circuit before any comparison.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal ChangeOrigin GetFinalOrigin()
+    public ChangeOrigin GetEffectiveOrigin()
     {
         if (_attempted.Origin.Kind == ChangeOriginKind.Local)
         {
@@ -299,7 +314,7 @@ public struct PropertyWriteContext<TProperty>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void FinalizeOrigin()
     {
-        if (GetFinalOrigin().Kind == ChangeOriginKind.Local)
+        if (GetEffectiveOrigin().Kind == ChangeOriginKind.Local)
         {
             _attempted = default;
         }

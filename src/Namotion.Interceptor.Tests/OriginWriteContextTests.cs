@@ -43,7 +43,7 @@ public class OriginWriteContextTests
             ref PropertyWriteContext<TProperty> context,
             WriteInterceptionDelegate<TProperty> next)
         {
-            ResolvedKind = context.GetFinalOrigin().Kind;
+            ResolvedKind = context.GetEffectiveOrigin().Kind;
             KindAfterResolution = context.Origin.Kind;
             next(ref context);
         }
