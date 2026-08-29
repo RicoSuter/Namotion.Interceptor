@@ -225,6 +225,11 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         {
             if (!_graph.IsOwned(subject))
             {
+                // Claimed for this context but not published: a root whose own structural getter
+                // writes back while the explicit attach seeds it at callback depth zero, or a
+                // subject between losing its ownership record and having its claim handed back. The
+                // reconcile would find no owner to publish edges for, and the seed that follows
+                // reads the committed value anyway.
                 next(ref context);
                 return;
             }
