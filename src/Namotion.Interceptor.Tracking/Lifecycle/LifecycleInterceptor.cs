@@ -107,11 +107,12 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     {
         var property = context.Property;
         var metadata = property.Metadata;
-        if (!metadata.Type.CanContainSubjects<TProperty>() || metadata.IsDerived || !metadata.IsIntercepted)
+        if (!metadata.Type.CanContainSubjects<TProperty>() || !metadata.IsIntercepted ||
+            metadata is { IsDerived: true, IsDynamic: true, SetValue: null })
         {
-            // Scalar, derived or non-intercepted: never a graph edge. [Derived] declares the
-            // value to be a function of other state, which makes the property a cache rather
-            // than the store of record, whether or not a backing field holds the result.
+            // Scalar, non-intercepted or a derived projection: never a graph edge. Same rule as
+            // OwnershipGraph.IsStructural, which carries the reasoning, restated here because the
+            // generic overload of CanContainSubjects is the write path's type fast path.
             next(ref context);
             return;
         }

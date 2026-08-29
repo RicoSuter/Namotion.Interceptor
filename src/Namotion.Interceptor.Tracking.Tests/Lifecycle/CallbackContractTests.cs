@@ -301,18 +301,39 @@ public class CallbackContractTests
     }
 
     [Fact]
-    public void WhenADerivedPropertyWithASetterStoresAnUnattachedSubject_ThenItThrows()
+    public void WhenADerivedPropertyWithABackingFieldStoresASubject_ThenTheUntrackedSubjectCheckAccepts()
     {
-        // Arrange: a derived property with a generator-emitted backing field takes the
-        // derived-with-setter recalculation path instead of the getter-projection path, and is the
-        // sole store of whatever is assigned, so no other property can ever own the subject.
+        // Arrange: a derived property with a generator-emitted backing field is the sole store of
+        // whatever is assigned, so it carries an ownership edge like any other stored property.
+        // The untracked-subject check must then find the subject owned rather than reject it.
         var context = CreateDerivedContext();
         var subject = new StoringDerivedSubject(context);
+        var child = new Person { FirstName = "Child" };
 
-        // Act & Assert
-        var exception = Record.Exception(() => subject.Current = new Person { FirstName = "Orphan" });
+        // Act
+        var exception = Record.Exception(() => subject.Current = child);
 
-        Assert.IsType<LifecycleContractViolationException>(exception);
-        Assert.Contains(nameof(StoringDerivedSubject.Current), exception!.Message);
+        // Assert
+        Assert.Null(exception);
+        Assert.Same(context, child.TryGetContext());
+        Assert.Equal(1, child.GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenADerivedPropertyWithABackingFieldReleasesASubject_ThenTheSubjectIsDetached()
+    {
+        // Arrange: clearing the store runs the derived-with-setter recalculation and the release
+        // descent over the same write, so the edge must come off exactly once.
+        var context = CreateDerivedContext();
+        var subject = new StoringDerivedSubject(context);
+        var child = new Person { FirstName = "Child" };
+        subject.Current = child;
+
+        // Act
+        subject.Current = null;
+
+        // Assert
+        Assert.Null(child.TryGetContext());
+        Assert.Equal(0, child.GetReferenceCount());
     }
 }

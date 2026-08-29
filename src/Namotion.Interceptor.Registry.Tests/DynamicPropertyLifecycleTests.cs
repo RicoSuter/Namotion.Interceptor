@@ -325,4 +325,69 @@ public class DynamicPropertyLifecycleTests
         Assert.Null(change.GetOldValue<string?>());
         Assert.Equal("Johnny", change.GetNewValue<string?>());
     }
+
+    [Fact]
+    public void WhenDynamicDerivedPropertyWithASetterStoresASubject_ThenItEstablishesAnOwnershipEdge()
+    {
+        // Arrange: a dynamic derived property whose accessors read and write private state of
+        // their own. Unlike the getter-only shape above it can hold a subject no other property
+        // reaches, so it is the store of record and has to carry the edge.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var root = new Person(context) { FirstName = "Root" };
+        var registry = context.GetService<ISubjectRegistry>();
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+
+        Person? store = null;
+        var derivedProperty = registeredRoot.AddDerivedProperty<Person>(
+            "Current",
+            _ => store,
+            (_, value) => store = value);
+
+        var child = new Person { FirstName = "Child" };
+
+        // Act
+        derivedProperty.SetValue(child);
+
+        // Assert
+        Assert.Equal(1, child.GetReferenceCount());
+        Assert.NotNull(child.TryGetRegisteredSubject());
+        var parent = Assert.Single(child.TryGetRegisteredSubject()!.Parents);
+        Assert.Equal("Current", parent.Property.Name);
+        Assert.Equal(2, registry.KnownSubjects.Count);
+    }
+
+    [Fact]
+    public void WhenDynamicDerivedPropertyWithASetterClearsItsSubject_ThenTheSubjectIsReleased()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var root = new Person(context) { FirstName = "Root" };
+        var registry = context.GetService<ISubjectRegistry>();
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+
+        Person? store = null;
+        var derivedProperty = registeredRoot.AddDerivedProperty<Person>(
+            "Current",
+            _ => store,
+            (_, value) => store = value);
+
+        var child = new Person { FirstName = "Child" };
+        derivedProperty.SetValue(child);
+
+        // Act
+        derivedProperty.SetValue(null);
+
+        // Assert
+        Assert.Equal(0, child.GetReferenceCount());
+        Assert.Null(child.TryGetRegisteredSubject());
+        Assert.Single(registry.KnownSubjects);
+    }
 }

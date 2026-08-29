@@ -685,4 +685,41 @@ public class GraphOwnershipTests
         // Assert
         Assert.Null(child.TryGetContext());
     }
+
+    [Fact]
+    public void WhenADerivedPartialPropertyStoresASubject_ThenTheSubjectIsOwned()
+    {
+        // Arrange: a [Derived] partial property is generated with a backing field, so it is the
+        // only thing holding whatever is assigned to it. Nothing else can own that subject.
+        var context = CreateContext();
+        var holder = new StoringDerivedSubject(context);
+        var child = new Person { FirstName = "C" };
+
+        // Act
+        holder.Current = child;
+
+        // Assert
+        Assert.Same(context, child.TryGetContext());
+        Assert.Equal(1, child.GetReferenceCount());
+        var parent = Assert.Single(child.GetParents());
+        Assert.Equal(nameof(StoringDerivedSubject.Current), parent.Property.Name);
+    }
+
+    [Fact]
+    public void WhenADerivedPartialPropertyStoringASubjectIsCleared_ThenTheSubjectIsReleased()
+    {
+        // Arrange
+        var context = CreateContext();
+        var holder = new StoringDerivedSubject(context);
+        var child = new Person { FirstName = "C" };
+        holder.Current = child;
+
+        // Act
+        holder.Current = null;
+
+        // Assert
+        Assert.Null(child.TryGetContext());
+        Assert.Equal(0, child.GetReferenceCount());
+        Assert.Empty(child.GetParents());
+    }
 }
