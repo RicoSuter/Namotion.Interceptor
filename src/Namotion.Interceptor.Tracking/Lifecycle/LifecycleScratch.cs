@@ -9,12 +9,8 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// thread at once, so they are pooled rather than held as fields.
 ///
 /// The pools are unbounded and never trimmed, so a thread retains buffers sized to the largest
-/// graph operation it ever performed. Occurrence and index buffers are bounded by the widest single
-/// structural value, but discovery, release and reachability state is not: a component discovery
-/// visits every newly reachable subject, and a reachability walk visits an ancestor closure, so
-/// those buffers can reach the size of a whole component. Discarding oversized buffers on return
-/// would cap that at the price of reallocating on every large operation; that trade has not been
-/// measured, so the high-water mark is retained.
+/// graph operation it ever performed, which for discovery, release and reachability state is a
+/// whole component.
 ///
 /// Subject-keyed sets and maps use reference equality; see <see cref="OwnershipGraph"/> for why
 /// graph membership is identity.

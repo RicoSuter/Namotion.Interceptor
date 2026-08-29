@@ -7,12 +7,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// <remarks>
 /// It is a backward search over committed incoming edges rather than a forward mark from the roots.
 /// A subject is reachable from a root exactly when some root lies in its ancestor closure, so the
-/// cost is that closure instead of the whole context. Three alternatives were implemented and
-/// measured against it. A complete context-local scan is far slower on a large context, because it
-/// visits every subject per removed edge. A forward mark is invalidated by every cross-parent
-/// removal, which is the common shape, so it never helps. Incrementally maintained reachability pays
-/// maintenance on every edge mutation, including the tree-shaped removals that the
-/// zero-remaining-edges short circuit already answers for free.
+/// cost is that closure instead of the whole context.
 ///
 /// Two questions share this one walk. Release asks whether a subject that just lost an edge is still
 /// held, and passes no exclusion. Anchor adoption asks whether a new edge supports the subject

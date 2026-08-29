@@ -40,8 +40,7 @@ internal sealed class SubjectOwnership
 
     // Volatile because GetReferenceCount reads it lock-free from outside the per-subject monitor
     // (consumers call it from inside their own locks and from lifecycle callbacks, so it must not
-    // take one). The volatile store publishes the count with release semantics; an Interlocked
-    // read would only prevent tearing, which a 32-bit int cannot suffer anyway.
+    // take one).
     private volatile int _incomingCount;
 
     // Published parent snapshot, or null while parents were never asked for on this subject. Read
@@ -54,11 +53,9 @@ internal sealed class SubjectOwnership
     /// allocates one.
     /// </summary>
     /// <remarks>
-    /// Volatile because <see cref="RepublishParents"/> reads it outside this instance's monitor to
-    /// decide whether republishing is needed at all. A missed activation would not merely delay a
-    /// snapshot, it would freeze one: <see cref="TryGetPublishedParents"/> never re-materializes
-    /// once an array is published, so a publisher that read a stale <c>false</c> would leave that
-    /// array in place for the rest of the subject's life.
+    /// Volatile because <see cref="RepublishParents"/> reads it outside this instance's monitor. A
+    /// missed activation would not merely delay a snapshot, it would freeze one:
+    /// <see cref="TryGetPublishedParents"/> never re-materializes once an array is published.
     /// </remarks>
     private volatile bool _areParentsActivated;
 

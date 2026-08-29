@@ -33,13 +33,10 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
         {
             // Owned but not yet seeded: an edge-driven attach records ownership before the descent
             // seeds, so a handler that adds properties lands in that window. Committing a baseline
-            // here decides the pending seeding by name, because AreBaselinesSeeded answers from
-            // whichever structural property enumerates first. Seeding is then either skipped, and
-            // this subject's own children never attach at all, or it runs and re-attaches this
-            // batch's edges a second time. Seeding reads every structural getter, including the
-            // ones this batch adds, so it publishes these edges itself. The property callbacks
-            // still belong to this call: Publish snapshots the property names before the handlers
-            // run, precisely so a handler's additions are attached by that call and not twice.
+            // here would decide the pending seeding by name, because AreBaselinesSeeded answers
+            // from whichever structural property enumerates first. The descent reads every
+            // structural getter, the ones this batch adds included, so it publishes these edges
+            // itself; only the property callbacks belong to this call.
             registration.Publish();
             InvokePropertyAttachCallbacks(subject, batch);
             return;
@@ -64,19 +61,15 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
 
             // Commit the captured values as ordinary assignments: the reconciler sees no baseline,
             // so every occurrence becomes a fresh edge, and the value becomes the baseline later
-            // writes diff against. A null value writes the baseline entry directly, because the
-            // seeded-baseline invariant is per property: every structural property of an owned
-            // subject carries an entry, present or null, and AreBaselinesSeeded reads whichever
-            // enumerates first.
+            // writes diff against. A null value writes the entry directly, because every structural
+            // property of an owned subject must carry one, present or null.
             foreach (var (metadata, value) in captured)
             {
                 var property = new PropertyReference(subject, metadata.Name);
                 if (value is null)
                 {
-                    // Same guard the reconciler applies at entry: a side-effecting user collection
-                    // enumerated by an earlier entry's reconcile runs at callback depth zero and
-                    // can release this subject mid-batch, and a baseline written for a subject the
-                    // graph no longer owns is never removed.
+                    // Same guard the reconciler applies at entry: a baseline written for a subject
+                    // an earlier entry's reconcile released mid-batch is never removed again.
                     if (!graph.IsOwned(subject))
                     {
                         return;
@@ -110,17 +103,14 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
     /// then-current property set when it attaches the subject. When the subject is already seeded
     /// (an explicit attach seeds the root before owning it, and a subject with no structural
     /// properties counts as seeded), the descent will not come back, so the new structural
-    /// properties are seeded here the same way the descent would have: baseline first, then one
-    /// edge per occurrence. Property callbacks are not invoked on either shape, because the
-    /// subject's pending context-attach publication snapshots the then-current property set and
-    /// fans it out, new properties included; fanning out here would run them twice.
+    /// properties are seeded here the same way the descent would have. Property callbacks are not
+    /// invoked on either shape, because the pending context-attach publication fans out the
+    /// then-current property set, new properties included.
     ///
-    /// A releasing subject presents the same attached-but-unowned shape from the opposite
-    /// direction and takes the metadata-only arm too. It has no descent coming, and an edge
-    /// published from it would name an owner the release already removed, so nothing would ever
-    /// release the child. A subject that owns structural properties reaches that arm already,
-    /// because the release dropped the baselines it had; the marker is what extends it to one
-    /// whose baselines were empty to begin with.
+    /// A releasing subject presents the same attached-but-unowned shape from the opposite direction
+    /// and takes the metadata-only arm too: it has no descent coming, and an edge published from it
+    /// would name an owner the release already removed, so nothing would ever release the child.
+    /// The marker is what extends that arm to a subject whose baselines were empty to begin with.
     /// </remarks>
     public void AdmitUnowned(SubjectPropertyRegistration registration)
     {
@@ -190,10 +180,9 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
     }
 
     /// <summary>
-    /// Classifies the initial ownership candidates and invokes each qualifying getter exactly
-    /// once, before anything publishes. The captured value is authoritative for the property's
-    /// initial stored value: it is committed by the caller rather than re-read, so a getter that
-    /// is not stable would otherwise commit edges for a graph nobody stored.
+    /// Classifies the initial ownership candidates and invokes each qualifying getter exactly once,
+    /// before anything publishes. The captured value is committed by the caller rather than re-read,
+    /// so an unstable getter cannot commit edges for a graph nobody stored.
     /// </summary>
     private static List<(SubjectPropertyMetadata Metadata, object? Value)>? CaptureStructuralValues(
         IInterceptorSubject subject, IReadOnlyList<SubjectPropertyMetadata> batch)

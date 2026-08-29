@@ -21,8 +21,6 @@ namespace Namotion.Interceptor.Tracking.Change;
 [RunsBefore(typeof(LifecycleInterceptor))]
 // Outer of the change interceptor so the cascade recalculation runs after that interceptor has
 // dispatched: a triggering write is announced before the derived recalculations it causes.
-// Registration order already produces this nesting, so the attribute pins the required order
-// rather than correcting one.
 [RunsBefore(typeof(PropertyChangeInterceptor))]
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler,
     ISingletonContextService<DerivedPropertyChangeHandler>
@@ -290,13 +288,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
                         // Behind the staleness gates and before the commit, so an exposing value
                         // never becomes LastKnownValue and never produces a change notification.
-                        // The evaluation ran outside the lock, so a concurrent structural write
-                        // can detach a projected subject after this thread evaluated but before
-                        // its cascade marks this data stale: that value is a stale read produced
-                        // by correct code, not a violation, so it is re-evaluated like any stale
-                        // result instead of thrown out of an innocent write on this thread.
-                        // Only a value still exposing an unattached subject at the retry bound
-                        // is a genuine orphan that never converges, and that one throws.
+                        // The evaluation ran outside the lock, so a concurrent structural write can
+                        // detach a projected subject between the evaluation and the cascade that
+                        // marks this data stale: that is a stale read produced by correct code, so
+                        // it is re-evaluated rather than convicted. Only a value still exposing an
+                        // unattached subject at the retry bound is a genuine orphan, and it throws.
                         if (ExposesUntrackedSubject(derivedProperty, newValue))
                         {
                             if (++untrackedValueRetries >= MaxStabilizationIterations)
@@ -308,10 +304,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                                     // while still attached to nothing. Retrying cannot converge
                                     // that away, because the window closes only when that
                                     // transaction ends, so this evaluation neither commits nor
-                                    // convicts and is re-run when it does end. Registered rather
-                                    // than inferred: the read that saw the window may have gone
-                                    // through an accessor that records no dependency, and the
-                                    // transaction may end without running any cascade at all.
+                                    // convicts and is re-run when it does end.
                                     return;
                                 }
 
@@ -441,18 +434,16 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// </summary>
     /// <remarks>
     /// The booking is what makes withholding safe rather than lossy, and it is a handshake rather
-    /// than an inference for three reasons that were each measured: a getter can read a
-    /// mid-publication value through an accessor that records no dependency, a write can end without
-    /// reaching its cascade at all, and a cascade that does run reaches only the dependents of the
-    /// property that was written. At most one booking per property is outstanding, so a burst of
-    /// withholding recalculations cannot grow the lifecycle's list. Requires the caller to hold the
-    /// data lock, which is what makes that flag exact.
+    /// than an inference: a getter can read a mid-publication value through an accessor that records
+    /// no dependency, a write can end without reaching its cascade at all, and a cascade that does
+    /// run reaches only the dependents of the property that was written. At most one booking per
+    /// property is outstanding, so a burst of withholding recalculations cannot grow the lifecycle's
+    /// list. Requires the caller to hold the data lock, which is what makes that flag exact.
     ///
     /// The booking replays the trigger's timestamps rather than resolving new ones, so a drained
-    /// re-run can publish a timestamp older than one a newer trigger already committed. Resolving
-    /// at drain time is not obviously better: the only scope available there belongs to the
-    /// transaction that happened to end, not to the write that produced this value, and passing
-    /// none resets the property to the never-written sentinel.
+    /// re-run can publish a timestamp older than one a newer trigger already committed. Resolving at
+    /// drain time is no better: the only scope available there belongs to the transaction that
+    /// happened to end, not to the write that produced this value.
     /// </remarks>
     private static bool TryWithholdUntilTransactionEnds(
         PropertyReference property, DerivedPropertyData data, long storageTimestamp, long rawTimestamp)
@@ -463,9 +454,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
 
         // Whether to withhold is the lifecycle's question in every case, including when a booking is
-        // already outstanding. The flag records that one exists, not that a transaction is still
-        // running, and answering from it alone would let a booking that was never drained withhold
-        // every later verdict on a settled graph.
+        // already outstanding: the flag records that one exists, not that a transaction is still
+        // running.
         Action? recalculation = null;
         if (!data.HasWithheldRecalculation)
         {

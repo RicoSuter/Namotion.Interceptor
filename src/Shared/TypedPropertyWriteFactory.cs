@@ -12,8 +12,7 @@ namespace Namotion.Interceptor;
 /// routes and runs exactly like a generated property of that type.
 /// </summary>
 /// <remarks>
-/// One source file linked into every assembly that needs it, rather than a type in the core
-/// assembly: the consumers share no reference besides the core, and this is an implementation
+/// A linked source file rather than a type in the core assembly, because this is an implementation
 /// detail of dynamic property registration rather than a contract worth freezing as public API.
 ///
 /// The generic instantiation is built at runtime, so a value-typed property is not Native AOT
@@ -67,12 +66,9 @@ internal static class TypedPropertyWriteFactory
             else
             {
                 // A null (a first write into a null backing store, say) or a box of another type
-                // is not representable in a non-nullable typed chain. Such a write keeps the
+                // is not representable in a non-nullable typed chain, so such a write keeps the
                 // pre-typed behavior: the object-typed chain carries both values untouched to the
-                // stored setter, at the price of the structural route that an object-typed write
-                // takes. Only writes both of whose values fit the declared type run typed above,
-                // so a value-typed property pays this at most until its backing store holds a
-                // value of the declared type.
+                // stored setter, at the price of taking the structural route.
                 subject.Executor.SetPropertyValue<object?>(propertyName, newValue, currentValue, setValue);
             }
         };
