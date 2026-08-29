@@ -468,13 +468,13 @@ Changes are replayed in insertion order through the full interceptor chain again
 await transaction.CommitAsync(cancellationToken);
 
 Apply pending[MaxAllowedSpeed] = 200:
-    → ValidationInterceptor: validates 200 → OK
+    → ValidationInterceptor: origin is Local (no source bound) → validates 200 → OK
     → TransactionInterceptor: IsCommitting=true → calls next (no capture)
     → Field write: MaxAllowedSpeed = 200
     → Notifications fired
 
 Apply pending[MotorSpeed] = 150:
-    → ValidationInterceptor: validates 150
+    → ValidationInterceptor: origin is Local → validates 150
         reads MaxAllowedSpeed from real model → 200 (already committed above)
         150 <= 200 → OK
     → TransactionInterceptor: IsCommitting=true → calls next (no capture)
@@ -482,9 +482,11 @@ Apply pending[MotorSpeed] = 150:
     → Notifications fired
 ```
 
+**Source-bound properties are not re-validated on replay.** The walkthrough above is a local transaction. When a source accepts a change, its replay is stamped `Confirmed` and skips validation entirely, because the source already holds the value and rejecting it would make the commit revert an accepted write. See [Validation](validation.md#validation-is-scoped-to-local-writes).
+
 **Why insertion order matters:** If `MotorSpeed` were committed before `MaxAllowedSpeed`, the validator would read `MaxAllowedSpeed = 100` from the real model and reject the write.
 
-**Write order limitation:** Only the final value per property is stored (last write wins), and the commit position is determined by the *first* write to each property. If a property is re-written with a value that has different dependency requirements than the initial value, the commit order (based on first-write positions) may no longer match the dependency order needed by the final values. This can cause commit-time validation to fail even though the final set of values is consistent. To avoid this, ensure that re-writes do not shift dependency requirements relative to the original insertion order. See [#192](https://github.com/RicoSuter/Namotion.Interceptor/issues/192) for details and potential solutions.
+**Write order limitation:** Only the final value per property is stored (last write wins), and the commit position is determined by the *first* write to each property. If a property is re-written with a value that has different dependency requirements than the initial value, the commit order (based on first-write positions) may no longer match the dependency order needed by the final values. This can cause commit-time validation to fail even though the final set of values is consistent. It applies to local transactions only, since source-confirmed replays are not validated. To avoid this, ensure that re-writes do not shift dependency requirements relative to the original insertion order. See [#192](https://github.com/RicoSuter/Namotion.Interceptor/issues/192) for details and potential solutions.
 
 ### Retry After Conflict Detection
 
