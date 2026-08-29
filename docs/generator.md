@@ -145,17 +145,20 @@ public partial class Rectangle
 
 When `Width` or `Height` changes, `Area` automatically raises a change notification (requires `WithDerivedPropertyChangeDetection()` on the context).
 
-A derived property never establishes an ownership edge. `[Derived]` declares that the value is a function of other state, which makes the property a cache rather than the store of record, and that holds whether the value is recomputed on each read or kept in a backing field. A subject returned by a derived property must therefore be stored by some other property, or attached explicitly, or it is never tracked, registered or released:
+A derived property establishes an ownership edge only when it is the store of record. The generator gives every partial property a backing field, so a `[Derived]` partial property is the only thing holding whatever is assigned to it and it tracks that subject like any other stored property. Every other derived shape computes its value from state that lives elsewhere and establishes no edge, so a subject it returns must be stored by some other property, or attached explicitly, or it is never tracked, registered or released:
 
 ```csharp
 [Derived]
 public Room? Current => Rooms.FirstOrDefault();  // fine: Rooms owns the room
 
 [Derived]
-public partial Room? Current { get; set; }       // rejected: nothing else owns the room
+public Room Current => _room ??= new Room();     // rejected: nothing owns the room
+
+[Derived]
+public partial Room? Current { get; set; }       // fine: the backing field is the store
 ```
 
-With `WithDerivedPropertyChangeDetection()` enabled, the second shape throws `LifecycleContractViolationException` when the getter is evaluated. Without it nothing evaluates the getter, so the subject is silently untracked instead. Scalar derived properties are unaffected either way.
+With `WithDerivedPropertyChangeDetection()` enabled, the lazily constructing shape throws `LifecycleContractViolationException` when the getter is evaluated. Without it nothing evaluates the getter, so the subject is silently untracked instead. Scalar derived properties are unaffected either way.
 
 ### Interface Default Properties
 
