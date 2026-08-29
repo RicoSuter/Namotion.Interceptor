@@ -19,9 +19,8 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// walk read the same relation.
 ///
 /// The claim primitives (claiming, releasing and re-anchoring executors) take the executor's
-/// attachment monitor through <c>TryGetAttachment</c> and <c>TryUpdateAttachment</c>, so they
-/// require the topology gate to already be held; see the lock order note on the executor's
-/// attachment monitor.
+/// attachment monitor through <c>TryUpdateAttachment</c>, so they require the topology gate to
+/// already be held; see the lock order note on the executor's attachment monitor.
 ///
 /// The owned map is a <see cref="ConcurrentDictionary{TKey,TValue}"/> with exactly one writer (the
 /// lifecycle, under its topology lock). It is concurrent for the readers:
@@ -270,8 +269,10 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsAnchored(IInterceptorSubject subject)
     {
-        var executor = subject.Executor;
-        return executor.AttachmentAnchor != SubjectAttachmentAnchorKind.None && ReferenceEquals(executor.AttachedContext, Context);
+        // One snapshot rather than the two getters: the anchor only means anything against the
+        // context it anchors to, and the two getters can straddle a transition.
+        subject.Executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
+        return anchor != SubjectAttachmentAnchorKind.None && ReferenceEquals(attachedContext, Context);
     }
 
     /// <summary>
