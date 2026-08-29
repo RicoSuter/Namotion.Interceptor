@@ -1,9 +1,12 @@
+using System.ComponentModel.DataAnnotations;
 using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Transactions;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
+using Namotion.Interceptor.Validation;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.Tests.Transactions;
@@ -260,5 +263,67 @@ public class SubjectChangingHookTransformTests : TransactionTestBase
         Assert.Single(valueChanges);
         Assert.Equal(100, valueChanges[0].GetNewValue<int>());
         Assert.Same(sourceMock.Object, valueChanges[0].Origin.Source);
+    }
+
+    [Fact]
+    public void WhenAHookTransformsAStampedValue_ThenItIsValidatedBecauseItIsEffectivelyLocal()
+    {
+        // Arrange: the validator rejects anything above 50, and the hook clamps above 100.
+        var context = CreateContextWithMaxValueValidation();
+        var device = new ClampingDevice(context);
+        var sourceMock = CreateSucceedingSource();
+
+        // Act & Assert: the source sends 150, the hook stores 100, so the value is locally computed
+        // and publishes as Local. It flows back out to the source, so it must be validated even
+        // though the write entered the chain stamped FromSource.
+        Assert.Throws<ValidationException>(() =>
+            new PropertyReference(device, nameof(ClampingDevice.Value))
+                .SetValueFromSource(sourceMock.Object, null, null, 150));
+
+        Assert.Equal(0, device.Value);
+    }
+
+    [Fact]
+    public void WhenAStampedValueIsStoredUntransformed_ThenValidationIsSkipped()
+    {
+        // Arrange: same validator, but a value the hook leaves alone, so the source stamp survives.
+        var context = CreateContextWithMaxValueValidation();
+        var device = new ClampingDevice(context);
+        var sourceMock = CreateSucceedingSource();
+
+        // Act: 60 exceeds the validator's limit but not the hook's clamp, so it is stored exactly as
+        // the source sent it.
+        new PropertyReference(device, nameof(ClampingDevice.Value))
+            .SetValueFromSource(sourceMock.Object, null, null, 60);
+
+        // Assert: the source owns this value, so the model mirrors it rather than vetoing it.
+        Assert.Equal(60, device.Value);
+    }
+
+    private static IInterceptorSubjectContext CreateContextWithMaxValueValidation()
+    {
+        return InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithTransactions()
+            .WithFullPropertyTracking()
+            .WithSourceTransactions()
+            .WithPropertyValidation()
+            .WithService<IPropertyValidator>(() => new MaxValueValidator(50));
+    }
+
+    /// <summary>Rejects any <see cref="ClampingDevice.Value"/> above the configured maximum.</summary>
+    private sealed class MaxValueValidator(int maximum) : IPropertyValidator
+    {
+        public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
+        {
+            if (context.Property.Name == nameof(ClampingDevice.Value) &&
+                context.Value is int value && value > maximum)
+            {
+                return [new ValidationResult($"Value {value} exceeds {maximum}.")];
+            }
+
+            return [];
+        }
     }
 }

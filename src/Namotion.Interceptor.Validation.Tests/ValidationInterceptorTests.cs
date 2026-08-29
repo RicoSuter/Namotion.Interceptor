@@ -115,6 +115,9 @@ public class ValidationInterceptorTests
                 .SetValueFromSource(source, null, null, "anything"));
 
         Assert.Equal([ChangeOriginKind.Local], validator.SeenOrigins);
+
+        // The asymmetry this test is named for: the source write itself was never vetoed, it landed.
+        Assert.Equal("anything", person.LastName);
     }
 
     /// <summary>

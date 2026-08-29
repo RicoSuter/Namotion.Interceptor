@@ -26,7 +26,9 @@ public class ValidationInterceptor : IWriteInterceptor
         // accepted source write (a visible flap), or an inbound apply would simply leave the model
         // diverged from its source. Placed before validator resolution so the inbound apply path
         // does no validation work at all.
-        if (context.Origin.Kind != ChangeOriginKind.Local)
+        // The EFFECTIVE origin, not context.Origin: a hook that transformed a stamped value produces
+        // a locally computed value that publishes as Local and flows outbound, so it must be validated.
+        if (context.GetEffectiveOrigin().Kind != ChangeOriginKind.Local)
         {
             next(ref context);
             return;
