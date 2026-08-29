@@ -8,7 +8,10 @@ namespace Namotion.Interceptor.Validation;
 
 /// <summary>
 /// Interceptor that validates property values using registered validators before writing.
-/// Runs before the transaction interceptor to validate during both capture and commit phases.
+/// Runs only for locally originated writes: values a source sent (<see cref="ChangeOriginKind.FromSource"/>)
+/// or confirmed (<see cref="ChangeOriginKind.Confirmed"/>) are applied unvalidated, because the external
+/// system already holds them and rejecting them would diverge the model rather than repair anything.
+/// A local commit replay is still validated, since a rejection there is cleanly recoverable.
 /// </summary>
 [RunsBefore(typeof(SubjectTransactionInterceptor))]
 public class ValidationInterceptor : IWriteInterceptor
@@ -16,6 +19,17 @@ public class ValidationInterceptor : IWriteInterceptor
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
+        // Only local writes are validated. A non-local origin means an external system already holds
+        // this value, so rejecting it cannot cleanly undo anything: the commit would revert an
+        // accepted source write (a visible flap), or an inbound apply would simply leave the model
+        // diverged from its source. Placed before validator resolution so the inbound apply path
+        // does no validation work at all.
+        if (context.Origin.Kind != ChangeOriginKind.Local)
+        {
+            next(ref context);
+            return;
+        }
+
         var validators = context.Property.Subject.Context.GetServices<IPropertyValidator>();
 
         var validationContext = new PropertyValidationContext<TProperty>(context.Property, context.NewValue, context.Origin);
