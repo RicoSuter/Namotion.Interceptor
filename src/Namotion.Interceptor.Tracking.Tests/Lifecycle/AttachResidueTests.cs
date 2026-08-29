@@ -11,8 +11,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// </summary>
 public class AttachResidueTests
 {
-    private static readonly TimeSpan RendezvousTimeout = TimeSpan.FromSeconds(20);
-
     private static IInterceptorSubjectContext CreateContext()
     {
         return InterceptorSubjectContext
@@ -66,14 +64,14 @@ public class AttachResidueTests
             Children = new ParkingEnumerable(() =>
             {
                 discoveryReachedTheValue.Set();
-                mutationObserved = mutationApplied.Wait(RendezvousTimeout);
+                mutationObserved = mutationApplied.Wait(WriteProtocolAcceptance.RendezvousTimeout);
             })
         };
 
         Exception? mutationException = null;
         var mutator = new Thread(() =>
         {
-            if (!discoveryReachedTheValue.Wait(RendezvousTimeout))
+            if (!discoveryReachedTheValue.Wait(WriteProtocolAcceptance.RendezvousTimeout))
             {
                 return;
             }
@@ -88,7 +86,7 @@ public class AttachResidueTests
         // Act
         mutator.Start();
         var attachException = Record.Exception(() => ((IInterceptorSubject)holder).AttachToContext(context));
-        var mutatorCompleted = mutator.Join(RendezvousTimeout);
+        var mutatorCompleted = mutator.Join(WriteProtocolAcceptance.RendezvousTimeout);
 
         // Assert: the race actually happened, so the repro cannot pass without it.
         Assert.True(mutatorCompleted, "the mutating thread never finished");

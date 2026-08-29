@@ -10,8 +10,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// </summary>
 public class NormalizingSetterDerivedRaceTests
 {
-    private static readonly TimeSpan RendezvousTimeout = TimeSpan.FromSeconds(20);
-
     /// <summary>
     /// Reproduces the reported defect that a derived recalculation convicts a subject a normalizing
     /// setter stored before the reconcile attached it. The store-to-reconcile window is held open
@@ -55,7 +53,7 @@ public class NormalizingSetterDerivedRaceTests
             parent.OnAuthoritativeValueRead = null;
             Volatile.Write(ref storedValueAtPark, ReferenceEquals(storedValue, substitute) ? 1 : 0);
             parked.Set();
-            release.Wait(RendezvousTimeout);
+            release.Wait(WriteProtocolAcceptance.RendezvousTimeout);
         };
 
         Exception? writeException = null;
@@ -68,7 +66,7 @@ public class NormalizingSetterDerivedRaceTests
         // Act: the writer parks inside the window, then an unrelated scalar write on another
         // subject recalculates a derived property that projects the stored value.
         writer.Start();
-        var reachedPark = parked.Wait(RendezvousTimeout);
+        var reachedPark = parked.Wait(WriteProtocolAcceptance.RendezvousTimeout);
 
         Exception? recalculationException = null;
         var recalculator = new Thread(
@@ -77,10 +75,10 @@ public class NormalizingSetterDerivedRaceTests
             IsBackground = true
         };
         recalculator.Start();
-        var recalculatorCompleted = recalculator.Join(RendezvousTimeout);
+        var recalculatorCompleted = recalculator.Join(WriteProtocolAcceptance.RendezvousTimeout);
 
         release.Set();
-        var writerCompleted = writer.Join(RendezvousTimeout);
+        var writerCompleted = writer.Join(WriteProtocolAcceptance.RendezvousTimeout);
 
         // Assert: the window was actually open while the recalculation ran, so the repro cannot
         // pass by the two writes serializing or by the park landing outside the window.

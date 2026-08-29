@@ -9,8 +9,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// </summary>
 public class ReconcileRetentionWindowTests
 {
-    private static readonly TimeSpan RendezvousTimeout = TimeSpan.FromSeconds(20);
-
     private static IInterceptorSubjectContext CreateContext()
     {
         return InterceptorSubjectContext
@@ -47,7 +45,7 @@ public class ReconcileRetentionWindowTests
             }
 
             released.Set();
-            parkObserved = claimAttempted.Wait(RendezvousTimeout);
+            parkObserved = claimAttempted.Wait(WriteProtocolAcceptance.RendezvousTimeout);
         });
 
         context.WithService(() => handler, _ => false);
@@ -61,7 +59,7 @@ public class ReconcileRetentionWindowTests
         Exception? claimException = null;
         var claimer = new Thread(() =>
         {
-            if (!released.Wait(RendezvousTimeout))
+            if (!released.Wait(WriteProtocolAcceptance.RendezvousTimeout))
             {
                 return;
             }
@@ -78,7 +76,7 @@ public class ReconcileRetentionWindowTests
         claimer.Start();
         var assignmentException = Record.Exception(
             () => garage.CarsByName = new Dictionary<string, Car> { ["moved"] = mover });
-        var claimerCompleted = claimer.Join(RendezvousTimeout);
+        var claimerCompleted = claimer.Join(WriteProtocolAcceptance.RendezvousTimeout);
 
         // Assert: the race actually happened, so the repro cannot pass without it.
         Assert.True(claimerCompleted, "the claiming thread never finished");
