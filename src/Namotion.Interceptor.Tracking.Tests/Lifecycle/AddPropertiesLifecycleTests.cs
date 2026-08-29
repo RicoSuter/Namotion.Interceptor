@@ -191,10 +191,18 @@ public class AddPropertiesLifecycleTests
         var subject = (IInterceptorSubject)root;
         var innocent = new Person { FirstName = "I" };
         var trap = new ClaimTrapSubject();
+        var competingClaimCommitted = false;
         trap.ChildGetter = _ =>
         {
             trap.ChildGetter = null;
-            trap.AttachToContext(foreignContext);
+
+            // The competing claim runs on its own thread, which is the shape it has in production:
+            // a thread runs at most one topology transaction, so the admitting thread cannot enter
+            // the foreign context's gate itself. Joining keeps the race deterministic, the claim is
+            // committed before discovery walks on.
+            var competitor = new Thread(() => trap.AttachToContext(foreignContext)) { IsBackground = true };
+            competitor.Start();
+            competingClaimCommitted = competitor.Join(TimeSpan.FromSeconds(30));
             return null;
         };
 
@@ -211,6 +219,7 @@ public class AddPropertiesLifecycleTests
 
         // The innocent subject was provisionally claimed before the trap lost the race, so the
         // failed batch must hand its claim back; the trap keeps its competing attachment.
+        Assert.True(competingClaimCommitted);
         Assert.False(subject.Properties.ContainsKey("Trapped"));
         Assert.Null(innocent.TryGetContext());
         Assert.Same(foreignContext, ((IInterceptorSubject)trap).TryGetContext());
@@ -286,7 +295,7 @@ public class AddPropertiesLifecycleTests
             }), _ => false);
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => new Person(contextA));
+        Assert.Throws<LifecycleContractViolationException>(() => new Person(contextA));
 
         // Assert: rejected before the input was enumerated and before anything published.
         Assert.Equal(0, sequence.EnumerationCount);
@@ -315,7 +324,7 @@ public class AddPropertiesLifecycleTests
             }), _ => false);
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => new Person(contextA));
+        Assert.Throws<LifecycleContractViolationException>(() => new Person(contextA));
 
         // Assert: rejected before the input was enumerated and before anything published.
         Assert.True(fired);

@@ -10,10 +10,9 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// from inside a callback can deadlock because there is no order among gates. The depth is
 /// thread-local and shared across built-in lifecycle instances, so a callback writing into
 /// another context's graph is detected too. The guard is live in every build: the silent failure
-/// mode is graph corruption, so a violating consumer fails fast in Release. AddProperties
-/// admission reads both depths through <see cref="IsInsideAnyCallback"/> to reject a
-/// cross-context callback before it enumerates input or blocks on the foreign topology gate,
-/// where waiting could deadlock against opposing callbacks.
+/// mode is graph corruption, so a violating consumer fails fast in Release. Reaching a second
+/// context's topology gate is rejected separately, by the one-transaction-per-thread rule in
+/// <see cref="LifecycleInterceptor"/>, which binds every caller rather than only callbacks.
 /// </summary>
 /// <remarks>
 /// The rule is uniform at every graph depth: the attach and detach property lifecycle callbacks
