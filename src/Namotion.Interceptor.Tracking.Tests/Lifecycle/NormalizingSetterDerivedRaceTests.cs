@@ -1,5 +1,3 @@
-using Namotion.Interceptor.Interceptors;
-using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
@@ -15,46 +13,20 @@ public class NormalizingSetterDerivedRaceTests
     private static readonly TimeSpan RendezvousTimeout = TimeSpan.FromSeconds(20);
 
     /// <summary>
-    /// Registered after the lifecycle with no ordering attributes, which places it downstream of
-    /// the lifecycle in the resolved write chain. Parking after its own <c>next</c> therefore parks
-    /// after the terminal stored and before the lifecycle reconciles.
-    /// </summary>
-    private sealed class ParkingWriteInterceptor : IWriteInterceptor
-    {
-        private readonly ManualResetEventSlim _parked = new(false);
-        private readonly ManualResetEventSlim _release = new(false);
-
-        private volatile string? _armedPropertyName;
-
-        public void Arm(string propertyName) => _armedPropertyName = propertyName;
-
-        public bool WaitUntilParked(TimeSpan timeout) => _parked.Wait(timeout);
-
-        public void Release() => _release.Set();
-
-        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
-        {
-            var isArmed = _armedPropertyName is not null && context.Property.Name == _armedPropertyName;
-
-            next(ref context);
-
-            if (!isArmed)
-            {
-                return;
-            }
-
-            _armedPropertyName = null;
-            _parked.Set();
-            _release.Wait();
-        }
-    }
-
-    /// <summary>
     /// Reproduces the reported defect that a derived recalculation convicts a subject a normalizing
     /// setter stored before the reconcile attached it. The store-to-reconcile window is held open
-    /// artificially, by a downstream write interceptor that parks after the terminal; the window
-    /// itself is real and the write is legal, so the recalculating thread must not report the
-    /// transient exposure as a contract violation.
+    /// artificially; the window itself is real and the write is legal, so the recalculating thread
+    /// must not report the transient exposure as a contract violation.
+    ///
+    /// The park point is the authoritative getter the lifecycle rereads between its own
+    /// <c>next</c> and its reconcile. Do not move it into a write interceptor and do not move it
+    /// into the stored setter. A write interceptor's position in the chain is decided by ordering
+    /// attributes and registration order, so any change to how chains are partitioned can move the
+    /// park out of the window and turn this test green without the defect being fixed. The stored
+    /// setter runs inside the terminal's per-subject lock, which the reading thread's own chain
+    /// terminal also takes, so parking there blocks the reader instead of racing it, and the test
+    /// then fails on the join rather than on the defect. The getter reread is invoked by the
+    /// lifecycle itself, after the terminal lock is released, and is immune to both.
     /// </summary>
     [Fact]
     [Trait("Category", "Concurrency")]
@@ -62,12 +34,10 @@ public class NormalizingSetterDerivedRaceTests
     {
         // Arrange: the terminal substitutes a subject the write never proposed, so the substituted
         // subject is attached to nothing until the reconcile claims it.
-        var parkingInterceptor = new ParkingWriteInterceptor();
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
             .WithDerivedPropertyChangeDetection();
-        context.AddService<IWriteInterceptor>(parkingInterceptor);
 
         var parent = new SubstitutingDevice();
         ((IInterceptorSubject)parent).AttachToContext(context);
@@ -77,7 +47,16 @@ public class NormalizingSetterDerivedRaceTests
         var probe = new DerivedProjectionProbe { Projection = () => parent.Child };
         ((IInterceptorSubject)probe).AttachToContext(context);
 
-        parkingInterceptor.Arm(nameof(SubstitutingDevice.Child));
+        var parked = new ManualResetEventSlim(false);
+        var release = new ManualResetEventSlim(false);
+        var storedValueAtPark = 0;
+        parent.OnAuthoritativeValueRead = storedValue =>
+        {
+            parent.OnAuthoritativeValueRead = null;
+            Volatile.Write(ref storedValueAtPark, ReferenceEquals(storedValue, substitute) ? 1 : 0);
+            parked.Set();
+            release.Wait(RendezvousTimeout);
+        };
 
         Exception? writeException = null;
         var writer = new Thread(
@@ -89,7 +68,7 @@ public class NormalizingSetterDerivedRaceTests
         // Act: the writer parks inside the window, then an unrelated scalar write on another
         // subject recalculates a derived property that projects the stored value.
         writer.Start();
-        var parked = parkingInterceptor.WaitUntilParked(RendezvousTimeout);
+        var reachedPark = parked.Wait(RendezvousTimeout);
 
         Exception? recalculationException = null;
         var recalculator = new Thread(
@@ -100,12 +79,15 @@ public class NormalizingSetterDerivedRaceTests
         recalculator.Start();
         var recalculatorCompleted = recalculator.Join(RendezvousTimeout);
 
-        parkingInterceptor.Release();
+        release.Set();
         var writerCompleted = writer.Join(RendezvousTimeout);
 
         // Assert: the window was actually open while the recalculation ran, so the repro cannot
-        // pass by the two writes serializing.
-        Assert.True(parked, "the normalizing write never parked inside the store-to-reconcile window");
+        // pass by the two writes serializing or by the park landing outside the window.
+        Assert.True(reachedPark, "the normalizing write never parked inside the store-to-reconcile window");
+        Assert.True(Volatile.Read(ref storedValueAtPark) == 1,
+            "the park did not land between the terminal store and the reconcile: the backing field " +
+            "did not hold the substituted subject when the authoritative getter was reread");
         Assert.True(recalculatorCompleted, "the recalculating thread never finished");
         Assert.True(writerCompleted, "the parked writer never finished");
         Assert.Null(writeException);
