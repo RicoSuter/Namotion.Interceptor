@@ -11,7 +11,9 @@ namespace Namotion.Interceptor.Validation;
 /// Runs only for locally originated writes: values a source sent (<see cref="ChangeOriginKind.FromSource"/>)
 /// or confirmed (<see cref="ChangeOriginKind.Confirmed"/>) are applied unvalidated, because the external
 /// system already holds them and rejecting them would diverge the model rather than repair anything.
-/// A local commit replay is still validated, since a rejection there is cleanly recoverable.
+/// A local commit replay is still validated, since a rejection there is cleanly recoverable, which is
+/// why this runs before the transaction interceptor: a local write is validated at capture and again
+/// when the commit replays it.
 /// </summary>
 [RunsBefore(typeof(SubjectTransactionInterceptor))]
 public class ValidationInterceptor : IWriteInterceptor
