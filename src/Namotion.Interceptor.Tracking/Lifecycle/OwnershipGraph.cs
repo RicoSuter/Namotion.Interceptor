@@ -19,15 +19,13 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// walk read the same relation.
 ///
 /// The claim primitives (claiming, releasing and re-anchoring executors) take the executor's
-/// attachment monitor through <c>TryGetAttachment</c> and <c>TryUpdateAttachment</c>, so they
-/// require the topology gate to already be held; see the lock order note on the executor's
-/// attachment monitor.
+/// attachment monitor through <c>TryUpdateAttachment</c>, so they require the topology gate to
+/// already be held; see the lock order note on the executor's attachment monitor.
 ///
 /// The owned map is a <see cref="ConcurrentDictionary{TKey,TValue}"/> with exactly one writer (the
-/// lifecycle, under its topology lock). It is concurrent for the readers:
-/// <c>GetParents</c> and
-/// <c>GetReferenceCount</c> must not take that lock, so they
-/// need a lock-free way to find a subject's record.
+/// lifecycle, under its topology lock). It is concurrent for the readers: <c>GetParents</c> and
+/// <c>GetReferenceCount</c> must not take that lock, so they need a lock-free way to find a
+/// subject's record.
 /// </remarks>
 internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
 {
@@ -37,6 +35,10 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     private readonly ConcurrentDictionary<IInterceptorSubject, SubjectOwnership> _owned = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<PropertyReference, object?> _baselines = new(PropertyReference.Comparer);
 
+    // Written only by the release descent, under the topology lock, and read only by the
+    // admission path; a set rather than a field because a release can nest inside a callback.
+    private readonly HashSet<IInterceptorSubject> _releasing = new(ReferenceEqualityComparer.Instance);
+
     public IInterceptorSubjectContext Context { get; } = context;
 
     /// <summary>
@@ -44,22 +46,13 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     /// of a declared type that can contain subjects, and not a derived projection.
     /// </summary>
     /// <remarks>
-    /// A [Derived] property carries an edge where it is the store of record, and what establishes
-    /// that depends on which producer built the metadata. The generator intercepts only partial
-    /// properties and gives each one a backing field, so there IsIntercepted already means the
-    /// property is the store, and every computed generated shape (an expression-bodied getter, an
-    /// interface default) is out before the derived test runs. A dynamic property registered
-    /// through AddProperty is intercepted unconditionally, so its setter stands in instead: a
-    /// getter-only derived one can return nothing the properties it reads do not already own, and
-    /// counting it would double-count them. That setter test is a proxy, not a proof. It is exact
-    /// only for "the caller supplied a setter", so any non-null setter carries an edge whatever it
-    /// does with the value, including one that stores nothing or assigns through to another
-    /// subject. Metadata built by neither producer, by reflection through the public
-    /// SubjectPropertyMetadata constructor as DynamicSubjectFactory does, marks neither store, and
-    /// a derived property there carries an edge whenever it is intercepted. Both of those follow
-    /// master, which filtered no derived property at all. A subject reachable only through a
-    /// property that carries no edge is never tracked, and DerivedPropertyChangeHandler rejects it
-    /// instead of letting it go silently unowned. See docs/design/tracking-lifecycle.md.
+    /// A [Derived] property carries an edge where it is the store of record. The generator gives
+    /// every intercepted property a backing field, so there IsIntercepted already means the
+    /// property is the store; a dynamic property is intercepted unconditionally, so its setter
+    /// stands in instead, because a getter-only derived one can return nothing the properties it
+    /// reads do not already own. A subject reachable only through a property that carries no edge
+    /// is never tracked, and DerivedPropertyChangeHandler rejects it instead of letting it go
+    /// silently unowned. See docs/design/tracking-lifecycle.md.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool IsStructural(in SubjectPropertyMetadata metadata)
@@ -93,11 +86,36 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     }
 
     /// <summary>
+    /// Whether the subject is between losing its ownership record and having its executor handed
+    /// back, which is the window its detach callbacks run in.
+    /// </summary>
+    /// <remarks>
+    /// In that window the subject is attached but unowned, which is also the shape of a subject an
+    /// attach descent has claimed but not published yet. The two need opposite admission
+    /// behaviour, so the release marks its own; nothing else can tell them apart.
+    /// </remarks>
+    public bool IsReleasing(IInterceptorSubject subject)
+    {
+        return _releasing.Count > 0 && _releasing.Contains(subject);
+    }
+
+    /// <inheritdoc cref="IsReleasing"/>
+    public void MarkReleasing(IInterceptorSubject subject)
+    {
+        _releasing.Add(subject);
+    }
+
+    /// <inheritdoc cref="IsReleasing"/>
+    public void ClearReleasing(IInterceptorSubject subject)
+    {
+        _releasing.Remove(subject);
+    }
+
+    /// <summary>
     /// Gets the subject's occurrence-aware parents. Publication is lazily activated: the first call
     /// on a subject materializes its snapshot and marks it, and from then on every edge change
     /// republishes it, so a consumer that never asks pays one volatile read per edge change and
-    /// allocates nothing. Making it unconditional was measured as a material cost on structural
-    /// removal and bulk assignment, charged to consumers that never opted in.
+    /// allocates nothing.
     /// </summary>
     /// <remarks>
     /// This must not take the lifecycle's topology lock. <c>SourceMonitor</c> holds its own lock
@@ -155,29 +173,12 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     }
 
     /// <summary>
-    /// Appends every committed outgoing occurrence of the subject, in property enumeration order and
-    /// then value order. This is the order the release descent visits children in.
+    /// Walks the subject's structural properties and appends the occurrences their values contain, in
+    /// property enumeration order and then value order, which is the order the release descent visits
+    /// children in. Seeding reads the current getter output and commits it as the baseline;
+    /// collecting reads the committed baseline. That one difference is why both callers exist.
     /// </summary>
-    public void CollectCommittedChildren(IInterceptorSubject subject, List<(PropertyReference Property, SubjectOccurrence Occurrence)> children)
-    {
-        CollectStructuralChildren(subject, children, seed: false);
-    }
-
-    /// <summary>
-    /// Seeds the baselines of the subject's structural properties from their current getter values
-    /// and appends the direct occurrences those values contain.
-    /// </summary>
-    public void SeedBaselines(IInterceptorSubject subject, List<(PropertyReference Property, SubjectOccurrence Occurrence)> children)
-    {
-        CollectStructuralChildren(subject, children, seed: true);
-    }
-
-    /// <summary>
-    /// Walks the subject's structural properties and appends the occurrences their values contain.
-    /// Seeding reads the current getter output and commits it as the baseline; collecting reads the
-    /// committed baseline. That one difference is why the two callers exist at all.
-    /// </summary>
-    private void CollectStructuralChildren(
+    public void CollectStructuralChildren(
         IInterceptorSubject subject,
         List<(PropertyReference Property, SubjectOccurrence Occurrence)> children,
         bool seed)
@@ -231,8 +232,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     /// </summary>
     /// <remarks>
     /// The first structural property answers for all of them: seeding writes every baseline of a
-    /// subject under the topology lock, so they are present or absent together. Widening this to a
-    /// full scan would cost the whole property table per attach and decide nothing extra.
+    /// subject under the topology lock, so they are present or absent together.
     /// </remarks>
     public bool AreBaselinesSeeded(IInterceptorSubject subject)
     {
@@ -270,8 +270,10 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsAnchored(IInterceptorSubject subject)
     {
-        var executor = subject.Executor;
-        return executor.AttachmentAnchor != SubjectAttachmentAnchorKind.None && ReferenceEquals(executor.AttachedContext, Context);
+        // One snapshot rather than the two getters: the anchor only means anything against the
+        // context it anchors to, and the two getters can straddle a transition.
+        subject.Executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
+        return anchor != SubjectAttachmentAnchorKind.None && ReferenceEquals(attachedContext, Context);
     }
 
     /// <summary>
@@ -327,36 +329,21 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     }
 
     /// <summary>
-    /// Clears a provisional anchor, and only a provisional one: an explicit anchor that landed
-    /// concurrently must survive rather than be degraded by an adoption.
+    /// Sets the subject's anchor: promoted by an explicit attach on an inherited subject, and
+    /// cleared to <see cref="SubjectAttachmentAnchorKind.None"/> by an explicit detach. A non-null
+    /// <paramref name="onlyFrom"/> writes the anchor only where the subject currently carries
+    /// exactly that one; anchor adoption passes
+    /// <see cref="SubjectAttachmentAnchorKind.Provisional"/>, because an explicit anchor that landed
+    /// concurrently must survive rather than be degraded by the adoption.
     /// </summary>
-    public void ClearProvisionalAnchor(IInterceptorSubject subject)
-    {
-        var executor = subject.Executor;
-        while (true)
-        {
-            executor.TryGetAttachment(out var attachedContext, out var anchor, out var revision);
-            if (!ReferenceEquals(attachedContext, Context) || anchor != SubjectAttachmentAnchorKind.Provisional)
-            {
-                return;
-            }
-
-            if (executor.TryUpdateAttachment(revision, Context, SubjectAttachmentAnchorKind.None, out _))
-            {
-                return;
-            }
-        }
-    }
-
-    /// <summary>Sets the subject's anchor: promoted by an explicit attach on an inherited subject,
-    /// and cleared to <see cref="SubjectAttachmentAnchorKind.None"/> by an explicit detach.</summary>
-    public void SetAnchor(IInterceptorSubject subject, SubjectAttachmentAnchorKind anchor)
+    public void SetAnchor(IInterceptorSubject subject, SubjectAttachmentAnchorKind anchor, SubjectAttachmentAnchorKind? onlyFrom = null)
     {
         var executor = subject.Executor;
         while (true)
         {
             executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out var revision);
-            if (!ReferenceEquals(attachedContext, Context) || currentAnchor == anchor)
+            if (!ReferenceEquals(attachedContext, Context) ||
+                (onlyFrom is null ? currentAnchor == anchor : currentAnchor != onlyFrom))
             {
                 return;
             }
@@ -500,11 +487,9 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
 
     /// <summary>
     /// Hands back every claim that did not end up carrying ownership, which happens when the
-    /// terminal or the authoritative getter reread throws, or a normalizing setter stores a
-    /// different graph than the one that was validated. First-party interceptors all order before
-    /// the lifecycle, but that rests on their [RunsBefore] declarations: a third-party write
-    /// interceptor registered without ordering can run downstream and suppress the continuation,
-    /// which this release then also covers.
+    /// terminal or the authoritative getter reread throws, when a normalizing setter stores a
+    /// different graph than the one that was validated, or when a downstream write interceptor
+    /// suppresses the continuation.
     /// </summary>
     public void ReleaseUnusedClaims(List<IInterceptorSubject> claimed)
     {

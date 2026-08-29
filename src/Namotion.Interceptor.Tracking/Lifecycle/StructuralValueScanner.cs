@@ -24,11 +24,9 @@ internal static class StructuralValueScanner
     /// </summary>
     /// <remarks>
     /// Hot paths (<see cref="IDictionary"/>, <see cref="ICollection"/>) come before the
-    /// string/<see cref="IEnumerable"/> arms so common writes do not pay extra type checks. The
-    /// trailing <see cref="IEnumerable"/> arm handles read-only types that implement neither
-    /// interface (custom read-only list or dictionary wrappers), which is why it has to fall back
-    /// to the property and value shape to tell a keyed value from an ordinal one. The declared type
-    /// is a parameter rather than a metadata lookup so the scan also works during AddProperties
+    /// string/<see cref="IEnumerable"/> arms so common writes do not pay extra type checks; the
+    /// trailing arm handles read-only wrappers that implement neither. The declared type is a
+    /// parameter rather than a metadata lookup so the scan also works during AddProperties
     /// admission, where the property's metadata is not published yet.
     /// </remarks>
     public static void CollectOccurrences(Type declaredType, object? value, List<SubjectOccurrence> occurrences)
@@ -102,25 +100,9 @@ internal static class StructuralValueScanner
         }
     }
 
-    /// <summary>
-    /// Whether occurrences of this value are identified by a key rather than by an ordinal. Keys are
-    /// stable identities, so a reorder never invalidates them and matching goes by key; ordinals
-    /// shift on every insertion, so matching goes by occurrence count and the indices are refreshed.
-    /// </summary>
-    public static bool HasKeyedOccurrences(SubjectPropertyMetadata metadata, object? value)
-    {
-        // A subject is listed with the cheap negatives on purpose: it is the scalar back-reference
-        // that dominates graph wiring, and without it every such write would fall through to the
-        // declared-type probe. Only a value that is none of these can still be a read-only
-        // dictionary wrapper, which is the one shape the declared type has to answer for.
-        return value is IDictionary ||
-               (value is not (null or string or ICollection or IInterceptorSubject) && HasKeyedEntries(metadata.Type, value));
-    }
-
     // The declared type answers first because a typed property is the common case and needs no
     // GetType call, but a property declared object or IEnumerable can still carry a read-only
-    // dictionary, and only the value's own type reveals that. All three readers share this so their
-    // interpretation of a value's shape cannot diverge.
+    // dictionary, and only the value's own type reveals that.
     private static bool HasKeyedEntries(Type declaredType, object value)
     {
         return declaredType.IsSubjectDictionaryType() || value.GetType().IsSubjectDictionaryType();
@@ -128,10 +110,9 @@ internal static class StructuralValueScanner
 
     /// <summary>Whether the value still contains the subject at all, at any occurrence.</summary>
     /// <remarks>
-    /// Deliberately not <see cref="CollectOccurrences"/> followed by a scan. This runs once per
-    /// candidate edge inside the reachability walk, where the answer is a single bool and the
-    /// occurrence indices are never used, so building a list would allocate and fill one per
-    /// candidate. It also stops at the first match rather than enumerating the whole value.
+    /// Deliberately not <see cref="CollectOccurrences"/> followed by a scan: this runs once per
+    /// candidate edge inside the reachability walk, where the indices are never used, so it neither
+    /// fills a list nor enumerates past the first match.
     /// </remarks>
     public static bool Contains(PropertyReference property, object? value, IInterceptorSubject target)
     {

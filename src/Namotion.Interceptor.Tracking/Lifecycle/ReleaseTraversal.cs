@@ -104,16 +104,18 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
         var children = LifecycleScratch.RentChildList();
         try
         {
-            graph.CollectCommittedChildren(subject, children);
+            graph.CollectStructuralChildren(subject, children, seed: false);
 
             // Drop the ownership record and the baselines first: from here on the subject is
             // released as far as every other query is concerned, which is what makes the callbacks
-            // below safe to re-enter this descent from. It also means the callbacks see no parents
-            // at all rather than only the edge being removed; handlers ordered behind the descent
-            // observed the same thing before, because the previous parent writer removed the last
-            // remaining entry ahead of them.
+            // below safe to re-enter this descent from, and what makes them see no parents at all
+            // rather than only the edge being removed.
             graph.RemoveOwnership(subject);
             graph.RemoveBaselines(subject);
+
+            // Attached but unowned is also what a claimed, not yet published attach looks like, and
+            // property admission has to publish edges for that one and none for this one.
+            graph.MarkReleasing(subject);
 
             foreach (var entry in subject.Properties)
             {
@@ -139,6 +141,11 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
             // context they are being torn down from.
             graph.ReleaseClaim(subject);
 
+            // Handing the claim back ends the attached-but-unowned ambiguity the marker exists to
+            // resolve. Cleared here rather than only in the finally so it does not cover the
+            // children drain below, which is no longer this subject's window.
+            graph.ClearReleasing(subject);
+
             foreach (var (childProperty, occurrence) in children)
             {
                 RemoveEdge(occurrence.Subject, childProperty, occurrence.Index);
@@ -146,6 +153,7 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
         }
         finally
         {
+            graph.ClearReleasing(subject);
             LifecycleScratch.Return(children);
         }
     }

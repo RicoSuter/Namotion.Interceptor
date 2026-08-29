@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Cache;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Ordering;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor;
 
@@ -25,9 +26,7 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
     /// <see cref="Type"/>, and the structural classification of the type, so the unified write
     /// entry routes without calling the classifier. The index is handed out process wide to keep
     /// the lookup a plain array read; the cost is that an array is as long as the largest index
-    /// its context has seen rather than the number of types it uses. Internal because
-    /// <see cref="InterceptorExecutor"/> reads both fields off one static base and threads the
-    /// index down, so the write path pays for the generic statics access exactly once.
+    /// its context has seen rather than the number of types it uses.
     /// </summary>
     internal static class PropertyTypeIndex<TProperty>
     {
@@ -38,9 +37,8 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
         // from the declared property type) whenever TProperty is that declared type, which holds
         // by construction for generated setters. A boxed object fails closed to structural, while
         // a TProperty narrowed below the declared type routes scalar and forfeits the pre-chain
-        // seam (the lifecycle still self-acquires its gate inside the chain), which is why boxed
-        // callers (the registry's dynamic setters and the dynamic proxy) instantiate this entry
-        // with the declared type via a cached typed delegate rather than write as object.
+        // seam, which is why boxed callers instantiate this entry with the declared type via a
+        // cached typed delegate rather than write as object.
         // ReSharper disable once StaticMemberInGenericType
         internal static readonly bool CanContainSubjects = typeof(TProperty).CanContainSubjects();
     }
@@ -59,6 +57,27 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
 
     // Serializes mutators; never held on a query path.
     private readonly object _mutationLock = new();
+
+    // Whether a subject was ever anchored to this context while it had no lifecycle. Such a root is
+    // invisible to a lifecycle registered behind it: nothing ever admits it to the ownership graph,
+    // so it stays attached and unowned forever. Registering the lifecycle is what refuses that
+    // order. A flag rather than a count of live attachments, because the question is about the
+    // order the context was configured in and not about how many subjects are on it.
+    private bool _wasAttachedWithoutLifecycle;
+
+    /// <inheritdoc cref="_wasAttachedWithoutLifecycle"/>
+    internal void MarkAttachedWithoutLifecycle()
+    {
+        // Read before writing, so building many subjects on one lifecycle-free context does not
+        // dirty this line once per construction.
+        if (!Volatile.Read(ref _wasAttachedWithoutLifecycle))
+        {
+            Volatile.Write(ref _wasAttachedWithoutLifecycle, true);
+        }
+    }
+
+    /// <inheritdoc cref="_wasAttachedWithoutLifecycle"/>
+    internal bool WasAttachedWithoutLifecycle => Volatile.Read(ref _wasAttachedWithoutLifecycle);
 
     /// <summary>
     /// Restricts construction to <see cref="Create"/> because attachment tracking requires context

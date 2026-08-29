@@ -5,16 +5,13 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// fan-out, for one context.
 /// </summary>
 /// <remarks>
-/// Separated from <see cref="LifecycleInterceptor"/> so the classes that publish transitions depend
-/// on what they publish through rather than on the interceptor as a whole. Handing them the
-/// interceptor would make the dependency circular and would put the write protocol and both attach
-/// entry points within reach of code running while the topology lock is held; what those classes are
-/// allowed to do is then a property of a constructor signature rather than of three class bodies.
+/// Separate from <see cref="LifecycleInterceptor"/> so that what the publishing classes are allowed
+/// to do is a property of a constructor signature: handing them the interceptor would put the write
+/// protocol and both attach entry points within reach of code running under the topology lock.
 ///
 /// Every publication marks the thread through <see cref="CallbackReentrancyGuard.EnterScope"/>,
 /// which is what lets the structural write protocol reject a callback that writes a structural
-/// property. The guard is live in every build, so the exception regions the scopes produce are
-/// deliberate, not leftovers.
+/// property.
 /// </remarks>
 internal sealed class LifecycleNotifier(IInterceptorSubjectContext context)
 {

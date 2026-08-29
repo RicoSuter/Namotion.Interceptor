@@ -7,12 +7,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// <remarks>
 /// It is a backward search over committed incoming edges rather than a forward mark from the roots.
 /// A subject is reachable from a root exactly when some root lies in its ancestor closure, so the
-/// cost is that closure instead of the whole context. Three alternatives were implemented and
-/// measured against it. A complete context-local scan is far slower on a large context, because it
-/// visits every subject per removed edge. A forward mark is invalidated by every cross-parent
-/// removal, which is the common shape, so it never helps. Incrementally maintained reachability pays
-/// maintenance on every edge mutation, including the tree-shaped removals that the
-/// zero-remaining-edges short circuit already answers for free.
+/// cost is that closure instead of the whole context.
 ///
 /// Two questions share this one walk. Release asks whether a subject that just lost an edge is still
 /// held, and passes no exclusion. Anchor adoption asks whether a new edge supports the subject
@@ -22,6 +17,11 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// </remarks>
 internal sealed class ReachabilityWalk(OwnershipGraph graph)
 {
+    // Only bounds a cycle of one-edge subjects, which the reduction below cannot terminate on its
+    // own. The search resumes where the reduction stopped rather than restarting, so a chain deeper
+    // than this pays nothing for the reduction beyond the steps it took.
+    private const int MaximumReductionSteps = 8;
+
     /// <summary>
     /// Whether an anchor holds <paramref name="start"/>: either its own, or one in its ancestor
     /// closure over committed incoming edges. <paramref name="excluded"/>, when given, does not
@@ -34,6 +34,56 @@ internal sealed class ReachabilityWalk(OwnershipGraph graph)
             return true;
         }
 
+        // A subject whose only support is one committed edge asks the identical question of that
+        // edge's parent, so while the frontier cannot branch the answer needs no visited set, no
+        // stack and no edge copy. Every shape the search exists for leaves the reduction on the
+        // first subject that has anything other than exactly one edge, and a closed cycle of
+        // one-edge subjects closes back onto the start.
+        var current = start;
+        for (var step = 0; step < MaximumReductionSteps; step++)
+        {
+            var ownership = graph.TryGetOwnership(current);
+            if (ownership is null || ownership.IncomingCount == 0)
+            {
+                // Nothing above it, and so nothing above the subjects reduced to reach it either.
+                return false;
+            }
+
+            if (!ownership.TryGetSingleIncoming(out var incoming))
+            {
+                break;
+            }
+
+            // The same validation the search applies to every candidate parent; its sole edge being
+            // uncommitted leaves the closure empty rather than merely dropping one candidate.
+            if (!graph.CommitsEdgeTo(incoming, current))
+            {
+                return false;
+            }
+
+            var parent = incoming.Subject;
+            if (ReferenceEquals(parent, start))
+            {
+                // Back where it began, so the closure is exactly the chain just walked and every
+                // subject on it was tested. The step bound is what ends a cycle the start is not on.
+                return false;
+            }
+
+            if (!ReferenceEquals(parent, excluded) && graph.IsAnchored(parent))
+            {
+                return true;
+            }
+
+            current = parent;
+        }
+
+        // Correct to resume from here rather than from the start: the reduction proved the closure
+        // of every subject it left behind to be the closure of this one, and anchored none of them.
+        return SearchAncestors(current, excluded);
+    }
+
+    private bool SearchAncestors(IInterceptorSubject start, IInterceptorSubject? excluded)
+    {
         var visited = LifecycleScratch.RentSubjectSet();
         var expandable = LifecycleScratch.RentSubjectStack();
         var edges = LifecycleScratch.RentEdgeList();
