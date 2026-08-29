@@ -458,7 +458,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var children = LifecycleScratch.RentChildList();
         try
         {
-            _graph.CollectCommittedChildren(subject, children);
+            _graph.CollectStructuralChildren(subject, children, seed: false);
             foreach (var (property, occurrence) in children)
             {
                 _release.RemoveEdge(occurrence.Subject, property, occurrence.Index);

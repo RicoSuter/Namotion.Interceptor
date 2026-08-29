@@ -174,29 +174,12 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     }
 
     /// <summary>
-    /// Appends every committed outgoing occurrence of the subject, in property enumeration order and
-    /// then value order, which is the order the release descent visits children in.
+    /// Walks the subject's structural properties and appends the occurrences their values contain, in
+    /// property enumeration order and then value order, which is the order the release descent visits
+    /// children in. Seeding reads the current getter output and commits it as the baseline;
+    /// collecting reads the committed baseline. That one difference is why both callers exist.
     /// </summary>
-    public void CollectCommittedChildren(IInterceptorSubject subject, List<(PropertyReference Property, SubjectOccurrence Occurrence)> children)
-    {
-        CollectStructuralChildren(subject, children, seed: false);
-    }
-
-    /// <summary>
-    /// Seeds the baselines of the subject's structural properties from their current getter values
-    /// and appends the direct occurrences those values contain.
-    /// </summary>
-    public void SeedBaselines(IInterceptorSubject subject, List<(PropertyReference Property, SubjectOccurrence Occurrence)> children)
-    {
-        CollectStructuralChildren(subject, children, seed: true);
-    }
-
-    /// <summary>
-    /// Walks the subject's structural properties and appends the occurrences their values contain.
-    /// Seeding reads the current getter output and commits it as the baseline; collecting reads the
-    /// committed baseline. That one difference is why the two callers exist at all.
-    /// </summary>
-    private void CollectStructuralChildren(
+    public void CollectStructuralChildren(
         IInterceptorSubject subject,
         List<(PropertyReference Property, SubjectOccurrence Occurrence)> children,
         bool seed)
@@ -345,36 +328,21 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     }
 
     /// <summary>
-    /// Clears a provisional anchor, and only a provisional one: an explicit anchor that landed
-    /// concurrently must survive rather than be degraded by an adoption.
+    /// Sets the subject's anchor: promoted by an explicit attach on an inherited subject, and
+    /// cleared to <see cref="SubjectAttachmentAnchorKind.None"/> by an explicit detach. A non-null
+    /// <paramref name="onlyFrom"/> writes the anchor only where the subject currently carries
+    /// exactly that one; anchor adoption passes
+    /// <see cref="SubjectAttachmentAnchorKind.Provisional"/>, because an explicit anchor that landed
+    /// concurrently must survive rather than be degraded by the adoption.
     /// </summary>
-    public void ClearProvisionalAnchor(IInterceptorSubject subject)
-    {
-        var executor = subject.Executor;
-        while (true)
-        {
-            executor.TryGetAttachment(out var attachedContext, out var anchor, out var revision);
-            if (!ReferenceEquals(attachedContext, Context) || anchor != SubjectAttachmentAnchorKind.Provisional)
-            {
-                return;
-            }
-
-            if (executor.TryUpdateAttachment(revision, Context, SubjectAttachmentAnchorKind.None, out _))
-            {
-                return;
-            }
-        }
-    }
-
-    /// <summary>Sets the subject's anchor: promoted by an explicit attach on an inherited subject,
-    /// and cleared to <see cref="SubjectAttachmentAnchorKind.None"/> by an explicit detach.</summary>
-    public void SetAnchor(IInterceptorSubject subject, SubjectAttachmentAnchorKind anchor)
+    public void SetAnchor(IInterceptorSubject subject, SubjectAttachmentAnchorKind anchor, SubjectAttachmentAnchorKind? onlyFrom = null)
     {
         var executor = subject.Executor;
         while (true)
         {
             executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out var revision);
-            if (!ReferenceEquals(attachedContext, Context) || currentAnchor == anchor)
+            if (!ReferenceEquals(attachedContext, Context) ||
+                (onlyFrom is null ? currentAnchor == anchor : currentAnchor != onlyFrom))
             {
                 return;
             }

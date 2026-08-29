@@ -189,61 +189,37 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             return;
         }
 
-        // An append leaves every retained occurrence at the index it already carries, which is the
-        // common bulk-assignment shape, so it skips the rewrite entirely.
-        if (!IsAppendOnly(oldOccurrences, newOccurrences))
+        var groups = LifecycleScratch.RentIndexGroups();
+        try
         {
-            var groups = LifecycleScratch.RentIndexGroups();
-            try
+            foreach (var occurrence in newOccurrences)
             {
-                foreach (var occurrence in newOccurrences)
+                if (!groups.TryGetValue(occurrence.Subject, out var indices))
                 {
-                    if (!groups.TryGetValue(occurrence.Subject, out var indices))
-                    {
-                        indices = LifecycleScratch.RentIndexList();
-                        groups.Add(occurrence.Subject, indices);
-                    }
-
-                    indices.Add(occurrence.Index);
+                    indices = LifecycleScratch.RentIndexList();
+                    groups.Add(occurrence.Subject, indices);
                 }
 
-                foreach (var group in groups)
-                {
-                    var ownership = graph.TryGetOwnership(group.Key);
-                    if (ownership is null)
-                    {
-                        continue;
-                    }
+                indices.Add(occurrence.Index);
+            }
 
-                    ownership.SetIncomingIndices(property, group.Value);
-                    ownership.RepublishParents();
-                }
-            }
-            finally
+            foreach (var group in groups)
             {
-                LifecycleScratch.Return(groups);
+                var ownership = graph.TryGetOwnership(group.Key);
+                if (ownership is null)
+                {
+                    continue;
+                }
+
+                ownership.SetIncomingIndices(property, group.Value);
+                ownership.RepublishParents();
             }
+        }
+        finally
+        {
+            LifecycleScratch.Return(groups);
         }
 
         notifier.RefreshCollectionProperty(property, newValue);
-    }
-
-    private static bool IsAppendOnly(List<SubjectOccurrence> oldOccurrences, List<SubjectOccurrence> newOccurrences)
-    {
-        if (newOccurrences.Count < oldOccurrences.Count)
-        {
-            return false;
-        }
-
-        for (var i = 0; i < oldOccurrences.Count; i++)
-        {
-            if (!ReferenceEquals(oldOccurrences[i].Subject, newOccurrences[i].Subject) ||
-                !Equals(oldOccurrences[i].Index, newOccurrences[i].Index))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 }

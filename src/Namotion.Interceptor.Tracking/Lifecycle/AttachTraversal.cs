@@ -24,7 +24,7 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
         var children = LifecycleScratch.RentChildList();
         try
         {
-            graph.SeedBaselines(subject, children);
+            graph.CollectStructuralChildren(subject, children, seed: true);
             foreach (var (property, occurrence) in children)
             {
                 AttachEdge(occurrence.Subject, property, occurrence.Index);
@@ -137,7 +137,7 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
 
         if (reachability.IsAnchorReachable(property.Subject, subject))
         {
-            graph.ClearProvisionalAnchor(subject);
+            graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None, onlyFrom: SubjectAttachmentAnchorKind.Provisional);
         }
     }
 }

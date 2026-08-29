@@ -104,7 +104,7 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
         var children = LifecycleScratch.RentChildList();
         try
         {
-            graph.CollectCommittedChildren(subject, children);
+            graph.CollectStructuralChildren(subject, children, seed: false);
 
             // Drop the ownership record and the baselines first: from here on the subject is
             // released as far as every other query is concerned, which is what makes the callbacks
