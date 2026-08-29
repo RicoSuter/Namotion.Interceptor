@@ -79,13 +79,19 @@ public class DynamicPropertyWriteRoutingTests
             _ => storedValue,
             (_, value) => storedValue = (double)value!);
 
+        // Registration publishes the initial value as a null-to-value write, which a double chain
+        // cannot carry and which therefore routes as object. That one-off is not what this test
+        // pins: the invariant is the per-update cost of a scalar-declared dynamic property.
+        var gateEntriesAfterRegistration = probe.GateEnterCount;
+        var writesAfterRegistration = probe.WritePropertyCount;
+
         // Act
         person.Properties["Temperature"].SetValue!(person, 42.0);
 
         // Assert: the scalar declared type keeps the dynamic write off the structural protocol
         // even though the value arrives boxed; the chain itself still runs.
-        Assert.Equal(0, probe.GateEnterCount);
-        Assert.Equal(1, probe.WritePropertyCount);
+        Assert.Equal(gateEntriesAfterRegistration, probe.GateEnterCount);
+        Assert.Equal(writesAfterRegistration + 1, probe.WritePropertyCount);
         Assert.Equal(42.0, storedValue);
     }
 
@@ -114,7 +120,8 @@ public class DynamicPropertyWriteRoutingTests
         person.Properties["Buddy"].SetValue!(person, buddy);
 
         // Assert: the subject-capable declared type takes the structural protocol, the gate
-        // before the chain, so a racing attach or detach orders against this write.
+        // before the chain, so a racing attach or detach orders against this write. Registration
+        // issues no initial write for a subject-capable property, so this is the only one.
         Assert.Equal(1, probe.GateEnterCount);
         Assert.Equal(1, probe.WritePropertyCount);
         Assert.Same(buddy, storedValue);

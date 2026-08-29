@@ -163,6 +163,39 @@ public class DynamicPropertyLifecycleTests
     }
 
     [Fact]
+    public void WhenAScalarDynamicPropertyIsReregisteredAfterReattach_ThenItsInitialValueIsPublishedAgain()
+    {
+        // Arrange: an initializer reruns its AddProperty on every attach, and a reattached subject
+        // presents its dynamic properties to the graph afresh.
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var root = new Person(context) { FirstName = "Root" };
+        var father = new Person { FirstName = "F" };
+        root.Father = father;
+        father.TryGetRegisteredSubject()!.AddProperty("Nickname", typeof(string), _ => "Fred", null);
+
+        root.Father = null;
+        root.Father = father;
+
+        context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Where(change => change.Property.Name == "Nickname")
+            .Subscribe(changes.Add);
+
+        // Act
+        father.TryGetRegisteredSubject()!.AddProperty("Nickname", typeof(string), _ => "Fred", null);
+
+        // Assert
+        var change = Assert.Single(changes);
+        Assert.Null(change.GetOldValue<string?>());
+        Assert.Equal("Fred", change.GetNewValue<string?>());
+    }
+
+    [Fact]
     public void WhenAStoredDynamicSubjectPropertyIsAdded_ThenTheProjectionExistsBeforeItsInitialEdgePublishes()
     {
         // Arrange: the registry resolves an edge notification through the parent's registered
@@ -259,5 +292,37 @@ public class DynamicPropertyLifecycleTests
 
         // Only root remains
         Assert.Single(registry.KnownSubjects);
+    }
+
+    [Fact]
+    public void WhenAScalarDynamicPropertyIsAdded_ThenItsInitialValueIsPublishedAsAChangeFromNull()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var root = new Person(context) { FirstName = "John" };
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+
+        context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Where(change => change.Property.Name == "Nickname")
+            .Subscribe(changes.Add);
+
+        var nickname = "Johnny";
+
+        // Act
+        registeredRoot.AddProperty<string>(
+            "Nickname",
+            getValue: _ => nickname,
+            setValue: (_, value) => nickname = value!);
+
+        // Assert: adding the property is the transition from "did not exist" to the initial value.
+        var change = Assert.Single(changes);
+        Assert.Null(change.GetOldValue<string?>());
+        Assert.Equal("Johnny", change.GetNewValue<string?>());
     }
 }
