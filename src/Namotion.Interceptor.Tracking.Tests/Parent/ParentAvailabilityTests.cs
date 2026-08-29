@@ -5,8 +5,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Parent;
 
 /// <summary>
 /// Covers what the parent projection and the reference count answer when the lifecycle that
-/// publishes them is absent, which is a different question from a subject genuinely having no
-/// parents.
+/// publishes them is absent. Empty and zero are the true answers there rather than a stand-in for
+/// an unavailable one, because nothing can give such a subject a parent.
 /// </summary>
 public class ParentAvailabilityTests
 {
@@ -37,27 +37,36 @@ public class ParentAvailabilityTests
     }
 
     [Fact]
-    public void WhenAttachedToAContextWithoutLifecycle_ThenGetParentsThrows()
+    public void WhenAttachedToAContextWithoutLifecycle_ThenGetParentsReturnsEmptyAndGetReferenceCountReturnsZero()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var subject = new Simulation(context) { Name = "Root" };
 
-        // Act & Assert
-        var exception = Assert.Throws<InvalidOperationException>(() => subject.GetParents());
-        Assert.Contains("WithLifecycle()", exception.Message);
+        // Act
+        var parents = subject.GetParents();
+        var referenceCount = subject.GetReferenceCount();
+
+        // Assert
+        Assert.Empty(parents);
+        Assert.Equal(0, referenceCount);
     }
 
     [Fact]
-    public void WhenAttachedToAContextWithoutLifecycle_ThenGetReferenceCountThrows()
+    public void WhenAContextHasNoLifecycle_ThenOnlyAnchoredRootsCanBeAttachedToIt()
     {
-        // Arrange
+        // Arrange: this is why empty and zero are the answers above and not a stand-in for one.
         var context = InterceptorSubjectContext.Create();
-        var subject = new Simulation(context) { Name = "Root" };
+        var simulation = new Simulation(context) { Name = "Root" };
+        var component = new Component { Name = "Child" };
 
-        // Act & Assert
-        var exception = Assert.Throws<InvalidOperationException>(() => subject.GetReferenceCount());
-        Assert.Contains("WithLifecycle()", exception.Message);
+        // Act: nothing propagates the context along the edge, so the child never attaches, and a
+        // lifecycle can no longer be registered behind the root's attach either.
+        simulation.Component = component;
+
+        // Assert
+        Assert.Null(component.TryGetContext());
+        Assert.Throws<InvalidOperationException>(() => context.WithLifecycle());
     }
 
     [Fact]

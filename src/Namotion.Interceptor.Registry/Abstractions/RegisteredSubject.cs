@@ -32,8 +32,6 @@ public class RegisteredSubject
     /// Gets the current reference count (number of parent references), or 0 when the subject is
     /// not attached, because no edge can point at an unattached subject.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The subject is attached to a context with no
-    /// lifecycle, which cannot answer the question rather than answering it with zero.</exception>
     public int ReferenceCount => Subject.GetReferenceCount();
 
     /// <summary>
