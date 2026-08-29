@@ -35,8 +35,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     /// over committed writes and never reset, so it stays comparable across detach and reattach.
     ///
     /// It records commit order, it does not establish it: the lock is what serializes the commits, and
-    /// this counter labels them afterwards. Consumers do order changes by comparing it (see the flush
-    /// merging in docs/tracking.md), but nothing in the write path depends on its value.
+    /// this counter labels them afterwards.
     ///
     /// Consumes a revision exactly when the terminal write runs. A vetoed write and a write stopped
     /// by the equality check never reach the terminal and consume nothing, but a derived property's
@@ -46,24 +45,21 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
 
     // The exact attachment state. Writes are serialized by a private monitor rather than SyncRoot
     // so that transitioning the attachment never contends with ordinary property writes; reads are
-    // lock-free (the context read is the ownership predicate across the codebase, so it must cost
-    // a volatile load, not a monitor).
+    // lock-free, because the context read is the ownership predicate across the codebase.
     //
     // Lock order, stated once here and cross-referenced everywhere else: the structural write
     // protocol is lifecycle gate, then _attachmentLock, then SyncRoot (the terminal). The gate
     // must come first: a write that entered this monitor before the gate deadlocks against a
     // removal that holds the gate and releases this subject's claim through this same monitor.
-    // The attachment transitions (TryUpdateAttachment, TryGetAttachment) take _attachmentLock
-    // alone and run no foreign code while holding it, so they are leaf acquisitions, and nothing
-    // enters _attachmentLock while holding a SyncRoot.
+    // The attachment transitions take _attachmentLock alone and run no foreign code while holding
+    // it, so they are leaf acquisitions, and nothing enters it while holding a SyncRoot.
     //
     // Publication ordering, which the lock-free readers depend on: a transition stores the context
     // and the anchor first (volatile, so release) and the revision last with an atomic release
     // store. A reader that pairs a revision with subsequently read fields can therefore see fields
     // that are NEWER than that revision, never older, and the compare-and-swap in
-    // TryUpdateAttachment rejects exactly that case. The revision is 64-bit, so it is read with
-    // Interlocked.Read: netstandard2.0 also targets 32-bit runtimes, where a plain long load can
-    // tear.
+    // TryUpdateAttachment rejects exactly that case. The revision is read with Interlocked.Read
+    // because netstandard2.0 also targets 32-bit runtimes, where a plain long load can tear.
     private readonly object _attachmentLock = new();
     private volatile InterceptorSubjectContext? _attachedContext;
     private volatile SubjectAttachmentAnchorKind _anchor;
@@ -256,12 +252,11 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             if (lifecycle is null)
             {
                 // No lifecycle to order against: either the subject is unattached, or the pinned
-                // state has no lifecycle, so nothing downstream takes a topology gate for it. A
-                // lifecycle registered on the attached context after the pin is invisible to this
-                // write as a whole, routing and chain alike, and is seen by the next write, which
-                // pins a fresh state. One assumption remains: interceptors resolved through a
-                // lifecycle-free state must not take another context's lifecycle gate inside this
-                // chain.
+                // state has no lifecycle. A lifecycle registered on the attached context after the
+                // pin is invisible to this write as a whole, routing and chain alike, and is seen
+                // by the next write, which pins a fresh state. One assumption remains: interceptors
+                // resolved through a lifecycle-free state must not take another context's lifecycle
+                // gate inside this chain.
                 lock (_attachmentLock)
                 {
                     if (ReferenceEquals(_attachedContext, attachedContext))
@@ -379,9 +374,8 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         // stale routing decision as a retry rather than an error. The unattached (or
         // lifecycle-free) arm publishes under the attachment monitor alone, so a concurrent attach
         // either sees the published metadata when it seeds or waits until the publication is done.
-        // Unlike the structural write, no state pin is needed: the lifecycle-free arm publishes
-        // metadata and resolves no interceptor chain, so there is no second state read that could
-        // disagree with the routing.
+        // No state pin is needed here: that arm resolves no interceptor chain, so there is no
+        // second state read that could disagree with the routing.
         while (true)
         {
             var attachedContext = _attachedContext;

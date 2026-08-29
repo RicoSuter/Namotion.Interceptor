@@ -36,38 +36,31 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     private readonly LifecycleNotifier _notifier;
     private readonly PropertyAdmission _admission;
 
-    // One reentrant topology lock per lifecycle, which is one per context because the lifecycle is a
-    // singleton contract, and the outermost lock of the structural write order (see the executor's
-    // _attachmentLock note for the full order). Reentrancy is required: the structural write
-    // protocol enters the gate in Core (through EnterStructuralWriteGate, before the chain is
-    // resolved) and this interceptor enters it again from inside the chain, and a same-lifecycle
-    // callback re-enters it through TryAddProperties (the dynamic-property-initializer case).
-    // Always taken through EnterGate, never directly, so the one-transaction-per-thread rule below
-    // sees every acquisition.
+    // One reentrant topology lock per lifecycle, and the outermost lock of the structural write
+    // order (see the executor's _attachmentLock note for the full order). Reentrancy is required:
+    // Core enters the gate before the chain is resolved and this interceptor enters it again from
+    // inside the chain. Always taken through EnterGate, never directly, so the
+    // one-transaction-per-thread rule below sees every acquisition.
     private readonly Lock _gate = new();
 
     // How many topology gates the current thread holds, across every lifecycle. Gates have no
     // order among themselves, so a thread holding one and blocking on another deadlocks against a
-    // thread taking them the other way round: a thread runs at most one topology transaction, and
-    // a second one on a different lifecycle is rejected instead of waiting. Which gate the thread
-    // holds is answered by the gate itself, so a count is all this has to carry.
+    // thread taking them the other way round: a second transaction on a different lifecycle is
+    // rejected instead of waiting.
     [ThreadStatic]
     private static int _heldGateCount;
 
     // How many threads are inside a topology transaction of this lifecycle. Counted once per
-    // thread, not once per acquisition, because the gate is reentrant. A thread that is not in the
-    // transaction has no other way to tell an in-flight publication from a settled graph: the
-    // window between a terminal store and its reconcile is user-visible and cannot be closed, so
-    // readers that would otherwise convict a subject caught in it ask this instead.
+    // thread, not once per acquisition, because the gate is reentrant. The window between a
+    // terminal store and its reconcile is user-visible and cannot be closed, so readers that would
+    // otherwise convict a subject caught in it ask this instead.
     private int _transactionsInFlight;
 
     // Work registered by a reader that withheld a verdict because this lifecycle was mid-transaction,
     // to be re-run once it is not. A handshake rather than an inference: nothing else guarantees
-    // that the thread which opened the window will recalculate what read through it, because the
-    // read may have gone through an accessor that records no dependency, the write may end without
-    // running a cascade at all, and a cascade that does run reaches only the written property's
-    // dependents. Guarded by its own lock, which is a leaf: it is taken by a thread holding the
-    // reader's own lock, and released before anything registered here runs.
+    // that the thread which opened the window will recalculate what read through it. Guarded by its
+    // own lock, which is a leaf: it is taken by a thread holding the reader's own lock, and
+    // released before anything registered here runs.
     private readonly Lock _withheldLock = new();
     private List<Action>? _withheldRecalculations;
 
@@ -144,9 +137,8 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         _gate.Enter();
         if (_heldGateCount++ == 0)
         {
-            // First entry on this thread: past the rejection above, a nonzero count means this
-            // thread already holds this very gate, so a reentrant acquisition is not a new
-            // transaction.
+            // Past the rejection above, a nonzero count means this thread already holds this very
+            // gate, so a reentrant acquisition is not a new transaction.
             Interlocked.Increment(ref _transactionsInFlight);
         }
 
@@ -173,8 +165,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         {
             // Unconditionally, without first peeking at the list: a peek outside the registration
             // lock creates a third outcome for a registration that has passed the count check and
-            // not yet published its entry, which is then neither drained nor refused. The lock is
-            // uncontended and is only taken when this thread actually left the transaction.
+            // not yet published its entry, which is then neither drained nor refused.
             RunWithheldRecalculations();
         }
     }
@@ -203,10 +194,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// value: replaying it with the pre-write value re-stores the same subject and fails again, and
     /// going through <c>SetValue</c> is worse, being full chain re-entry with the same substitution
     /// and therefore unbounded recursion. A terminal that stores what it was given, which is every
-    /// terminal the source generator emits, never reaches the boundary, and skips the second claim
-    /// when the stored value is identifiably the same storage: by reference for a reference-typed
-    /// property, and for a value-typed one only where the type's own equality is storage identity,
-    /// which the authoritative getter's re-boxing otherwise makes unanswerable.
+    /// terminal the source generator emits, never reaches the boundary and skips the second claim.
     /// </remarks>
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
@@ -237,6 +225,11 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         {
             if (!_graph.IsOwned(subject))
             {
+                // Claimed for this context but not published: a root whose own structural getter
+                // writes back while the explicit attach seeds it at callback depth zero, or a
+                // subject between losing its ownership record and having its claim handed back. The
+                // reconcile would find no owner to publish edges for, and the seed that follows
+                // reads the committed value anyway.
                 next(ref context);
                 return;
             }
@@ -255,11 +248,9 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                 if (!IsTheProposedValue(storedValue, context.NewValue))
                 {
                     // The terminal stored something else, so the claim above covers a graph that is
-                    // not the one now in the property. Claiming what was actually stored is what
-                    // moves the foreign-subject rejection ahead of every graph mutation: the
-                    // baseline, the ownership records and the attach notifications all come after
-                    // this point, so a rejection here leaves none of them behind. A terminal that
-                    // stores what it was given pays nothing for this.
+                    // not the one now in the property. Claiming what was actually stored keeps the
+                    // foreign-subject rejection ahead of every graph mutation: the baseline, the
+                    // ownership records and the attach notifications all come after this point.
                     ClaimProposedComponent(metadata.Type, storedValue, claimed);
                 }
 
@@ -284,12 +275,10 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// is compared by reference and deliberately not through <see cref="object.Equals(object?)"/>:
     /// a type that overrides equality could otherwise report a different instance as the same value
     /// and suppress the claim on subjects nothing validated. A value type has no reference to
-    /// compare, because the authoritative getter boxes it afresh on every call, so the same question
-    /// can only be asked of a value type whose own equality is itself storage identity.
-    /// <see cref="ImmutableArray{T}"/> is that type and the one this protocol actually meets: its
-    /// equality compares the underlying array reference. Every other value type is claimed a second
-    /// time instead, which costs one scan and cannot be wrong, where trusting a user-defined
-    /// equality could suppress the claim on a same-stamp value holding different subjects.
+    /// compare, because the authoritative getter boxes it afresh on every call, so the question can
+    /// only be asked of one whose own equality is itself storage identity, which
+    /// <see cref="ImmutableArray{T}"/> is. Every other value type is claimed a second time instead,
+    /// which costs one scan and cannot be wrong.
     /// </remarks>
     private static bool IsTheProposedValue<TProperty>(object? storedValue, TProperty proposedValue)
     {
@@ -465,18 +454,16 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// the only handle on a subject a concurrent write installed after the scan: it is published but
     /// was never in the claimed set, so a claim-only rollback would leave it attached.
     ///
-    /// The order is deliberate. The root keeps its anchor, its baselines and its claim until the
+    /// The order is deliberate: the root keeps its anchor, its baselines and its claim until the
     /// drain has actually finished, so a rollback that cannot complete leaves the root attached and
-    /// detachable rather than stripped of the very state <c>DetachFromContext</c> needs. A rollback
-    /// that gives up halfway leaks; one that gives up halfway and also removes the handle leaves no
-    /// way to clean up at all, which is worse than the leak.
+    /// detachable rather than stripped of the very state <c>DetachFromContext</c> needs.
     /// </remarks>
     private void RollbackRejectedAttach(IInterceptorSubject subject, List<IInterceptorSubject> claimed)
     {
         var children = LifecycleScratch.RentChildList();
         try
         {
-            _graph.CollectCommittedChildren(subject, children);
+            _graph.CollectStructuralChildren(subject, children, seed: false);
             foreach (var (property, occurrence) in children)
             {
                 _release.RemoveEdge(occurrence.Subject, property, occurrence.Index);
@@ -499,11 +486,8 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             // This runs while the attach's own exception is in flight, and that one is the
             // diagnostic worth keeping: it says why the attach was refused, where this one only
             // says the cleanup after it went wrong. So the original wins and this is traced instead
-            // of thrown. Three things in the body can raise it, all user code the callback contract
-            // already forbids to throw: a detach callback published by an edge removal, a user
-            // collection enumerated while reading a committed baseline, and a hand-written
-            // subject's property map. Whichever it is, the rollback stops where it stood and the
-            // root keeps the anchor and claim an explicit detach needs.
+            // of thrown, the rollback stops where it stood, and the root keeps the anchor and claim
+            // an explicit detach needs.
             Trace.TraceError(
                 $"LifecycleInterceptor: rolling back a rejected attach of {subject.GetType().Name} " +
                 $"failed with {exception.GetType().Name}: {exception.Message}. The attach's own " +
@@ -606,10 +590,8 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// before the drain takes that lock, so the two cannot both miss: a registration that lands
     /// before the drain's swap is drained, and one that lands after it reads a count of zero and is
     /// refused. That is also why every caller has to ask here rather than answering from state of
-    /// its own: a flag recording that a booking exists does not record that a transaction is still
-    /// running, and one that outlived its booking would withhold every later verdict. Nothing
-    /// registered here runs under this lock, and the caller may hold its own lock while registering,
-    /// so this stays a leaf.
+    /// its own. Nothing registered here runs under this lock, and the caller may hold its own lock
+    /// while registering, so this stays a leaf.
     /// </remarks>
     internal bool TryRunWhenTransactionEnds(Action? recalculation)
     {
@@ -634,15 +616,13 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// so the work is free to take it again, and this lifecycle holds no lock while it runs.
     /// </summary>
     /// <remarks>
-    /// Exceptions do not escape. This is reached from a <c>finally</c>, so a transaction that is
-    /// already failing would have its own exception replaced by one from work it merely happened to
-    /// release. A conviction that surfaces here is therefore traced rather than thrown: the reader
-    /// that produced the value has long returned, and this thread was only ending an unrelated
-    /// transaction. It is then raised against a caller on the next evaluation with nothing in
-    /// flight, if one occurs. Nothing schedules that evaluation, so this is best effort and not a
-    /// guarantee: a derived property whose dependencies are written once at startup, or one
-    /// orphaned by the last write of a batch, is reported only into the trace, which is silent
-    /// unless a listener is configured.
+    /// Exceptions do not escape: this is reached from a <c>finally</c>, so a conviction that
+    /// surfaces here would replace the exception of a transaction that is already failing, and the
+    /// reader that produced the value has long returned. It is traced instead, and raised against a
+    /// caller on the next evaluation with nothing in flight. Nothing schedules that evaluation, so
+    /// this is best effort and not a guarantee: a derived property whose dependencies are written
+    /// once at startup, or one orphaned by the last write of a batch, is reported only into the
+    /// trace, which is silent unless a listener is configured.
     /// </remarks>
     private void RunWithheldRecalculations()
     {

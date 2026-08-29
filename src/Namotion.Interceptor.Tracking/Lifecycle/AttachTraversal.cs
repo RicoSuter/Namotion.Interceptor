@@ -5,14 +5,12 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// subject's own structural properties when it enters the graph.
 /// </summary>
 /// <remarks>
-/// The mirror image of <see cref="ReleaseTraversal"/>. Attach order is the one master already
-/// publishes: the recursive descent happens from inside the context handler list, so handlers
-/// ordered before it observe a subject top-down and handlers after it, along with the
-/// <c>SubjectAttached</c> event, observe it bottom-up.
+/// The recursive descent happens from inside the context handler list, so handlers ordered before
+/// it observe a subject top-down and handlers after it, along with the <c>SubjectAttached</c>
+/// event, observe it bottom-up.
 /// </remarks>
 internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph graph, ReachabilityWalk reachability)
 {
-    /// <summary>Seeds the subject's structural properties unless an earlier descent already did.</summary>
     public void SeedChildrenIfNeeded(IInterceptorSubject subject)
     {
         if (!graph.AreBaselinesSeeded(subject))
@@ -26,7 +24,7 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
         var children = LifecycleScratch.RentChildList();
         try
         {
-            graph.SeedBaselines(subject, children);
+            graph.CollectStructuralChildren(subject, children, seed: true);
             foreach (var (property, occurrence) in children)
             {
                 AttachEdge(occurrence.Subject, property, occurrence.Index);
@@ -139,7 +137,7 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
 
         if (reachability.IsAnchorReachable(property.Subject, subject))
         {
-            graph.ClearProvisionalAnchor(subject);
+            graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None, onlyFrom: SubjectAttachmentAnchorKind.Provisional);
         }
     }
 }

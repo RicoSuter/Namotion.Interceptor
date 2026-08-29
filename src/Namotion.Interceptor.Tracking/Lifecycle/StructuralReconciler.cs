@@ -50,9 +50,7 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
                 // collected this property's children through the old baseline, so nothing may
                 // continue on the parent's behalf: committing the new baseline would recreate an
                 // entry that no later release ever removes, and the addition loop would attach
-                // occurrences to a released owner. The in-loop released-parent exits below remain
-                // for the residual shape where user code invoked by the loops themselves releases
-                // the parent mid-flight.
+                // occurrences to a released owner.
                 return;
             }
 
@@ -60,9 +58,8 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             {
                 // That same user code reentered the write protocol on this very property and
                 // committed a newer baseline while the scans above ran. Its value reached the
-                // backing field after this one did and the graph already agrees with it, so this
-                // value is stale: committing it would overwrite the newer baseline and publish
-                // edges for occurrences the committed property no longer holds.
+                // backing field after this one did and the graph already agrees with it, so
+                // committing this one would publish edges the property no longer holds.
                 return;
             }
 
@@ -121,11 +118,9 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
                 if (!graph.IsOwned(parent))
                 {
                     // Side-effecting user code invoked by this loop at callback depth zero (a
-                    // dictionary-key Equals, a user collection or dictionary implementation) can run
-                    // the write protocol reentrantly and release the writing parent mid-publication;
-                    // callbacks cannot, they throw. The remaining edges belong to a subject that is
-                    // no longer in the graph, so publishing them would claim on behalf of a released
-                    // owner.
+                    // dictionary-key Equals, a user collection implementation) can run the write
+                    // protocol reentrantly and release the writing parent mid-publication, and the
+                    // remaining edges would then be published on behalf of a released owner.
                     return;
                 }
             }
@@ -194,61 +189,37 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             return;
         }
 
-        // An append leaves every retained occurrence at the index it already carries, which is the
-        // common bulk-assignment shape, so it skips the rewrite entirely.
-        if (!IsAppendOnly(oldOccurrences, newOccurrences))
+        var groups = LifecycleScratch.RentIndexGroups();
+        try
         {
-            var groups = LifecycleScratch.RentIndexGroups();
-            try
+            foreach (var occurrence in newOccurrences)
             {
-                foreach (var occurrence in newOccurrences)
+                if (!groups.TryGetValue(occurrence.Subject, out var indices))
                 {
-                    if (!groups.TryGetValue(occurrence.Subject, out var indices))
-                    {
-                        indices = LifecycleScratch.RentIndexList();
-                        groups.Add(occurrence.Subject, indices);
-                    }
-
-                    indices.Add(occurrence.Index);
+                    indices = LifecycleScratch.RentIndexList();
+                    groups.Add(occurrence.Subject, indices);
                 }
 
-                foreach (var group in groups)
-                {
-                    var ownership = graph.TryGetOwnership(group.Key);
-                    if (ownership is null)
-                    {
-                        continue;
-                    }
+                indices.Add(occurrence.Index);
+            }
 
-                    ownership.SetIncomingIndices(property, group.Value);
-                    ownership.RepublishParents();
-                }
-            }
-            finally
+            foreach (var group in groups)
             {
-                LifecycleScratch.Return(groups);
+                var ownership = graph.TryGetOwnership(group.Key);
+                if (ownership is null)
+                {
+                    continue;
+                }
+
+                ownership.SetIncomingIndices(property, group.Value);
+                ownership.RepublishParents();
             }
+        }
+        finally
+        {
+            LifecycleScratch.Return(groups);
         }
 
         notifier.RefreshCollectionProperty(property, newValue);
-    }
-
-    private static bool IsAppendOnly(List<SubjectOccurrence> oldOccurrences, List<SubjectOccurrence> newOccurrences)
-    {
-        if (newOccurrences.Count < oldOccurrences.Count)
-        {
-            return false;
-        }
-
-        for (var i = 0; i < oldOccurrences.Count; i++)
-        {
-            if (!ReferenceEquals(oldOccurrences[i].Subject, newOccurrences[i].Subject) ||
-                !Equals(oldOccurrences[i].Index, newOccurrences[i].Index))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 }

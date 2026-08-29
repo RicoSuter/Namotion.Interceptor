@@ -104,14 +104,12 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
         var children = LifecycleScratch.RentChildList();
         try
         {
-            graph.CollectCommittedChildren(subject, children);
+            graph.CollectStructuralChildren(subject, children, seed: false);
 
             // Drop the ownership record and the baselines first: from here on the subject is
             // released as far as every other query is concerned, which is what makes the callbacks
-            // below safe to re-enter this descent from. It also means the callbacks see no parents
-            // at all rather than only the edge being removed; handlers ordered behind the descent
-            // observed the same thing before, because the previous parent writer removed the last
-            // remaining entry ahead of them.
+            // below safe to re-enter this descent from, and what makes them see no parents at all
+            // rather than only the edge being removed.
             graph.RemoveOwnership(subject);
             graph.RemoveBaselines(subject);
 
@@ -143,11 +141,9 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
             // context they are being torn down from.
             graph.ReleaseClaim(subject);
 
-            // The marker exists to tell an attached-but-unowned subject that is being released from
-            // one that is being attached, and handing the claim back ends that ambiguity: the
-            // subject is attached to nothing now. Clearing it here rather than only in the finally
-            // keeps it from covering the children drain below, which is no longer this subject's
-            // window at all. The finally still clears it for the paths that never reach this line.
+            // Handing the claim back ends the attached-but-unowned ambiguity the marker exists to
+            // resolve. Cleared here rather than only in the finally so it does not cover the
+            // children drain below, which is no longer this subject's window.
             graph.ClearReleasing(subject);
 
             foreach (var (childProperty, occurrence) in children)
