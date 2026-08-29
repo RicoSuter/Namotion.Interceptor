@@ -115,6 +115,10 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
             graph.RemoveOwnership(subject);
             graph.RemoveBaselines(subject);
 
+            // Attached but unowned is also what a claimed, not yet published attach looks like, and
+            // property admission has to publish edges for that one and none for this one.
+            graph.MarkReleasing(subject);
+
             foreach (var entry in subject.Properties)
             {
                 subject.DetachSubjectProperty(new PropertyReference(subject, entry.Key));
@@ -146,6 +150,7 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
         }
         finally
         {
+            graph.ClearReleasing(subject);
             LifecycleScratch.Return(children);
         }
     }

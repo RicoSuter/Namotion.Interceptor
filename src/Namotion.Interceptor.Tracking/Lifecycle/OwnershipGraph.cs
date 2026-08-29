@@ -37,6 +37,10 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     private readonly ConcurrentDictionary<IInterceptorSubject, SubjectOwnership> _owned = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<PropertyReference, object?> _baselines = new(PropertyReference.Comparer);
 
+    // Written only by the release descent, under the topology lock, and read only by the
+    // admission path; a set rather than a field because a release can nest inside a callback.
+    private readonly HashSet<IInterceptorSubject> _releasing = new(ReferenceEqualityComparer.Instance);
+
     public IInterceptorSubjectContext Context { get; } = context;
 
     /// <summary>
@@ -90,6 +94,32 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     public void RemoveOwnership(IInterceptorSubject subject)
     {
         _owned.TryRemove(subject, out _);
+    }
+
+    /// <summary>
+    /// Whether the subject is between losing its ownership record and having its executor handed
+    /// back, which is the window its detach callbacks run in.
+    /// </summary>
+    /// <remarks>
+    /// In that window the subject is attached but unowned, which is also the shape of a subject an
+    /// attach descent has claimed but not published yet. The two need opposite admission
+    /// behaviour, so the release marks its own; nothing else can tell them apart.
+    /// </remarks>
+    public bool IsReleasing(IInterceptorSubject subject)
+    {
+        return _releasing.Count > 0 && _releasing.Contains(subject);
+    }
+
+    /// <inheritdoc cref="IsReleasing"/>
+    public void MarkReleasing(IInterceptorSubject subject)
+    {
+        _releasing.Add(subject);
+    }
+
+    /// <inheritdoc cref="IsReleasing"/>
+    public void ClearReleasing(IInterceptorSubject subject)
+    {
+        _releasing.Remove(subject);
     }
 
     /// <summary>
