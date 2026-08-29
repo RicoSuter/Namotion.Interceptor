@@ -101,8 +101,8 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
     }
 
     /// <summary>
-    /// Admits a batch on a subject that is claimed for this context but not yet published into the
-    /// graph, which is only observable from inside this thread's own attach descent.
+    /// Admits a batch on a subject that is claimed for this context but not owned by the graph,
+    /// which is observable from inside this thread's own attach descent and from a detach callback.
     /// </summary>
     /// <remarks>
     /// Two shapes exist. When the descent has not seeded the subject yet, only metadata publishes:
@@ -114,11 +114,18 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
     /// edge per occurrence. Property callbacks are not invoked on either shape, because the
     /// subject's pending context-attach publication snapshots the then-current property set and
     /// fans it out, new properties included; fanning out here would run them twice.
+    ///
+    /// A releasing subject presents the same attached-but-unowned shape from the opposite
+    /// direction and takes the metadata-only arm too. It has no descent coming, and an edge
+    /// published from it would name an owner the release already removed, so nothing would ever
+    /// release the child. A subject that owns structural properties reaches that arm already,
+    /// because the release dropped the baselines it had; the marker is what extends it to one
+    /// whose baselines were empty to begin with.
     /// </remarks>
     public void AdmitUnowned(SubjectPropertyRegistration registration)
     {
         var subject = registration.Subject;
-        if (!graph.AreBaselinesSeeded(subject))
+        if (graph.IsReleasing(subject) || !graph.AreBaselinesSeeded(subject))
         {
             registration.Publish();
             return;

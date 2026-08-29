@@ -259,9 +259,9 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             }
             else
             {
-                // Claimed for this context but not yet published into the graph, which is only
-                // observable from inside this thread's own attach descent; see AdmitUnowned for
-                // the two shapes.
+                // Claimed for this context but not owned by the graph: this thread's own attach
+                // descent before it publishes, or a detach callback after the release dropped the
+                // record; see AdmitUnowned for the shapes.
                 _admission.AdmitUnowned(registration);
             }
 
