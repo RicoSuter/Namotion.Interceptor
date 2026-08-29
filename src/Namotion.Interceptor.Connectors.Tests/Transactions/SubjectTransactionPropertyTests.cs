@@ -426,6 +426,45 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         Assert.Throws<ValidationException>(() => motor.MotorSpeed = 150);
     }
 
+    [Fact]
+    public async Task WhenConfirmedReplayWouldFailValidation_ThenValueLandsAndSourceIsNotReverted()
+    {
+        // Arrange: MaxAllowedSpeed is bound to a failing source, so it lands in failedSource and is
+        // excluded from the local apply. The landed limit therefore stays 100 while MotorSpeed, which
+        // its own source accepted, replays stamped Confirmed against that stale limit.
+        // BestEffort is required: Rollback returns before the local apply when a source write fails.
+        var context = CreateContextWithMotorValidation();
+        var motor = new Motor(context);
+
+        var speedSource = CreateSucceedingSource();
+        var limitSource = CreateFailingSource();
+
+        new PropertyReference(motor, nameof(Motor.MotorSpeed)).SetSource(speedSource.Object);
+        new PropertyReference(motor, nameof(Motor.MaxAllowedSpeed)).SetSource(limitSource.Object);
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        motor.MaxAllowedSpeed = 200;
+        motor.MotorSpeed = 150;
+
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert: the limit write genuinely failed and is still reported as such
+        Assert.Contains(exception.FailedChanges, c => c.Property.Name == nameof(Motor.MaxAllowedSpeed));
+
+        // Assert: the speed write was accepted by its source, so it lands locally and is not
+        // reported as failed. Re-validating it on replay would reject it against the stale limit.
+        Assert.Equal(150, motor.MotorSpeed);
+        Assert.DoesNotContain(exception.FailedChanges, c => c.Property.Name == nameof(Motor.MotorSpeed));
+
+        // Assert: no compensating write back to the source. A replay rejection makes the commit
+        // revert the accepted write, which other subscribers of that source observe as a flap.
+        speedSource.Verify(
+            s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     private static IInterceptorSubjectContext CreateContextWithMotorValidation()
     {
         return InterceptorSubjectContext
