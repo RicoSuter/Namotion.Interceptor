@@ -19,6 +19,12 @@ The independent-support rule is what makes ordinary graph building safe. Clearin
 
 The anchor lives on the executor (`IInterceptorExecutor.AttachmentAnchor`), never mirrored into graph state, so it cannot drift from the attachment it belongs to.
 
+### Registering the lifecycle behind an attach
+
+`AttachToContext` on a context with no lifecycle takes a root-only path: it writes the anchor onto the executor so the context's services resolve from the subject, and nothing else, because there is no graph to enter. A lifecycle registered after that point never learns the root exists. The root stays attached and unowned, every structural write on it takes the graph's unowned arm, and it claims nothing, validates nothing and reconciles nothing: a subject owned by another context can be stored into one of its fields without an exception, and a same-context child stored into one is never attached, never registered and never given a lifecycle callback. Nothing in the model repairs that later, so `WithLifecycle` rejects the order instead: the lifecycle-free attach path records a flag on the context, and registering a lifecycle behind it throws.
+
+The flag records that an attach has landed, so it does not order against one still in flight. A thread calling `AttachToContext` concurrently with a thread calling `WithLifecycle` can still resolve no lifecycle, write the anchor, and land behind a registration that already read the flag as false. Configuring a context concurrently with attaching subjects to it is unsupported for the same reason the sequential order is, and is not detected.
+
 ## Decomposition
 
 | Class | Owns |
@@ -110,6 +116,7 @@ Observed orders on a three-level chain: attach ahead of the descent `top, mid, l
 ## Invariants
 
 - A subject is unattached or owned by exactly one exact context, with at most one anchor.
+- The lifecycle is registered before anything attaches to its context; the reverse order is rejected, not repaired.
 - Ownership is anchor-reachability over committed occurrence-aware edges; reference count is a projection, never a predicate.
 - Property baselines and committed outgoing edges are one representation.
 - A derived property carries an edge only where its metadata marks it a store: a generated partial property, whose backing field holds the value, or a dynamic one whose caller supplied a setter. A computed generated getter is not intercepted and carries none. Metadata built by reflection marks neither, so a derived property there carries an edge whenever it is intercepted, as on master.

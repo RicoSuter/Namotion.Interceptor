@@ -60,6 +60,28 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
     // Serializes mutators; never held on a query path.
     private readonly object _mutationLock = new();
 
+    // Whether a subject was ever anchored to this context while it had no lifecycle. Such a root is
+    // invisible to a lifecycle registered behind it: nothing ever admits it to the ownership graph,
+    // so it stays attached and unowned and its structural writes take the graph's unowned arm
+    // forever, claiming, validating and reconciling nothing. Registering the lifecycle is what
+    // refuses that order. A flag rather than a count of live attachments, because the question is
+    // about the order the context was configured in and not about how many subjects are on it.
+    private bool _wasAttachedWithoutLifecycle;
+
+    /// <inheritdoc cref="_wasAttachedWithoutLifecycle"/>
+    internal void MarkAttachedWithoutLifecycle()
+    {
+        // Read before writing, so building many subjects on one lifecycle-free context does not
+        // dirty this line once per construction.
+        if (!Volatile.Read(ref _wasAttachedWithoutLifecycle))
+        {
+            Volatile.Write(ref _wasAttachedWithoutLifecycle, true);
+        }
+    }
+
+    /// <inheritdoc cref="_wasAttachedWithoutLifecycle"/>
+    internal bool WasAttachedWithoutLifecycle => Volatile.Read(ref _wasAttachedWithoutLifecycle);
+
     /// <summary>
     /// Restricts construction to <see cref="Create"/> because attachment tracking requires context
     /// reference identity.
