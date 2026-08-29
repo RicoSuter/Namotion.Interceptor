@@ -74,7 +74,7 @@ namespace Namotion.Interceptor.Connectors
         System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject?> CreateSubjectCollection(System.Type propertyType, [System.Runtime.CompilerServices.ParamCollection] System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject?> children);
         System.Collections.IDictionary CreateSubjectDictionary(System.Type propertyType, System.Collections.Generic.IDictionary<object, Namotion.Interceptor.IInterceptorSubject> entries);
     }
-    public interface ISubjectSource : Namotion.Interceptor.Connectors.ISubjectConnector
+    public interface ISubjectSource : Namotion.Interceptor.Connectors.ISubjectConnector, Namotion.Interceptor.IAuthoritativeSource
     {
         Namotion.Interceptor.Connectors.Diagnostics.SourceDiagnostics Diagnostics { get; }
         System.DateTimeOffset? LastSynchronizedAt { get; }
@@ -135,7 +135,7 @@ namespace Namotion.Interceptor.Connectors
         public void StartBuffering() { }
         public void Write<TState>(TState state, System.Action<TState> update) { }
     }
-    public abstract class SubjectSourceBase : Namotion.Interceptor.Connectors.SubjectConnectorBase, Namotion.Interceptor.Connectors.ISubjectConnector, Namotion.Interceptor.Connectors.ISubjectSource
+    public abstract class SubjectSourceBase : Namotion.Interceptor.Connectors.SubjectConnectorBase, Namotion.Interceptor.Connectors.ISubjectConnector, Namotion.Interceptor.Connectors.ISubjectSource, Namotion.Interceptor.IAuthoritativeSource
     {
         protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000, System.TimeSpan? teardownFlushTimeout = default, Namotion.Interceptor.Connectors.ThroughputCounter? incomingThroughput = null, Namotion.Interceptor.Connectors.ThroughputCounter? outgoingThroughput = null) { }
         [get: System.Runtime.CompilerServices.PreserveBaseOverrides]

@@ -28,7 +28,13 @@ public class ValidationInterceptor : IWriteInterceptor
         // does no validation work at all.
         // The EFFECTIVE origin, not context.Origin: a hook that transformed a stamped value produces
         // a locally computed value that publishes as Local and flows outbound, so it must be validated.
-        if (context.GetEffectiveOrigin().Kind != ChangeOriginKind.Local)
+        // Confirmed is skipped unconditionally: that is our own value returning after a source accepted
+        // it, so rejecting it would revert an accepted write whatever the source is. FromSource is
+        // skipped only for an authoritative source, because a server-role connector stamps a remote
+        // peer's write the same way, and there our model is the truth and the peer is untrusted input.
+        var origin = context.GetEffectiveOrigin();
+        if (origin.Kind == ChangeOriginKind.Confirmed ||
+            (origin.Kind == ChangeOriginKind.FromSource && origin.Source is IAuthoritativeSource))
         {
             next(ref context);
             return;
@@ -36,12 +42,12 @@ public class ValidationInterceptor : IWriteInterceptor
 
         var validators = context.Property.Subject.Context.GetServices<IPropertyValidator>();
 
-        // The effective origin, which the gate above has already established is Local. Passing
-        // context.Origin instead would hand a validator FromSource for a hook-transformed value that
-        // this interceptor just decided to validate, and a validator that opts out of non-local
-        // writes would then skip the very write the gate exists to catch.
+        // The effective origin, not context.Origin. A hook-transformed inbound value is reported as
+        // Local, which is what it is, rather than as the FromSource the caller declared: reporting the
+        // latter would let a validator that opts out of non-local writes skip the very write the gate
+        // above decided to catch. A peer write is reported as FromSource, which is also what it is.
         var validationContext = new PropertyValidationContext<TProperty>(
-            context.Property, context.NewValue, ChangeOrigin.Local);
+            context.Property, context.NewValue, origin);
 
         List<ValidationResult>? additionalErrors = null;
         foreach (var validator in validators)

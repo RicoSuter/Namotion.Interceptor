@@ -1,11 +1,11 @@
 namespace Namotion.Interceptor.Validation;
 
 /// <summary>
-/// Validation input for a single property write. Under the current contract validators run only for
-/// local writes, so <see cref="Origin"/> is always <see cref="ChangeOriginKind.Local"/> when the
-/// validator is invoked by <c>ValidationInterceptor</c>. It is retained because code that invokes
-/// validators directly, outside the write chain, constructs this context itself and supplies the
-/// origin.
+/// Validation input for a single property write. When the validator is invoked by
+/// <c>ValidationInterceptor</c>, <see cref="Origin"/> is the write's effective origin and is never
+/// that of an authoritative source, because those writes are not validated at all: it is either
+/// <see cref="ChangeOriginKind.Local"/>, or <see cref="ChangeOriginKind.FromSource"/> for a write a
+/// server-role connector accepted from a remote peer, which is untrusted input rather than truth.
 /// </summary>
 public readonly struct PropertyValidationContext<TProperty>(
     PropertyReference property, TProperty value, ChangeOrigin origin)
@@ -16,6 +16,6 @@ public readonly struct PropertyValidationContext<TProperty>(
     /// <summary>Gets the new value to validate.</summary>
     public TProperty Value { get; } = value;
 
-    /// <summary>Gets the attempted origin of the write; always Local when invoked from the interceptor.</summary>
+    /// <summary>Gets the effective origin of the write; see the type summary for what it can be.</summary>
     public ChangeOrigin Origin { get; } = origin;
 }

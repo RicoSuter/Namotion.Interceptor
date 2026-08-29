@@ -61,7 +61,7 @@ public class ValidationInterceptorTests
             .WithService<IPropertyValidator>(() => validator);
 
         var person = new Person(context);
-        var source = new object();
+        var source = new AuthoritativeTestSource();
 
         // Act
         new PropertyReference(person, nameof(Person.LastName))
@@ -83,7 +83,7 @@ public class ValidationInterceptorTests
             .WithFullPropertyTracking();
 
         var person = new Person(context);
-        var source = new object();
+        var source = new AuthoritativeTestSource();
 
         // Act: a source sends a value the local annotation would reject.
         new PropertyReference(person, nameof(Person.FirstName))
@@ -107,7 +107,7 @@ public class ValidationInterceptorTests
             .WithService<IPropertyValidator>(() => validator);
 
         var person = new Person(context);
-        var source = new object();
+        var source = new AuthoritativeTestSource();
 
         // Act & Assert
         Assert.Throws<ValidationException>(() =>
@@ -119,6 +119,34 @@ public class ValidationInterceptorTests
         // The asymmetry this test is named for: the source write itself was never vetoed, it landed.
         Assert.Equal("anything", person.LastName);
     }
+
+    [Fact]
+    public void WhenOriginIsAPeerWriteRatherThanAnAuthoritativeSource_ThenValidationStillApplies()
+    {
+        // Arrange: server-role connectors stamp a remote peer's write the same way a client source
+        // stamps an inbound value, but there the local model is the truth and the peer is untrusted
+        // input, so it keeps its veto. Such a connector is not an ISubjectSource and so is unmarked.
+        var validator = new RecordingValidator(nameof(Person.LastName));
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithPropertyValidation()
+            .WithFullPropertyTracking()
+            .WithService<IPropertyValidator>(() => validator);
+
+        var person = new Person(context);
+        var peer = new object();
+
+        // Act & Assert
+        Assert.Throws<ValidationException>(() =>
+            new PropertyReference(person, nameof(Person.LastName))
+                .SetValueFromSource(peer, null, null, "anything"));
+
+        Assert.Null(person.LastName);
+        Assert.Equal([ChangeOriginKind.FromSource], validator.SeenOrigins);
+    }
+
+    /// <summary>Stands in for a client-role source, whose external system holds the truth.</summary>
+    private sealed class AuthoritativeTestSource : IAuthoritativeSource;
 
     /// <summary>
     /// Rejects every write to one property and records the origin of each write it is asked about for
