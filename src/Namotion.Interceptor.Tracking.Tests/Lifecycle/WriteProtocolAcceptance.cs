@@ -17,6 +17,25 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// lifecycle, an interceptor outside it would hold nothing and both writes would simply complete;
 /// the asserted rejection is what catches that, and chain position alone does not.
 ///
+/// TerminalStoreContractTests, foreign-subject half. Fixed, and now the record of a known contract
+/// boundary rather than a repro. Only the proposed value was claimed before the terminal ran, so a
+/// foreign-context subject stored by a normalizing terminal was rejected after the baseline had been
+/// committed. Claiming the stored value moves the rejection ahead of every graph mutation, and the
+/// test asserts that per kind of state rather than through one probe. The backing field is the
+/// boundary and is asserted as such, deliberately in the negative: it still holds what the terminal
+/// stored, because the only store the framework has is the terminal the subject handed it and this
+/// one ignores the value it is given, so no replay restores anything. A change that starts restoring
+/// the field fails that assertion, which is the point: the contract would have moved and that should
+/// be seen rather than absorbed. The boundary is stated for consumers in the WriteProperty remarks
+/// and in docs/design/tracking-lifecycle.md, so this entry is the test-side reminder, not the
+/// argument.
+///
+/// TerminalStoreContractTests, reordering half. Passes today and is a parity guard, not a repro: a
+/// normalizing setter that stores a reordered subset of the proposed subjects must stay legal. It is
+/// the only case that runs the stored-value claim on a value that has to pass, so it is what stops
+/// an over-aggressive fix. Its stored list is a different instance from the proposed one, so a
+/// reference-equality short circuit cannot hide the rewrite, and it is also what pins that the
+/// stored-value claim is skipped when the terminal stored exactly what it was given.
 /// NormalizingSetterDerivedRaceTests. A derived recalculation on another thread convicted a subject
 /// that a normalizing setter had stored before the reconcile attached it. Parks in the authoritative
 /// getter the lifecycle rereads between its own next and its reconcile, which the lifecycle invokes

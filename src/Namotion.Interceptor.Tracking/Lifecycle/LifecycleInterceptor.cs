@@ -189,7 +189,21 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// <remarks>
     /// Scalar properties never take the topology lock. A structural property validates and claims the
     /// whole component the proposed value opens up before the backing writer runs, so a write that
-    /// would pull in a subject of another context fails before the property changes.
+    /// would pull in a subject of another context fails before the property changes. The value the
+    /// terminal actually stored is claimed as well, because a normalizing or hand-written terminal
+    /// can store a graph the caller never proposed.
+    ///
+    /// A terminal that stores a subject the write never proposed is a contract violation, and the
+    /// guarantee has one boundary there: the graph is left untouched, but the backing field holds
+    /// whatever that terminal stored. The framework can only invoke the terminal it was given, and a
+    /// terminal that is not a function of its argument cannot be replayed to restore the prior
+    /// value: replaying it with the pre-write value re-stores the same subject and fails again, and
+    /// going through <c>SetValue</c> is worse, being full chain re-entry with the same substitution
+    /// and therefore unbounded recursion. A terminal that stores what it was given, which is every
+    /// terminal the source generator emits, never reaches the boundary, and skips the second claim
+    /// when the stored value is identifiably the same storage: by reference for a reference-typed
+    /// property, and for a value-typed one only where the type's own equality is storage identity,
+    /// which the authoritative getter's re-boxing otherwise makes unanswerable.
     /// </remarks>
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
@@ -234,7 +248,19 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                 // The authoritative getter output rather than the proposed value: a normalizing or
                 // derived setter may store a different graph than the caller passed.
                 var getValue = metadata.GetValue;
-                _reconciler.Reconcile(property, metadata, getValue is not null ? getValue(subject) : context.NewValue);
+                var storedValue = getValue is not null ? getValue(subject) : context.NewValue;
+                if (!IsTheProposedValue(storedValue, context.NewValue))
+                {
+                    // The terminal stored something else, so the claim above covers a graph that is
+                    // not the one now in the property. Claiming what was actually stored is what
+                    // moves the foreign-subject rejection ahead of every graph mutation: the
+                    // baseline, the ownership records and the attach notifications all come after
+                    // this point, so a rejection here leaves none of them behind. A terminal that
+                    // stores what it was given pays nothing for this.
+                    ClaimProposedComponent(metadata.Type, storedValue, claimed);
+                }
+
+                _reconciler.Reconcile(property, metadata, storedValue);
             }
             finally
             {
@@ -244,6 +270,45 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                 LifecycleScratch.Return(claimed);
             }
         }
+    }
+
+    /// <summary>
+    /// Whether the terminal stored the value it was given, which is what lets a write skip claiming
+    /// the stored component a second time.
+    /// </summary>
+    /// <remarks>
+    /// The question is always identity of storage, never equality of value. A reference-typed value
+    /// is compared by reference and deliberately not through <see cref="object.Equals(object?)"/>:
+    /// a type that overrides equality could otherwise report a different instance as the same value
+    /// and suppress the claim on subjects nothing validated. A value type has no reference to
+    /// compare, because the authoritative getter boxes it afresh on every call, so the same question
+    /// can only be asked of a value type whose own equality is itself storage identity.
+    /// <see cref="ImmutableArray{T}"/> is that type and the one this protocol actually meets: its
+    /// equality compares the underlying array reference. Every other value type is claimed a second
+    /// time instead, which costs one scan and cannot be wrong, where trusting a user-defined
+    /// equality could suppress the claim on a same-stamp value holding different subjects.
+    /// </remarks>
+    private static bool IsTheProposedValue<TProperty>(object? storedValue, TProperty proposedValue)
+    {
+        if (default(TProperty) is null)
+        {
+            return ReferenceEquals(storedValue, proposedValue);
+        }
+
+        return StorageIdentity<TProperty>.IsItsOwnEquality &&
+               storedValue is TProperty typedStoredValue &&
+               EqualityComparer<TProperty>.Default.Equals(typedStoredValue, proposedValue);
+    }
+
+    /// <summary>
+    /// Whether a value type's own equality is a comparison of its storage rather than of its
+    /// contents. Resolved once per property type by the runtime, so the write path reads a static.
+    /// </summary>
+    private static class StorageIdentity<TProperty>
+    {
+        internal static readonly bool IsItsOwnEquality =
+            typeof(TProperty).IsGenericType &&
+            typeof(TProperty).GetGenericTypeDefinition() == typeof(ImmutableArray<>);
     }
 
     /// <summary>
