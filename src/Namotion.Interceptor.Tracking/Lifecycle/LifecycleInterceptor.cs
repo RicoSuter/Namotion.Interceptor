@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Parent;
 
@@ -52,6 +53,20 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     // holds is answered by the gate itself, so a count is all this has to carry.
     [ThreadStatic]
     private static int _heldGateCount;
+
+    // How many threads are inside a topology transaction of this lifecycle. Counted once per
+    // thread, not once per acquisition, because the gate is reentrant.
+    private int _transactionsInFlight;
+
+    // Work registered by a reader that withheld a verdict because this lifecycle was mid-transaction,
+    // to be re-run once it is not. A handshake rather than an inference: nothing else guarantees
+    // that the thread which opened the window will recalculate what read through it, because the
+    // read may have gone through an accessor that records no dependency, the write may end without
+    // running a cascade at all, and a cascade that does run reaches only the written property's
+    // dependents. Guarded by its own lock, which is a leaf: it is taken by a thread holding the
+    // reader's own lock, and released before anything registered here runs.
+    private readonly Lock _withheldLock = new();
+    private List<Action>? _withheldRecalculations;
 
     /// <summary>
     /// Raised when a subject is attached to the object graph.
@@ -124,7 +139,14 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         }
 
         _gate.Enter();
-        _heldGateCount++;
+        if (_heldGateCount++ == 0)
+        {
+            // First entry on this thread: past the rejection above, a nonzero count means this
+            // thread already holds this very gate, so a reentrant acquisition is not a new
+            // transaction.
+            Interlocked.Increment(ref _transactionsInFlight);
+        }
+
         return new GateScope(this);
     }
 
@@ -133,8 +155,25 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         // Decrement first, so an unbalanced exit leaves the count too low rather than too high: a
         // count stranded above zero on a pooled thread would reject that thread's next unrelated
         // transaction, while one below zero only stops the rule firing.
-        _heldGateCount--;
+        var leftTheTransaction = --_heldGateCount == 0;
+        if (leftTheTransaction)
+        {
+            // Before the gate is released and before the drain below takes the registration lock,
+            // so a reader that registers after this point reads a settled count and is told to
+            // decide for itself rather than to wait for a transaction that has ended.
+            Interlocked.Decrement(ref _transactionsInFlight);
+        }
+
         _gate.Exit();
+
+        if (leftTheTransaction)
+        {
+            // Unconditionally, without first peeking at the list: a peek outside the registration
+            // lock creates a third outcome for a registration that has passed the count check and
+            // not yet published its entry, which is then neither drained nor refused. The lock is
+            // uncontended and is only taken when this thread actually left the transaction.
+            RunWithheldRecalculations();
+        }
     }
 
     /// <summary>Releases what <see cref="EnterGate"/> took. A struct, so the using costs nothing.</summary>
@@ -409,6 +448,84 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     // Internal for tests only: committed baselines have no public observer, and the
     // released-parent regression tests must assert that none survives a subject's release.
     internal OwnershipGraph Graph => _graph;
+
+    /// <summary>
+    /// Asks whether there is an in-flight transaction to wait for, and registers work to run once it
+    /// ends. Returns false when there is nothing in flight, in which case nothing was registered and
+    /// the caller decides on the value it is holding. A null <paramref name="recalculation"/> asks
+    /// the question without registering, for a caller whose earlier booking is still outstanding.
+    /// </summary>
+    /// <remarks>
+    /// The question and the registration share one lock, and the transaction count is decremented
+    /// before the drain takes that lock, so the two cannot both miss: a registration that lands
+    /// before the drain's swap is drained, and one that lands after it reads a count of zero and is
+    /// refused. That is also why every caller has to ask here rather than answering from state of
+    /// its own: a flag recording that a booking exists does not record that a transaction is still
+    /// running, and one that outlived its booking would withhold every later verdict. Nothing
+    /// registered here runs under this lock, and the caller may hold its own lock while registering,
+    /// so this stays a leaf.
+    /// </remarks>
+    internal bool TryRunWhenTransactionEnds(Action? recalculation)
+    {
+        lock (_withheldLock)
+        {
+            if (Volatile.Read(ref _transactionsInFlight) <= (_gate.IsHeldByCurrentThread ? 1 : 0))
+            {
+                return false;
+            }
+
+            if (recalculation is not null)
+            {
+                (_withheldRecalculations ??= []).Add(recalculation);
+            }
+
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Runs everything a reader deferred until this transaction ended. The gate is already released,
+    /// so the work is free to take it again, and this lifecycle holds no lock while it runs.
+    /// </summary>
+    /// <remarks>
+    /// Exceptions do not escape. This is reached from a <c>finally</c>, so a transaction that is
+    /// already failing would have its own exception replaced by one from work it merely happened to
+    /// release. A conviction that surfaces here is therefore traced rather than thrown: the reader
+    /// that produced the value has long returned, and this thread was only ending an unrelated
+    /// transaction. It is then raised against a caller on the next evaluation with nothing in
+    /// flight, if one occurs. Nothing schedules that evaluation, so this is best effort and not a
+    /// guarantee: a derived property whose dependencies are written once at startup, or one
+    /// orphaned by the last write of a batch, is reported only into the trace, which is silent
+    /// unless a listener is configured.
+    /// </remarks>
+    private void RunWithheldRecalculations()
+    {
+        List<Action>? withheld;
+        lock (_withheldLock)
+        {
+            withheld = _withheldRecalculations;
+            _withheldRecalculations = null;
+        }
+
+        if (withheld is null)
+        {
+            return;
+        }
+
+        foreach (var recalculation in withheld)
+        {
+            try
+            {
+                recalculation();
+            }
+            catch (Exception exception)
+            {
+                Trace.TraceError(
+                    "LifecycleInterceptor: a recalculation deferred until this topology transaction " +
+                    $"ended failed with {exception.GetType().Name}: {exception.Message}");
+            }
+        }
+    }
 
     /// <summary>
     /// Gets the number of committed incoming edge occurrences, which is the subject's reference
