@@ -34,7 +34,7 @@ public class ValidationInterceptor : IWriteInterceptor
         // peer's write the same way, and there our model is the truth and the peer is untrusted input.
         var origin = context.GetEffectiveOrigin();
         if (origin.Kind == ChangeOriginKind.Confirmed ||
-            (origin.Kind == ChangeOriginKind.FromSource && origin.Source is IAuthoritativeSource))
+            (origin.Kind == ChangeOriginKind.FromSource && origin.Source is IAuthoritativeRemote))
         {
             next(ref context);
             return;

@@ -61,7 +61,7 @@ public class ValidationInterceptorTests
             .WithService<IPropertyValidator>(() => validator);
 
         var person = new Person(context);
-        var source = new AuthoritativeTestSource();
+        var source = new AuthoritativeTestRemote();
 
         // Act
         new PropertyReference(person, nameof(Person.LastName))
@@ -83,7 +83,7 @@ public class ValidationInterceptorTests
             .WithFullPropertyTracking();
 
         var person = new Person(context);
-        var source = new AuthoritativeTestSource();
+        var source = new AuthoritativeTestRemote();
 
         // Act: a source sends a value the local annotation would reject.
         new PropertyReference(person, nameof(Person.FirstName))
@@ -107,7 +107,7 @@ public class ValidationInterceptorTests
             .WithService<IPropertyValidator>(() => validator);
 
         var person = new Person(context);
-        var source = new AuthoritativeTestSource();
+        var source = new AuthoritativeTestRemote();
 
         // Act & Assert
         Assert.Throws<ValidationException>(() =>
@@ -146,7 +146,7 @@ public class ValidationInterceptorTests
     }
 
     /// <summary>Stands in for a client-role source, whose external system holds the truth.</summary>
-    private sealed class AuthoritativeTestSource : IAuthoritativeSource;
+    private sealed class AuthoritativeTestRemote : IAuthoritativeRemote;
 
     /// <summary>
     /// Rejects every write to one property and records the origin of each write it is asked about for
