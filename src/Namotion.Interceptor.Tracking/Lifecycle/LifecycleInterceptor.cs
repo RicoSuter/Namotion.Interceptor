@@ -41,7 +41,17 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     // protocol enters the gate in Core (through EnterStructuralWriteGate, before the chain is
     // resolved) and this interceptor enters it again from inside the chain, and a same-lifecycle
     // callback re-enters it through TryAddProperties (the dynamic-property-initializer case).
+    // Always taken through EnterGate, never directly, so the one-transaction-per-thread rule below
+    // sees every acquisition.
     private readonly Lock _gate = new();
+
+    // How many topology gates the current thread holds, across every lifecycle. Gates have no
+    // order among themselves, so a thread holding one and blocking on another deadlocks against a
+    // thread taking them the other way round: a thread runs at most one topology transaction, and
+    // a second one on a different lifecycle is rejected instead of waiting. Which gate the thread
+    // holds is answered by the gate itself, so a count is all this has to carry.
+    [ThreadStatic]
+    private static int _heldGateCount;
 
     /// <summary>
     /// Raised when a subject is attached to the object graph.
@@ -88,13 +98,52 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// <inheritdoc />
     public void EnterStructuralWriteGate()
     {
-        _gate.Enter();
+        EnterGate();
     }
 
     /// <inheritdoc />
     public void ExitStructuralWriteGate()
     {
+        ExitGate();
+    }
+
+    /// <summary>
+    /// Enters the topology gate, rejecting a second transaction on a different lifecycle before it
+    /// can block. Re-entering the gate this thread already holds is legal and load-bearing.
+    /// </summary>
+    private GateScope EnterGate()
+    {
+        if (_heldGateCount > 0 && !_gate.IsHeldByCurrentThread)
+        {
+            throw new LifecycleContractViolationException(
+                "A thread runs at most one lifecycle topology transaction at a time, and this one " +
+                "is already inside a transaction of another context. Topology gates have no order " +
+                "among themselves, so waiting for a second one can deadlock against a thread " +
+                "taking them the other way round. Nothing was read and nothing was changed: defer " +
+                "the second operation until the enclosing one completes.");
+        }
+
+        _gate.Enter();
+        _heldGateCount++;
+        return new GateScope(this);
+    }
+
+    private void ExitGate()
+    {
+        // Decrement first, so an unbalanced exit leaves the count too low rather than too high: a
+        // count stranded above zero on a pooled thread would reject that thread's next unrelated
+        // transaction, while one below zero only stops the rule firing.
+        _heldGateCount--;
         _gate.Exit();
+    }
+
+    /// <summary>Releases what <see cref="EnterGate"/> took. A struct, so the using costs nothing.</summary>
+    private readonly struct GateScope(LifecycleInterceptor lifecycle) : IDisposable
+    {
+        public void Dispose()
+        {
+            lifecycle.ExitGate();
+        }
     }
 
     /// <inheritdoc />
@@ -128,7 +177,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             return;
         }
 
-        lock (_gate)
+        using (EnterGate())
         {
             if (!_graph.IsOwned(subject))
             {
@@ -191,22 +240,10 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// <inheritdoc />
     public bool TryAddProperties(SubjectPropertyRegistration registration)
     {
-        // Reject a cross-context callback before the gate and before the input is enumerated: a
-        // thread inside another lifecycle's callback holds that lifecycle's gate, so blocking on
-        // this one can deadlock against opposing callbacks. Property lifecycle callbacks count
-        // too: they are published under the same gate, so the deadlock shape is identical. A
-        // same-lifecycle callback already holds this gate reentrantly and is the supported
-        // dynamic-property-initializer case.
-        if (CallbackReentrancyGuard.IsInsideAnyCallback && !_gate.IsHeldByCurrentThread)
-        {
-            throw new InvalidOperationException(
-                "AddProperties on a subject owned by another context is not supported from a " +
-                "lifecycle callback, because blocking on a second lifecycle gate there can " +
-                "deadlock against opposing callbacks. The input was not enumerated and nothing " +
-                "was published.");
-        }
-
-        lock (_gate)
+        // EnterGate rejects an admission that would open a second transaction, before the input is
+        // enumerated and before anything blocks. A same-lifecycle callback re-enters this gate and
+        // is the supported dynamic-property-initializer case.
+        using (EnterGate())
         {
             var subject = registration.Subject;
             if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
@@ -271,7 +308,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             throw new InvalidOperationException("An attach without a root anchor would be released by the next reachability decision.");
         }
 
-        lock (_gate)
+        using (EnterGate())
         {
             var executor = subject.Executor;
             executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out _);
@@ -304,7 +341,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             throw new InvalidOperationException("The subject cannot be detached through the lifecycle of another context.");
         }
 
-        lock (_gate)
+        using (EnterGate())
         {
             var executor = subject.Executor;
             executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
