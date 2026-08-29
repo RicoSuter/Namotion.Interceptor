@@ -267,13 +267,15 @@ public struct PropertyWriteContext<TProperty>
     /// <summary>
     /// Gets the origin this write would publish with if the value currently in the context were the
     /// one stored: a stamped origin survives only while the value still equals the one the source
-    /// sent, and otherwise resolves to Local, because the value was computed locally.
+    /// sent, and otherwise resolves to Local, because the value was computed locally. A derived
+    /// property always resolves to Local, whatever the value, since its stored value is recomputed
+    /// by its getter and is never literally the value a source sent.
     /// </summary>
     /// <remarks>
     /// Prefer this over <see cref="Origin"/> when deciding how to treat a write, because
     /// <see cref="Origin"/> is only the attempted origin until the terminal write lands. The answer
     /// is effective as of the call: an interceptor further down the chain can still change the value
-    /// and with it the origin, and <see cref="FinalizeOrigin"/> settles it at the terminal write.
+    /// and with it the origin. The answer is settled at the terminal write, the same point <see cref="IsWritten"/> becomes true.
     /// Cheap for local writes, which short-circuit before any comparison.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -286,7 +288,7 @@ public struct PropertyWriteContext<TProperty>
 
         // A derived property's stored value is recomputed by its getter, never literally the sent value,
         // so a stamped origin never survives. Demoted without invoking the getter, which must not run
-        // here (this executes under the subject's SyncRoot).
+        // from here: the terminal-write caller holds the subject's SyncRoot.
         if (Property.Metadata.IsDerived)
         {
             return default;

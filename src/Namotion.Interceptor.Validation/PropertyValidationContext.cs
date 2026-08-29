@@ -3,9 +3,9 @@ namespace Namotion.Interceptor.Validation;
 /// <summary>
 /// Validation input for a single property write. Under the current contract validators run only for
 /// local writes, so <see cref="Origin"/> is always <see cref="ChangeOriginKind.Local"/> when the
-/// validator is invoked by <c>ValidationInterceptor</c>. It is retained because callers that invoke
-/// validators directly construct the context themselves; the only one in this repository, the
-/// ASP.NET Core update endpoint, also passes Local.
+/// validator is invoked by <c>ValidationInterceptor</c>. It is retained because code that invokes
+/// validators directly, outside the write chain, constructs this context itself and supplies the
+/// origin.
 /// </summary>
 public readonly struct PropertyValidationContext<TProperty>(
     PropertyReference property, TProperty value, ChangeOrigin origin)

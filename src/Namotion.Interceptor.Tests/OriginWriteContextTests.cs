@@ -94,7 +94,7 @@ public class OriginWriteContextTests
     }
 
     [Fact]
-    public void WhenFinalOriginIsResolvedBeforeWrite_ThenTheAttemptedOriginRemainsAvailableToTheTerminal()
+    public void WhenEffectiveOriginIsResolvedBeforeWrite_ThenTheAttemptedOriginRemainsAvailableToTheTerminal()
     {
         // Arrange
         var probe = new ResolvingOriginProbe();

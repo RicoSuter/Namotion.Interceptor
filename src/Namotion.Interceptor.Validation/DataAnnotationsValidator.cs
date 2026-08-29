@@ -18,7 +18,7 @@ public class DataAnnotationsValidator : IPropertyValidator
         }
 
         // Slow path: has attributes, must box for .NET Validator API. Origin is not inspected here:
-        // ValidationInterceptor only invokes validators for local writes, so no source value reaches this.
+        // ValidationInterceptor invokes validators only for effectively local writes.
         return ValidateCore(property, context.Value);
     }
 

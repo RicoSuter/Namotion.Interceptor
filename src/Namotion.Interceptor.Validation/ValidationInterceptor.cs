@@ -36,7 +36,12 @@ public class ValidationInterceptor : IWriteInterceptor
 
         var validators = context.Property.Subject.Context.GetServices<IPropertyValidator>();
 
-        var validationContext = new PropertyValidationContext<TProperty>(context.Property, context.NewValue, context.Origin);
+        // The effective origin, which the gate above has already established is Local. Passing
+        // context.Origin instead would hand a validator FromSource for a hook-transformed value that
+        // this interceptor just decided to validate, and a validator that opts out of non-local
+        // writes would then skip the very write the gate exists to catch.
+        var validationContext = new PropertyValidationContext<TProperty>(
+            context.Property, context.NewValue, ChangeOrigin.Local);
 
         List<ValidationResult>? additionalErrors = null;
         foreach (var validator in validators)

@@ -269,7 +269,8 @@ public class SubjectChangingHookTransformTests : TransactionTestBase
     public void WhenAHookTransformsAStampedValue_ThenItIsValidatedBecauseItIsEffectivelyLocal()
     {
         // Arrange: the validator rejects anything above 50, and the hook clamps above 100.
-        var context = CreateContextWithMaxValueValidation();
+        var validator = new MaxValueValidator(50);
+        var context = CreateContextWithMaxValueValidation(validator);
         var device = new ClampingDevice(context);
         var sourceMock = CreateSucceedingSource();
 
@@ -281,13 +282,18 @@ public class SubjectChangingHookTransformTests : TransactionTestBase
                 .SetValueFromSource(sourceMock.Object, null, null, 150));
 
         Assert.Equal(0, device.Value);
+
+        // The validator must be told the origin the interceptor decided on. Handing it FromSource here
+        // would let a validator that opts out of non-local writes skip the write the gate just caught.
+        Assert.Equal([ChangeOriginKind.Local], validator.SeenOrigins);
     }
 
     [Fact]
     public void WhenAStampedValueIsStoredUntransformed_ThenValidationIsSkipped()
     {
         // Arrange: same validator, but a value the hook leaves alone, so the source stamp survives.
-        var context = CreateContextWithMaxValueValidation();
+        var validator = new MaxValueValidator(50);
+        var context = CreateContextWithMaxValueValidation(validator);
         var device = new ClampingDevice(context);
         var sourceMock = CreateSucceedingSource();
 
@@ -296,11 +302,13 @@ public class SubjectChangingHookTransformTests : TransactionTestBase
         new PropertyReference(device, nameof(ClampingDevice.Value))
             .SetValueFromSource(sourceMock.Object, null, null, 60);
 
-        // Assert: the source owns this value, so the model mirrors it rather than vetoing it.
+        // Assert: the source owns this value, so the model mirrors it rather than vetoing it, and the
+        // validator was never consulted.
         Assert.Equal(60, device.Value);
+        Assert.Empty(validator.SeenOrigins);
     }
 
-    private static IInterceptorSubjectContext CreateContextWithMaxValueValidation()
+    private static IInterceptorSubjectContext CreateContextWithMaxValueValidation(MaxValueValidator validator)
     {
         return InterceptorSubjectContext
             .Create()
@@ -309,16 +317,28 @@ public class SubjectChangingHookTransformTests : TransactionTestBase
             .WithFullPropertyTracking()
             .WithSourceTransactions()
             .WithPropertyValidation()
-            .WithService<IPropertyValidator>(() => new MaxValueValidator(50));
+            .WithService<IPropertyValidator>(() => validator);
     }
 
-    /// <summary>Rejects any <see cref="ClampingDevice.Value"/> above the configured maximum.</summary>
+    /// <summary>
+    /// Rejects any <see cref="ClampingDevice.Value"/> above the configured maximum, and records the
+    /// origin it was handed, so a test can check that the interceptor reports the origin it actually
+    /// decided on rather than the one the caller declared.
+    /// </summary>
     private sealed class MaxValueValidator(int maximum) : IPropertyValidator
     {
+        public List<ChangeOriginKind> SeenOrigins { get; } = [];
+
         public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
         {
-            if (context.Property.Name == nameof(ClampingDevice.Value) &&
-                context.Value is int value && value > maximum)
+            if (context.Property.Name != nameof(ClampingDevice.Value))
+            {
+                return [];
+            }
+
+            SeenOrigins.Add(context.Origin.Kind);
+
+            if (context.Value is int value && value > maximum)
             {
                 return [new ValidationResult($"Value {value} exceeds {maximum}.")];
             }
