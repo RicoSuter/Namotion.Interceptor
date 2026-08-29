@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
