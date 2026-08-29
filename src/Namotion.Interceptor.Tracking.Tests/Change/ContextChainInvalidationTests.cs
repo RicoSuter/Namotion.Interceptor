@@ -9,8 +9,11 @@ public class ContextChainInvalidationTests
     [Fact]
     public void WhenServicesAreRegisteredAfterChainWasCompiled_ThenTheNextWriteSeesThem()
     {
-        // Arrange: the first write compiles and caches the context's interceptor chain.
-        var context = InterceptorSubjectContext.Create();
+        // Arrange: the first write compiles and caches the context's interceptor chain. The
+        // lifecycle is registered before the subject attaches, because registering one behind an
+        // attach is rejected; the services this test adds afterwards are the ones that do not
+        // constrain their order.
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
         var person = new Person(context);
         person.LastName = "compiles the write chain";
 

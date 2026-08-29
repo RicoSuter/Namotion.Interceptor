@@ -302,6 +302,14 @@ car.Tire = tire; // tire is now attached to the same context; tire.TryGetContext
 
 This ensures that all objects in the subject graph share the same context, enabling consistent tracking, validation, and other interceptor features.
 
+Configure the context fully before attaching anything to it. A subject attached to a context that has no lifecycle yet is anchored but never enters the ownership graph a later `WithLifecycle()` brings, so registering one behind an attach throws. `WithRegistry()`, `WithFullPropertyTracking()` and `WithDerivedPropertyChangeDetection()` register the lifecycle themselves and are rejected the same way.
+
+```csharp
+var context = InterceptorSubjectContext.Create();
+var car = new Car(context); // anchors car on a context with no lifecycle
+context.WithRegistry();     // throws: the lifecycle would never see car
+```
+
 ## Subject Lifecycle Tracking
 
 Track when subjects enter or leave the object graph, and when property references are added or removed:

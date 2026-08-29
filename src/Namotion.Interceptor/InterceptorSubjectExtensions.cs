@@ -69,6 +69,11 @@ public static class InterceptorSubjectExtensions
         // Without a lifecycle the attach is root-only: publishing the exact context is what makes
         // the context's services resolvable from the subject.
         ApplyRootAnchor(subject, context, anchor);
+
+        // Recorded only once the anchor is written, so a rejected attach records nothing. This is
+        // the whole handle a lifecycle registered later has on the roots it never saw, which is why
+        // registering one behind an attach is refused rather than silently left unowned.
+        (context as InterceptorSubjectContext)?.MarkAttachedWithoutLifecycle();
     }
 
     /// <summary>
