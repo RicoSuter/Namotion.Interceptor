@@ -1,4 +1,4 @@
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -21,7 +21,9 @@ namespace Namotion.Interceptor.Registry;
 [RunsBefore(typeof(LifecycleInterceptor))]
 public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
 {
-    private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
+    // Reference equality, explicitly: registry membership is identity and must agree with the
+    // lifecycle graph, so a hand-written subject overriding Equals/GetHashCode cannot merge nodes.
+    private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
     private ImmutableDictionary<IInterceptorSubject, RegisteredSubject>? _knownSubjectsSnapshot;
 
@@ -44,7 +46,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
             if (snapshot is not null)
                 return snapshot;
 
-            snapshot = _knownSubjects.ToImmutableDictionary();
+            snapshot = _knownSubjects.ToImmutableDictionary(ReferenceEqualityComparer.Instance);
             Volatile.Write(ref _knownSubjectsSnapshot, snapshot);
             return snapshot;
         }

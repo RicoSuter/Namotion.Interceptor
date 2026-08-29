@@ -350,7 +350,9 @@ public class RegisteredSubject
                     "shaped re-registration, the reattach case, is supported.");
             }
 
-            return GetOrAddPropertyProjection(name, existingMetadata.Type, existingMetadata.Attributes);
+            var existingProperty = GetOrAddPropertyProjection(name, existingMetadata.Type, existingMetadata.Attributes);
+            PublishInitialValue(existingProperty);
+            return existingProperty;
         }
 
         Subject.AddProperties(new SubjectPropertyMetadata(
@@ -375,11 +377,37 @@ public class RegisteredSubject
         // No explicit callback fan-out here. An attached subject's admission already invoked the
         // property lifecycle callbacks, and SubjectRegistry.AttachProperty created this projection
         // from inside that fan-out. An unattached subject resolves no context and therefore no
-        // handlers, so there is nothing to notify. The synthetic null-to-value write that used to
-        // follow is gone too: the admission itself captures and commits the initial structural
-        // value, so the write had become a no-op chain traversal that could only throw, through
-        // the callback write guard, when a lifecycle handler added a structural property.
+        // handlers, so there is nothing to notify.
+        PublishInitialValue(property);
         return property;
+    }
+
+    /// <summary>
+    /// Publishes a dynamic property's initial value as a null-to-value write: the transition from
+    /// "the property did not exist" to what it now holds. Nothing else reports that to change
+    /// tracking or to the other write interceptors.
+    /// </summary>
+    /// <remarks>
+    /// Fires on every registration, including the re-registration an initializer performs on each
+    /// attach, because a reattached subject presents its dynamic properties to the graph afresh and
+    /// an observer that missed the first registration has no other way to learn their values. The
+    /// value is already in the caller's backing store, so the write carries a no-op writer and only
+    /// traverses the chain.
+    ///
+    /// A property that can hold subjects is excluded: admission captures and commits its initial
+    /// value, which left this write a no-op traversal that could only throw, through the callback
+    /// write guard, when a lifecycle handler added one.
+    /// </remarks>
+    private void PublishInitialValue(RegisteredSubjectProperty property)
+    {
+        if (property.Type.CanContainSubjects())
+        {
+            return;
+        }
+
+        TypedPropertyWriteFactory
+            .CreateSetter(property.Type, property.Name, getValue: null, setValue: static (_, _) => { })
+            .Invoke(Subject, property.GetValue());
     }
 
     /// <summary>

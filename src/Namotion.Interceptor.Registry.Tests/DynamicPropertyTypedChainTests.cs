@@ -46,9 +46,11 @@ public class DynamicPropertyTypedChainTests
         // Act
         person.Properties["Temperature"].SetValue!(person, 42.0);
 
-        // Assert: the boxed dynamic write runs the same double chain a generated double property
-        // would, so the interceptor observes TProperty as double, not object.
-        var write = Assert.Single(probe.Writes);
+        // Assert: registration publishes the initial value first, as a null-to-value write that no
+        // double chain can carry, so the assignment is the second write. That one runs the same
+        // double chain a generated double property would, so TProperty is double, not object.
+        Assert.Equal(2, probe.Writes.Count);
+        var write = probe.Writes[1];
         Assert.Equal(typeof(double), write.PropertyType);
         Assert.Equal(42.0, write.NewValue);
         Assert.Equal(0.0, write.CurrentValue);
@@ -78,8 +80,10 @@ public class DynamicPropertyTypedChainTests
         person.Properties["Temperature"].SetValue!(person, null);
 
         // Assert: null cannot travel a double chain, so the write falls back to the object-typed
-        // chain and the stored setter receives the null unchanged, as it always did.
-        var write = Assert.Single(probe.Writes);
+        // chain and the stored setter receives the null unchanged, as it always did. The first
+        // write is the initial value registration publishes.
+        Assert.Equal(2, probe.Writes.Count);
+        var write = probe.Writes[1];
         Assert.Equal(typeof(object), write.PropertyType);
         Assert.Null(write.NewValue);
         Assert.Equal(42.0, write.CurrentValue);

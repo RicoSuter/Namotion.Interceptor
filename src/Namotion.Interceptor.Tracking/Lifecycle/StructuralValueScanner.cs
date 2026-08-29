@@ -27,7 +27,7 @@ internal static class StructuralValueScanner
     /// string/<see cref="IEnumerable"/> arms so common writes do not pay extra type checks. The
     /// trailing <see cref="IEnumerable"/> arm handles read-only types that implement neither
     /// interface (custom read-only list or dictionary wrappers), which is why it has to fall back
-    /// to the declared property shape to tell a keyed value from an ordinal one. The declared type
+    /// to the property and value shape to tell a keyed value from an ordinal one. The declared type
     /// is a parameter rather than a metadata lookup so the scan also works during AddProperties
     /// admission, where the property's metadata is not published yet.
     /// </remarks>
@@ -73,7 +73,7 @@ internal static class StructuralValueScanner
                 return;
 
             case IEnumerable enumerable:
-                if (declaredType.IsSubjectDictionaryType())
+                if (HasKeyedEntries(declaredType, enumerable))
                 {
                     foreach (var item in enumerable)
                     {
@@ -114,7 +114,16 @@ internal static class StructuralValueScanner
         // declared-type probe. Only a value that is none of these can still be a read-only
         // dictionary wrapper, which is the one shape the declared type has to answer for.
         return value is IDictionary ||
-               (value is not (null or string or ICollection or IInterceptorSubject) && metadata.Type.IsSubjectDictionaryType());
+               (value is not (null or string or ICollection or IInterceptorSubject) && HasKeyedEntries(metadata.Type, value));
+    }
+
+    // The declared type answers first because a typed property is the common case and needs no
+    // GetType call, but a property declared object or IEnumerable can still carry a read-only
+    // dictionary, and only the value's own type reveals that. All three readers share this so their
+    // interpretation of a value's shape cannot diverge.
+    private static bool HasKeyedEntries(Type declaredType, object value)
+    {
+        return declaredType.IsSubjectDictionaryType() || value.GetType().IsSubjectDictionaryType();
     }
 
     /// <summary>Whether the value still contains the subject at all, at any occurrence.</summary>
@@ -160,7 +169,7 @@ internal static class StructuralValueScanner
                 return false;
 
             case IEnumerable enumerable:
-                if (property.Metadata.Type.IsSubjectDictionaryType())
+                if (HasKeyedEntries(property.Metadata.Type, enumerable))
                 {
                     foreach (var item in enumerable)
                     {

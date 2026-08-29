@@ -121,7 +121,7 @@ Dynamic properties participate in lifecycle tracking when `WithLifecycle()` or `
 
 When a stored dynamic property's value changes, lifecycle tracking reconciles the old and new subjects automatically (attaching new subjects, detaching removed ones). A derived property just follows the stored edges: when they change, its value changes with them, without adding or removing any attachment.
 
-When a dynamic property is added, its initial value triggers a change event with `OldValue = null`, representing a transition from "property did not exist" to its initial value. This ensures interceptors (lifecycle, change tracking, etc.) correctly process the initial state.
+When a scalar dynamic property is added, its initial value triggers a change event with `OldValue = null`, representing a transition from "property did not exist" to its initial value. This ensures interceptors (change tracking, validation, etc.) process the initial state. A property that can hold subjects gets no such event: admission captures and commits its initial value directly, so the edges are already published by the time `AddProperty` returns. The event fires again on every re-registration, because each attach reruns its initializers and a reattached subject presents its dynamic properties afresh. It carries whatever the property's installed accessors resolve to, which on a re-registration are still the first registration's, so an initializer that rebuilds its value on each attach republishes the value the property actually reads rather than the one the rerun passed.
 
 ### Add attributes
 
