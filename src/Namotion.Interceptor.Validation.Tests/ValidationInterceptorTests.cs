@@ -34,7 +34,7 @@ public class ValidationInterceptorTests
     public void WhenOriginIsLocal_ThenValidatorIsInvokedAndRejects()
     {
         // Arrange
-        var validator = new RecordingValidator();
+        var validator = new RecordingValidator(nameof(Person.LastName));
         var context = InterceptorSubjectContext
             .Create()
             .WithPropertyValidation()
@@ -53,7 +53,7 @@ public class ValidationInterceptorTests
     public void WhenOriginIsFromSource_ThenValidatorIsNotInvokedAtAll()
     {
         // Arrange: a validator that rejects unconditionally, so only the skip can let the write through.
-        var validator = new RecordingValidator();
+        var validator = new RecordingValidator(nameof(Person.LastName));
         var context = InterceptorSubjectContext
             .Create()
             .WithPropertyValidation()
@@ -93,16 +93,47 @@ public class ValidationInterceptorTests
         Assert.Equal("Suter", person.FirstName);
     }
 
+    [Fact]
+    public void WhenSourceWriteTriggersDerivedRecalculation_ThenTheDerivedWriteIsStillValidated()
+    {
+        // Arrange: the source write itself skips validation, but FullName depends on LastName and its
+        // recalculation is a local write, so it keeps its veto. Documented behavior, pinned here
+        // because the asymmetry is easy to break by accident.
+        var validator = new RecordingValidator(nameof(Person.FullName));
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithPropertyValidation()
+            .WithFullPropertyTracking()
+            .WithService<IPropertyValidator>(() => validator);
+
+        var person = new Person(context);
+        var source = new object();
+
+        // Act & Assert
+        Assert.Throws<ValidationException>(() =>
+            new PropertyReference(person, nameof(Person.LastName))
+                .SetValueFromSource(source, null, null, "anything"));
+
+        Assert.Equal([ChangeOriginKind.Local], validator.SeenOrigins);
+    }
+
     /// <summary>
-    /// Rejects every write and records the origin of each write it was asked about, so a test can
-    /// assert not just that a value landed but that the validator was never consulted.
+    /// Rejects every write to one property and records the origin of each write it is asked about for
+    /// that property, so a test can assert not just that a value landed but that the validator was
+    /// never consulted. Scoped to a single property because a write also triggers derived
+    /// recalculations, which are local by design and would otherwise register here.
     /// </summary>
-    private sealed class RecordingValidator : IPropertyValidator
+    private sealed class RecordingValidator(string propertyName) : IPropertyValidator
     {
         public List<ChangeOriginKind> SeenOrigins { get; } = [];
 
         public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
         {
+            if (context.Property.Name != propertyName)
+            {
+                return [];
+            }
+
             SeenOrigins.Add(context.Origin.Kind);
             return [new ValidationResult("Rejected unconditionally.")];
         }
