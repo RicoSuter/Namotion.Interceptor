@@ -55,7 +55,10 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     private static int _heldGateCount;
 
     // How many threads are inside a topology transaction of this lifecycle. Counted once per
-    // thread, not once per acquisition, because the gate is reentrant.
+    // thread, not once per acquisition, because the gate is reentrant. A thread that is not in the
+    // transaction has no other way to tell an in-flight publication from a settled graph: the
+    // window between a terminal store and its reconcile is user-visible and cannot be closed, so
+    // readers that would otherwise convict a subject caught in it ask this instead.
     private int _transactionsInFlight;
 
     // Work registered by a reader that withheld a verdict because this lifecycle was mid-transaction,
@@ -430,8 +433,86 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                 return;
             }
 
-            ClaimComponentForRoot(subject, anchor);
-            SeedAndAttachComponent(subject);
+            var claimed = LifecycleScratch.RentSubjectList();
+            var published = false;
+            try
+            {
+                ClaimComponentForRoot(subject, anchor, claimed);
+                SeedAndAttachComponent(subject);
+                published = true;
+            }
+            finally
+            {
+                if (!published)
+                {
+                    RollbackRejectedAttach(subject, claimed);
+                }
+
+                LifecycleScratch.Return(claimed);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Hands back everything a rejected attach had already written. Discovery reads user values
+    /// before the claim publishes anything, so a concurrent write can install a child that seeding
+    /// then refuses, and the anchor, the seeded baselines and the claims taken in between must not
+    /// outlive that refusal.
+    /// </summary>
+    /// <remarks>
+    /// Whatever the seed managed to publish hangs off the root's committed baselines, so removing
+    /// those edges releases it the ordinary way, cascade and detach callbacks included. That is also
+    /// the only handle on a subject a concurrent write installed after the scan: it is published but
+    /// was never in the claimed set, so a claim-only rollback would leave it attached.
+    ///
+    /// The order is deliberate. The root keeps its anchor, its baselines and its claim until the
+    /// drain has actually finished, so a rollback that cannot complete leaves the root attached and
+    /// detachable rather than stripped of the very state <c>DetachFromContext</c> needs. A rollback
+    /// that gives up halfway leaks; one that gives up halfway and also removes the handle leaves no
+    /// way to clean up at all, which is worse than the leak.
+    /// </remarks>
+    private void RollbackRejectedAttach(IInterceptorSubject subject, List<IInterceptorSubject> claimed)
+    {
+        var children = LifecycleScratch.RentChildList();
+        try
+        {
+            _graph.CollectCommittedChildren(subject, children);
+            foreach (var (property, occurrence) in children)
+            {
+                _release.RemoveEdge(occurrence.Subject, property, occurrence.Index);
+            }
+
+            _graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None);
+
+            foreach (var claimedSubject in claimed)
+            {
+                if (!_graph.IsOwned(claimedSubject))
+                {
+                    _graph.RemoveBaselines(claimedSubject);
+                }
+            }
+
+            _graph.ReleaseUnusedClaims(claimed);
+        }
+        catch (Exception exception)
+        {
+            // This runs while the attach's own exception is in flight, and that one is the
+            // diagnostic worth keeping: it says why the attach was refused, where this one only
+            // says the cleanup after it went wrong. So the original wins and this is traced instead
+            // of thrown. Three things in the body can raise it, all user code the callback contract
+            // already forbids to throw: a detach callback published by an edge removal, a user
+            // collection enumerated while reading a committed baseline, and a hand-written
+            // subject's property map. Whichever it is, the rollback stops where it stood and the
+            // root keeps the anchor and claim an explicit detach needs.
+            Trace.TraceError(
+                $"LifecycleInterceptor: rolling back a rejected attach of {subject.GetType().Name} " +
+                $"failed with {exception.GetType().Name}: {exception.Message}. The attach's own " +
+                "exception is propagating and this one is not, so part of the attach is still " +
+                "published and the root is still attached; detach it explicitly to clean up.");
+        }
+        finally
+        {
+            LifecycleScratch.Return(children);
         }
     }
 
@@ -484,12 +565,13 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
 
     /// <summary>
     /// Validates the component the subject opens up and claims every unattached subject in it, with
-    /// the requested anchor on the root. Nothing is published, so a rejection leaves no residue.
+    /// the requested anchor on the root. The claims and the anchor are the only things it writes,
+    /// and <see cref="RollbackRejectedAttach"/> is what hands them back when the attach is refused
+    /// after this point.
     /// </summary>
-    private void ClaimComponentForRoot(IInterceptorSubject subject, SubjectAttachmentAnchorKind anchor)
+    private void ClaimComponentForRoot(IInterceptorSubject subject, SubjectAttachmentAnchorKind anchor, List<IInterceptorSubject> unattached)
     {
         var visited = LifecycleScratch.RentSubjectSet();
-        var unattached = LifecycleScratch.RentSubjectList();
         try
         {
             _graph.DiscoverComponent(subject, visited, unattached);
@@ -502,7 +584,6 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         finally
         {
             LifecycleScratch.Return(visited);
-            LifecycleScratch.Return(unattached);
         }
     }
 

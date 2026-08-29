@@ -36,6 +36,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// an over-aggressive fix. Its stored list is a different instance from the proposed one, so a
 /// reference-equality short circuit cannot hide the rewrite, and it is also what pins that the
 /// stored-value claim is skipped when the terminal stored exactly what it was given.
+///
 /// NormalizingSetterDerivedRaceTests. A derived recalculation on another thread convicted a subject
 /// that a normalizing setter had stored before the reconcile attached it. Parks in the authoritative
 /// getter the lifecycle rereads between its own next and its reconcile, which the lifecycle invokes
@@ -49,6 +50,18 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// re-evaluation happened rather than only that the final read looks right, because reading a
 /// derived property re-invokes its getter and would answer correctly either way.
 /// ConcurrentPublicationVerdictTests holds the other side, that a deferral is not an acquittal.
+///
+/// AttachResidueTests, root half. A rejected explicit attach left residue behind. Asserts each kind
+/// of state the attach would have written separately, so a partial rollback reports which part
+/// leaked. Depends on discovery invoking user code before the root is claimed, and on seeding
+/// re-reading the property getter rather than reusing the discovery snapshot; the guard asserts the
+/// root is still unattached when the scan parks.
+///
+/// AttachResidueTests, sibling half. The residue a claim-only rollback cannot reach: a subject the
+/// seed published before it threw was never in the claimed set, because the concurrent write
+/// installed it after the scan. Both children arrive in one property value, so the seed attaches
+/// them in that list's order rather than in whatever order the subject enumerates its properties,
+/// which is what makes the published-then-rejected sequence deterministic.
 /// </remarks>
 internal static class WriteProtocolAcceptance
 {
