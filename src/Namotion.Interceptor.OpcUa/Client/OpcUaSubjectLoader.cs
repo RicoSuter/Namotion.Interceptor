@@ -133,7 +133,7 @@ internal class OpcUaSubjectLoader
                     }
                     else
                     {
-                        await LoadSubjectReferenceAsync(property, nodeReference, resolvedNodeId, subject, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+                        await LoadSubjectReferenceAsync(property, nodeReference, resolvedNodeId, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
                     }
                 }
                 else if (property.IsSubjectCollection)
@@ -254,7 +254,6 @@ internal class OpcUaSubjectLoader
     private async Task LoadSubjectReferenceAsync(RegisteredSubjectProperty property,
         ReferenceDescription nodeReference,
         NodeId nodeId,
-        IInterceptorSubject subject,
         ISession session,
         List<MonitoredItem> monitoredItems,
         HashSet<IInterceptorSubject> loadedSubjects,
@@ -278,10 +277,10 @@ internal class OpcUaSubjectLoader
 
         if (isNewSubject)
         {
-            // A provisional root: the asynchronous population below runs registered and
-            // intercepted, and the assignment at the end provides the supporting edge that
-            // clears the anchor, so no detach ceremony is needed.
-            subjectToLoad.AttachToContext(subject.GetContext(), SubjectAttachmentAnchorKind.Provisional);
+            // Assign before loading, as the collection and dictionary paths below do: the
+            // assignment is what attaches the subject, and the load is registry-driven, so it
+            // silently does nothing for a subject that is not in the graph yet.
+            property.SetValueFromSource(_source, null, null, subjectToLoad);
         }
 
         // Pre-attached children participate in the dedup cache too: any later sibling
@@ -289,36 +288,7 @@ internal class OpcUaSubjectLoader
         // branch above, rather than creating a parallel subject.
         subjectsByNodeId.TryAdd(nodeId, subjectToLoad);
 
-        try
-        {
-            await LoadSubjectAsync(subjectToLoad, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
-
-            if (isNewSubject)
-            {
-                property.SetValueFromSource(_source, null, null, subjectToLoad);
-            }
-        }
-        catch
-        {
-            // The assignment above is what consumes the provisional anchor. Without it the subject
-            // stays an anchored root of the client's context, registered and unreleasable, and a
-            // cancelled load is routine here: reconnect and shutdown both cancel one.
-            ReleaseUnconsumedRoot(subjectToLoad, subject);
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Releases a subject that was attached as a provisional root but never received the edge that
-    /// would have consumed the anchor. Does nothing once an edge has consumed it, which is the
-    /// case when the failure happened after the assignment.
-    /// </summary>
-    private static void ReleaseUnconsumedRoot(IInterceptorSubject candidate, IInterceptorSubject parent)
-    {
-        if (candidate.IsAnchoredRoot())
-        {
-            candidate.DetachFromContext(parent.GetContext());
-        }
+        await LoadSubjectAsync(subjectToLoad, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task LoadSubjectCollectionAsync(RegisteredSubjectProperty property,

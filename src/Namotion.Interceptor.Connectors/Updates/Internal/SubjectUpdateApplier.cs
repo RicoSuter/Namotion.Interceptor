@@ -111,21 +111,20 @@ internal static class SubjectUpdateApplier
             }
 
             case SubjectPropertyUpdateKind.Object:
-                ApplyObjectUpdate(subject, registeredProperty, propertyUpdate, context);
+                ApplyObjectUpdate(registeredProperty, propertyUpdate, context);
                 break;
 
             case SubjectPropertyUpdateKind.Collection:
-                SubjectItemsUpdateApplier.ApplyCollectionUpdate(subject, registeredProperty, propertyUpdate, context);
+                SubjectItemsUpdateApplier.ApplyCollectionUpdate(registeredProperty, propertyUpdate, context);
                 break;
 
             case SubjectPropertyUpdateKind.Dictionary:
-                SubjectItemsUpdateApplier.ApplyDictionaryUpdate(subject, registeredProperty, propertyUpdate, context);
+                SubjectItemsUpdateApplier.ApplyDictionaryUpdate(registeredProperty, propertyUpdate, context);
                 break;
         }
     }
 
     private static void ApplyObjectUpdate(
-        IInterceptorSubject parent,
         RegisteredSubjectProperty property,
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
@@ -142,27 +141,16 @@ internal static class SubjectUpdateApplier
             }
             else
             {
+                // Assign before populating: the assignment is what attaches the item, and the
+                // population is registry-driven, so it only reaches a subject already in the graph.
+                // A property that refuses the write leaves the item unattached and with nothing to
+                // populate, so the attachment doubles as the guard.
                 var newItem = context.SubjectFactory.CreateSubject(property);
-                // Provisional, so the population below runs registered and intercepted exactly as it
-                // will once assigned. The assignment provides the supporting edge that clears the
-                // anchor, so there is no detach ceremony.
-                newItem.AttachToContext(parent.GetContext(), SubjectAttachmentAnchorKind.Provisional);
+                context.SetPropertyValue(property, propertyUpdate.Timestamp, newItem);
 
-                try
+                if (newItem.TryGetContext() is not null && context.TryMarkAsProcessed(propertyUpdate.Id))
                 {
-                    if (context.TryMarkAsProcessed(propertyUpdate.Id))
-                    {
-                        ApplyPropertyUpdates(newItem, itemProperties, context);
-                    }
-
-                    context.SetPropertyValue(property, propertyUpdate.Timestamp, newItem);
-                }
-                catch
-                {
-                    // The assignment consumes the provisional anchor; without it the item stays an
-                    // anchored root of the parent's context that nothing will ever release.
-                    ReleaseUnconsumedRoot(newItem, parent);
-                    throw;
+                    ApplyPropertyUpdates(newItem, itemProperties, context);
                 }
             }
         }
@@ -180,18 +168,5 @@ internal static class SubjectUpdateApplier
             JsonElement jsonElement => jsonElement.Deserialize(targetType),
             _ => value
         };
-    }
-
-    /// <summary>
-    /// Releases an item that was attached as a provisional root but never received the edge that
-    /// would have consumed the anchor. Does nothing once an edge has consumed it, so it is safe on
-    /// a failure path that may or may not have reached the assignment.
-    /// </summary>
-    internal static void ReleaseUnconsumedRoot(IInterceptorSubject item, IInterceptorSubject parent)
-    {
-        if (item.IsAnchoredRoot())
-        {
-            item.DetachFromContext(parent.GetContext());
-        }
     }
 }

@@ -27,31 +27,6 @@ public static class InterceptorSubjectExtensions
     }
 
     /// <summary>
-    /// Gets whether the subject is held in its context by a root anchor rather than only by an
-    /// incoming structural edge.
-    /// </summary>
-    /// <remarks>
-    /// Read this rather than inferring root-ness from an empty <c>GetParents()</c> result, which
-    /// answers identically for a genuine root, for an unattached subject, and for a subject inside
-    /// its own release. This separates the root from the other two, and pairs with
-    /// <see cref="TryGetContext"/> when those two must also be told apart: a subject inside its own
-    /// release still resolves its context, because the attachment is torn down after the detach
-    /// callbacks rather than before them.
-    ///
-    /// A departing subject never reports true, by two different routes: an explicit detach clears
-    /// the anchor before it releases, and the edge-removal path never releases an anchored subject
-    /// at all.
-    ///
-    /// One lock-free read, deliberately: the anchor alone decides this, and the ownership
-    /// predicates across the codebase must cost a volatile load rather than a monitor. A non-None
-    /// anchor implies an attached context, which the executor enforces rather than assumes.
-    /// </remarks>
-    public static bool IsAnchoredRoot(this IInterceptorSubject subject)
-    {
-        return subject.Executor.AttachmentAnchor != SubjectAttachmentAnchorKind.None;
-    }
-
-    /// <summary>
     /// Attaches the subject to <paramref name="context"/> with an explicit anchor, together with
     /// every subject its structural properties reach. Attaching a subject that is already attached
     /// to the same context promotes its anchor to <see cref="SubjectAttachmentAnchorKind.Explicit"/> without
@@ -103,8 +78,8 @@ public static class InterceptorSubjectExtensions
     /// <remarks>
     /// Either anchor kind can be cleared. A provisional anchor is detachable so that a caller who
     /// created a provisional root and then failed to give it a supporting edge can undo it; once an
-    /// edge has consumed the anchor there is nothing to detach and the call is rejected, which is
-    /// what <see cref="IsAnchoredRoot"/> answers ahead of the call.
+    /// edge has consumed the anchor there is nothing to detach and the call is rejected, which
+    /// <see cref="IInterceptorExecutor.AttachmentAnchor"/> answers ahead of the call.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The subject carries no anchor, or its anchor is
     /// on a different context.</exception>

@@ -450,7 +450,7 @@ var referenceCount = subject.GetReferenceCount();
 - The count is per occurrence, not per property: a subject listed twice in one collection counts 2
 - Subjects created directly with context (root subjects) have `refs: 0` - no edge points at an anchored root
 - Subjects attached via properties have their reference count incremented/decremented per occurrence added or removed
-- `GetReferenceCount()` is never an attachment predicate: an anchored root reports 0 while attached, so use `TryGetContext()` to test attachment and `IsAnchoredRoot()` to test root-ness. An empty `GetParents()` is not a root test either: it answers the same for a root, an unattached subject, and a subject inside its own release
+- `GetReferenceCount()` is never an attachment predicate: an anchored root reports 0 while attached, so use `TryGetContext()` to test attachment and a non-None `Executor.AttachmentAnchor` to test root-ness. An empty `GetParents()` is not a root test either: it answers the same for a root, an unattached subject, and a subject inside its own release
 
 The `SubjectLifecycleChange` includes `ReferenceCount` after the operation. Use the flags to determine the event type:
 
