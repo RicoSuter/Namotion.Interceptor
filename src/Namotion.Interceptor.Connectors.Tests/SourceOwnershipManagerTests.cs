@@ -5,7 +5,6 @@ namespace Namotion.Interceptor.Connectors.Tests;
 
 public class SourceOwnershipManagerTests
 {
-
     [Fact]
     public void ClaimSource_WhenNotOwned_ReturnsTrue()
     {

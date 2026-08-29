@@ -100,10 +100,10 @@ public class ValidationInterceptorTests
     }
 
     /// <summary>
-    /// Rejects every write to one property and records the origin of each write it is asked about for
-    /// that property, so a test can assert not just that a value landed but that the validator was
-    /// never consulted. Scoped to a single property because a write also triggers derived
-    /// recalculations, which are local by design and would otherwise register here.
+    /// Rejects every write to one property and records the origin it was handed for that property, so
+    /// a test can assert which origin the interceptor reported as well as that the write was rejected.
+    /// Scoped to a single property because a write also triggers derived recalculations, which are
+    /// local by design and would otherwise register here.
     /// </summary>
     private sealed class RecordingValidator(string propertyName) : IPropertyValidator
     {
