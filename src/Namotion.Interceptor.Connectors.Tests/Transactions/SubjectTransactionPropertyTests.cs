@@ -465,6 +465,33 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
             Times.Once);
     }
 
+    [Fact]
+    public async Task WhenLocalCommitReplayViolatesAValidator_ThenTheChangeIsStillRejected()
+    {
+        // Arrange: no sources, so every change replays stamped Local and keeps its veto. The commit
+        // position of a property is its FIRST write, so re-writing the limit downwards makes the replay
+        // lower it before revalidating the speed against it. This pins the deliberate carve-out: only a
+        // change a source confirmed skips replay validation, never a local one. The re-write must differ
+        // from the landed value (100, set in the constructor), or the equality check drops it and the
+        // pending value stays at the first write.
+        var context = CreateContextWithMotorValidation();
+        var motor = new Motor(context);
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        motor.MaxAllowedSpeed = 200;
+        motor.MotorSpeed = 150;      // capture: 150 <= pending 200, accepted
+        motor.MaxAllowedSpeed = 120; // re-write, commit position stays ahead of MotorSpeed
+
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert: the replay lowered the limit first, then rejected the speed against it.
+        Assert.Contains(exception.FailedChanges, c => c.Property.Name == nameof(Motor.MotorSpeed));
+        Assert.Equal(120, motor.MaxAllowedSpeed);
+        Assert.Equal(0, motor.MotorSpeed);
+    }
+
     private static IInterceptorSubjectContext CreateContextWithMotorValidation()
     {
         return InterceptorSubjectContext
