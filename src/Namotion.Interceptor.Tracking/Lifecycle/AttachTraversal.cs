@@ -129,8 +129,8 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
     /// </remarks>
     private void ConsumeProvisionalAnchor(IInterceptorSubject subject, PropertyReference property)
     {
-        var executor = subject.Executor;
-        if (executor.AttachmentAnchor != SubjectAttachmentAnchorKind.Provisional || !ReferenceEquals(executor.AttachedContext, graph.Context))
+        subject.Executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
+        if (anchor != SubjectAttachmentAnchorKind.Provisional || !ReferenceEquals(attachedContext, graph.Context))
         {
             return;
         }
