@@ -63,7 +63,7 @@ public static class ParentsHandlerExtensions
     /// unattached subject, and for a subject inside its own release, because the release drops the
     /// ownership record before it runs any detach callback, so a getter evaluated from one sees no
     /// parents while the subject is still attached. Decide root-ness from the anchor instead, with
-    /// <see cref="InterceptorSubjectExtensions.IsAnchoredRoot"/>.
+    /// a non-None <see cref="Interceptors.IInterceptorExecutor.AttachmentAnchor"/>.
     ///
     /// The order of the entries is unspecified and history-dependent: only the set of occurrences,
     /// each with its property and its index or key, is meaningful.

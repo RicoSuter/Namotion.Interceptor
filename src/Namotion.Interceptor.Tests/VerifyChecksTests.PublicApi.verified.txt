@@ -97,7 +97,6 @@ namespace Namotion.Interceptor
         public static void AttachToContext(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context, Namotion.Interceptor.SubjectAttachmentAnchorKind anchor) { }
         public static void DetachFromContext(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext GetContext(this Namotion.Interceptor.IInterceptorSubject subject) { }
-        public static bool IsAnchoredRoot(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static void SetData(this Namotion.Interceptor.IInterceptorSubject subject, string key, object? value) { }
         public static bool TryAddData(this Namotion.Interceptor.IInterceptorSubject subject, string key, object? value) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext? TryGetContext(this Namotion.Interceptor.IInterceptorSubject subject) { }
