@@ -587,7 +587,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         _logger.LogInformation("Subscribed to {Count} MQTT topics.", properties.Count);
     }
 
-    private (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
+    internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
         if (_propertyToTopic.TryGetValue(propertyReference, out var cached))
         {
@@ -604,7 +604,9 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
         var entry = (topic, resolvedMapping);
 
-        // Add first, then validate (guarantees no memory leak)
+        // Add first, then validate (guarantees no memory leak). Registry membership is the whole
+        // test: the reference count answers zero for the anchored root, so asking it here would
+        // evict every mapping the root owns and make this cache a per-message mapper call.
         if (_propertyToTopic.TryAdd(propertyReference, entry))
         {
             var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
