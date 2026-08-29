@@ -54,6 +54,16 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
                 return;
             }
 
+            if (!ReferenceEquals(graph.GetBaseline(property), oldValue))
+            {
+                // That same user code reentered the write protocol on this very property and
+                // committed a newer baseline while the scans above ran. Its value reached the
+                // backing field after this one did and the graph already agrees with it, so this
+                // value is stale: committing it would overwrite the newer baseline and publish
+                // edges for occurrences the committed property no longer holds.
+                return;
+            }
+
             // Commit the outgoing edges before the incoming records are touched.
             graph.SetBaseline(property, newValue);
 
