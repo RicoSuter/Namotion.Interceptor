@@ -432,6 +432,11 @@ public class RegisteredSubjectProperty
     /// then IEnumerable for read-only types that implement neither.
     /// Reuses a ThreadStatic dictionary to avoid allocations.
     /// </summary>
+    /// <remarks>
+    /// Keyed by reference: a collection slot is a position of one instance, and a hand-written
+    /// subject overriding Equals/GetHashCode would otherwise merge two equal siblings into one
+    /// entry and give both of them the last one's position.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Dictionary<IInterceptorSubject, int>? BuildCollectionPositions(object? value, int capacityHint)
     {
@@ -447,7 +452,7 @@ public class RegisteredSubjectProperty
             {
                 if (list[index] is IInterceptorSubject subject)
                 {
-                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint);
+                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
                     collectionPositions[subject] = index;
                 }
             }
@@ -459,7 +464,7 @@ public class RegisteredSubjectProperty
             {
                 if (item is IInterceptorSubject subject)
                 {
-                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint);
+                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
                     collectionPositions[subject] = index;
                 }
                 index++;
@@ -472,7 +477,7 @@ public class RegisteredSubjectProperty
             {
                 if (item is IInterceptorSubject subject)
                 {
-                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint);
+                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
                     collectionPositions[subject] = index;
                 }
                 index++;
