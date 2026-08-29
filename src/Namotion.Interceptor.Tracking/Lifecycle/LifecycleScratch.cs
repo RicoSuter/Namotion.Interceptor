@@ -17,143 +17,84 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// </summary>
 internal static class LifecycleScratch
 {
-    [ThreadStatic]
-    private static Stack<List<SubjectOccurrence>>? _occurrenceLists;
-
-    [ThreadStatic]
-    private static Stack<List<IncomingEdge>>? _edgeLists;
-
-    [ThreadStatic]
-    private static Stack<List<object?>>? _indexLists;
-
-    [ThreadStatic]
-    private static Stack<List<IInterceptorSubject>>? _subjectLists;
-
-    [ThreadStatic]
-    private static Stack<HashSet<IInterceptorSubject>>? _subjectSets;
-
-    [ThreadStatic]
-    private static Stack<Stack<IInterceptorSubject>>? _subjectStacks;
-
-    [ThreadStatic]
-    private static Stack<Dictionary<IInterceptorSubject, int>>? _subjectCounters;
-
-    [ThreadStatic]
-    private static Stack<Dictionary<IInterceptorSubject, List<object?>>>? _indexGroups;
-
-    [ThreadStatic]
-    private static Stack<List<(PropertyReference Property, SubjectOccurrence Occurrence)>>? _childLists;
+    // One closed generic per buffer type, so the thread-static and the rent/return pair are written
+    // once rather than once per type; the named entry points below only carry each buffer's own
+    // capacity hint and comparer.
+    private static class Pool<T> where T : class
+    {
+        [ThreadStatic]
+        internal static Stack<T>? Buffers;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryRent<T>(out T buffer) where T : class
+    {
+        var buffers = Pool<T>.Buffers;
+        if (buffers is { Count: > 0 })
+        {
+            buffer = buffers.Pop();
+            return true;
+        }
+
+        buffer = null!;
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Recycle<T>(T buffer) where T : class
+    {
+        (Pool<T>.Buffers ??= new Stack<T>()).Push(buffer);
+    }
+
     public static List<SubjectOccurrence> RentOccurrenceList()
-    {
-        _occurrenceLists ??= new Stack<List<SubjectOccurrence>>();
-        return _occurrenceLists.Count > 0 ? _occurrenceLists.Pop() : new List<SubjectOccurrence>(8);
-    }
+        => TryRent<List<SubjectOccurrence>>(out var list) ? list : new List<SubjectOccurrence>(8);
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Return(List<SubjectOccurrence> list)
-    {
-        list.Clear();
-        _occurrenceLists ??= new Stack<List<SubjectOccurrence>>();
-        _occurrenceLists.Push(list);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static List<IncomingEdge> RentEdgeList()
-    {
-        _edgeLists ??= new Stack<List<IncomingEdge>>();
-        return _edgeLists.Count > 0 ? _edgeLists.Pop() : new List<IncomingEdge>(4);
-    }
+        => TryRent<List<IncomingEdge>>(out var list) ? list : new List<IncomingEdge>(4);
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Return(List<IncomingEdge> list)
-    {
-        list.Clear();
-        _edgeLists ??= new Stack<List<IncomingEdge>>();
-        _edgeLists.Push(list);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static List<object?> RentIndexList()
-    {
-        _indexLists ??= new Stack<List<object?>>();
-        return _indexLists.Count > 0 ? _indexLists.Pop() : new List<object?>(4);
-    }
+        => TryRent<List<object?>>(out var list) ? list : new List<object?>(4);
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Return(List<object?> list)
-    {
-        list.Clear();
-        _indexLists ??= new Stack<List<object?>>();
-        _indexLists.Push(list);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static List<IInterceptorSubject> RentSubjectList()
-    {
-        _subjectLists ??= new Stack<List<IInterceptorSubject>>();
-        return _subjectLists.Count > 0 ? _subjectLists.Pop() : new List<IInterceptorSubject>(8);
-    }
+        => TryRent<List<IInterceptorSubject>>(out var list) ? list : new List<IInterceptorSubject>(8);
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Return(List<IInterceptorSubject> list)
+    public static List<(PropertyReference Property, SubjectOccurrence Occurrence)> RentChildList()
+        => TryRent<List<(PropertyReference, SubjectOccurrence)>>(out var list) ? list : new List<(PropertyReference, SubjectOccurrence)>(8);
+
+    public static HashSet<IInterceptorSubject> RentSubjectSet()
+        => TryRent<HashSet<IInterceptorSubject>>(out var set) ? set : new HashSet<IInterceptorSubject>(8, ReferenceEqualityComparer.Instance);
+
+    public static Stack<IInterceptorSubject> RentSubjectStack()
+        => TryRent<Stack<IInterceptorSubject>>(out var stack) ? stack : new Stack<IInterceptorSubject>(8);
+
+    public static Dictionary<IInterceptorSubject, int> RentSubjectCounter()
+        => TryRent<Dictionary<IInterceptorSubject, int>>(out var counter) ? counter : new Dictionary<IInterceptorSubject, int>(8, ReferenceEqualityComparer.Instance);
+
+    public static Dictionary<IInterceptorSubject, List<object?>> RentIndexGroups()
+        => TryRent<Dictionary<IInterceptorSubject, List<object?>>>(out var groups) ? groups : new Dictionary<IInterceptorSubject, List<object?>>(8, ReferenceEqualityComparer.Instance);
+
+    public static void Return<TItem>(List<TItem> list)
     {
         list.Clear();
-        _subjectLists ??= new Stack<List<IInterceptorSubject>>();
-        _subjectLists.Push(list);
+        Recycle(list);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static HashSet<IInterceptorSubject> RentSubjectSet()
-    {
-        _subjectSets ??= new Stack<HashSet<IInterceptorSubject>>();
-        return _subjectSets.Count > 0 ? _subjectSets.Pop() : new HashSet<IInterceptorSubject>(8, ReferenceEqualityComparer.Instance);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Return(HashSet<IInterceptorSubject> set)
+    public static void Return<TItem>(HashSet<TItem> set)
     {
         set.Clear();
-        _subjectSets ??= new Stack<HashSet<IInterceptorSubject>>();
-        _subjectSets.Push(set);
+        Recycle(set);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Stack<IInterceptorSubject> RentSubjectStack()
-    {
-        _subjectStacks ??= new Stack<Stack<IInterceptorSubject>>();
-        return _subjectStacks.Count > 0 ? _subjectStacks.Pop() : new Stack<IInterceptorSubject>(8);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Return(Stack<IInterceptorSubject> stack)
+    public static void Return<TItem>(Stack<TItem> stack)
     {
         stack.Clear();
-        _subjectStacks ??= new Stack<Stack<IInterceptorSubject>>();
-        _subjectStacks.Push(stack);
+        Recycle(stack);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Dictionary<IInterceptorSubject, int> RentSubjectCounter()
-    {
-        _subjectCounters ??= new Stack<Dictionary<IInterceptorSubject, int>>();
-        return _subjectCounters.Count > 0 ? _subjectCounters.Pop() : new Dictionary<IInterceptorSubject, int>(8, ReferenceEqualityComparer.Instance);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Return(Dictionary<IInterceptorSubject, int> counter)
+    public static void Return<TKey>(Dictionary<TKey, int> counter) where TKey : notnull
     {
         counter.Clear();
-        _subjectCounters ??= new Stack<Dictionary<IInterceptorSubject, int>>();
-        _subjectCounters.Push(counter);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Dictionary<IInterceptorSubject, List<object?>> RentIndexGroups()
-    {
-        _indexGroups ??= new Stack<Dictionary<IInterceptorSubject, List<object?>>>();
-        return _indexGroups.Count > 0 ? _indexGroups.Pop() : new Dictionary<IInterceptorSubject, List<object?>>(8, ReferenceEqualityComparer.Instance);
+        Recycle(counter);
     }
 
     /// <summary>Returns the group map and every index list it handed out.</summary>
@@ -165,22 +106,6 @@ internal static class LifecycleScratch
         }
 
         groups.Clear();
-        _indexGroups ??= new Stack<Dictionary<IInterceptorSubject, List<object?>>>();
-        _indexGroups.Push(groups);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static List<(PropertyReference Property, SubjectOccurrence Occurrence)> RentChildList()
-    {
-        _childLists ??= new Stack<List<(PropertyReference, SubjectOccurrence)>>();
-        return _childLists.Count > 0 ? _childLists.Pop() : new List<(PropertyReference, SubjectOccurrence)>(8);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Return(List<(PropertyReference Property, SubjectOccurrence Occurrence)> list)
-    {
-        list.Clear();
-        _childLists ??= new Stack<List<(PropertyReference, SubjectOccurrence)>>();
-        _childLists.Push(list);
+        Recycle(groups);
     }
 }
