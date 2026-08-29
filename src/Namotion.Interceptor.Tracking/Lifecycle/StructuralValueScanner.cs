@@ -102,21 +102,6 @@ internal static class StructuralValueScanner
         }
     }
 
-    /// <summary>
-    /// Whether occurrences of this value are identified by a key rather than by an ordinal. Keys are
-    /// stable identities, so a reorder never invalidates them and matching goes by key; ordinals
-    /// shift on every insertion, so matching goes by occurrence count and the indices are refreshed.
-    /// </summary>
-    public static bool HasKeyedOccurrences(SubjectPropertyMetadata metadata, object? value)
-    {
-        // A subject is listed with the cheap negatives on purpose: it is the scalar back-reference
-        // that dominates graph wiring, and without it every such write would fall through to the
-        // declared-type probe. Only a value that is none of these can still be a read-only
-        // dictionary wrapper, which is the one shape the declared type has to answer for.
-        return value is IDictionary ||
-               (value is not (null or string or ICollection or IInterceptorSubject) && HasKeyedEntries(metadata.Type, value));
-    }
-
     // The declared type answers first because a typed property is the common case and needs no
     // GetType call, but a property declared object or IEnumerable can still carry a read-only
     // dictionary, and only the value's own type reveals that. All three readers share this so their
