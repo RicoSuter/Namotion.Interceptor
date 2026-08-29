@@ -9,8 +9,9 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 
 /// <summary>
 /// A dictionary entry is an occurrence like a collection slot is, so the same subject under two keys
-/// is two edges. Keys differ from collection indices in that they are stable identities: a reorder
-/// cannot invalidate them, and a rename is a different occurrence rather than the same one moved.
+/// is two edges. A key is a stable identity, so a reorder cannot invalidate one, but the key is the
+/// occurrence's address rather than its identity: retention is decided by subject, and a rename
+/// moves an occurrence instead of replacing it.
 /// </summary>
 public class DictionaryOccurrenceTests
 {
@@ -99,8 +100,14 @@ public class DictionaryOccurrenceTests
         Assert.Equal(1, second.GetReferenceCount());
     }
 
+    /// <summary>
+    /// The rename is the shape that forces the retention rule: reconciliation runs its whole removal
+    /// pass before its addition pass, so a subject matched by key would lose its only support and
+    /// become claimable by another context in the gap, for a write that was about to re-commit it.
+    /// Matching by subject instead keeps the edge and moves its key afterwards.
+    /// </summary>
     [Fact]
-    public void WhenTheOnlyKeyOfASubjectIsRenamed_ThenItDetachesAndReattaches()
+    public void WhenTheOnlyKeyOfASubjectIsRenamed_ThenTheOccurrenceMovesWithoutLeavingTheGraph()
     {
         // Arrange
         var context = CreateContext();
@@ -117,14 +124,12 @@ public class DictionaryOccurrenceTests
         // Act
         garage.CarsByName = new Dictionary<string, Car> { ["y"] = car };
 
-        // Assert: a key is an identity, so renaming the only key is a removal and an addition, not a
-        // move. The subject therefore leaves the graph and re-enters it, and so does everything
-        // below it, which a Registry projection observes as an eviction followed by a fresh
-        // registration of the whole subtree.
-        Assert.Contains(car, detached);
-        Assert.Contains(car, attached);
-        Assert.Equal(1 + car.Tires.Length, detached.Count);
-        Assert.Equal(1 + car.Tires.Length, attached.Count);
+        // Assert: the subject the new value still holds never leaves the graph, so nothing below it
+        // is torn down and rebuilt either, and a Registry projection sees the key move rather than an
+        // eviction followed by a fresh registration of the whole subtree. Master behaves the same way
+        // on this shape, except that it leaves the published index on the old key.
+        Assert.Empty(detached);
+        Assert.Empty(attached);
         Assert.Equal(1, car.GetReferenceCount());
         Assert.Same(context, ((IInterceptorSubject)car).TryGetContext());
         Assert.Equal("y", ((IInterceptorSubject)car).GetParents()[0].Index);

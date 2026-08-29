@@ -7,11 +7,13 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// the lifecycle last reconciled.
 /// </summary>
 /// <remarks>
-/// Every occurrence is one edge, so <c>[a, a, b]</c> gives <c>a</c> two edges. Retained occurrences
-/// are matched deterministically: ordinal values match by occurrence count in enumeration order, so
-/// the first <c>min(old, new)</c> occurrences of a subject survive and only the surplus is removed;
-/// keyed values match by key, because a key is a stable identity while an ordinal shifts on every
-/// insertion.
+/// Every occurrence is one edge, so <c>[a, a, b]</c> gives <c>a</c> two edges. Retention is decided
+/// by subject identity, never by the index the occurrence carries: the first <c>min(old, new)</c>
+/// occurrences of a subject survive in enumeration order, only the surplus is removed, and the
+/// survivors adopt their new indices afterwards. Matching a keyed value by its key instead would
+/// make a rekey a removal plus an addition, and the removal pass runs to completion before the
+/// addition pass, so the subject would lose its last support and become claimable by another
+/// context in between.
 ///
 /// The new value is committed as the property baseline before any edge is published. Incoming
 /// records and committed outgoing edges therefore disagree for the duration of the publication,
@@ -57,15 +59,7 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             // Commit the outgoing edges before the incoming records are touched.
             graph.SetBaseline(property, newValue);
 
-            if (StructuralValueScanner.HasKeyedOccurrences(metadata, oldValue) ||
-                StructuralValueScanner.HasKeyedOccurrences(metadata, newValue))
-            {
-                ReconcileKeyed(property, oldValue, newValue, oldOccurrences, newOccurrences);
-            }
-            else
-            {
-                ReconcileOrdinal(property, newValue, oldOccurrences, newOccurrences);
-            }
+            ReconcileOccurrences(property, newValue, oldOccurrences, newOccurrences);
         }
         finally
         {
@@ -75,80 +69,11 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
     }
 
     /// <summary>
-    /// Keyed reconciliation: an occurrence survives when the other value holds the same subject under
-    /// the same key. Both lookups are O(1) on a dictionary, so a large map costs one pass.
+    /// Per subject, the surplus old occurrences are removed from the end and the surplus new
+    /// occurrences are added at the front-most free positions, then every retained edge adopts its
+    /// new index.
     /// </summary>
-    private void ReconcileKeyed(
-        PropertyReference property,
-        object? oldValue,
-        object? newValue,
-        List<SubjectOccurrence> oldOccurrences,
-        List<SubjectOccurrence> newOccurrences)
-    {
-        var parent = property.Subject;
-        var hasRetained = false;
-
-        for (var i = oldOccurrences.Count - 1; i >= 0; i--)
-        {
-            var occurrence = oldOccurrences[i];
-            if (IsHeldAt(newValue, occurrence))
-            {
-                hasRetained = true;
-                continue;
-            }
-
-            release.RemoveEdge(occurrence.Subject, property, occurrence.Index);
-            if (!graph.IsOwned(parent))
-            {
-                // Side-effecting user code invoked by this loop at callback depth zero (a
-                // dictionary-key Equals, a user collection or dictionary implementation) can run
-                // the write protocol reentrantly and release the writing parent mid-publication;
-                // callbacks cannot, they throw. The remaining edges belong to a subject that is
-                // no longer in the graph, so publishing them would claim on behalf of a released
-                // owner.
-                return;
-            }
-        }
-
-        foreach (var occurrence in newOccurrences)
-        {
-            if (IsHeldAt(oldValue, occurrence))
-            {
-                continue;
-            }
-
-            attach.AttachEdge(occurrence.Subject, property, occurrence.Index);
-            if (!graph.IsOwned(parent))
-            {
-                return;
-            }
-        }
-
-        if (!graph.IsOwned(parent))
-        {
-            return;
-        }
-
-        // Keys are stable identities, so no index is rewritten here, but property handlers still
-        // resynchronize their own collection projections against the committed value.
-        if (hasRetained)
-        {
-            notifier.RefreshCollectionProperty(property, newValue);
-        }
-    }
-
-    private static bool IsHeldAt(object? value, SubjectOccurrence occurrence)
-    {
-        return value is not null && occurrence.Index is not null &&
-               ReferenceEquals(SubjectLookup.FindSubjectInDictionary(value, occurrence.Index), occurrence.Subject);
-    }
-
-    /// <summary>
-    /// Ordinal reconciliation: per subject, the surplus old occurrences are removed from the end and
-    /// the surplus new occurrences are added at the front-most free positions, then every retained
-    /// edge adopts its new index.
-    /// </summary>
-    private void ReconcileOrdinal(
+    private void ReconcileOccurrences(
         PropertyReference property,
         object? newValue,
         List<SubjectOccurrence> oldOccurrences,
@@ -185,7 +110,12 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
                 release.RemoveEdge(occurrence.Subject, property, occurrence.Index);
                 if (!graph.IsOwned(parent))
                 {
-                    // See ReconcileKeyed: user code invoked by the loop released the writing parent.
+                    // Side-effecting user code invoked by this loop at callback depth zero (a
+                    // dictionary-key Equals, a user collection or dictionary implementation) can run
+                    // the write protocol reentrantly and release the writing parent mid-publication;
+                    // callbacks cannot, they throw. The remaining edges belong to a subject that is
+                    // no longer in the graph, so publishing them would claim on behalf of a released
+                    // owner.
                     return;
                 }
             }
@@ -224,8 +154,8 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
 
     /// <summary>
     /// Rewrites the occurrence indices of every subject in the new value, then lets property handlers
-    /// refresh their own collection projections. A retained edge keeps its identity across a reorder,
-    /// so it changes index without an attach or detach transition.
+    /// refresh their own collection projections. A retained edge keeps its identity across a reorder
+    /// or a rekey, so it changes index without an attach or detach transition.
     /// </summary>
     private void RefreshRetainedIndices(
         PropertyReference property,
