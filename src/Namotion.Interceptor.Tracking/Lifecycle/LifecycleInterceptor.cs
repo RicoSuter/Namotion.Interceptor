@@ -108,7 +108,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var property = context.Property;
         var metadata = property.Metadata;
         if (!metadata.Type.CanContainSubjects<TProperty>() || !metadata.IsIntercepted ||
-            metadata is { IsDerived: true, IsDynamic: true })
+            metadata is { IsDerived: true, IsDynamic: true, SetValue: null })
         {
             // Scalar, non-intercepted or a derived projection: never a graph edge. Same rule as
             // OwnershipGraph.IsStructural, which carries the reasoning, restated here because the

@@ -44,19 +44,27 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     /// of a declared type that can contain subjects, and not a derived projection.
     /// </summary>
     /// <remarks>
-    /// Generated interception exists only for partial properties, and the generator gives every one
-    /// of them a backing field, so on a generated property IsIntercepted already means the property
-    /// is the store. Every computed generated shape (an expression-bodied getter, an interface
-    /// default) is out before the derived test runs, and a subject reachable only that way is never
-    /// tracked: DerivedPropertyChangeHandler rejects it instead of letting it go silently unowned.
-    /// A dynamic property is the one case where interception says nothing about storage, because
-    /// its accessors are consumer delegates over state the graph cannot see, so a derived one is
-    /// taken as a projection of edges the stored properties already own.
+    /// A [Derived] property carries an edge where it is the store of record, and what establishes
+    /// that depends on which producer built the metadata. The generator intercepts only partial
+    /// properties and gives each one a backing field, so there IsIntercepted already means the
+    /// property is the store, and every computed generated shape (an expression-bodied getter, an
+    /// interface default) is out before the derived test runs. A dynamic property registered
+    /// through AddProperty is intercepted unconditionally, so its setter stands in instead: a
+    /// getter-only derived one can return nothing the properties it reads do not already own, and
+    /// counting it would double-count them. That setter test is a proxy, not a proof. It is exact
+    /// only for "the caller supplied a setter", so any non-null setter carries an edge whatever it
+    /// does with the value, including one that stores nothing or assigns through to another
+    /// subject. Metadata built by neither producer, by reflection through the public
+    /// SubjectPropertyMetadata constructor as DynamicSubjectFactory does, marks neither store, and
+    /// a derived property there carries an edge whenever it is intercepted. Both of those follow
+    /// master, which filtered no derived property at all. A subject reachable only through a
+    /// property that carries no edge is never tracked, and DerivedPropertyChangeHandler rejects it
+    /// instead of letting it go silently unowned. See docs/design/tracking-lifecycle.md.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool IsStructural(in SubjectPropertyMetadata metadata)
     {
-        return metadata is { IsIntercepted: true } and not { IsDerived: true, IsDynamic: true } &&
+        return metadata is { IsIntercepted: true } and not { IsDerived: true, IsDynamic: true, SetValue: null } &&
                metadata.Type.CanContainSubjects();
     }
 

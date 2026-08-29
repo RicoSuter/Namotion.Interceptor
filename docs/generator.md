@@ -145,7 +145,7 @@ public partial class Rectangle
 
 When `Width` or `Height` changes, `Area` automatically raises a change notification (requires `WithDerivedPropertyChangeDetection()` on the context).
 
-A derived property establishes an ownership edge only when it is the store of record. The generator gives every partial property a backing field, so a `[Derived]` partial property is the only thing holding whatever is assigned to it and it tracks that subject like any other stored property. Every other derived shape computes its value from state that lives elsewhere and establishes no edge, so a subject it returns must be stored by some other property, or attached explicitly, or it is never tracked, registered or released:
+A derived property establishes an ownership edge only when it is the store of record. The generator gives every partial property a backing field, so a `[Derived]` partial property is the only thing holding whatever is assigned to it and it tracks that subject like any other stored property. A derived property written any other way computes its value from state that lives elsewhere and establishes no edge, so a subject it returns must be stored by some other property, or attached explicitly, or it is never tracked, registered or released:
 
 ```csharp
 [Derived]
