@@ -220,16 +220,16 @@ See [Source Monitoring](connectors-monitoring.md) for waiting on synchronization
 
 ### Inbound Update Error Handling
 
-When applying inbound updates (writing data from the external system to the local subject model), a property that fails to apply is logged and **dropped**. There is no retry mechanism for inbound updates.
+When applying inbound updates (writing data from the external system to the local subject model), a property that fails to apply is dropped and the rest of the update still applies. There is no retry of an individual property.
 
 This is by design:
-- A failed property does not block the other properties in the same update, at any nesting depth
+- A failed property does not block the other properties in the same update, including properties of nested subjects
+- Failures in separate updates are independent, so one failed update does not block the next
 - Write failures to internal models are treated as non-transient because property writes are deterministic: they either succeed or fail consistently, so retrying would not help (this includes custom validation failures)
-- Monitor logs for `Failed to apply subject update` errors to detect issues
 
-The whole update still reports failure to its caller once every property has been attempted: a single failure is rethrown as itself, several are wrapped in an `AggregateException`. Callers that retry, such as a source's initial state load, therefore still retry.
+The update as a whole reports failure to its caller once every property has been attempted: a single failure is rethrown as itself, several are wrapped in an `AggregateException` naming the properties. Callers log that once per update rather than once per failed property, so monitor for `Failed to apply subject update` errors. Callers that retry the whole update, such as a source's initial state load, therefore still retry.
 
-Note that a failed update to an object, collection or dictionary property can leave child subjects partially updated while the parent still references its previous value, because children are updated in place before the parent is written.
+Two limits are worth knowing. A collection or dictionary item whose own property fails is still inserted, carrying a default value for that property, so the parent ends up referencing a new item that is only partly populated. And a failure raised by the collection or dictionary machinery itself, such as an out-of-range index, still abandons the remaining items of that property.
 
 This differs from outbound changes (writing from local model to external system), which use a retry queue to handle transient failures.
 

@@ -69,8 +69,14 @@ public class SubjectUpdateApplyFailureTests
             () => target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local));
 
         Assert.Equal(2, exception.InnerExceptions.Count);
-        Assert.Contains(nameof(ThrowingDevice.PropertyA), exception.Message);
-        Assert.Contains(nameof(ThrowingDevice.PropertyB), exception.Message);
+
+        // AggregateException appends each inner message, and ThrowingDevice's own message contains the
+        // property name, so assert against the header the applier itself builds rather than the whole
+        // message, which would pass even with the name list removed.
+        var header = exception.Message.Split(" (")[0];
+        Assert.StartsWith("2 property updates could not be applied: ", header);
+        Assert.Contains(nameof(ThrowingDevice.PropertyA), header);
+        Assert.Contains(nameof(ThrowingDevice.PropertyB), header);
     }
 
     [Fact]
@@ -123,6 +129,59 @@ public class SubjectUpdateApplyFailureTests
         var child = Assert.Single(target.Children);
         Assert.Equal("Child", child.LastName);
         Assert.Null(child.FirstName);
+    }
+
+    [Fact]
+    public void WhenACollectionUpdateItselfFails_ThenSiblingPropertiesStillApply()
+    {
+        // Arrange
+        // Pins the per-property boundary: a throw raised by the collection machinery itself, rather than
+        // by an item's own property write, is contained at the Children property and does not cost the
+        // unrelated LastName sibling. It does still abandon the remaining items of that collection.
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new Person(context);
+
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    [nameof(Person.LastName)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Parent"
+                    },
+                    [nameof(Person.Children)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Items =
+                        [
+                            new SubjectPropertyItemUpdate { Index = 5, Id = "2" }
+                        ],
+                        Count = 1 // index 5 is out of bounds for a declared count of 1
+                    }
+                },
+                ["2"] = new()
+                {
+                    [nameof(Person.FirstName)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Kid"
+                    }
+                }
+            }
+        };
+
+        // Act
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local));
+
+        // Assert
+        Assert.Contains("out of bounds", exception.Message);
+        Assert.Equal("Parent", target.LastName);
+        Assert.Empty(target.Children);
     }
 
     [Fact]
