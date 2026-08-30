@@ -42,6 +42,36 @@ public class CrossContextGateDeadlockTests
         Assert.Null(foreignTarget.Father);
     }
 
+    [Fact]
+    public void WhenAttachedRouteChangesInsideAdmission_ThenWriteRetriesThroughTheNewCoordinator()
+    {
+        // Arrange
+        var secondLifecycle = new ReroutingLifecycleInterceptor();
+        var secondContext = InterceptorSubjectContext.Create();
+        secondContext.AddService(secondLifecycle);
+        secondLifecycle.SetContext(secondContext);
+
+        var firstLifecycle = new ReroutingLifecycleInterceptor(secondContext);
+        var firstContext = InterceptorSubjectContext.Create();
+        firstContext.AddService(firstLifecycle);
+
+        var target = new Person();
+        target.AttachToContext(firstContext);
+        var child = new Person();
+
+        // Act
+        var exception = Record.Exception(() => target.Father = child);
+
+        // Assert
+        Assert.Null(exception);
+        Assert.Same(secondContext, target.TryGetContext());
+        Assert.Same(child, target.Father);
+        Assert.Equal(1, firstLifecycle.LeaseAdmissions);
+        Assert.Equal(0, firstLifecycle.WriteChainEntries);
+        Assert.Equal(1, secondLifecycle.LeaseAdmissions);
+        Assert.Equal(1, secondLifecycle.WriteChainEntries);
+    }
+
     /// <summary>
     /// Reproduces the finding that a cross-context structural write from a lifecycle callback takes
     /// the foreign gate before any guard runs. The rendezvous is artificial, because it lines both
@@ -252,6 +282,93 @@ public class CrossContextGateDeadlockTests
             IInterceptorSubjectContext context,
             SubjectAttachmentAnchorKind anchor)
         {
+            subject.Executor.TryGetAttachment(out _, out _, out var revision);
+            Assert.True(subject.Executor.TryUpdateAttachment(revision, context, anchor, out _));
+        }
+
+        public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
+        {
+            subject.Executor.TryGetAttachment(out _, out _, out var revision);
+            Assert.True(subject.Executor.TryUpdateAttachment(
+                revision, null, SubjectAttachmentAnchorKind.None, out _));
+        }
+
+        public bool TryAddProperties(SubjectPropertyRegistration registration)
+        {
+            registration.Publish();
+            return true;
+        }
+    }
+
+    private sealed class ReroutingLifecycleInterceptor(IInterceptorSubjectContext? rerouteTo = null) :
+        ILifecycleInterceptor,
+        ITopologyAdmissionCoordinator
+    {
+        private InterceptorSubjectContext? _context;
+        private bool _rerouted;
+
+        public int LeaseAdmissions { get; private set; }
+
+        public int WriteChainEntries { get; private set; }
+
+        public void SetContext(IInterceptorSubjectContext context) =>
+            _context = (InterceptorSubjectContext)context;
+
+        StructuralWriteLease ITopologyAdmissionCoordinator.AcquireStructuralWriteLease(InterceptorExecutor executor)
+        {
+            LeaseAdmissions++;
+            if (!_rerouted && rerouteTo is not null)
+            {
+                _rerouted = true;
+                Assert.True(executor.TryUpdateAttachment(
+                    executor.AttachmentRevision,
+                    null,
+                    SubjectAttachmentAnchorKind.None,
+                    out _));
+                Assert.True(executor.TryUpdateAttachment(
+                    executor.AttachmentRevision,
+                    rerouteTo,
+                    SubjectAttachmentAnchorKind.Explicit,
+                    out _));
+            }
+
+            return executor.TryAcquireStructuralWriteLease(_context, this);
+        }
+
+        Exception? ITopologyAdmissionCoordinator.CompleteStructuralWrite(
+            InterceptorExecutor executor,
+            StructuralWriteLease lease,
+            Exception? primaryException)
+        {
+            executor.ReleaseStructuralWriteLease(lease);
+            return primaryException;
+        }
+
+        OwnershipReservationToken ITopologyAdmissionCoordinator.AcquireOwnershipReservation(
+            InterceptorExecutor executor,
+            ReservationMode mode) =>
+            executor.TryAcquireOwnershipReservation(_context!, mode, this);
+
+        void ITopologyAdmissionCoordinator.CompleteOwnershipReservation(
+            InterceptorExecutor executor,
+            OwnershipReservationToken token,
+            bool retainCommittedOwnership) =>
+            executor.ReleaseOwnershipReservation(token, detachIfLast: !retainCommittedOwnership);
+
+        public void WriteProperty<TProperty>(
+            ref PropertyWriteContext<TProperty> context,
+            WriteInterceptionDelegate<TProperty> next)
+        {
+            WriteChainEntries++;
+            next(ref context);
+        }
+
+        public void AttachSubjectToContext(
+            IInterceptorSubject subject,
+            IInterceptorSubjectContext context,
+            SubjectAttachmentAnchorKind anchor)
+        {
+            _context = (InterceptorSubjectContext)context;
             subject.Executor.TryGetAttachment(out _, out _, out var revision);
             Assert.True(subject.Executor.TryUpdateAttachment(revision, context, anchor, out _));
         }

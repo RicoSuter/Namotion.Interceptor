@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 
@@ -5,6 +6,46 @@ namespace Namotion.Interceptor.Tests.Interceptors;
 
 public class StructuralWriteLeaseTests
 {
+    private sealed class ThrowingCompletionCoordinator : ITopologyAdmissionCoordinator
+    {
+        public StructuralWriteLease AcquireStructuralWriteLease(InterceptorExecutor executor) =>
+            throw new NotSupportedException();
+
+        public Exception? CompleteStructuralWrite(
+            InterceptorExecutor executor,
+            StructuralWriteLease lease,
+            Exception? primaryException) =>
+            throw new InvalidOperationException("completion failed");
+
+        public OwnershipReservationToken AcquireOwnershipReservation(
+            InterceptorExecutor executor,
+            ReservationMode mode) =>
+            throw new NotSupportedException();
+
+        public void CompleteOwnershipReservation(
+            InterceptorExecutor executor,
+            OwnershipReservationToken token,
+            bool retainCommittedOwnership) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class ThrowingTraceListener : TraceListener
+    {
+        private readonly int _threadId = Environment.CurrentManagedThreadId;
+
+        public override void Write(string? message) => ThrowOnTestThread();
+
+        public override void WriteLine(string? message) => ThrowOnTestThread();
+
+        private void ThrowOnTestThread()
+        {
+            if (Environment.CurrentManagedThreadId == _threadId)
+            {
+                throw new InvalidOperationException("trace failed");
+            }
+        }
+    }
+
     private sealed class VetoingWriteInterceptor : IWriteInterceptor
     {
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
@@ -91,6 +132,49 @@ public class StructuralWriteLeaseTests
         Assert.Equal(1, executor.StructuralLeaseCount);
 
         second.Dispose();
+        Assert.Equal(0, executor.StructuralLeaseCount);
+    }
+
+    [Fact]
+    public void WhenLeaseCompletionAndTracingFail_ThenDisposeRemainsNoThrow()
+    {
+        // Arrange
+        var executor = CreateExecutor();
+        var lease = new StructuralWriteLease(executor, null, 0, new ThrowingCompletionCoordinator());
+        var listener = new ThrowingTraceListener();
+        Trace.Listeners.Add(listener);
+
+        try
+        {
+            // Act
+            var exception = Record.Exception(lease.Dispose);
+
+            // Assert
+            Assert.Null(exception);
+        }
+        finally
+        {
+            Trace.Listeners.Remove(listener);
+        }
+    }
+
+    [Fact]
+    public void WhenExpectedDetachedRouteHasAlreadyAttached_ThenExactLeaseAdmissionRejectsTheRoute()
+    {
+        // Arrange
+        var executor = CreateExecutor();
+        var context = InterceptorSubjectContext.Create();
+        Assert.True(executor.TryUpdateAttachment(
+            executor.AttachmentRevision,
+            context,
+            SubjectAttachmentAnchorKind.Explicit,
+            out _));
+
+        // Act
+        var exception = Record.Exception(() => executor.TryAcquireStructuralWriteLease(expectedContext: null));
+
+        // Assert
+        Assert.IsType<AttachmentRouteChangedException>(exception);
         Assert.Equal(0, executor.StructuralLeaseCount);
     }
 

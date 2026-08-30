@@ -37,7 +37,7 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
             // from whichever structural property enumerates first. The descent reads every
             // structural getter, the ones this batch adds included, so it publishes these edges
             // itself; only the property callbacks belong to this call.
-            registration.Publish();
+            Publish(registration);
             InvokePropertyAttachCallbacks(subject, batch);
             return;
         }
@@ -45,7 +45,7 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
         var captured = CaptureStructuralValues(subject, batch);
         if (captured is null)
         {
-            registration.Publish();
+            Publish(registration);
             InvokePropertyAttachCallbacks(subject, batch);
             return;
         }
@@ -56,7 +56,7 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
         {
             ClaimCapturedComponents(captured, visited, claimed);
 
-            registration.Publish();
+            Publish(registration);
             InvokePropertyAttachCallbacks(subject, batch);
 
             // Commit the captured values as ordinary assignments. The reconciler sees an empty
@@ -106,7 +106,7 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
         var subject = registration.Subject;
         if (graph.IsReleasing(subject) || !graph.AreSnapshotsSeeded(subject))
         {
-            registration.Publish();
+            Publish(registration);
             return;
         }
 
@@ -119,7 +119,7 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
         var captured = CaptureStructuralValues(subject, batch);
         if (captured is null)
         {
-            registration.Publish();
+            Publish(registration);
             return;
         }
 
@@ -129,7 +129,7 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
         {
             ClaimCapturedComponents(captured, visited, claimed);
 
-            registration.Publish();
+            Publish(registration);
 
             // Seed rather than reconcile: the reconciler's released-parent early exits read
             // IsOwned on the writing parent, which is legitimately false here, so it would stop
@@ -211,5 +211,11 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
         {
             subject.AttachSubjectProperty(new PropertyReference(subject, batch[index].Name));
         }
+    }
+
+    private void Publish(SubjectPropertyRegistration registration)
+    {
+        registration.Publish();
+        graph.RefreshPropertyNames(registration.Subject);
     }
 }

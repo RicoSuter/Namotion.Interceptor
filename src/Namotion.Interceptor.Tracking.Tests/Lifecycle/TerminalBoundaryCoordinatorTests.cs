@@ -159,6 +159,31 @@ public class TerminalBoundaryCoordinatorTests
     }
 
     [Fact]
+    public void WhenTopologyPreparationFails_ThenRawStorageAndCommittedGraphRemainUnchanged()
+    {
+        // Arrange
+        var context = CreateContext();
+        var parent = new Person(context);
+        var child = new Person();
+        parent.Father = child;
+        var executor = (InterceptorExecutor)((IInterceptorSubject)child).Executor;
+        using var transition = Assert.IsType<InterceptorExecutor.AttachmentTransition>(
+            executor.TryAcquireAttachmentTransition(
+                executor.AttachmentRevision,
+                AttachmentPhase.Detaching,
+                out _));
+
+        // Act
+        var exception = Record.Exception(() => parent.Father = null);
+
+        // Assert
+        Assert.IsType<LifecycleConflictException>(exception);
+        Assert.Same(child, parent.Father);
+        Assert.Same(context, child.TryGetContext());
+        Assert.Equal(1, child.GetReferenceCount());
+    }
+
+    [Fact]
     public void WhenTerminalReturnsToDownstreamInterceptor_ThenParentLeaseRemainsUntilFullUnwind()
     {
         // Arrange

@@ -5,10 +5,7 @@ using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
-/// <summary>
-/// Owns structural graph membership for one context: which subjects it holds, through which
-/// occurrence-aware edges, and when a subject that lost its last support leaves.
-/// </summary>
+/// <summary>Owns structural graph membership and lifecycle publication for one context.</summary>
 public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHandler,
     IWriteTerminalCoordinator, ITopologyAdmissionCoordinator
 {
@@ -45,23 +42,18 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         remove => _notifier.SubjectDetaching -= value;
     }
 
-    /// <summary>
-    /// Creates the lifecycle for one context. That context is the single exact context this
-    /// interceptor claims subjects for.
-    /// </summary>
+    /// <summary>Creates the lifecycle authority for one exact context.</summary>
     public LifecycleInterceptor(IInterceptorSubjectContext context)
     {
         _context = context;
         _notifier = new LifecycleNotifier(context, this);
         _graph = new OwnershipGraph(context, this);
         _reachability = new ReachabilityWalk(_graph);
-        _attach = new AttachTraversal(_notifier, _graph, _reachability);
-        _release = new ReleaseTraversal(_notifier, _graph, _reachability);
-        _reconciler = new StructuralReconciler(_notifier, _graph, _attach, _release);
+        _attach = new AttachTraversal(_notifier, _graph);
+        _release = new ReleaseTraversal(_notifier, _graph);
+        _reconciler = new StructuralReconciler(_notifier, _graph);
         _admission = new PropertyAdmission(_graph, _reconciler, _attach);
     }
-
-    #region Structural writes
 
     private GateScope EnterGate()
     {
@@ -170,9 +162,10 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var discovered = LifecycleScratch.RentSubjectList();
         var reservations = LifecycleScratch.RentOwnershipReservations();
         var seededSnapshots = new Dictionary<PropertyReference, StructuralSnapshot>(PropertyReference.Comparer);
+        var seededPropertyNames = new Dictionary<IInterceptorSubject, ImmutableArray<string>>(ReferenceEqualityComparer.Instance);
         try
         {
-            ReserveComponent(snapshot, discovered, reservations, seededSnapshots);
+            ReserveComponent(snapshot, discovered, reservations, seededSnapshots, seededPropertyNames);
             using var journalCapture = _notifier.BeginJournal();
             var runWithheld = false;
             try
@@ -191,16 +184,22 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                             throw LifecycleConflictException.Retryable(context.Property.Subject);
                         }
 
-                        var change = _graph.PrepareWrite(
+                        _graph.CommitReservations(reservations);
+                        using var change = _graph.PrepareWrite(
                             context.Property,
                             value,
                             snapshot,
                             context.Executor.Revision + 1,
-                            seededSnapshots);
-                        _graph.CommitReservations(reservations);
+                            seededSnapshots,
+                            seededPropertyNames,
+                            reservations,
+                            _notifier);
+                        var journal = journalCapture.Complete(
+                            context.Property,
+                            context.Executor.Revision + 1);
                         context.Executor.CommitRawWriteLocked(ref context, value, writeValue);
-                        _reconciler.Publish(change, reservations);
-                        context.CommittedLifecycleJournal = journalCapture.Complete(context.Property, context.Revision);
+                        _graph.Publish(change);
+                        context.CommittedLifecycleJournal = journal;
                     }
                     finally
                     {
@@ -228,13 +227,19 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         StructuralSnapshot snapshot,
         List<IInterceptorSubject> discovered,
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
-        Dictionary<PropertyReference, StructuralSnapshot> seededSnapshots)
+        Dictionary<PropertyReference, StructuralSnapshot> seededSnapshots,
+        Dictionary<IInterceptorSubject, ImmutableArray<string>> seededPropertyNames)
     {
         var visited = LifecycleScratch.RentSubjectSet();
         try
         {
             _graph.DiscoverComponent(
-                snapshot, visited, discovered, includeAttached: true, seededSnapshots: seededSnapshots);
+                snapshot,
+                visited,
+                discovered,
+                includeAttached: true,
+                seededSnapshots,
+                seededPropertyNames);
         }
         finally
         {
@@ -343,10 +348,6 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         }
     }
 
-    #endregion
-
-    #region Ordered handler slot (the descent)
-
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         HandleLifecycleChange(change, null);
@@ -361,10 +362,6 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             _attach.SeedChildrenIfNeeded(change.Subject, reservations);
         }
     }
-
-    #endregion
-
-    #region Explicit attach and detach
 
     /// <inheritdoc />
     public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor)
@@ -520,10 +517,6 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         }
     }
 
-    #endregion
-
-    #region Committed state queries
-
     internal OwnershipGraph Graph => _graph;
 
     internal bool TryRunWhenTransactionEnds(Action? recalculation)
@@ -573,25 +566,16 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         }
     }
 
-    /// <summary>
-    /// Gets the number of committed incoming edge occurrences, which is the subject's reference
-    /// count. An anchored root with no edge reports zero, so this is not an attachment predicate.
-    /// </summary>
-    /// <remarks>Takes no lock: consumers call it from inside lifecycle callbacks and their own locks.</remarks>
+    /// <summary>Gets the committed incoming occurrence count, excluding a root anchor.</summary>
     public int GetReferenceCount(IInterceptorSubject subject)
     {
         return _graph.TryGetOwnership(subject)?.IncomingCount ?? 0;
     }
 
-    /// <summary>
-    /// Gets the subject's occurrence-aware parents. The first call on a subject activates parent
-    /// publication for it; a subject nobody asks about never allocates a snapshot.
-    /// </summary>
-    /// <remarks>Takes no lock; see <see cref="OwnershipGraph.GetParents"/> for why that is required.</remarks>
+    /// <summary>Gets the subject's immutable occurrence-aware parent publication.</summary>
     public ImmutableArray<SubjectParent> GetParents(IInterceptorSubject subject)
     {
         return _graph.GetParents(subject);
     }
 
-    #endregion
 }

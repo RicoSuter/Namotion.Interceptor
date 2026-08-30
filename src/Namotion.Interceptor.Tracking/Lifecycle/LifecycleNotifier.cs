@@ -2,18 +2,15 @@ using System.Collections.Immutable;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
-internal sealed class LifecycleJournal(
-    PropertyReference property,
-    long revision,
-    ImmutableArray<Action> entries)
+internal sealed record LifecycleJournal(
+    PropertyReference Property,
+    long Revision,
+    ImmutableArray<Action> Entries)
 {
-    internal PropertyReference Property { get; } = property;
-    internal long Revision { get; } = revision;
-
     internal Exception? Drain(Exception? primaryException)
     {
         List<Exception>? failures = primaryException is null ? null : [primaryException];
-        foreach (var entry in entries)
+        foreach (var entry in Entries)
         {
             try
             {
@@ -81,13 +78,34 @@ internal sealed class LifecycleNotifier(
     public void InvokeAddedLifecycleHandlers(
         IInterceptorSubject subject,
         SubjectLifecycleChange change,
-        Dictionary<IInterceptorSubject, Interceptors.OwnershipReservationToken>? reservations = null)
+        Dictionary<IInterceptorSubject, Interceptors.OwnershipReservationToken>? reservations = null) =>
+        InvokeAddedLifecycleHandlersCore(subject, change, reservations, null);
+
+    internal void InvokePreparedAddedLifecycleHandlers(
+        IInterceptorSubject subject,
+        SubjectLifecycleChange change,
+        Dictionary<IInterceptorSubject, Interceptors.OwnershipReservationToken> reservations,
+        Action? prepareChildren) =>
+        InvokeAddedLifecycleHandlersCore(subject, change, reservations, prepareChildren);
+
+    private void InvokeAddedLifecycleHandlersCore(
+        IInterceptorSubject subject,
+        SubjectLifecycleChange change,
+        Dictionary<IInterceptorSubject, Interceptors.OwnershipReservationToken>? reservations,
+        Action? prepareChildren)
     {
         foreach (var handler in GetLifecycleHandlers())
         {
             if (ReferenceEquals(handler, originatingLifecycle))
             {
-                originatingLifecycle.HandleLifecycleChange(change, reservations);
+                if (prepareChildren is null)
+                {
+                    originatingLifecycle.HandleLifecycleChange(change, reservations);
+                }
+                else
+                {
+                    prepareChildren();
+                }
             }
             else
             {
@@ -145,11 +163,11 @@ internal sealed class LifecycleNotifier(
         }
     }
 
-    private static void InvokeProperty(IPropertyLifecycleHandler handler, SubjectPropertyLifecycleChange change, bool attach)
-    {
-        Action<SubjectPropertyLifecycleChange> callback = attach ? handler.AttachProperty : handler.DetachProperty;
-        callback(change);
-    }
+    private static void InvokeProperty(
+        IPropertyLifecycleHandler handler,
+        SubjectPropertyLifecycleChange change,
+        bool attach) =>
+        (attach ? (Action<SubjectPropertyLifecycleChange>)handler.AttachProperty : handler.DetachProperty)(change);
 
     public void RefreshCollectionProperty(PropertyReference property, object? value)
     {
@@ -225,14 +243,11 @@ internal sealed class LifecycleNotifier(
         }
     }
 
-    internal sealed class JournalBuilder(
-        LifecycleNotifier owner,
-        ImmutableArray<ILifecycleHandler> lifecycleHandlers,
-        ImmutableArray<IPropertyLifecycleHandler> propertyHandlers)
+    internal sealed record JournalBuilder(
+        LifecycleNotifier Owner,
+        ImmutableArray<ILifecycleHandler> LifecycleHandlers,
+        ImmutableArray<IPropertyLifecycleHandler> PropertyHandlers)
     {
-        internal LifecycleNotifier Owner { get; } = owner;
-        internal ImmutableArray<ILifecycleHandler> LifecycleHandlers { get; } = lifecycleHandlers;
-        internal ImmutableArray<IPropertyLifecycleHandler> PropertyHandlers { get; } = propertyHandlers;
         internal List<Action> Entries { get; } = [];
     }
 

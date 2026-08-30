@@ -8,11 +8,7 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Interceptors;
 
-/// <summary>
-/// The built-in <see cref="IInterceptorExecutor"/>, one per subject and published on first access
-/// through <see cref="GetOrCreate"/>. It additionally owns the per-subject state the interface
-/// cannot express: the terminal lock, the commit revision, and the attachment monitor.
-/// </summary>
+/// <summary>The built-in per-subject executor, terminal, revision owner, and attachment authority.</summary>
 public sealed class InterceptorExecutor : IInterceptorExecutor
 {
     [ThreadStatic]
@@ -23,10 +19,8 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
 
     private readonly IInterceptorSubject _subject;
 
-    // The subject paired with SyncRoot and the revision counter.
     internal IInterceptorSubject Subject => _subject;
 
-    // Serializes backing-field access without holding the attachment monitor.
     internal readonly object SyncRoot = new();
 
     internal void CommitRawWriteLocked<TProperty>(
@@ -40,8 +34,8 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         context.IsWritten = true;
         context.IsTerminalCommitted = true;
         context.Revision = ++Revision;
-        var isFromSource = context.Origin.Kind == ChangeOriginKind.FromSource;
         context.FinalizeOrigin();
+        var isFromSource = context.Origin.Kind == ChangeOriginKind.FromSource;
         var timestamp = context.WriteTimestampRaw;
         context.Property.SetWriteState(timestamp > 0 ? timestamp : 0, context.Revision, isFromSource);
     }
@@ -59,22 +53,15 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         return new LogicalContextScope(true);
     }
 
-    // Dense per-subject commit order, incremented only while SyncRoot is held.
     internal long Revision;
 
-    // Attachment routing is one immutable publication guarded by this monitor for updates.
     private readonly object _attachmentLock = new();
     private volatile AttachmentState _attachment = AttachmentState.Unattached;
     private HashSet<StructuralWriteLease>? _activeStructuralLeases;
     private AttachmentTransition? _activeAttachmentTransition;
     private OwnershipReservation? _ownershipReservation;
 
-    /// <summary>
-    /// Creates an executor for <paramref name="subject"/>. Prefer <see cref="GetOrCreate"/>, which
-    /// publishes exactly one executor per subject; a second instance would split the commit
-    /// revision and the terminal lock.
-    /// </summary>
-    /// <param name="subject">The subject this executor runs interception for.</param>
+    /// <summary>Creates the executor for one subject; generated subjects use <see cref="GetOrCreate"/>.</summary>
     public InterceptorExecutor(IInterceptorSubject subject)
     {
         _subject = subject;
@@ -230,7 +217,6 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 $"Cannot apply the anchor '{anchor}' without an attached context.");
         }
 
-        // Interceptor chains compile inside InterceptorSubjectContext.
         if (context is not (null or InterceptorSubjectContext))
         {
             throw new InvalidOperationException(
@@ -241,16 +227,32 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         }
     }
 
+    internal StructuralWriteLease TryAcquireStructuralWriteLease() =>
+        TryAcquireStructuralWriteLease(null, 0, validateContext: false, validateRevision: false, null);
+
     internal StructuralWriteLease TryAcquireStructuralWriteLease(
-        InterceptorSubjectContext? expectedContext = null,
-        ITopologyAdmissionCoordinator? coordinator = null)
+        InterceptorSubjectContext? expectedContext,
+        ITopologyAdmissionCoordinator? coordinator = null) =>
+        TryAcquireStructuralWriteLease(expectedContext, 0, validateContext: true, validateRevision: false, coordinator);
+
+    private StructuralWriteLease TryAcquireStructuralWriteLease(
+        InterceptorSubjectContext? expectedContext,
+        long expectedRevision,
+        bool validateContext,
+        bool validateRevision,
+        ITopologyAdmissionCoordinator? coordinator)
     {
         lock (_attachmentLock)
         {
             var current = _attachment;
+            if ((validateContext && !ReferenceEquals(current.Context, expectedContext)) ||
+                (validateRevision && current.Revision != expectedRevision))
+            {
+                throw new AttachmentRouteChangedException();
+            }
+
             if (current.Phase != AttachmentPhase.Stable ||
-                _ownershipReservation?.Mode == ReservationMode.Exclusive ||
-                (expectedContext is not null && !ReferenceEquals(current.Context, expectedContext)))
+                _ownershipReservation?.Mode == ReservationMode.Exclusive)
             {
                 throw LifecycleConflictException.Retryable(_subject);
             }
@@ -326,6 +328,41 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         }
     }
 
+    internal AttachmentTransition PrepareAttachmentUpdate(
+        InterceptorSubjectContext expectedContext,
+        InterceptorSubjectContext? context,
+        SubjectAttachmentAnchorKind anchor,
+        OwnershipReservationToken? reservation = null)
+    {
+        ValidateAttachment(context, anchor);
+        lock (_attachmentLock)
+        {
+            var current = _attachment;
+            var reservationMatches = reservation is not null
+                ? reservation.IsActive(this) && ReferenceEquals(_ownershipReservation, reservation.Reservation)
+                : _ownershipReservation is null;
+            if (!ReferenceEquals(current.Context, expectedContext) ||
+                current.Phase != AttachmentPhase.Stable ||
+                current.StructuralLeaseCount != 0 ||
+                !reservationMatches)
+            {
+                throw LifecycleConflictException.Retryable(_subject);
+            }
+
+            var preparedState = new AttachmentState(
+                context,
+                anchor,
+                current.Revision + 1,
+                AttachmentPhase.Stable,
+                0);
+            var transition = new AttachmentTransition(this, preparedState);
+            _activeAttachmentTransition = transition;
+            _attachment = current.WithPhase(
+                context is null ? AttachmentPhase.Detaching : AttachmentPhase.Attaching);
+            return transition;
+        }
+    }
+
     private void CommitAttachmentTransition(
         AttachmentTransition transition,
         InterceptorSubjectContext? context,
@@ -371,6 +408,15 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         }
     }
 
+    private void PublishPreparedAttachmentTransition(AttachmentTransition transition)
+    {
+        lock (_attachmentLock)
+        {
+            _attachment = transition.PreparedState!;
+            _activeAttachmentTransition = null;
+        }
+    }
+
     /// <inheritdoc />
     public bool TryGetAttachment(out IInterceptorSubjectContext? context, out SubjectAttachmentAnchorKind anchor, out long revision)
     {
@@ -381,22 +427,10 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         return context is not null;
     }
 
-    /// <summary>
-    /// Returns the subject's executor, publishing one on first access. Call it from the subject's
-    /// <see cref="IInterceptorSubject.Executor"/> accessor, passing that subject's own backing field.
-    /// Public because the source generator emits the call into the consumer's assembly.
-    /// </summary>
-    /// <remarks>
-    /// Compare-and-swap rather than <c>??=</c>: a lazy assignment lets two threads racing the first
-    /// access each publish an executor and discard one, along with everything that had been put on it,
-    /// including the per-subject commit revision counter. It is also the store that safely publishes
-    /// the new instance, which a plain assignment is not.
-    /// </remarks>
+    /// <summary>Returns or atomically publishes the subject's one executor.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static IInterceptorExecutor GetOrCreate(ref IInterceptorExecutor? context, IInterceptorSubject subject)
     {
-        // The allocation sits in a separate non-inlined method so the accessor stays a load and a
-        // branch, small enough to inline into its own callers.
         return context ?? CreateAndPublish(ref context, subject);
     }
 
@@ -407,7 +441,6 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         return Interlocked.CompareExchange(ref context, created, null) ?? created;
     }
 
-    // The zero-interceptor scalar chain still performs terminal commit bookkeeping.
     private static class UninterceptedChain<TProperty>
     {
         internal static readonly WriteAction<TProperty> Write =
@@ -428,9 +461,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         return attachedContext.ExecuteInterceptedRead(ref context, readValue);
     }
 
-    /// <summary>
-    /// Reads a generated structural property through its synchronized trusted raw reader.
-    /// </summary>
+    /// <summary>Reads a generated structural property through its synchronized raw reader.</summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty GetGeneratedPropertyValue<TProperty>(
@@ -491,9 +522,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         return context.IsTerminalCommitted;
     }
 
-    /// <summary>
-    /// Writes a generated structural property through trusted raw reader and writer delegates.
-    /// </summary>
+    /// <summary>Writes a generated structural property through trusted raw delegates.</summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
     public bool SetGeneratedPropertyValue<TProperty>(
         string propertyName,
@@ -511,7 +540,6 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             propertyTypeIndex);
     }
 
-    // The structural branch pins attachment through the complete chain unwind.
     private bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, int propertyTypeIndex) =>
         SetStructuralPropertyValue(propertyName, newValue, currentValue, null, writeValue, propertyTypeIndex);
 
@@ -544,9 +572,28 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 }
             }
 
-            var lease = coordinator is not null
-                ? coordinator.AcquireStructuralWriteLease(this)
-                : TryAcquireStructuralWriteLease();
+            if (!IsAttachmentRoute(attachedContext, attachmentRevision))
+            {
+                continue;
+            }
+
+            StructuralWriteLease lease;
+            try
+            {
+                lease = coordinator is not null
+                    ? coordinator.AcquireStructuralWriteLease(this)
+                    : TryAcquireStructuralWriteLease(
+                        attachedContext,
+                        attachmentRevision,
+                        validateContext: true,
+                        validateRevision: true,
+                        coordinator: null);
+            }
+            catch (AttachmentRouteChangedException)
+            {
+                continue;
+            }
+
             if (!ReferenceEquals(lease.Context, attachedContext) ||
                 lease.AttachmentRevision != attachmentRevision)
             {
@@ -597,6 +644,13 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool IsAttachmentRoute(InterceptorSubjectContext? context, long revision)
+    {
+        var current = _attachment;
+        return ReferenceEquals(current.Context, context) && current.Revision == revision;
+    }
+
     private bool WriteStructuralValue<TProperty>(
         InterceptorSubjectContext? attachedContext,
         InterceptorSubjectContext.ContextState? contextState,
@@ -632,7 +686,6 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         return context.IsTerminalCommitted;
     }
 
-    // Cascade re-entry shares the trigger timestamp and never establishes structural edges.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, long rawTimestamp)
     {
@@ -666,7 +719,6 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 "The registration belongs to a different subject than this executor.");
         }
 
-        // Admission revalidates the lock-free attachment route under its coordinator.
         while (true)
         {
             var attachedContext = _attachment.Context;
@@ -703,10 +755,8 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         return attachedContext.ExecuteInterceptedInvoke(ref context, invokeMethod);
     }
 
-    // Attachment fields published together for coherent lock-free reads.
-    private sealed class AttachmentState
+    internal sealed class AttachmentState
     {
-        /// <summary>The state every executor starts in, shared because it carries no identity.</summary>
         internal static readonly AttachmentState Unattached = new(
             null,
             SubjectAttachmentAnchorKind.None,
@@ -754,6 +804,14 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             _executor = executor;
         }
 
+        internal AttachmentTransition(InterceptorExecutor executor, AttachmentState preparedState)
+        {
+            _executor = executor;
+            PreparedState = preparedState;
+        }
+
+        internal AttachmentState? PreparedState { get; }
+
         internal void Commit(
             InterceptorSubjectContext? context,
             SubjectAttachmentAnchorKind anchor,
@@ -762,6 +820,13 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             var executor = _executor
                 ?? throw new ObjectDisposedException(nameof(AttachmentTransition));
             executor.CommitAttachmentTransition(this, context, anchor, out currentRevision);
+            Interlocked.CompareExchange(ref _executor, null, executor);
+        }
+
+        internal void PublishPrepared()
+        {
+            var executor = _executor!;
+            executor.PublishPreparedAttachmentTransition(this);
             Interlocked.CompareExchange(ref _executor, null, executor);
         }
 

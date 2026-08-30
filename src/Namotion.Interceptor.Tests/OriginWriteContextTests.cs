@@ -115,7 +115,7 @@ public class OriginWriteContextTests
         Assert.True(property.TryGetWriteState(true, out var anyRevision, out _));
         Assert.True(anyRevision > 0);
         Assert.True(property.TryGetWriteState(false, out var localRevision, out _));
-        Assert.Equal(0, localRevision);
+        Assert.Equal(anyRevision, localRevision);
     }
 
     [Fact]

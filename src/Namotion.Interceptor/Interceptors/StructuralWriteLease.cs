@@ -9,6 +9,8 @@ internal enum AttachmentPhase
     Detaching
 }
 
+internal sealed class AttachmentRouteChangedException : InvalidOperationException;
+
 /// <summary>
 /// Reports that a structural write and an attachment transition raced. The losing operation can be
 /// retried after the competing operation completes; it has not reached its terminal.
@@ -68,12 +70,24 @@ internal sealed class StructuralWriteLease : IDisposable
         {
             if (Complete(null) is { } exception)
             {
-                Trace.TraceError($"Completing a structural write lease failed: {exception}");
+                ReportCompletionFailure(exception);
             }
         }
         catch (Exception exception)
         {
+            ReportCompletionFailure(exception);
+        }
+    }
+
+    private static void ReportCompletionFailure(Exception exception)
+    {
+        try
+        {
             Trace.TraceError($"Completing a structural write lease failed: {exception}");
+        }
+        catch
+        {
+            // Dispose is the no-throw fallback even when diagnostics are misconfigured.
         }
     }
 }
