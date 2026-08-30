@@ -15,7 +15,9 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// which is what lets the structural write protocol reject a callback that writes a structural
 /// property.
 /// </remarks>
-internal sealed class LifecycleNotifier(IInterceptorSubjectContext context)
+internal sealed class LifecycleNotifier(
+    IInterceptorSubjectContext context,
+    LifecycleInterceptor originatingLifecycle)
 {
     public event Action<SubjectLifecycleChange>? SubjectAttached;
 
@@ -55,9 +57,9 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context)
         var handlers = context.GetServices<ILifecycleHandler>();
         for (var index = 0; index < handlers.Length; index++)
         {
-            if (handlers[index] is LifecycleInterceptor lifecycleInterceptor)
+            if (ReferenceEquals(handlers[index], originatingLifecycle))
             {
-                lifecycleInterceptor.HandleLifecycleChange(change, reservations);
+                originatingLifecycle.HandleLifecycleChange(change, reservations);
             }
             else
             {

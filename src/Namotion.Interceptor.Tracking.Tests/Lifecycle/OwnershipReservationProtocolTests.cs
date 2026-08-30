@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+using System.Reflection;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -29,6 +31,82 @@ public class OwnershipReservationProtocolTests
     private static OwnershipGraph GetGraph(IInterceptorSubjectContext context)
     {
         return ((LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!).Graph;
+    }
+
+    private static void WaitFor(ManualResetEventSlim signal, string phase)
+    {
+        if (!signal.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+        {
+            throw new TimeoutException($"Timed out waiting for {phase}.");
+        }
+    }
+
+    private static void InsertLifecycleHandler(
+        InterceptorSubjectContext context,
+        LifecycleInterceptor handler)
+    {
+        var stateField = typeof(InterceptorSubjectContext).GetField("_state", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var state = stateField.GetValue(context)!;
+        var stateType = state.GetType();
+        var services = (ImmutableArray<object>)stateType
+            .GetField("Services", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(state)!;
+        var replacement = Activator.CreateInstance(
+            stateType,
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            binder: null,
+            args: [services.Insert(0, handler)],
+            culture: null)!;
+        stateField.SetValue(context, replacement);
+    }
+
+    [Fact]
+    public void WhenSeparateLifecycleHandlerSeedsReservedChild_ThenOriginReservationIsNotForwarded()
+    {
+        // Arrange
+        var context = (InterceptorSubjectContext)CreateContext();
+        var origin = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
+        var separate = new LifecycleInterceptor(context);
+        var parent = new Person(context) { FirstName = "parent" };
+        var child = new Person(context) { FirstName = "child" };
+        parent.Father = child;
+        origin.Graph.SetAnchor(child, SubjectAttachmentAnchorKind.Provisional);
+        separate.Graph.AddOwnership(parent);
+        InsertLifecycleHandler(context, separate);
+        Assert.Same(separate, context.GetServices<ILifecycleHandler>()[0]);
+
+        var reservation = origin.Graph.ReserveForStructuralWrite(child);
+        var reservations = (System.Collections.IDictionary)Activator.CreateInstance(
+            typeof(Dictionary<,>).MakeGenericType(typeof(IInterceptorSubject), reservation.GetType()))!;
+        reservations[child] = reservation;
+        var notifier = (LifecycleNotifier)typeof(LifecycleInterceptor)
+            .GetField("_notifier", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(origin)!;
+        var invokeHandlers = typeof(LifecycleNotifier).GetMethod(nameof(LifecycleNotifier.InvokeAddedLifecycleHandlers))!;
+        var change = new SubjectLifecycleChange
+        {
+            Subject = parent,
+            Property = new PropertyReference(parent, nameof(Person.Father)),
+            ReferenceCount = 1,
+            IsContextAttach = true,
+            IsPropertyReferenceAdded = true
+        };
+
+        try
+        {
+            // Act
+            var exception = Record.Exception(() => invokeHandlers.Invoke(notifier, [parent, change, reservations]));
+            ((IInterceptorSubject)child).Executor.TryGetAttachment(out _, out var anchor, out _);
+
+            // Assert
+            Assert.IsAssignableFrom<InvalidOperationException>(
+                Assert.IsType<TargetInvocationException>(exception).InnerException);
+            Assert.Equal(SubjectAttachmentAnchorKind.Provisional, anchor);
+        }
+        finally
+        {
+            origin.Graph.ReleaseUnusedReservation(reservation);
+        }
     }
 
     [Fact]
@@ -130,68 +208,89 @@ public class OwnershipReservationProtocolTests
         var secondForeignAttempted = new ManualResetEventSlim(false);
         Exception? firstReservationException = null;
         Exception? secondReservationException = null;
+        Exception? foreignWorkerException = null;
         Exception? firstForeignException = null;
         Exception? secondForeignException = null;
+        IInterceptorSubjectContext? contextBeforeFirstForeignAttempt = null;
+        IInterceptorSubjectContext? contextBeforeSecondForeignAttempt = null;
 
         var firstWriter = new Thread(() =>
         {
+            IDisposable? reservation = null;
             try
             {
-                var reservation = graph.ReserveForStructuralWrite(child);
-                try
-                {
-                    firstReserved.Set();
-                    firstForeignAttempted.Wait(WriteProtocolAcceptance.RendezvousTimeout);
-                    firstParent.Father = child;
-                }
-                finally
-                {
-                    graph.ReleaseUnusedReservation(reservation);
-                }
+                reservation = graph.ReserveForStructuralWrite(child);
+                firstReserved.Set();
+                WaitFor(firstForeignAttempted, "the first foreign attempt");
+                graph.ReleaseUnusedReservation(reservation);
+                reservation = null;
+                firstReleased.Set();
+                WaitFor(secondForeignAttempted, "the second foreign attempt");
+                firstParent.Father = child;
             }
             catch (Exception exception)
             {
                 firstReservationException = exception;
-                firstReserved.Set();
             }
             finally
             {
+                if (reservation is not null)
+                {
+                    graph.ReleaseUnusedReservation(reservation);
+                }
+
+                firstReserved.Set();
                 firstReleased.Set();
             }
         }) { IsBackground = true };
 
         var secondWriter = new Thread(() =>
         {
+            IDisposable? reservation = null;
             try
             {
-                firstReserved.Wait(WriteProtocolAcceptance.RendezvousTimeout);
-                var reservation = graph.ReserveForStructuralWrite(child);
-                try
-                {
-                    secondReserved.Set();
-                    secondForeignAttempted.Wait(WriteProtocolAcceptance.RendezvousTimeout);
-                    secondParent.Mother = child;
-                }
-                finally
-                {
-                    graph.ReleaseUnusedReservation(reservation);
-                }
+                WaitFor(firstReserved, "the first reservation");
+                reservation = graph.ReserveForStructuralWrite(child);
+                secondReserved.Set();
+                WaitFor(secondForeignAttempted, "the second foreign attempt");
+                secondParent.Mother = child;
             }
             catch (Exception exception)
             {
                 secondReservationException = exception;
+            }
+            finally
+            {
+                if (reservation is not null)
+                {
+                    graph.ReleaseUnusedReservation(reservation);
+                }
+
                 secondReserved.Set();
             }
         }) { IsBackground = true };
 
         var foreignAttacher = new Thread(() =>
         {
-            secondReserved.Wait(WriteProtocolAcceptance.RendezvousTimeout);
-            firstForeignException = Record.Exception(() => child.AttachToContext(foreignContext));
-            firstForeignAttempted.Set();
-            firstReleased.Wait(WriteProtocolAcceptance.RendezvousTimeout);
-            secondForeignException = Record.Exception(() => child.AttachToContext(foreignContext));
-            secondForeignAttempted.Set();
+            try
+            {
+                WaitFor(secondReserved, "the second reservation");
+                contextBeforeFirstForeignAttempt = child.TryGetContext();
+                firstForeignException = Record.Exception(() => child.AttachToContext(foreignContext));
+                firstForeignAttempted.Set();
+                WaitFor(firstReleased, "the first participant release");
+                contextBeforeSecondForeignAttempt = child.TryGetContext();
+                secondForeignException = Record.Exception(() => child.AttachToContext(foreignContext));
+            }
+            catch (Exception exception)
+            {
+                foreignWorkerException = exception;
+            }
+            finally
+            {
+                firstForeignAttempted.Set();
+                secondForeignAttempted.Set();
+            }
         }) { IsBackground = true };
 
         // Act
@@ -208,6 +307,9 @@ public class OwnershipReservationProtocolTests
         Assert.True(foreignCompleted, "the foreign attacher never finished");
         Assert.Null(firstReservationException);
         Assert.Null(secondReservationException);
+        Assert.Null(foreignWorkerException);
+        Assert.Null(contextBeforeFirstForeignAttempt);
+        Assert.Null(contextBeforeSecondForeignAttempt);
         Assert.IsAssignableFrom<InvalidOperationException>(firstForeignException);
         Assert.IsAssignableFrom<InvalidOperationException>(secondForeignException);
         Assert.Same(context, child.TryGetContext());

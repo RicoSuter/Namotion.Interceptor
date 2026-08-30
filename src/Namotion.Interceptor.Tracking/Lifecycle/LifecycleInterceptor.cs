@@ -95,7 +95,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     public LifecycleInterceptor(IInterceptorSubjectContext context)
     {
         _context = context;
-        _notifier = new LifecycleNotifier(context);
+        _notifier = new LifecycleNotifier(context, this);
         _graph = new OwnershipGraph(context, () => EnterGate());
         _reachability = new ReachabilityWalk(_graph);
         _attach = new AttachTraversal(_notifier, _graph, _reachability);
