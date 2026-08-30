@@ -1,175 +1,131 @@
+using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
-using Namotion.Interceptor.Tracking.Parent;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 
 /// <summary>
-/// The write protocol claims and validates the proposed component before the terminal runs, and the
-/// value the terminal actually stored after it runs, so a terminal that stores a different graph
-/// stores subjects the second claim covers. These pin which terminal rewrites stay legal, which must
-/// be rejected, and how much of a rejected write can be taken back.
+/// Structural normalization is interceptor work. The coordinated raw writer is deliberately a
+/// much narrower primitive: it must faithfully store its argument and must not throw.
 /// </summary>
 public class TerminalStoreContractTests
 {
-    private static IInterceptorSubjectContext CreateContext()
-    {
-        return InterceptorSubjectContext
-            .Create()
-            .WithLifecycle();
-    }
-
-    private static OwnershipGraph GetGraph(IInterceptorSubjectContext context)
-    {
-        return ((LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!).Graph;
-    }
-
-    /// <summary>
-    /// Pins the terminal-store contract and the one boundary it has. A terminal that stores a
-    /// subject the write never proposed is a contract violation, and the rejection now comes from
-    /// the claim taken over the stored value, which runs before the reconcile commits a snapshot or
-    /// records any ownership. So the graph is left exactly as it was, asserted per kind of state
-    /// rather than through one probe.
-    ///
-    /// The backing field is the boundary, and the last assertion pins it deliberately rather than
-    /// leaving it unchecked: the field still holds what the terminal stored, and a future change
-    /// that restores it would be a contract move that should be seen rather than absorbed. The
-    /// reason it cannot be restored is that the only store the framework has is the terminal this
-    /// subject handed it, and this terminal ignores the value it is given, so replaying it with the
-    /// pre-write value re-stores the same foreign subject and fails again. Going through the
-    /// property setter is worse, being full chain re-entry with the same substitution and therefore
-    /// unbounded recursion. The model is deliberately badly behaved; a terminal that is a function
-    /// of its argument never reaches this boundary, because it stores only subjects the write
-    /// proposed and the claim taken before the terminal already covers those.
-    /// </summary>
     [Fact]
-    public void WhenATerminalStoresASubjectOwnedByAnotherContext_ThenTheRejectedWriteLeavesTheGraphUnchanged()
+    public void WhenInterceptorNormalizesStructuralValue_ThenNormalizedValueIsCommitted()
     {
-        // Arrange: the terminal substitutes a subject owned by a second context, which the claim
-        // taken before the terminal never covered.
-        var context = CreateContext();
-        var otherContext = CreateContext();
-        var parent = new SubstitutingDevice();
-        ((IInterceptorSubject)parent).AttachToContext(context);
-        var foreign = new SubstitutingDevice();
-        ((IInterceptorSubject)foreign).AttachToContext(otherContext);
-        parent.Substitute = foreign;
-        var graph = GetGraph(context);
-        var property = new PropertyReference(parent, nameof(SubstitutingDevice.Child));
-        var snapshotBeforeWrite = graph.GetSnapshot(property);
-
-        // Act
-        var exception = Record.Exception(() => parent.Child = new SubstitutingDevice());
-
-        // Assert: the write is rejected.
-        Assert.NotNull(exception);
-
-        // Every kind of graph state the write would have published is absent, which is what makes
-        // the rejection one that arrived before the reconcile rather than during it.
-        Assert.Same(snapshotBeforeWrite, graph.GetSnapshot(property));
-        Assert.False(graph.IsOwned(foreign),
-            "the rejected write recorded ownership for a subject owned by another context");
-        Assert.Same(otherContext, ((IInterceptorSubject)foreign).TryGetContext());
-        Assert.Empty(((IInterceptorSubject)foreign).GetParents());
-
-        // The documented boundary, asserted rather than omitted so that moving it is visible.
-        Assert.True(ReferenceEquals(parent.Child, foreign),
-            "the backing field no longer holds what the terminal stored, so the terminal-store " +
-            "contract has moved: the documented guarantee is that a rejected write leaves no " +
-            "snapshot, no ownership and no claim, and explicitly not that it restores the field, " +
-            "because the only store the framework has is the terminal the subject handed it and a " +
-            "terminal that ignores the value it is given cannot be replayed to restore anything");
-    }
-
-    /// <summary>
-    /// Parity guard, not a repro: a normalizing setter that stores a reordered subset of the
-    /// proposed subjects is legal and must keep working. This is also the only case that runs the
-    /// stored-value claim on a value that has to pass.
-    /// </summary>
-    [Fact]
-    public void WhenATerminalReordersAndDropsTheProposedSubjects_ThenTheWriteSucceeds()
-    {
-        // Arrange: the stored list is a different instance from the proposed one, so a
-        // reference-equality short circuit cannot hide the rewrite.
-        var context = CreateContext();
-        var parent = new ReorderingDevice();
-        ((IInterceptorSubject)parent).AttachToContext(context);
-        var kept = new ReorderingDevice { Name = "b" };
-        var alsoKept = new ReorderingDevice { Name = "a" };
-        var dropped = new ReorderingDevice { Name = "dropped" };
+        // Arrange
+        var interceptor = new NormalizingChildrenInterceptor();
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        context.AddService<IWriteInterceptor>(interceptor);
+        var parent = new Person(context);
+        var kept = new Person { FirstName = "b" };
+        var alsoKept = new Person { FirstName = "a" };
+        var dropped = new Person { FirstName = "dropped" };
+        interceptor.Target = parent;
 
         // Act
         parent.Children = [kept, alsoKept, dropped];
 
-        // Assert: the kept subjects are owned in the terminal's order, not the caller's, and the
-        // dropped one's provisional claim was handed back rather than becoming ownership.
-        Assert.Equal(["a", "b"], parent.Children!.Select(child => child.Name));
-        Assert.Same(context, ((IInterceptorSubject)kept).TryGetContext());
-        Assert.Same(context, ((IInterceptorSubject)alsoKept).TryGetContext());
-        Assert.Null(((IInterceptorSubject)dropped).TryGetContext());
-        Assert.Empty(((IInterceptorSubject)dropped).GetParents());
+        // Assert
+        Assert.Equal(["a", "b"], parent.Children.Select(child => child.FirstName));
+        Assert.Same(context, kept.TryGetContext());
+        Assert.Same(context, alsoKept.TryGetContext());
+        Assert.Null(dropped.TryGetContext());
     }
 
-    /// <summary>
-    /// The stored-value claim is skipped when the terminal stored what it was given, and that has to
-    /// hold for an immutable array too. It does not follow from the reference-typed case: the
-    /// authoritative getter boxes a struct afresh on every call, so comparing the stored value to
-    /// the proposed one by reference answers false for every such write and scans the value a second
-    /// time. Asserted against the identical reference-typed shape on the same subject, so the number
-    /// is a comparison rather than a magic constant, and a change in how often the protocol passes
-    /// over a value moves both together.
-    /// </summary>
     [Fact]
-    public void WhenATerminalStoresTheProposedImmutableArray_ThenItIsNotScannedAgain()
+    public void WhenRawWriterMutatesThenThrows_ThenMutationIsOutsideCoordinatedContract()
     {
         // Arrange
-        var context = CreateContext();
-        var device = new StoredValueClaimDevice();
-        ((IInterceptorSubject)device).AttachToContext(context);
-        var immutableChild = new ExecutorCountingSubject();
-        var listChild = new ExecutorCountingSubject();
-
-        // Act: the same shape assigned twice, once value-typed and once reference-typed.
-        device.ImmutableChildren = [immutableChild];
-        device.ListChildren = new List<ExecutorCountingSubject> { listChild };
-
-        // Assert: every pass over a value asks each subject it holds for its attachment, so an extra
-        // pass shows up as extra accesses on the child it passed over.
-        Assert.Equal(listChild.ExecutorAccessCount, immutableChild.ExecutorAccessCount);
-    }
-
-    /// <summary>
-    /// A value type whose equality answers about a version stamp rather than about storage must not
-    /// be allowed to decide whether the stored value still needs claiming. Two such values compare
-    /// equal while holding entirely different subjects, so trusting that equality would skip the
-    /// claim on a graph nothing validated and commit it, which is the same hole an overridden
-    /// <c>Equals</c> would open on the reference side. Such a type is claimed a second time instead,
-    /// which costs one scan and cannot be wrong.
-    /// </summary>
-    [Fact]
-    public void WhenATerminalStoresAnEquallyStampedValueHoldingAForeignSubject_ThenTheRejectedWriteLeavesTheGraphUnchanged()
-    {
-        // Arrange: the substitute carries the same stamp as the proposed value and a foreign child.
-        var context = CreateContext();
-        var otherContext = CreateContext();
-        var device = new StoredValueClaimDevice();
-        ((IInterceptorSubject)device).AttachToContext(context);
-        var foreign = new Person { FirstName = "F" };
-        ((IInterceptorSubject)foreign).AttachToContext(otherContext);
-        device.StampedSubstitute = new StampedChildren(7, [foreign]);
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var parent = new InvalidRawWriterSubject();
+        parent.AttachToContext(context);
+        var proposed = new InvalidRawWriterSubject();
+        var substituted = new InvalidRawWriterSubject();
+        parent.Substitute = substituted;
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var property = new PropertyReference(parent, nameof(InvalidRawWriterSubject.Child));
+        var snapshot = lifecycle.Graph.GetSnapshot(property);
 
         // Act
-        var exception = Record.Exception(() => device.Stamped = new StampedChildren(7, []));
+        var exception = Record.Exception(() => parent.Child = proposed);
 
-        // Assert
-        Assert.NotNull(exception);
-        var graph = GetGraph(context);
-        var snapshot = graph.GetSnapshot(new PropertyReference(device, nameof(StoredValueClaimDevice.Stamped)));
-        Assert.DoesNotContain(snapshot.Occurrences, occurrence => ReferenceEquals(occurrence.Subject, foreign));
-        Assert.False(graph.IsOwned(foreign),
-            "the rejected write recorded ownership for a subject owned by another context");
-        Assert.Same(otherContext, ((IInterceptorSubject)foreign).TryGetContext());
-        Assert.Empty(((IInterceptorSubject)foreign).GetParents());
+        // Assert: the terminal primitive violated both promises. Core cannot replay an arbitrary
+        // writer to restore the field, but it has not published a graph transaction for it.
+        Assert.IsType<InvalidRawWriterException>(exception);
+        Assert.Same(substituted, parent.Child);
+        Assert.Same(snapshot, lifecycle.Graph.GetSnapshot(property));
+        Assert.Null(proposed.TryGetContext());
+        Assert.Null(substituted.TryGetContext());
     }
+
+    private sealed class NormalizingChildrenInterceptor : IWriteInterceptor
+    {
+        public Person? Target { get; set; }
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (ReferenceEquals(context.Property.Subject, Target) &&
+                context.Property.Name == nameof(Person.Children) &&
+                context.NewValue is Person[] children)
+            {
+                context.NewValue = (TProperty)(object)children
+                    .Where(child => child.FirstName != "dropped")
+                    .OrderBy(child => child.FirstName)
+                    .ToArray();
+            }
+
+            next(ref context);
+        }
+    }
+
+    private sealed class InvalidRawWriterSubject : IInterceptorSubject
+    {
+        private static readonly FrozenDictionary<string, SubjectPropertyMetadata> Metadata =
+            new Dictionary<string, SubjectPropertyMetadata>
+            {
+                [nameof(Child)] = new(
+                    nameof(Child),
+                    typeof(InvalidRawWriterSubject),
+                    [],
+                    static subject => ((InvalidRawWriterSubject)subject)._child,
+                    static (subject, value) => ((InvalidRawWriterSubject)subject).Child = (InvalidRawWriterSubject?)value,
+                    isIntercepted: true,
+                    isDynamic: false)
+            }.ToFrozenDictionary();
+
+        private IInterceptorExecutor? _executor;
+        private InvalidRawWriterSubject? _child;
+
+        public InvalidRawWriterSubject? Substitute { get; set; }
+
+        public IInterceptorExecutor Executor => InterceptorExecutor.GetOrCreate(ref _executor, this);
+
+        public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
+
+        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => Metadata;
+
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) =>
+            throw new NotSupportedException();
+
+        public InvalidRawWriterSubject? Child
+        {
+            get => ((InterceptorExecutor)Executor).GetGeneratedPropertyValue(
+                nameof(Child), static subject => ((InvalidRawWriterSubject)subject)._child);
+            set => ((InterceptorExecutor)Executor).SetGeneratedPropertyValue(
+                nameof(Child),
+                value,
+                static subject => ((InvalidRawWriterSubject)subject)._child,
+                static (subject, _) =>
+                {
+                    var instance = (InvalidRawWriterSubject)subject;
+                    instance._child = instance.Substitute;
+                    throw new InvalidRawWriterException();
+                });
+        }
+    }
+
+    private sealed class InvalidRawWriterException : Exception;
 }

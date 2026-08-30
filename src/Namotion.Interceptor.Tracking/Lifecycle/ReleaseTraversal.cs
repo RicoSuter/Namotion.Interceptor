@@ -98,7 +98,7 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
     {
         // The zero-edge short circuit is what keeps tree-shaped removals free of any walk; the walk
         // itself already answers the subject's own anchor.
-        return graph.HasReservation(subject) ||
+        return graph.HasReservation(subject) || OwnershipGraph.HasStructuralLease(subject) ||
                (ownership.IncomingCount > 0
                    ? reachability.IsAnchorReachable(subject, null)
                    : graph.IsAnchored(subject));
@@ -122,10 +122,7 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
             // property admission has to publish edges for that one and none for this one.
             graph.MarkReleasing(subject);
 
-            foreach (var entry in subject.Properties)
-            {
-                subject.DetachSubjectProperty(new PropertyReference(subject, entry.Key));
-            }
+            notifier.DetachSubjectProperties(subject, subject.Properties.Keys);
 
             DrainRemainingEdges(subject, ownership);
 

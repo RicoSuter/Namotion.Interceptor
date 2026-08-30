@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 using Castle.DynamicProxy;
+using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Dynamic;
 
@@ -76,7 +78,9 @@ public class DynamicSubjectFactory
                 invocation.Method.Name.StartsWith("get_"))
             {
                 var accessor = GetAccessor(invocation.Method, isSetter: false);
-                invocation.ReturnValue = context.GetPropertyValue(accessor.Name, accessor.Read);
+                invocation.ReturnValue = accessor.IsStructural
+                    ? ((InterceptorExecutor)context).GetGeneratedPropertyValue(accessor.Name, accessor.Read)
+                    : context.GetPropertyValue(accessor.Name, accessor.Read);
             }
             else if (invocation.Method.IsSpecialName &&
                      invocation.Method.Name.StartsWith("set_"))
@@ -137,11 +141,16 @@ public class DynamicSubjectFactory
         /// </summary>
         private sealed class PropertyAccessor
         {
-            private PropertyAccessor(string name, Func<IInterceptorSubject, object?> read, Action<IInterceptorSubject, object?>? write)
+            private PropertyAccessor(
+                string name,
+                Func<IInterceptorSubject, object?> read,
+                Action<IInterceptorSubject, object?>? write,
+                bool isStructural)
             {
                 Name = name;
                 Read = read;
                 Write = write;
+                IsStructural = isStructural;
             }
 
             public string Name { get; }
@@ -149,6 +158,8 @@ public class DynamicSubjectFactory
             public Func<IInterceptorSubject, object?> Read { get; }
 
             public Action<IInterceptorSubject, object?>? Write { get; }
+
+            public bool IsStructural { get; }
 
             public static PropertyAccessor Create(MethodInfo method, bool isSetter, DynamicSubjectInterceptor interceptor)
             {
@@ -163,7 +174,7 @@ public class DynamicSubjectFactory
                         declaredType, name, read, (_, value) => interceptor.WriteProperty(name, value))
                     : null;
 
-                return new PropertyAccessor(name, read, write);
+                return new PropertyAccessor(name, read, write, declaredType.CanContainSubjects());
             }
         }
     }

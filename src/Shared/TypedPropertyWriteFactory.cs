@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reflection;
+using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor;
 
@@ -54,9 +56,26 @@ internal static class TypedPropertyWriteFactory
         // One wrapper per property, not per write: the typed chain terminal invokes it and pays
         // the single box back into the stored object-typed setter.
         Action<IInterceptorSubject, TProperty> writeValue = (subject, value) => setValue(subject, value);
+        Func<IInterceptorSubject, TProperty>? readValue = getValue is null ? null : subject => (TProperty)getValue(subject)!;
+        var isStructural = typeof(TProperty).CanContainSubjects();
 
         return (subject, newValue) =>
         {
+            if (isStructural)
+            {
+                if (readValue is null)
+                {
+                    subject.Executor.SetPropertyValue(propertyName, (TProperty)newValue!, default!, writeValue);
+                }
+                else
+                {
+                    ((InterceptorExecutor)subject.Executor).SetGeneratedPropertyValue(
+                        propertyName, (TProperty)newValue!, readValue, writeValue);
+                }
+
+                return;
+            }
+
             var currentValue = getValue?.Invoke(subject);
             if ((newValue is TProperty || (newValue is null && default(TProperty) is null)) &&
                 (currentValue is TProperty || (currentValue is null && default(TProperty) is null)))

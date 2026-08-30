@@ -158,6 +158,31 @@ public class DynamicSubjectTests
     }
 
     [Fact]
+    public void WhenDynamicStructuralValueIsRewrittenDownstream_ThenTrustedTerminalStoresFinalValue()
+    {
+        // Arrange
+        var interceptor = new DynamicStructuralRewriteInterceptor();
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        context.AddService<IWriteInterceptor>(interceptor);
+        var otherContext = InterceptorSubjectContext.Create().WithLifecycle();
+        var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotorHolder));
+        subject.AttachToContext(context);
+        var holder = (IMotorHolder)subject;
+        var foreign = new Motor();
+        foreign.AttachToContext(otherContext);
+        var replacement = new Motor();
+        interceptor.Arm(subject, replacement);
+
+        // Act
+        holder.Motor = foreign;
+
+        // Assert
+        Assert.Same(replacement, holder.Motor);
+        Assert.Same(context, replacement.TryGetContext());
+        Assert.Same(otherContext, foreign.TryGetContext());
+    }
+
+    [Fact]
     public void WhenADynamicStructuralPropertyIsWrittenBeforeAttach_ThenTheAttachDiscoversIt()
     {
         // Arrange: an unattached proxy writes through the structural accessor's unattached arm,
@@ -224,12 +249,6 @@ public class DynamicSubjectTests
 
     public class TestLifecycleInterceptor(string name, List<string> logs) : ILifecycleInterceptor
     {
-        private readonly object _structuralWriteGate = new();
-
-        public void EnterStructuralWriteGate() => Monitor.Enter(_structuralWriteGate);
-
-        public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
-
         public bool TryAddProperties(SubjectPropertyRegistration registration)
         {
             registration.Publish();
@@ -287,5 +306,27 @@ public class DynamicSubjectTests
             _logs.Add($"{_name}: After write {context.Property.Name}");
         }
 
+    }
+
+    private sealed class DynamicStructuralRewriteInterceptor : IWriteInterceptor
+    {
+        private IInterceptorSubject? _subject;
+        private Motor? _replacement;
+
+        public void Arm(IInterceptorSubject subject, Motor replacement)
+        {
+            _subject = subject;
+            _replacement = replacement;
+        }
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (ReferenceEquals(context.Property.Subject, _subject) && context.Property.Name == nameof(IMotorHolder.Motor))
+            {
+                context.NewValue = (TProperty)(object)_replacement!;
+            }
+
+            next(ref context);
+        }
     }
 }

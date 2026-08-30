@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -358,7 +359,11 @@ public class RegisteredSubject
             name,
             type,
             attributes,
-            getValue is not null ? s => s.Executor.GetPropertyValue(name, getValue) : null,
+            getValue is null
+                ? null
+                : type.CanContainSubjects()
+                    ? s => ((InterceptorExecutor)s.Executor).GetGeneratedPropertyValue(name, getValue)
+                    : s => s.Executor.GetPropertyValue(name, getValue),
             setValue is not null
                 // The value arrives boxed here, so a TProperty-routed write would classify every
                 // dynamic property as structural and put scalar writes (source telemetry, say)

@@ -14,16 +14,23 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
         long sourceRevision = 0,
         Dictionary<IInterceptorSubject, OwnershipReservationToken>? reservations = null)
     {
-        var oldSnapshot = graph.GetSnapshot(property);
-        var newSnapshot = StructuralSnapshotBuilder.Build(metadata.Type, newValue, sourceRevision);
+        var snapshot = StructuralSnapshotBuilder.Build(metadata.Type, newValue, sourceRevision);
+        Publish(graph.PrepareWrite(property, newValue, snapshot, sourceRevision), reservations);
+    }
 
-        if (!graph.IsOwned(property.Subject) || !ReferenceEquals(graph.GetSnapshot(property), oldSnapshot))
+    internal void Publish(
+        OwnershipGraph.PreparedTopologyChange change,
+        Dictionary<IInterceptorSubject, OwnershipReservationToken>? reservations = null)
+    {
+        if (graph.Publish(change))
         {
-            return;
+            ReconcileOccurrences(
+                change.Property,
+                change.Value,
+                change.OldSnapshot.Occurrences,
+                change.NewSnapshot.Occurrences,
+                reservations);
         }
-
-        graph.SetSnapshot(property, newSnapshot);
-        ReconcileOccurrences(property, newValue, oldSnapshot.Occurrences, newSnapshot.Occurrences, reservations);
     }
 
     private void ReconcileOccurrences(

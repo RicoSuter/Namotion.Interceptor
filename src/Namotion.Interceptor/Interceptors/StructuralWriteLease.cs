@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace Namotion.Interceptor.Interceptors;
 
 internal enum AttachmentPhase
@@ -28,19 +30,50 @@ internal sealed class StructuralWriteLease : IDisposable
     internal StructuralWriteLease(
         InterceptorExecutor executor,
         InterceptorSubjectContext? context,
-        long attachmentRevision)
+        long attachmentRevision,
+        ITopologyAdmissionCoordinator? coordinator = null)
     {
         _executor = executor;
         Context = context;
         AttachmentRevision = attachmentRevision;
+        Coordinator = coordinator;
     }
 
     internal InterceptorSubjectContext? Context { get; }
 
     internal long AttachmentRevision { get; }
 
+    internal ITopologyAdmissionCoordinator? Coordinator { get; }
+
+    internal Exception? Complete(Exception? primaryException)
+    {
+        var executor = Interlocked.Exchange(ref _executor, null);
+        if (executor is null)
+        {
+            return primaryException;
+        }
+
+        if (Coordinator is null)
+        {
+            executor.ReleaseStructuralWriteLease(this);
+            return primaryException;
+        }
+
+        return Coordinator.CompleteStructuralWrite(executor, this, primaryException);
+    }
+
     public void Dispose()
     {
-        Interlocked.Exchange(ref _executor, null)?.ReleaseStructuralWriteLease(this);
+        try
+        {
+            if (Complete(null) is { } exception)
+            {
+                Trace.TraceError($"Completing a structural write lease failed: {exception}");
+            }
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError($"Completing a structural write lease failed: {exception}");
+        }
     }
 }

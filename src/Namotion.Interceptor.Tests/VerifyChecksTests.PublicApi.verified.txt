@@ -3,6 +3,7 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tracking")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tracking.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETStandard,Version=v2.0", FrameworkDisplayName=".NET Standard 2.0")]
 namespace Namotion.Interceptor.Attributes
 {
@@ -194,8 +195,6 @@ namespace Namotion.Interceptor.Interceptors
     {
         void AttachSubjectToContext(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context, Namotion.Interceptor.SubjectAttachmentAnchorKind anchor);
         void DetachSubjectFromContext(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.IInterceptorSubjectContext context);
-        void EnterStructuralWriteGate();
-        void ExitStructuralWriteGate();
         bool TryAddProperties(Namotion.Interceptor.Interceptors.SubjectPropertyRegistration registration);
     }
     public interface IMethodInterceptor

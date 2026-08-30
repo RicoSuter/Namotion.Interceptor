@@ -17,20 +17,18 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
         IInterceptorSubject subject,
         Dictionary<IInterceptorSubject, OwnershipReservationToken>? reservations = null)
     {
-        if (!graph.AreSnapshotsSeeded(subject))
-        {
-            SeedAndAttachChildren(subject, reservations);
-        }
+        SeedAndAttachChildren(subject, reservations, seed: !graph.AreSnapshotsSeeded(subject));
     }
 
     public void SeedAndAttachChildren(
         IInterceptorSubject subject,
-        Dictionary<IInterceptorSubject, OwnershipReservationToken>? reservations = null)
+        Dictionary<IInterceptorSubject, OwnershipReservationToken>? reservations = null,
+        bool seed = true)
     {
         var children = LifecycleScratch.RentChildList();
         try
         {
-            graph.CollectStructuralChildren(subject, children, seed: true);
+            graph.CollectStructuralChildren(subject, children, seed);
             foreach (var (property, occurrence) in children)
             {
                 AttachEdge(occurrence.Subject, property, occurrence.SubjectOrdinal, occurrence.Index, reservations);
@@ -131,10 +129,7 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
         }
 
         notifier.RaiseSubjectAttached(change);
-        foreach (var propertyName in properties)
-        {
-            subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
-        }
+        notifier.AttachSubjectProperties(subject, properties);
     }
 
     /// <summary>

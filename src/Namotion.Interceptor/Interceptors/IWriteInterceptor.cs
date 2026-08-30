@@ -41,24 +41,26 @@ public struct PropertyWriteContext<TProperty>
     // trigger's already-resolved value.
     private long _writeTimestamp;
 
-    // The terminal write action for this call. Threaded through the per-call context (which already
-    // flows by ref to the end of the chain) instead of a ThreadStatic on the shared chain instance:
-    // per-call state belongs on the per-call context, which is also robust against reentrant writes.
+    // Per-call terminal state flows by ref through the chain.
     internal Action<IInterceptorSubject, TProperty>? Terminal;
 
-    // The executor that started this write, and always the executor of Property.Subject: both library
-    // construction sites pass their own 'this' alongside a PropertyReference over their own subject.
-    // The constructors are also visible to the test and benchmark assemblies, which construct contexts
-    // of their own, which is why the terminal asserts that pairing instead of assuming it.
-    // Threaded through the context so the terminal can stamp the commit revision with a plain field
-    // increment, instead of resolving the subject's context (an interface dispatch plus a type test)
-    // on every committed write.
+    internal Func<IInterceptorSubject, TProperty>? ReadValue;
+
+    internal IWriteTerminalCoordinator? TerminalCoordinator;
+
+    internal StructuralWriteLease? StructuralLease;
+
+    internal object? CommittedLifecycleJournal;
+
+    // Paired with Property.Subject so the terminal can stamp its executor directly.
     internal readonly InterceptorExecutor Executor;
 
     private TProperty _currentValue;
     private TProperty _newValue;
     private TProperty _terminalValue = default!;
     private bool _terminalEntered;
+    private ChangeOrigin _terminalOrigin;
+    private bool _isTerminalOriginResolved;
 
     internal bool IsTerminalCommitted;
 
@@ -95,10 +97,7 @@ public struct PropertyWriteContext<TProperty>
     /// </summary>
     public bool IsWritten { get; set; }
 
-    /// <summary>
-    /// The attempted origin paired with the value the source sent (valid when the origin is
-    /// stamped). Finalized at the terminal write; see <see cref="Origin"/> and <see cref="FinalizeOrigin"/>.
-    /// </summary>
+    // Attempted origin paired with the source value until terminal finalization.
     private AttemptedOrigin _attempted;
 
     /// <summary>
@@ -110,14 +109,7 @@ public struct PropertyWriteContext<TProperty>
     /// </summary>
     public ChangeOrigin Origin => _attempted.Origin;
 
-    /// <summary>
-    /// Constructs a write context and, as a side effect, consumes the thread-static pending
-    /// origin stamp for this property (see <see cref="PendingOrigin"/>). Any direct construction
-    /// (tests, benchmarks, not just the interceptor chain) drains the pending stamp for the
-    /// matching property; a caller newing up a context by hand takes on that consumption.
-    /// Internal so every meaningfully constructed context comes from the library's execution
-    /// entry points, which always thread the per-call chain state (such as the terminal) through it.
-    /// </summary>
+    // Construction consumes this property's thread-static pending origin.
     internal PropertyWriteContext(InterceptorExecutor executor, PropertyReference property, TProperty currentValue, TProperty newValue)
     {
         Executor = executor;
@@ -129,17 +121,7 @@ public struct PropertyWriteContext<TProperty>
         PendingOrigin.TryConsume(in property, out _attempted);
     }
 
-    /// <summary>
-    /// Internal constructor for cascade re-entry: pre-populates the cache with the trigger's
-    /// already-resolved raw timestamp, so the dependent's write does not need to lazy-resolve
-    /// (and therefore does not need an active <c>WithChangedTimestamp</c> scope to share state
-    /// with the trigger). Pass 0 to leave the cache uninitialized (the default lazy behavior).
-    /// Like the other constructor, this consumes the thread-static pending origin stamp for
-    /// this property (see <see cref="PendingOrigin"/>) as a side effect of construction.
-    ///
-    /// Cascade re-entry is only ever reached with a new value that is already the stabilized getter
-    /// output, which the terminal freezes before publishing.
-    /// </summary>
+    // Cascade re-entry supplies its trigger's resolved timestamp and stabilized value.
     internal PropertyWriteContext(InterceptorExecutor executor, PropertyReference property, TProperty currentValue, TProperty newValue, long rawTimestamp)
     {
         Executor = executor;
@@ -157,6 +139,13 @@ public struct PropertyWriteContext<TProperty>
             throw new InvalidOperationException("The write terminal can only be entered once.");
         _terminalEntered = true;
         return _terminalValue = _newValue;
+    }
+
+    internal void PrepareTerminalState()
+    {
+        _terminalOrigin = ResolveFinalOrigin();
+        _isTerminalOriginResolved = true;
+        _ = WriteTimestampRaw;
     }
 
     internal void SetTerminalPredecessor(TProperty value) => _currentValue = value;
@@ -262,6 +251,11 @@ public struct PropertyWriteContext<TProperty>
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal ChangeOrigin GetFinalOrigin()
+    {
+        return _isTerminalOriginResolved ? _terminalOrigin : ResolveFinalOrigin();
+    }
+
+    private ChangeOrigin ResolveFinalOrigin()
     {
         if (_attempted.Origin.Kind == ChangeOriginKind.Local)
         {

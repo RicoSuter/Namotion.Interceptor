@@ -4,13 +4,7 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 
-/// <summary>
-/// A structural write enters the target context's topology gate before the write chain is resolved,
-/// so the callback guard that would reject a cross-context write from inside a lifecycle callback
-/// only runs once that gate is already held. Two symmetric callbacks therefore acquire two gates in
-/// opposite order. The explicit attach, detach and property admission entry points all check before
-/// their gate; the structural write is the one topology mutation that does not.
-/// </summary>
+/// <summary>Verifies that one logical context is enforced before any foreign topology admission.</summary>
 public class CrossContextGateDeadlockTests
 {
     private static IInterceptorSubjectContext CreateContext()
@@ -18,6 +12,34 @@ public class CrossContextGateDeadlockTests
         return InterceptorSubjectContext
             .Create()
             .WithLifecycle();
+    }
+
+    [Fact]
+    public void WhenDownstreamWriteTargetsSecondContext_ThenItIsRejectedBeforeForeignAdmission()
+    {
+        // Arrange: any foreign coordinator, gate, lease or chain entry precedes logical-context rejection.
+        var foreignLifecycle = new AdmissionProbeLifecycleInterceptor();
+        var foreignContext = InterceptorSubjectContext.Create();
+        foreignContext.AddService(foreignLifecycle);
+        var foreignTarget = new Person();
+        foreignTarget.AttachToContext(foreignContext);
+
+        var attempt = new CrossContextAttemptInterceptor();
+        var context = CreateContext();
+        context.AddService<IWriteInterceptor>(attempt);
+        var parent = new Person(context);
+        attempt.Arm(parent, nameof(Person.Mother), () => foreignTarget.Father = new Person());
+
+        // Act
+        parent.Mother = new Person();
+
+        // Assert
+        Assert.IsAssignableFrom<InvalidOperationException>(attempt.Exception);
+        Assert.Equal(0, foreignLifecycle.CoordinatorEntries);
+        Assert.Equal(0, foreignLifecycle.GateEntries);
+        Assert.Equal(0, foreignLifecycle.LeaseAdmissions);
+        Assert.Equal(0, foreignLifecycle.WriteChainEntries);
+        Assert.Null(foreignTarget.Father);
     }
 
     /// <summary>
@@ -108,15 +130,13 @@ public class CrossContextGateDeadlockTests
             "probable ABBA deadlock on two lifecycle gates: the first attach " +
             $"{(firstCompleted ? "completed" : "did not complete")} and the second attach " +
             $"{(secondCompleted ? "completed" : "did not complete")} within {WriteProtocolAcceptance.JoinTimeout.TotalSeconds:F0} seconds");
-        Assert.IsType<LifecycleContractViolationException>(firstCrossWriteException);
-        Assert.IsType<LifecycleContractViolationException>(secondCrossWriteException);
+        Assert.IsAssignableFrom<InvalidOperationException>(firstCrossWriteException);
+        Assert.IsAssignableFrom<InvalidOperationException>(secondCrossWriteException);
     }
 
     /// <summary>
-    /// A third-party write interceptor with no ordering attributes registered after the lifecycle,
-    /// which places it downstream of the lifecycle in the resolved write chain. It therefore runs
-    /// at callback depth zero while holding the writing context's topology gate, which the callback
-    /// reentrancy guard explicitly does not bind.
+    /// A third-party write interceptor registered downstream of the lifecycle and retained inside
+    /// the writing context's Core logical scope through the complete unwind.
     /// </summary>
     private sealed class CrossContextWriteInterceptor(Barrier rendezvous, TimeSpan rendezvousTimeout) : IWriteInterceptor
     {
@@ -159,23 +179,105 @@ public class CrossContextGateDeadlockTests
         }
     }
 
+    private sealed class CrossContextAttemptInterceptor : IWriteInterceptor
+    {
+        private IInterceptorSubject? _subject;
+        private string? _propertyName;
+        private Action? _write;
+
+        public Exception? Exception { get; private set; }
+
+        public void Arm(IInterceptorSubject subject, string propertyName, Action write)
+        {
+            _subject = subject;
+            _propertyName = propertyName;
+            _write = write;
+        }
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (ReferenceEquals(context.Property.Subject, _subject) && context.Property.Name == _propertyName)
+            {
+                _subject = null;
+                Exception = Record.Exception(_write!);
+            }
+
+            next(ref context);
+        }
+    }
+
+    private sealed class AdmissionProbeLifecycleInterceptor : ILifecycleInterceptor, ITopologyAdmissionCoordinator
+    {
+        public int CoordinatorEntries { get; private set; }
+
+        public int GateEntries { get; private set; }
+
+        public int LeaseAdmissions { get; private set; }
+
+        public int WriteChainEntries { get; private set; }
+
+        StructuralWriteLease ITopologyAdmissionCoordinator.AcquireStructuralWriteLease(InterceptorExecutor executor)
+        {
+            CoordinatorEntries++;
+            GateEntries++;
+            LeaseAdmissions++;
+            throw new InvalidOperationException("The foreign topology coordinator must not be entered.");
+        }
+
+        Exception? ITopologyAdmissionCoordinator.CompleteStructuralWrite(
+            InterceptorExecutor executor,
+            StructuralWriteLease lease,
+            Exception? primaryException) =>
+            throw new InvalidOperationException("No foreign structural lease should require completion.");
+
+        OwnershipReservationToken ITopologyAdmissionCoordinator.AcquireOwnershipReservation(
+            InterceptorExecutor executor,
+            ReservationMode mode) =>
+            throw new InvalidOperationException("The foreign topology coordinator must not reserve ownership.");
+
+        void ITopologyAdmissionCoordinator.CompleteOwnershipReservation(
+            InterceptorExecutor executor,
+            OwnershipReservationToken token,
+            bool retainCommittedOwnership) =>
+            throw new InvalidOperationException("No foreign ownership reservation should require completion.");
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            WriteChainEntries++;
+            next(ref context);
+        }
+
+        public void AttachSubjectToContext(
+            IInterceptorSubject subject,
+            IInterceptorSubjectContext context,
+            SubjectAttachmentAnchorKind anchor)
+        {
+            subject.Executor.TryGetAttachment(out _, out _, out var revision);
+            Assert.True(subject.Executor.TryUpdateAttachment(revision, context, anchor, out _));
+        }
+
+        public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
+        {
+            subject.Executor.TryGetAttachment(out _, out _, out var revision);
+            Assert.True(subject.Executor.TryUpdateAttachment(
+                revision, null, SubjectAttachmentAnchorKind.None, out _));
+        }
+
+        public bool TryAddProperties(SubjectPropertyRegistration registration)
+        {
+            registration.Publish();
+            return true;
+        }
+    }
+
     /// <summary>
-    /// The second half of the same finding: no lifecycle callback is involved, so no guard is
-    /// consulted at all. Two ordinary downstream write interceptors cross-writing into each other's
-    /// contexts acquire two topology gates in opposite order, because the gate is entered before the
-    /// write chain is resolved and the interceptor runs inside it.
+    /// Two ordinary downstream write interceptors cross-write into each other's contexts after their
+    /// terminals return. Each still carries its Core logical-context scope through that unwind.
     ///
     /// The rendezvous is artificial, because it lines both interceptors up inside their own gates at
     /// the same time; the acquisition order they then take is the production one.
     ///
-    /// Like the callback half above, this asserts the rejection and not merely that both operations
-    /// terminate. The distinction matters here: the gate is currently entered around the whole write
-    /// chain, so an interceptor moved to the other side of the lifecycle still holds it, but if
-    /// entering the gate ever moves inside the lifecycle then an interceptor outside it would hold
-    /// nothing, both writes would simply complete, and a termination-only assertion would pass while
-    /// proving nothing. The expected exception type follows the contract that a second transaction on
-    /// one thread is rejected; a design that rejects with a different type makes this a one-line
-    /// update rather than a finding.
+    /// Like the callback half above, this asserts the rejection and not merely termination.
     /// </summary>
     [Fact]
     [Trait("Category", "Concurrency")]
@@ -227,7 +329,7 @@ public class CrossContextGateDeadlockTests
             $"{(firstCompleted ? "completed" : "did not complete")} and the second structural write " +
             $"{(secondCompleted ? "completed" : "did not complete")} within {WriteProtocolAcceptance.JoinTimeout.TotalSeconds:F0} seconds");
 
-        Assert.IsType<LifecycleContractViolationException>(firstInterceptor.CrossContextWriteException);
-        Assert.IsType<LifecycleContractViolationException>(secondInterceptor.CrossContextWriteException);
+        Assert.IsAssignableFrom<InvalidOperationException>(firstInterceptor.CrossContextWriteException);
+        Assert.IsAssignableFrom<InvalidOperationException>(secondInterceptor.CrossContextWriteException);
     }
 }

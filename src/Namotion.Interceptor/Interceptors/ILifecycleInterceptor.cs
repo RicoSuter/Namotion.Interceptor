@@ -21,31 +21,6 @@ public interface ILifecycleInterceptor :
     ISingletonContextService<ILifecycleInterceptor>
 {
     /// <summary>
-    /// Enters the synchronization gate a structural write must hold before the subject's
-    /// attachment monitor and before the write chain is resolved and executed. The gate is the
-    /// outermost lock of the structural write order; the protocol is documented on
-    /// <see cref="IInterceptorExecutor.SetPropertyValue{TProperty}"/>.
-    /// </summary>
-    /// <remarks>
-    /// The gate must support reentrant acquisition on one thread (the lifecycle re-enters it from
-    /// inside the write chain). The built-in lifecycle enters its per-context topology lock. An
-    /// enter/exit pair rather than an exposed lock object, so a consumer cannot take the gate with
-    /// an idiomatic-looking <c>lock</c> statement and hang the process against a structural write.
-    ///
-    /// Who enters it is a fixed convention: Core enters the gate around chain-executing
-    /// operations (the structural write seam), while the lifecycle enters it itself inside its
-    /// own entry points (attach, detach, property admission). A new lifecycle entry point follows
-    /// the second form; a new chain-executing operation the first.
-    /// </remarks>
-    void EnterStructuralWriteGate();
-
-    /// <summary>
-    /// Exits the gate entered by <see cref="EnterStructuralWriteGate"/>. Call from a finally block
-    /// paired with that enter.
-    /// </summary>
-    void ExitStructuralWriteGate();
-
-    /// <summary>
     /// Attaches the subject to <paramref name="context"/> with the given root anchor, together with
     /// every subject its structural properties reach.
     /// </summary>
@@ -102,4 +77,20 @@ public interface ILifecycleInterceptor :
     /// can deadlock against opposing callbacks), a property name is duplicated, or part of the
     /// captured component belongs to a different context.</exception>
     bool TryAddProperties(SubjectPropertyRegistration registration);
+}
+
+internal interface IWriteTerminalCoordinator
+{
+    void ExecuteTerminal<TProperty>(
+        ref PropertyWriteContext<TProperty> context,
+        Func<IInterceptorSubject, TProperty>? readValue,
+        Action<IInterceptorSubject, TProperty> writeValue);
+}
+
+internal interface ITopologyAdmissionCoordinator
+{
+    StructuralWriteLease AcquireStructuralWriteLease(InterceptorExecutor executor);
+    Exception? CompleteStructuralWrite(InterceptorExecutor executor, StructuralWriteLease lease, Exception? primaryException);
+    OwnershipReservationToken AcquireOwnershipReservation(InterceptorExecutor executor, ReservationMode mode);
+    void CompleteOwnershipReservation(InterceptorExecutor executor, OwnershipReservationToken token, bool retainCommittedOwnership);
 }
