@@ -586,6 +586,35 @@ public class GraphOwnershipTests
     }
 
     [Fact]
+    public void WhenDuplicateIncomingIndicesAreRefreshed_ThenEachPayloadIsReadOnceByOrdinal()
+    {
+        // Arrange
+        var parent = new Person { FirstName = "P" };
+        var property = new PropertyReference(parent, nameof(Person.Children));
+        var ownership = new SubjectOwnership();
+        ownership.AddIncoming(property, 0, new EqualityThrowingIndex(10));
+        ownership.AddIncoming(property, 1, new EqualityThrowingIndex(11));
+        ownership.ActivateParents();
+        var indices = new CountingOrdinalIndices(
+            new EqualityThrowingIndex(20),
+            new EqualityThrowingIndex(21));
+
+        // Act
+        var exception = Record.Exception(() =>
+        {
+            ownership.UpdateIncomingIndices(property, indices);
+            ownership.RepublishParents();
+        });
+
+        // Assert
+        Assert.Null(exception);
+        Assert.Equal(2, indices.AccessCount);
+        Assert.True(ownership.TryGetPublishedParents(out var parents));
+        Assert.Equal(20, Assert.IsType<EqualityThrowingIndex>(parents[0].Index).Value);
+        Assert.Equal(21, Assert.IsType<EqualityThrowingIndex>(parents[1].Index).Value);
+    }
+
+    [Fact]
     public void WhenRemovingAnEdgeOfAnotherProperty_ThenOrdinalIdentityDoesNotMatch()
     {
         // Arrange
@@ -716,5 +745,37 @@ public class GraphOwnershipTests
         Assert.Null(child.TryGetContext());
         Assert.Equal(0, child.GetReferenceCount());
         Assert.Empty(child.GetParents());
+    }
+
+    private readonly struct EqualityThrowingIndex(int value) : IEquatable<EqualityThrowingIndex>
+    {
+        public int Value { get; } = value;
+
+        public bool Equals(EqualityThrowingIndex other) => throw new InvalidOperationException("Index equality was invoked.");
+
+        public override bool Equals(object? obj) => throw new InvalidOperationException("Index equality was invoked.");
+
+        public override int GetHashCode() => Value;
+    }
+
+    private sealed class CountingOrdinalIndices(params object?[] indices) : IReadOnlyList<object?>
+    {
+        public int AccessCount { get; private set; }
+
+        public object? this[int index]
+        {
+            get
+            {
+                AccessCount++;
+                return indices[index];
+            }
+        }
+
+        public int Count => indices.Length;
+
+        public IEnumerator<object?> GetEnumerator() =>
+            throw new InvalidOperationException("Ordinal indices were enumerated instead of indexed.");
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }

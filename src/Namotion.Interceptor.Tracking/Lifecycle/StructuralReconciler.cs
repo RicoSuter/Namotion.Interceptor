@@ -122,27 +122,33 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             return;
         }
 
-        var refreshed = LifecycleScratch.RentSubjectSet();
+        var indicesBySubject = LifecycleScratch.RentIndexGroups();
         try
         {
             foreach (var occurrence in newOccurrences)
             {
-                if (!refreshed.Add(occurrence.Subject))
+                if (!indicesBySubject.TryGetValue(occurrence.Subject, out var indices))
                 {
-                    continue;
+                    indices = LifecycleScratch.RentIndexList();
+                    indicesBySubject.Add(occurrence.Subject, indices);
                 }
 
-                var ownership = graph.TryGetOwnership(occurrence.Subject);
+                indices.Add(occurrence.Index);
+            }
+
+            foreach (var entry in indicesBySubject)
+            {
+                var ownership = graph.TryGetOwnership(entry.Key);
                 if (ownership is not null)
                 {
-                    ownership.UpdateIncomingIndices(property, occurrence.Subject, newOccurrences);
+                    ownership.UpdateIncomingIndices(property, entry.Value);
                     ownership.RepublishParents();
                 }
             }
         }
         finally
         {
-            LifecycleScratch.Return(refreshed);
+            LifecycleScratch.Return(indicesBySubject);
         }
 
         notifier.RefreshCollectionProperty(property, newValue);

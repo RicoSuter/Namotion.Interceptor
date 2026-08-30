@@ -122,17 +122,13 @@ internal sealed class SubjectOwnership
     }
 
     /// <summary>Replaces every payload index of one child property atomically by ordinal.</summary>
-    public void UpdateIncomingIndices(
-        PropertyReference property,
-        IInterceptorSubject subject,
-        ImmutableArray<StructuralOccurrence> occurrences)
+    public void UpdateIncomingIndices(PropertyReference property, IReadOnlyList<object?> indices)
     {
         lock (this)
         {
-            if (_incomingCount > 0 && _firstProperty.Equals(property) &&
-                TryGetIndex(subject, _firstSubjectOrdinal, occurrences, out var firstIndex))
+            if (_incomingCount > 0 && _firstProperty.Equals(property) && _firstSubjectOrdinal < indices.Count)
             {
-                _firstIndex = firstIndex;
+                _firstIndex = indices[_firstSubjectOrdinal];
             }
 
             if (_additionalEdges is not null)
@@ -140,33 +136,13 @@ internal sealed class SubjectOwnership
                 for (var i = 0; i < _additionalEdges.Count; i++)
                 {
                     var edge = _additionalEdges[i];
-                    if (edge.Property.Equals(property) &&
-                        TryGetIndex(subject, edge.SubjectOrdinal, occurrences, out var index))
+                    if (edge.Property.Equals(property) && edge.SubjectOrdinal < indices.Count)
                     {
-                        _additionalEdges[i] = new IncomingEdge(property, edge.SubjectOrdinal, index);
+                        _additionalEdges[i] = new IncomingEdge(property, edge.SubjectOrdinal, indices[edge.SubjectOrdinal]);
                     }
                 }
             }
         }
-    }
-
-    private static bool TryGetIndex(
-        IInterceptorSubject subject,
-        int subjectOrdinal,
-        ImmutableArray<StructuralOccurrence> occurrences,
-        out object? index)
-    {
-        foreach (var occurrence in occurrences)
-        {
-            if (occurrence.SubjectOrdinal == subjectOrdinal && ReferenceEquals(occurrence.Subject, subject))
-            {
-                index = occurrence.Index;
-                return true;
-            }
-        }
-
-        index = null;
-        return false;
     }
 
     /// <summary>

@@ -52,6 +52,9 @@ internal static class LifecycleScratch
     public static List<StructuralOccurrence> RentStructuralOccurrenceList()
         => TryRent<List<StructuralOccurrence>>(out var list) ? list : new List<StructuralOccurrence>(8);
 
+    public static List<object?> RentIndexList()
+        => TryRent<List<object?>>(out var list) ? list : new List<object?>(4);
+
     public static List<IInterceptorSubject> RentSubjectList()
         => TryRent<List<IInterceptorSubject>>(out var list) ? list : new List<IInterceptorSubject>(8);
 
@@ -66,6 +69,9 @@ internal static class LifecycleScratch
 
     public static Dictionary<IInterceptorSubject, int> RentSubjectCounter()
         => TryRent<Dictionary<IInterceptorSubject, int>>(out var counter) ? counter : new Dictionary<IInterceptorSubject, int>(8, ReferenceEqualityComparer.Instance);
+
+    public static Dictionary<IInterceptorSubject, List<object?>> RentIndexGroups()
+        => TryRent<Dictionary<IInterceptorSubject, List<object?>>>(out var groups) ? groups : new Dictionary<IInterceptorSubject, List<object?>>(8, ReferenceEqualityComparer.Instance);
 
     public static void Return<TItem>(List<TItem> list)
     {
@@ -91,4 +97,14 @@ internal static class LifecycleScratch
         Recycle(counter);
     }
 
+    public static void Return(Dictionary<IInterceptorSubject, List<object?>> groups)
+    {
+        foreach (var group in groups)
+        {
+            Return(group.Value);
+        }
+
+        groups.Clear();
+        Recycle(groups);
+    }
 }
