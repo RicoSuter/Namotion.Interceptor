@@ -31,6 +31,10 @@
 - Do not run the long benchmark comparison until the user agrees to it. Read `docs/benchmarking.md` immediately before running it.
 - Do not mix generator constructor mirroring, connector feature fixes, or unrelated public API cleanup into these commits.
 - Do not commit a task until its focused tests are green and `git diff --check` passes.
+- Treat production-code simplification as an acceptance gate. Production means C# under `src` excluding test, benchmark, sample, and snapshot paths. PR head `c5079c6f` is already about 3,100 net production lines above master under that classification. Core plus Tracking account for +2,585 lines, while Core, Tracking, Generator, Registry, and Dynamic together account for +3,094. Completion requires Core plus Tracking to finish at +2,300 or less and the five-project lifecycle scope at +2,800 or less versus master, unless the user explicitly accepts a measured per-invariant exception after reviewing the local branch. The completed branch must report its remaining delta by product-semantic responsibility rather than calling protocol overhead a feature.
+- Record the production-line delta against both `c5079c6f` and master after every task. Intermediate migration duplication is allowed only when a later task names its deletion. Task 10 must leave one snapshot builder, one reachability and topology engine, one terminal protocol, and one notification path, with no compatibility path that duplicates a new mechanism.
+- The seven superseded helper files named by the design currently contain 1,063 physical lines at `c5079c6f`: `StructuralReconciler`, `AttachTraversal`, `ReleaseTraversal`, `ReachabilityWalk`, `CallbackReentrancyGuard`, `StructuralValueScanner`, and `LifecycleScratch`. Replacement components must earn their size by deleting those responsibilities, not wrap them.
+- The lifecycle scope is currently +12 net production files over master. It may not exceed that file delta. A new protocol file must replace an obsolete owner or be folded into an existing focused owner before Task 10 completes.
 
 ---
 
@@ -287,7 +291,7 @@ git commit -m "fix: reserve structural ownership without claim gaps"
 - Add: `src/Namotion.Interceptor.Tracking/Lifecycle/PendingTerminalRegistry.cs`
 - Add: `src/Namotion.Interceptor.Tracking/Lifecycle/PendingStructuralWrite.cs`
 - Add: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/TerminalRevisionTests.cs`
-- Modify: tests added in Task 1
+- Add or modify: Task 1 terminal-boundary tests assigned to this task
 - Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/TerminalStoreContractTests.cs`
 - Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/DownstreamWriteInterceptorReleaseTests.cs`
 
@@ -326,7 +330,7 @@ dotnet test src/Namotion.Interceptor.Generator.Tests/Namotion.Interceptor.Genera
 git diff --check
 ```
 
-- [ ] Commit only the Task 1 tests whose terminal-boundary invariants are green with this implementation. Keep each remaining acceptance-test change uncommitted until its owning task makes it green.
+- [ ] Commit only terminal-boundary acceptance tests written RED and made GREEN inside this task. No later task's acceptance test may be present in the working tree.
 
 ```bash
 git add src/Namotion.Interceptor src/Namotion.Interceptor.Tests src/Namotion.Interceptor.Generator src/Namotion.Interceptor.Generator.Tests src/Namotion.Interceptor.Tracking src/Namotion.Interceptor.Tracking.Tests
@@ -413,7 +417,7 @@ git commit -m "refactor: commit lifecycle topology from final reachability"
 - Modify: `src/Namotion.Interceptor.Tracking/Lifecycle/SubjectLifecycleChange.cs`
 - Modify: `src/Namotion.Interceptor.Tracking/Lifecycle/SubjectPropertyLifecycleChange.cs`
 - Modify: `src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleNotifier.cs`
-- Delete after cutover: `src/Namotion.Interceptor.Tracking/Lifecycle/CallbackReentrancyGuard.cs`
+- Retain until Task 10: `src/Namotion.Interceptor.Tracking/Lifecycle/CallbackReentrancyGuard.cs`
 - Modify: `src/Namotion.Interceptor.Tracking/Lifecycle/IPropertyLifecycleHandler.cs`
 - Modify: `src/Namotion.Interceptor.Registry/SubjectRegistry.cs`
 - Modify: `src/Namotion.Interceptor.Registry/Abstractions/RegisteredSubject.cs`
@@ -424,14 +428,14 @@ git commit -m "refactor: commit lifecycle topology from final reachability"
 - Modify public API snapshots for Tracking and Registry
 
 - [ ] Add overlap tests with two topology commits parked in callbacks. Assert no framework deadlock, each originating operation receives its own callback exception or aggregate after its complete journal, and built-in Registry applies the latest revision for each affected property even when an older same-property callback reaches Registry last. Include unrelated subjects to prove one context-global watermark is not used.
-- [ ] Add a detach-context-lifetime test where an earlier attach callback overlaps a later detach callback. Assert `GetContext()` remains the exact context throughout both callback bodies and becomes null only after the detach notification count reaches zero.
+- [ ] Add notifier-level overlap coverage for notification holds and entity revisions. Task 8 owns the end-to-end detach-context-lifetime test because explicit detach is not cut over yet.
 - [ ] Add context topology revision plus subject, property, and stable-edge revisions where applicable. Publish an immutable per-property occurrence projection containing child reference, child ordinal, and index payload. Do not expose mutable graph state.
 - [ ] Resolve handler arrays and build journals under ordinary service snapshots, but invoke every handler and event after releasing the topology gate.
 - [ ] Preserve within-journal ordering from the spec. Permit different threads' journals to overlap.
 - [ ] Extend Task 6's per-subject active lifecycle-notification count with the entity revisions required for concurrent consumers. A detaching subject cannot be claimed by another context. The detach journal marks its exact epoch completed; whichever notification scope reduces that completed epoch's count to zero clears context without waiting.
-- [ ] Replace `RefreshCollectionProperty(PropertyReference, object?)` with immutable property projection publication. Make Registry atomically replace a property projection at the newest revision for that property. Remove raw-value re-enumeration and index/key equality from Registry locks.
+- [ ] Add immutable property projection publication and make Registry atomically replace a property projection at the newest revision for that property. Retain the legacy `RefreshCollectionProperty(PropertyReference, object?)` adapter only for the old admission and reconcile callers through Task 9; it must call no user equality under Registry locks and Task 10 deletes it with the final old caller.
 - [ ] Audit every built-in `ILifecycleHandler` and `IPropertyLifecycleHandler` for concurrent invocation. Add local revision suppression where it projects state; document thread safety where it only performs idempotent initialization.
-- [ ] Delete the thread-static callback restriction. Add same-thread callback tests for structural write, explicit attach, detach, and `AddProperties`; they run as ordinary nested operations and may fail only on normal nonblocking transition conflicts. Guard the tests against accidental unbounded recursion.
+- [ ] Remove callback-depth rejection only from callback paths already cut over to unlocked revisioned journals. Add same-thread callback tests for structural writes here. Task 8 owns explicit attach and detach callback reentry, Task 9 owns `AddProperties` and property-lifecycle callback reentry, and Task 10 deletes `CallbackReentrancyGuard` after `rg` proves no caller remains. Guard every test against accidental unbounded recursion.
 - [ ] Stress Task 6's atomically published notification holds and exception draining under overlapping revisioned journals. Assert no subject remains `Detaching`, each ordinary operation receives only its own aggregate, and deferred final-protector notification still cannot throw from token disposal. Do not add a new public diagnostic event for the deferred contract-violation path.
 - [ ] Run callback, registry order, connector source-monitor order, and public API tests.
 
@@ -472,6 +476,7 @@ git commit -m "fix: publish revisioned lifecycle callbacks outside locks"
 - [ ] Implement detach as exclusive transition, anchor removal and final reachability under the topology gate, detaching phase publication, unlocked notification, then final context clear.
 - [ ] Remove claimed-but-unowned pass-through branches, `RollbackRejectedAttach`, seeded-baseline markers, and release-time getter scans.
 - [ ] Preserve the exact context throughout all overlapping notification holds for a detaching subject and clear it when the final hold exits, including aggregate-exception paths.
+- [ ] Add the end-to-end detach-context-lifetime test: park an earlier attach callback across a later detach callback, assert `GetContext()` remains the exact context throughout both callback bodies, and assert it becomes null only after the completed detach epoch's notification count reaches zero.
 - [ ] Run all lifecycle attach, detach, anchor, and graph tests.
 
 Run:
@@ -496,6 +501,7 @@ git commit -m "fix: attach and detach through immutable topology transactions"
 - Modify: `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs`
 - Modify: `src/Namotion.Interceptor.Tracking/Lifecycle/PropertyAdmission.cs`
 - Modify: `src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleInterceptor.cs`
+- Modify: `src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleInterceptorExtensions.cs`
 - Modify: `src/Namotion.Interceptor.Tracking/Change/DerivedPropertyChangeHandler.cs`
 - Modify: `src/Namotion.Interceptor.Tracking/Change/DerivedPropertyData.cs`
 - Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/AddPropertiesLifecycleTests.cs`
@@ -509,6 +515,7 @@ git commit -m "fix: attach and detach through immutable topology transactions"
 - [ ] Preserve public `SubjectPropertyRegistration.Publish()` for alternative lifecycle implementations and add an internal friend-visible `PublishPrepared(mergedProperties)` path that invokes the existing continuation without rebuilding from `Subject.Properties`. Invoke that prepared publisher as the first post-commit admission-journal entry outside framework locks, then continue property and lifecycle callbacks in caller order. Generated and `DynamicSubject` publishers must retain their exception-free exact-assignment contract. If a deliberately invalid third-party publisher throws, retain executor-authoritative metadata, continue all entries, release every hold, include the exception in the originating operation's final aggregate, and do not claim that the framework repaired the third party's implementation-owned `IInterceptorSubject.Properties` projection.
 - [ ] Capture batch and getters outside the topology gate, reserve prospective components, then validate names, executor metadata generation, attachment phase, property revisions, and reservations under the gate before publishing metadata and snapshots.
 - [ ] Invoke property callbacks after commit in caller input order. A detaching subject may publish metadata only and never ownership edges.
+- [ ] Remove the remaining property-callback scopes from `LifecycleInterceptorExtensions` only after admission uses unlocked journals. Migrate the final legacy raw refresh caller to immutable projection publication; leave removal of the now-unreferenced adapter and `CallbackReentrancyGuard` file to Task 10.
 - [ ] Replace context-wide transaction-count inference in derived validation with the exact per-property pending descriptor when dependency capture identifies it. For an orphan read through an uninstrumented alias, first read exact descriptors from the observed subject's same-context reservation participants. Only if no participant explains it, snapshot Task 5's immutable untrusted-terminal registry and register an all-completed continuation against that exact descriptor set. Never wait for a later descriptor or for context-wide quiescence.
 - [ ] Add no-lost-wakeup tests around `RegisterOrRun`: park a derived evaluation between observing and registering, finish the terminal transaction, and assert exactly one retry runs before outer derived and property-change publication. Cover the exact property descriptor, the reservation-participant path, and the untrusted-terminal alias fallback. Prove that a descriptor registered after the orphan read cannot delay or excuse it and that generated faithful writes never touch the context registry.
 - [ ] Add a genuine orphan test where the retry fails. Store a sticky derived lifecycle fault and assert the next caller receives it. Do not trace and forget it.
@@ -541,6 +548,9 @@ git commit -m "fix: admit properties and derived values through pending topology
 - Delete if still present: `src/Namotion.Interceptor.Tracking/Lifecycle/ReachabilityWalk.cs`
 - Delete if still present: `src/Namotion.Interceptor.Tracking/Lifecycle/CallbackReentrancyGuard.cs`
 - Modify: `src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleScratch.cs`
+- Modify: `src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleNotifier.cs`
+- Modify: `src/Namotion.Interceptor.Tracking/Lifecycle/IPropertyLifecycleHandler.cs`
+- Modify: `src/Namotion.Interceptor.Registry/SubjectRegistry.cs`
 - Modify: `src/Namotion.Interceptor/Interceptors/ILifecycleInterceptor.cs`
 - Modify: `src/Namotion.Interceptor/Interceptors/IInterceptorExecutor.cs`
 - Modify public API snapshots for Core, Tracking, Registry, Connectors, Hosting, MQTT, and OPC UA only where the protocol changed them
@@ -552,14 +562,15 @@ git commit -m "fix: admit properties and derived values through pending topology
 Run:
 
 ```bash
-rg -n "EnterStructuralWriteGate|ExitStructuralWriteGate|GetBaseline|SetBaseline|CommitsEdgeTo|_transactionsInFlight|_withheldRecalculations|RollbackRejectedAttach" src
+rg -n "EnterStructuralWriteGate|ExitStructuralWriteGate|GetBaseline|SetBaseline|CommitsEdgeTo|_transactionsInFlight|_withheldRecalculations|RollbackRejectedAttach|CallbackReentrancyGuard|RefreshCollectionProperty" src
 ```
 
 Expected: no production match. Test or migration comments may name removed behavior only when explaining the revised assertion.
 
 - [ ] Verify `EnterStructuralWriteGate` and `ExitStructuralWriteGate` were removed in Task 5. Keep public attach, detach, events, handler interfaces, `SubjectPropertyRegistration`, and both existing `AddProperties` signatures. Remove only temporary migration seams that are now unreferenced.
 - [ ] Reduce `LifecycleScratch` to collections still used by snapshot capture and pure transactions. Do not pool immutable published objects.
-- [ ] Compare lifecycle production line counts and dependency direction against `331b7019`. Explain any net increase in the PR description by invariant. Do not merge components that still own distinct invariants merely to reduce file count.
+- [ ] Compare production line counts and dependency direction against both `c5079c6f` and master. The branch must be net-negative against `c5079c6f`; target a material reduction rather than a token deletion. Partition the remaining master delta into the PR's product semantics and the minimum synchronization protocol. If protocol code has merely moved or a legacy path remains beside its replacement, this task is not complete. Do not merge components that still own distinct invariants merely to reduce file count.
+- [ ] Enforce the Global Constraints budgets: Core plus Tracking at +2,300 production lines or less over master, the five-project lifecycle scope at +2,800 or less, and no more than +12 net production files. Missing a budget is a simplification failure for local review, not a reason to hide code in fewer files.
 - [ ] Update lifecycle documentation with the terminal sequence, lease conflict behavior, immutable snapshot contract, callback concurrency, normalizing-terminal boundary, direct mutable collection limitation, and sticky fault behavior.
 - [ ] Run public API checks and inspect every received snapshot.
 
@@ -635,6 +646,7 @@ git diff --check origin/master...HEAD
 
 - [ ] Run the concurrency filters repeatedly on at least two runtime configurations available in CI. Record exact commands, repetitions, and results in the PR.
 - [ ] Audit lock callouts mechanically. Search every topology-gate, attachment-monitor, and terminal-lock scope and verify that only pure state operations occur.
+- [ ] Recalculate the production C# delta using the Global Constraints classification. Reject completion if it is positive against `c5079c6f`; include the exact net delta against `c5079c6f` and master plus the largest added and deleted production files in the local review report.
 - [ ] Ask the user whether to run the long comparison benchmark. If approved, read `docs/benchmarking.md` and run from the required external worktree:
 
 ```powershell
