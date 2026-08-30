@@ -34,9 +34,11 @@
 
 ---
 
-## Task 1: Establish the acceptance suite and convert stale behavior into correctness assertions
+## Task 1: Establish the acceptance inventory and assign each assertion to its owning task
 
-**Files:**
+This task is a planning gate, not a red test commit. To preserve TDD and keep every implementation commit green, do not create or modify test files here. Each acceptance assertion is written in its owning task, observed failing for the expected reason, and committed only with the implementation that makes it pass. This avoids carrying uncommitted failing tests through Task 2's complete Tracking and Registry runs.
+
+**Files assigned to later owning tasks:**
 
 - Add: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/TerminalBoundaryCoordinatorTests.cs`
 - Add: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/StructuralAttachRaceTests.cs`
@@ -46,7 +48,7 @@
 - Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/TopologyTransactionTests.cs`
 - Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/WriteProtocolAcceptance.cs`
 
-- [ ] Add the deterministic downstream worker-wait test. The interceptor must start a worker that writes a different subject in the same context and synchronously wait before forwarding the outer write. Assert both assignments commit and both children are attached.
+- [ ] Assign the deterministic downstream worker-wait test to Task 5. The interceptor must start a worker that writes a different subject in the same context and synchronously wait before forwarding the outer write. Assert both assignments commit and both children are attached.
 
 ```csharp
 [Fact]
@@ -70,11 +72,10 @@ public void WhenADownstreamInterceptorWaitsForASameContextStructuralWrite_ThenBo
 }
 ```
 
-- [ ] Replace `WhenAUserEnumerableWritesTheRootWhileTheAttachSeedsIt_ThenTheWritePassesThroughAndTheAttachCompletes` with `WhenAStructuralWriteRacesAttachCapture_ThenAttachCannotCommitAStaleSnapshot`. Assert that either the write commits before the attach capture and the latest child is owned, or the write receives the new retryable transition conflict before its terminal. Never accept a field child that is unattached after both operations settle.
-- [ ] Change ordinary downstream and callback-originated cross-context tests to require termination and successful independent writes when no ownership conflict exists. A nested operation may fail only on the same explicit lease, transition, reservation, or terminal contract conflicts as a top-level operation.
-- [ ] Add one worker-wait probe for each forbidden lock callout: authoritative getter, custom enumerable, throwing or reentrant dictionary key equality, metadata input, lifecycle handler, subject event, and property lifecycle handler. Add a separate manual-terminal contract test and documentation assertion; a violating raw terminal is outside the framework deadlock guarantee because the terminal must remain under `SyncRoot` for torn-access protection.
-- [ ] Make every worker background-owned and bounded. Include phase guards so a test cannot pass without entering the intended production window.
-- [ ] Run the focused tests against the current implementation and record which tests fail for the expected reasons.
+- [ ] Assign `WhenAStructuralWriteRacesAttachCapture_ThenAttachCannotCommitAStaleSnapshot` to Task 8. It replaces `WhenAUserEnumerableWritesTheRootWhileTheAttachSeedsIt_ThenTheWritePassesThroughAndTheAttachCompletes` and asserts that either the write commits before attach capture and the latest child is owned, or the write receives the new retryable transition conflict before its terminal. Never accept a field child that is unattached after both operations settle.
+- [ ] Assign ordinary downstream cross-context behavior and terminal callout probes to Task 5, topology publication assertions to Task 6, callback-originated cross-context behavior plus lifecycle handler, subject event, and property lifecycle handler probes to Task 7, stale attach assertions to Task 8, and metadata-input probes to Task 9. Assign immutable enumeration and dictionary-key equality assertions to Task 2. A nested operation may fail only on the same explicit lease, transition, reservation, or terminal contract conflicts as a top-level operation.
+- [ ] Require every owning task to make each worker background-owned and bounded. Include phase guards so a test cannot pass without entering the intended production window.
+- [ ] Record the clean current-PR baseline before implementation. The owning task must then record the expected RED result immediately before writing production code and the GREEN result after implementation.
 
 Run:
 
@@ -82,9 +83,9 @@ Run:
 dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --no-restore --filter "FullyQualifiedName~TerminalBoundaryCoordinatorTests|FullyQualifiedName~StructuralAttachRaceTests|FullyQualifiedName~LifecycleLockCalloutTests|FullyQualifiedName~CrossContextGateDeadlockTests|FullyQualifiedName~TopologyTransactionTests"
 ```
 
-Expected before implementation: the worker-wait and stale-attach assertions fail without hanging the test process.
+Expected at this gate: the existing current-PR suite passes. Each later owning task proves its new assertion fails without hanging before it changes production code.
 
-- [ ] Do not commit the red assertions alone. Keep each assertion uncommitted until the task that owns its invariant can make it green. Task 5 owns terminal-boundary and downstream worker-wait assertions, Task 6 owns topology publication assertions, Task 7 owns callback callout assertions, and Task 8 owns stale-attach assertions.
+- [ ] Do not commit a red assertion alone. Write, observe, implement, and commit it entirely inside its owning task. Task 2 owns immutable-snapshot callouts, Task 5 owns terminal-boundary and downstream worker-wait assertions, Task 6 owns topology publication assertions, Task 7 owns callback callout assertions, Task 8 owns stale-attach assertions, and Task 9 owns metadata-admission callouts.
 
 ## Task 2: Replace raw baselines with immutable occurrence snapshots
 
@@ -611,6 +612,8 @@ git commit -m "fix: consume revisioned lifecycle topology"
 ```
 
 ## Task 12: Final verification, performance decision, and PR update
+
+For the local implementation phase requested by the user, stop after complete verification and the independent whole-branch review against the current PR head. Do not push, update the PR description, post review replies, or run the long benchmark until the user has reviewed the local branch and explicitly chooses those follow-up actions.
 
 **Files:**
 
