@@ -135,4 +135,67 @@ public class UnifiedSetterEmissionTests
         Assert.Contains(".SetGeneratedPropertyValue(nameof(Children)", generated);
         Assert.Contains("executeInterceptors: false", generated);
     }
+
+    [Fact]
+    public void WhenConsumerNamespaceShadowsNamotion_ThenAmbiguousPropertyCompilesAndUsesStructuralRouting()
+    {
+        // Arrange
+        const string source = """
+            namespace Repro.Namotion
+            {
+                public sealed class NamespaceShadow
+                {
+                }
+            }
+
+            namespace Repro
+            {
+                [global::Namotion.Interceptor.Attributes.InterceptorSubject]
+                public partial class Child
+                {
+                }
+
+                [global::Namotion.Interceptor.Attributes.InterceptorSubject]
+                public partial class Holder
+                {
+                    public partial object? Value { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunForExecution(source);
+
+        // Assert
+        Assert.Empty(result.CompilationErrors);
+
+        var assembly = result.LoadAssembly();
+        var holderType = assembly.GetType("Repro.Holder");
+        var childType = assembly.GetType("Repro.Child");
+        Assert.NotNull(holderType);
+        Assert.NotNull(childType);
+        var holder = Activator.CreateInstance(holderType);
+        var child = Activator.CreateInstance(childType);
+        var property = holderType.GetProperty("Value");
+        Assert.NotNull(holder);
+        Assert.NotNull(child);
+        Assert.NotNull(property);
+
+        // Act
+        property.SetValue(holder, child);
+
+        // Assert
+        Assert.Same(child, property.GetValue(holder));
+        var executorField = holderType.GetField(
+            "_executor",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(executorField);
+        var executor = executorField.GetValue(holder);
+        Assert.NotNull(executor);
+        var revisionField = executor.GetType().GetField(
+            "Revision",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(revisionField);
+        Assert.Equal(1L, revisionField.GetValue(executor));
+    }
 }

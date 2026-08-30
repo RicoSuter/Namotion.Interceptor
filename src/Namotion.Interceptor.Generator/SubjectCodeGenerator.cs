@@ -133,7 +133,7 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("        private static class __InterceptorPropertyTraits<TProperty>");
         builder.AppendLine("        {");
         builder.AppendLine("            internal static readonly bool CanContainSubjects =");
-        builder.AppendLine("                Namotion.Interceptor.Tracking.SubjectPropertyTypeExtensions.CanContainSubjects<TProperty>(typeof(TProperty));");
+        builder.AppendLine("                global::Namotion.Interceptor.Tracking.SubjectPropertyTypeExtensions.CanContainSubjects<TProperty>(typeof(TProperty));");
         builder.AppendLine("        }");
         builder.AppendLine();
     }
