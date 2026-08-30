@@ -175,7 +175,6 @@ git commit -m "refactor: store immutable structural edge snapshots"
 
 - Add: `src/Namotion.Interceptor/Interceptors/StructuralWriteLease.cs`
 - Modify: `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs`
-- Modify: `src/Namotion.Interceptor/Interceptors/IInterceptorExecutor.cs`
 - Modify: `src/Namotion.Interceptor.Generator/SubjectCodeGenerator.cs`
 - Add: `src/Namotion.Interceptor.Tests/Interceptors/StructuralWriteLeaseTests.cs`
 - Modify: `src/Namotion.Interceptor.Generator.Tests/InterceptorSubjectTests.cs`
@@ -280,7 +279,6 @@ git commit -m "fix: reserve structural ownership without claim gaps"
 - Modify: `src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs`
 - Modify: `src/Namotion.Interceptor/Cache/WriteInterceptorFactory.cs`
 - Modify: `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs`
-- Modify: `src/Namotion.Interceptor/Interceptors/IInterceptorExecutor.cs`
 - Modify: `src/Namotion.Interceptor/Interceptors/ILifecycleInterceptor.cs`
 - Modify: `src/Namotion.Interceptor.Generator/SubjectCodeGenerator.cs`
 - Modify: `src/Namotion.Interceptor.Generator.Tests/GeneratedExecutorTests.cs`
@@ -312,7 +310,7 @@ internal interface IWriteTerminalCoordinator
 - [ ] Let `LifecycleInterceptor.WriteProperty` validate structural classification, install the coordinator, and call `next` once. Remove callback-depth rejection, any gate entry from `InterceptorExecutor.SetStructuralPropertyValue`, and the lifecycle wrapper around `next`.
 - [ ] In `WriteInterceptorFactory`, call `BeforeTerminal` before `SyncRoot`; under `SyncRoot`, assign the revision and current property slot, run the trusted generated raw read when available, invoke the raw store, and update origin, timestamp, write state, and descriptor state; call `AfterTerminal` after releasing it. Catch a raw-terminal exception, release `SyncRoot`, call `TerminalFailed` to finish protocol cleanup, then rethrow the original exception with its stack.
 - [ ] Allocate `PendingStructuralWrite` after proposal capture in `Preparing` state and link each proposal reservation participant to it, but do not replace the property's current slot yet. Publish only an untrusted manual terminal in the context's immutable `PendingTerminalRegistry`, before its raw terminal, because it alone can expose a substitute that has no exact reservation yet. Under `SyncRoot`, assign the terminal revision, publish this descriptor as the property's current slot, advance it to `Storing`, re-linearize generated `CurrentValue`, invoke the raw store, and advance to `Pending`. Add the A-prepares, B-prepares-and-stores, A-stores-last permutation and assert A owns the larger revision. Add an allocation assertion that the generated faithful path never updates the context registry.
-- [ ] Add a generated-code executor entry with the explicit signature `SetGeneratedPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> writeValue)`. It acquires `SyncRoot` for a short initial raw read before the chain and repeats that trusted read immediately before the terminal store to re-linearize `PropertyWriteContext.CurrentValue`. Preserve the existing public `SetPropertyValue` signature and binary behavior for hand-written and dynamic subjects; it always takes the untrusted authoritative-getter path and retains the caller-supplied current-value contract. Hide the generated entry from ordinary API discovery, never infer faithfulness from metadata, and inspect the Core public API snapshot before accepting the addition.
+- [ ] Complete the concrete generated-code executor entry added in Task 3, with the signature `SetGeneratedPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> writeValue)`. It already acquires `SyncRoot` for a short initial raw read before the chain; repeat that trusted read immediately before the terminal store to re-linearize `PropertyWriteContext.CurrentValue`. Preserve the existing public `SetPropertyValue` signature and binary behavior for hand-written and dynamic subjects; it always takes the untrusted authoritative-getter path and retains the caller-supplied current-value contract. Keep the generated entry concrete and hidden from ordinary API discovery, never add it to `IInterceptorExecutor`, never infer faithfulness from metadata, and inspect the Core public API snapshot before accepting its final shape.
 - [ ] Give `PropertyWriteContext.CurrentValue` an internal mutation path used only by the generated terminal entry. Entry-side interceptors see the coherent initial capture; after-`next` interceptors and `PropertyChangeInterceptor` see the exact value replaced at terminal linearization. No topology decision may depend on the entry-side value.
 - [ ] Validate actual occurrences by subject reference. Reuse proposal reservations and acquire same-context reservations after the terminal for actual subjects introduced by a normalizer. Never steal a foreign subject after the backing field changed; publish sticky fault state if actual reservation fails.
 - [ ] Implement `Preparing -> Storing -> Pending -> Committed | Superseded | Faulted`, including `Storing -> Superseded | Faulted` after terminal failure, plus an atomic `RegisterOrRun` completion operation. Terminal transition detaches continuations without invoking them under the topology gate. `TerminalFailed` retains the original exception, releases `SyncRoot`, then either supersedes an already replaced descriptor or performs best-effort authoritative capture and publishes sticky fault state before rethrowing. Every path removes the optional registry entry, unlinks reservation participants, releases unneeded reservations, and dispatches detached continuations outside locks. If ordinary finalization fails after successful authoritative capture, retain only same-context reservations required by the actual snapshot and release known dropped proposals. If capture failed, conservatively retain proposals. Surface sticky fault through structural reads and graph-sensitive operations.
@@ -400,7 +398,7 @@ Do not emit context detach or attach for the retained child or grandchild.
 Run:
 
 ```bash
-dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --no-restore --filter "FullyQualifiedName~GraphOwnership|FullyQualifiedName~OwnershipOracle|FullyQualifiedName~ReparentCascade|FullyQualifiedName~OwnershipChangeStream|FullyQualifiedName~LifecycleEvents|FullyQualifiedName~DownstreamWriteInterceptorReleaseTests|FullyQualifiedName~DerivedPropertyConcurrencyTests|FullyQualifiedName~WhenChildWritesRaceParentRemovals"
+dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --no-restore --filter "FullyQualifiedName~GraphOwnership|FullyQualifiedName~OwnershipOracle|FullyQualifiedName~ReparentCascade|FullyQualifiedName~OwnershipChangeStream|FullyQualifiedName~LifecycleEvents|FullyQualifiedName~WhenADownstreamInterceptorRemovesTheWritingParentsLastSupport|FullyQualifiedName~DerivedPropertyConcurrencyTests|FullyQualifiedName~WhenChildWritesRaceParentRemovals"
 dotnet test src/Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj --no-restore --filter "FullyQualifiedName~OccurrenceProjection|FullyQualifiedName~Cycle|FullyQualifiedName~Dag|FullyQualifiedName~Dictionary"
 dotnet test src/Namotion.Interceptor.Tests/Namotion.Interceptor.Tests.csproj --no-restore --filter "FullyQualifiedName~StructuralWriteLease|FullyQualifiedName~OwnershipReservation"
 git diff --check
@@ -488,7 +486,7 @@ git commit -m "fix: publish revisioned lifecycle callbacks outside locks"
 Run:
 
 ```bash
-dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --no-restore --filter "FullyQualifiedName~Attach|FullyQualifiedName~Detach|FullyQualifiedName~Anchor|FullyQualifiedName~AttachmentState|FullyQualifiedName~GraphOwnership|FullyQualifiedName~WhenStructuralWritesRaceExplicitAttachAndDetach"
+dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --no-restore --filter "FullyQualifiedName~Attach|FullyQualifiedName~Detach|FullyQualifiedName~Anchor|FullyQualifiedName~AttachmentState|FullyQualifiedName~GraphOwnership|FullyQualifiedName~WhenStructuralWritesRaceExplicitAttachAndDetach|FullyQualifiedName~WhenADownstreamInterceptorDetachesTheWritingParentExplicitly"
 git diff --check
 ```
 
