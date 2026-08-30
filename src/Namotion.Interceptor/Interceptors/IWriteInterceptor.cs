@@ -79,8 +79,9 @@ public struct PropertyWriteContext<TProperty>
     public TProperty CurrentValue => _currentValue;
 
     /// <summary>
-    /// Gets the new value to write (might be different than the value returned by calling the
-    /// getter after the write, use <see cref="GetFinalValue"/> for that).
+    /// Gets or sets the value forwarded toward the terminal. Terminal entry freezes its current
+    /// value for storage and publication. Assignments after <c>next</c> returns affect only this
+    /// context's unwind state and do not change <see cref="GetFinalValue"/>.
     /// </summary>
     public TProperty NewValue
     {
@@ -240,15 +241,9 @@ public struct PropertyWriteContext<TProperty>
     }
 
     /// <summary>
-    /// Reads the current property value (might be different from <see cref="NewValue"/> if the property is derived).
-    /// Must only be used after the 'next()' call in the write interceptor.
-    ///
-    /// One exception: on a derived property's own recalculation, <see cref="NewValue"/> is already the
-    /// stabilized getter output, so this returns it directly instead of invoking the getter again. That
-    /// keeps the published new value paired with the old value it was compared against, and keeps user
-    /// code off the publish path, where a throwing getter used to suppress the notification entirely.
-    /// An interceptor that rewrites <see cref="NewValue"/> on that path therefore changes what is
-    /// published, which the previous getter re-read would have masked.
+    /// Gets the value frozen when the write entered its terminal. Assigning <see cref="NewValue"/>
+    /// after <c>next</c> returns does not change this value or built-in publication. Must only be used
+    /// after the <c>next</c> call in the write interceptor.
     /// </summary>
     /// <returns>The property value.</returns>
     public TProperty GetFinalValue()

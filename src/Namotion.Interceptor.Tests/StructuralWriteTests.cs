@@ -63,6 +63,28 @@ public class StructuralWriteTests
         }
     }
 
+    private sealed class FailedTerminalCapturingInterceptor : IWriteInterceptor
+    {
+        public bool? IsTerminalCommitted;
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            try
+            {
+                next(ref context);
+            }
+            catch
+            {
+                IsTerminalCommitted = context.IsTerminalCommitted;
+                throw;
+            }
+        }
+    }
+
+    private sealed class RawWriteException : Exception
+    {
+    }
+
     private static IInterceptorExecutor GetExecutor(IInterceptorSubject subject)
     {
         return subject.Executor;
@@ -114,6 +136,29 @@ public class StructuralWriteTests
         // Assert
         Assert.True(written);
         Assert.Equal([1L], capturing.Revisions);
+    }
+
+    [Fact]
+    public void WhenGeneratedRawStructuralWriterThrows_ThenNoCommitIsReported()
+    {
+        // Arrange
+        var capturing = new FailedTerminalCapturingInterceptor();
+        var context = InterceptorSubjectContext.Create().WithService(() => capturing);
+        var subject = new StructuralHolder(context);
+        var executor = (InterceptorExecutor)GetExecutor(subject);
+        StructuralHolder? storedValue = null;
+        var property = new PropertyReference(subject, nameof(StructuralHolder.Child));
+
+        // Act & Assert
+        Assert.Throws<RawWriteException>(() => executor.SetGeneratedPropertyValue(
+            nameof(StructuralHolder.Child),
+            new StructuralHolder(),
+            _ => storedValue,
+            (_, _) => throw new RawWriteException()));
+        Assert.False(capturing.IsTerminalCommitted);
+        Assert.Null(storedValue);
+        Assert.Equal(0, executor.Revision);
+        Assert.False(property.TryGetWriteState(true, out _, out _));
     }
 
     [Fact]
