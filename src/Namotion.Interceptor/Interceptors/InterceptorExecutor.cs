@@ -561,20 +561,23 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 ? EnterLogicalContext(attachedContext)
                 : default;
             var coordinator = attachedContext?.TryGetServiceFromState<ITopologyAdmissionCoordinator>(contextState!);
+            var isMissingStructuralReader = false;
             if (coordinator is not null && readValue is null)
             {
                 var metadata = new PropertyReference(_subject, propertyName).Metadata;
-                if (metadata.IsIntercepted && metadata.Type.CanContainSubjects() &&
-                    metadata is not { IsDerived: true, IsDynamic: true, SetValue: null })
-                {
-                    throw new InvalidOperationException(
-                        $"The attached structural property '{propertyName}' must provide a trusted raw reader and faithful raw writer.");
-                }
+                isMissingStructuralReader = metadata.IsIntercepted && metadata.Type.CanContainSubjects() &&
+                    metadata is not { IsDerived: true, IsDynamic: true, SetValue: null };
             }
 
             if (!IsAttachmentRoute(attachedContext, attachmentRevision))
             {
                 continue;
+            }
+
+            if (isMissingStructuralReader)
+            {
+                throw new InvalidOperationException(
+                    $"The attached structural property '{propertyName}' must provide a trusted raw reader and faithful raw writer.");
             }
 
             StructuralWriteLease lease;

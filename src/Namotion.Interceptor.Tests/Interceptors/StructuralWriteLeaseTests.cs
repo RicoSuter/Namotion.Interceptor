@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
@@ -8,8 +9,13 @@ public class StructuralWriteLeaseTests
 {
     private sealed class ThrowingCompletionCoordinator : ITopologyAdmissionCoordinator
     {
-        public StructuralWriteLease AcquireStructuralWriteLease(InterceptorExecutor executor) =>
+        internal int LeaseAdmissions { get; private set; }
+
+        public StructuralWriteLease AcquireStructuralWriteLease(InterceptorExecutor executor)
+        {
+            LeaseAdmissions++;
             throw new NotSupportedException();
+        }
 
         public Exception? CompleteStructuralWrite(
             InterceptorExecutor executor,
@@ -44,6 +50,61 @@ public class StructuralWriteLeaseTests
                 throw new InvalidOperationException("trace failed");
             }
         }
+    }
+
+    private sealed class CountingWriteInterceptor : IWriteInterceptor
+    {
+        internal int Entries { get; private set; }
+
+        public void WriteProperty<TProperty>(
+            ref PropertyWriteContext<TProperty> context,
+            WriteInterceptionDelegate<TProperty> next)
+        {
+            Entries++;
+            next(ref context);
+        }
+    }
+
+    private sealed class RouteChangingMetadataSubject : IInterceptorSubject
+    {
+        private static readonly IReadOnlyDictionary<string, SubjectPropertyMetadata> Metadata =
+            new Dictionary<string, SubjectPropertyMetadata>
+            {
+                [nameof(Child)] = new(
+                    nameof(Child),
+                    typeof(StructuralHolder),
+                    [],
+                    getValue: null,
+                    static (subject, value) => ((RouteChangingMetadataSubject)subject).Child = (StructuralHolder?)value,
+                    isIntercepted: true,
+                    isDynamic: false)
+            };
+
+        private IInterceptorExecutor? _executor;
+        private Action? _onNextPropertiesRead;
+
+        internal StructuralHolder? Child { get; set; }
+
+        internal Action? OnNextPropertiesRead
+        {
+            set => _onNextPropertiesRead = value;
+        }
+
+        public IInterceptorExecutor Executor => InterceptorExecutor.GetOrCreate(ref _executor, this);
+
+        public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
+
+        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties
+        {
+            get
+            {
+                Interlocked.Exchange(ref _onNextPropertiesRead, null)?.Invoke();
+                return Metadata;
+            }
+        }
+
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) =>
+            throw new NotSupportedException();
     }
 
     private sealed class VetoingWriteInterceptor : IWriteInterceptor
@@ -175,6 +236,80 @@ public class StructuralWriteLeaseTests
 
         // Assert
         Assert.IsType<AttachmentRouteChangedException>(exception);
+        Assert.Equal(0, executor.StructuralLeaseCount);
+    }
+
+    [Fact]
+    public void WhenAttachedRouteDetachesDuringMissingReaderValidation_ThenWriteRetriesOnDetachedRoute()
+    {
+        // Arrange
+        var coordinator = new ThrowingCompletionCoordinator();
+        var interceptor = new CountingWriteInterceptor();
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(coordinator);
+        context.AddService(interceptor);
+        var subject = new RouteChangingMetadataSubject();
+        var executor = (InterceptorExecutor)subject.Executor;
+        Assert.True(executor.TryUpdateAttachment(
+            executor.AttachmentRevision,
+            context,
+            SubjectAttachmentAnchorKind.Explicit,
+            out _));
+        subject.OnNextPropertiesRead = () => Assert.True(executor.TryUpdateAttachment(
+            executor.AttachmentRevision,
+            null,
+            SubjectAttachmentAnchorKind.None,
+            out _));
+        var child = new StructuralHolder();
+        var written = false;
+
+        // Act
+        var exception = Record.Exception(() => written = executor.SetPropertyValue(
+            nameof(RouteChangingMetadataSubject.Child),
+            child,
+            (StructuralHolder?)null,
+            (_, value) => subject.Child = value));
+
+        // Assert
+        Assert.Null(exception);
+        Assert.True(written);
+        Assert.Same(child, subject.Child);
+        Assert.Null(executor.AttachedContext);
+        Assert.Equal(0, coordinator.LeaseAdmissions);
+        Assert.Equal(0, interceptor.Entries);
+    }
+
+    [Fact]
+    public void WhenStableAttachedStructuralRouteHasNoRawReader_ThenItRejectsBeforeAdmissionOrExecution()
+    {
+        // Arrange
+        var coordinator = new ThrowingCompletionCoordinator();
+        var interceptor = new CountingWriteInterceptor();
+        var context = InterceptorSubjectContext.Create();
+        context.AddService(coordinator);
+        context.AddService(interceptor);
+        var subject = new RouteChangingMetadataSubject();
+        var executor = (InterceptorExecutor)subject.Executor;
+        Assert.True(executor.TryUpdateAttachment(
+            executor.AttachmentRevision,
+            context,
+            SubjectAttachmentAnchorKind.Explicit,
+            out _));
+        var writerExecuted = false;
+
+        // Act
+        var exception = Record.Exception(() => executor.SetPropertyValue(
+            nameof(RouteChangingMetadataSubject.Child),
+            new StructuralHolder(),
+            (StructuralHolder?)null,
+            (_, _) => writerExecuted = true));
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.False(writerExecuted);
+        Assert.Same(context, executor.AttachedContext);
+        Assert.Equal(0, coordinator.LeaseAdmissions);
+        Assert.Equal(0, interceptor.Entries);
         Assert.Equal(0, executor.StructuralLeaseCount);
     }
 
