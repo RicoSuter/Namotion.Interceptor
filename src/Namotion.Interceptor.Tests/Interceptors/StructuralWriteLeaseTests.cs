@@ -79,7 +79,7 @@ public class StructuralWriteLeaseTests
         var second = executor.TryAcquireStructuralWriteLease();
 
         // Assert
-        Assert.NotEqual(first.Identity, second.Identity);
+        Assert.NotSame(first, second);
         Assert.Equal(2, executor.StructuralLeaseCount);
         Assert.Null(first.Context);
         Assert.Null(second.Context);

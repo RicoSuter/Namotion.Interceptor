@@ -45,14 +45,12 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     internal long Revision;
 
     // Context, anchor, revision, transition phase, and structural lease count are one immutable
-    // publication. The monitor changes that publication and its private active-token identities;
+    // publication. The monitor changes that publication and its private active-token references;
     // structural interceptor chains run after releasing it, so their user code never holds it.
     private readonly object _attachmentLock = new();
     private volatile AttachmentState _attachment = AttachmentState.Unattached;
-    private HashSet<long>? _activeStructuralLeaseIdentities;
-    private long _nextStructuralLeaseIdentity;
-    private long _activeAttachmentTransitionIdentity;
-    private long _nextAttachmentTransitionIdentity;
+    private HashSet<StructuralWriteLease>? _activeStructuralLeases;
+    private AttachmentTransition? _activeAttachmentTransition;
 
     /// <summary>
     /// Creates an executor for <paramref name="subject"/>. Prefer <see cref="GetOrCreate"/>, which
@@ -120,18 +118,18 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 throw LifecycleConflictException.Retryable(_subject);
             }
 
-            var identity = ++_nextStructuralLeaseIdentity;
-            (_activeStructuralLeaseIdentities ??= []).Add(identity);
+            var lease = new StructuralWriteLease(this, current.Context, current.Revision);
+            (_activeStructuralLeases ??= []).Add(lease);
             _attachment = current.WithStructuralLeaseCount(current.StructuralLeaseCount + 1);
-            return new StructuralWriteLease(this, identity, current.Context, current.Revision);
+            return lease;
         }
     }
 
-    internal void ReleaseStructuralWriteLease(long identity)
+    internal void ReleaseStructuralWriteLease(StructuralWriteLease lease)
     {
         lock (_attachmentLock)
         {
-            if (_activeStructuralLeaseIdentities?.Remove(identity) != true)
+            if (_activeStructuralLeases?.Remove(lease) != true)
             {
                 return;
             }
@@ -165,15 +163,15 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 throw LifecycleConflictException.Retryable(_subject);
             }
 
-            var identity = ++_nextAttachmentTransitionIdentity;
-            _activeAttachmentTransitionIdentity = identity;
+            var transition = new AttachmentTransition(this);
+            _activeAttachmentTransition = transition;
             _attachment = current.WithPhase(phase);
-            return new AttachmentTransition(this, identity);
+            return transition;
         }
     }
 
     private void CommitAttachmentTransition(
-        long identity,
+        AttachmentTransition transition,
         InterceptorSubjectContext? context,
         SubjectAttachmentAnchorKind anchor,
         out long currentRevision)
@@ -181,7 +179,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         lock (_attachmentLock)
         {
             var current = _attachment;
-            if (_activeAttachmentTransitionIdentity != identity || current.Phase == AttachmentPhase.Stable)
+            if (!ReferenceEquals(_activeAttachmentTransition, transition) || current.Phase == AttachmentPhase.Stable)
             {
                 throw new InvalidOperationException("The attachment transition is no longer active.");
             }
@@ -199,20 +197,20 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 currentRevision,
                 AttachmentPhase.Stable,
                 current.StructuralLeaseCount);
-            _activeAttachmentTransitionIdentity = 0;
+            _activeAttachmentTransition = null;
         }
     }
 
-    private void ReleaseAttachmentTransition(long identity)
+    private void ReleaseAttachmentTransition(AttachmentTransition transition)
     {
         lock (_attachmentLock)
         {
-            if (_activeAttachmentTransitionIdentity != identity)
+            if (!ReferenceEquals(_activeAttachmentTransition, transition))
             {
                 return;
             }
 
-            _activeAttachmentTransitionIdentity = 0;
+            _activeAttachmentTransition = null;
             _attachment = _attachment.WithPhase(AttachmentPhase.Stable);
         }
     }
@@ -245,15 +243,6 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         // branch, small enough to inline into its own callers.
         return context ?? CreateAndPublish(ref context, subject);
     }
-
-    /// <summary>
-    /// Returns whether generated accessors for <typeparamref name="TProperty"/> require structural
-    /// synchronization. The JIT folds the per-type trait after its one-time initialization.
-    /// </summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool IsStructuralProperty<TProperty>() =>
-        InterceptorSubjectContext.PropertyTypeIndex<TProperty>.CanContainSubjects;
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static IInterceptorExecutor CreateAndPublish(ref IInterceptorExecutor? context, IInterceptorSubject subject)
@@ -290,7 +279,9 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         return attachedContext.ExecuteInterceptedRead(ref context, readValue);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Reads a generated structural property through its synchronized trusted raw reader.
+    /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TProperty GetGeneratedPropertyValue<TProperty>(
@@ -353,7 +344,9 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         return context.IsWritten;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Writes a generated structural property through trusted raw reader and writer delegates.
+    /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
     public bool SetGeneratedPropertyValue<TProperty>(
         string propertyName,
@@ -396,6 +389,12 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         }
 
         var attachedContext = lease.Context;
+        if (attachedContext is null && readValue is null)
+        {
+            writeValue(_subject, newValue);
+            return true;
+        }
+
         var contextState = attachedContext?.PinState();
         var lifecycle = attachedContext?.TryGetServiceFromState<ILifecycleInterceptor>(contextState!);
         if (lifecycle is null)
@@ -597,12 +596,10 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     internal sealed class AttachmentTransition : IDisposable
     {
         private InterceptorExecutor? _executor;
-        private readonly long _identity;
 
-        internal AttachmentTransition(InterceptorExecutor executor, long identity)
+        internal AttachmentTransition(InterceptorExecutor executor)
         {
             _executor = executor;
-            _identity = identity;
         }
 
         internal void Commit(
@@ -612,13 +609,13 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         {
             var executor = _executor
                 ?? throw new ObjectDisposedException(nameof(AttachmentTransition));
-            executor.CommitAttachmentTransition(_identity, context, anchor, out currentRevision);
+            executor.CommitAttachmentTransition(this, context, anchor, out currentRevision);
             Interlocked.CompareExchange(ref _executor, null, executor);
         }
 
         public void Dispose()
         {
-            Interlocked.Exchange(ref _executor, null)?.ReleaseAttachmentTransition(_identity);
+            Interlocked.Exchange(ref _executor, null)?.ReleaseAttachmentTransition(this);
         }
     }
 }

@@ -1,6 +1,7 @@
 using Namotion.Interceptor.Generator.Tests.Models;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Attributes;
+using System.Collections;
 using System.Reflection;
 
 namespace Namotion.Interceptor.Generator.Tests;
@@ -10,7 +11,17 @@ public partial class DetachedGeneratedAccessSubject
 {
     public partial DetachedGeneratedAccessSubject? Child { get; set; }
 
+    public partial DetachedChildCollection? Children { get; set; }
+
     public partial int Count { get; set; }
+}
+
+public readonly struct DetachedChildCollection(IEnumerable<DetachedGeneratedAccessSubject> children) :
+    IEnumerable<DetachedGeneratedAccessSubject>
+{
+    public IEnumerator<DetachedGeneratedAccessSubject> GetEnumerator() => children.GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }
 
 public class InterceptorSubjectTests
@@ -117,5 +128,29 @@ public class InterceptorSubjectTests
         // Assert
         Assert.Equal(42, subject.Count);
         Assert.Null(ExecutorField.GetValue(subject));
+    }
+
+    [Fact]
+    public void WhenDetachedNullableStructuralAccessRunsFirst_ThenBothAccessorsInitializeTheExecutorAndTheSetterConsumesARevision()
+    {
+        // Arrange
+        var getterSubject = new DetachedGeneratedAccessSubject();
+        var setterSubject = new DetachedGeneratedAccessSubject();
+        var child = new DetachedGeneratedAccessSubject();
+        Assert.Null(ExecutorField.GetValue(getterSubject));
+        Assert.Null(ExecutorField.GetValue(setterSubject));
+
+        // Act
+        var initial = getterSubject.Children;
+        setterSubject.Children = new DetachedChildCollection([child]);
+
+        // Assert
+        Assert.Null(initial);
+        Assert.IsType<InterceptorExecutor>(ExecutorField.GetValue(getterSubject));
+        var setterExecutor = Assert.IsType<InterceptorExecutor>(ExecutorField.GetValue(setterSubject));
+        Assert.Equal(1L, Assert.IsType<long>(RevisionField.GetValue(setterExecutor)));
+        Assert.True(new PropertyReference(setterSubject, nameof(DetachedGeneratedAccessSubject.Children))
+            .TryGetWriteState(true, out var revision, out _));
+        Assert.Equal(1, revision);
     }
 }

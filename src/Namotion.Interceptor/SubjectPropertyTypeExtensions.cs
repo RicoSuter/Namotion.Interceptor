@@ -51,6 +51,7 @@ public static class SubjectPropertyTypeExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool CanContainSubjects(this Type type)
     {
+        type = Nullable.GetUnderlyingType(type) ?? type;
         return CanContainSubjectsCache.TryGetValue(type, out var result)
             ? result
             : CanContainSubjectsSlow(type);
@@ -65,6 +66,7 @@ public static class SubjectPropertyTypeExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsSubjectReferenceType(this Type type)
     {
+        type = Nullable.GetUnderlyingType(type) ?? type;
         return IsSubjectReferenceTypeCache.TryGetValue(type, out var result)
             ? result
             : IsSubjectReferenceTypeSlow(type);
@@ -77,6 +79,7 @@ public static class SubjectPropertyTypeExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsSubjectCollectionType(this Type type)
     {
+        type = Nullable.GetUnderlyingType(type) ?? type;
         return IsSubjectCollectionTypeCache.TryGetValue(type, out var result)
             ? result
             : IsSubjectCollectionTypeSlow(type);
@@ -89,6 +92,7 @@ public static class SubjectPropertyTypeExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsSubjectDictionaryType(this Type type)
     {
+        type = Nullable.GetUnderlyingType(type) ?? type;
         return IsSubjectDictionaryTypeCache.TryGetValue(type, out var result)
             ? result
             : IsSubjectDictionaryTypeSlow(type);

@@ -151,4 +151,28 @@ public class HandWrittenSubjectWriteTests
         Assert.Equal(1, probe.WritePropertyCount);
         Assert.Equal(42, subject.Count);
     }
+
+    [Fact]
+    public void WhenDetachedManualAndGeneratedStructuralSettersRun_ThenOnlyTheGeneratedEntryConsumesTerminalState()
+    {
+        // Arrange
+        var manual = new HandWrittenSubject();
+        var generated = new StructuralHolder();
+
+        // Act
+        manual.Child = new HandWrittenSubject();
+        generated.Child = new StructuralHolder();
+
+        // Assert
+        var manualExecutor = Assert.IsType<InterceptorExecutor>(((IInterceptorSubject)manual).Executor);
+        Assert.Equal(0, manualExecutor.Revision);
+        Assert.False(new PropertyReference(manual, nameof(HandWrittenSubject.Child))
+            .TryGetWriteState(true, out _, out _));
+
+        var generatedExecutor = Assert.IsType<InterceptorExecutor>(((IInterceptorSubject)generated).Executor);
+        Assert.Equal(1, generatedExecutor.Revision);
+        Assert.True(new PropertyReference(generated, nameof(StructuralHolder.Child))
+            .TryGetWriteState(true, out var generatedRevision, out _));
+        Assert.Equal(1, generatedRevision);
+    }
 }

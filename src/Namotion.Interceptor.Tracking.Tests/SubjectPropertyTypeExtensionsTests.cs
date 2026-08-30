@@ -180,6 +180,25 @@ public class SubjectPropertyTypeExtensionsTests
         Assert.False(nonSubjectType.CanContainSubjects<object>());
     }
 
+    [Fact]
+    public void WhenNullableValueTypeContainsSubjects_ThenClassificationUnwrapsTheUnderlyingType()
+    {
+        // Arrange
+        var type = typeof(StampedChildren?);
+
+        // Act
+        var isReference = type.IsSubjectReferenceType();
+        var isCollection = type.IsSubjectCollectionType();
+        var isDictionary = type.IsSubjectDictionaryType();
+
+        // Assert
+        Assert.False(isReference);
+        Assert.True(isCollection);
+        Assert.False(isDictionary);
+        Assert.True(type.CanContainSubjects());
+        Assert.True(type.CanContainSubjects<StampedChildren?>());
+    }
+
     private sealed class NonSubjectPlainClass
     {
     }

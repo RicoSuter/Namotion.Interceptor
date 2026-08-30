@@ -27,17 +27,13 @@ internal sealed class StructuralWriteLease : IDisposable
 
     internal StructuralWriteLease(
         InterceptorExecutor executor,
-        long identity,
         InterceptorSubjectContext? context,
         long attachmentRevision)
     {
         _executor = executor;
-        Identity = identity;
         Context = context;
         AttachmentRevision = attachmentRevision;
     }
-
-    internal long Identity { get; }
 
     internal InterceptorSubjectContext? Context { get; }
 
@@ -45,6 +41,6 @@ internal sealed class StructuralWriteLease : IDisposable
 
     public void Dispose()
     {
-        Interlocked.Exchange(ref _executor, null)?.ReleaseStructuralWriteLease(Identity);
+        Interlocked.Exchange(ref _executor, null)?.ReleaseStructuralWriteLease(this);
     }
 }

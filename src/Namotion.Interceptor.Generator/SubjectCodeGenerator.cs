@@ -21,6 +21,7 @@ internal static class SubjectCodeGenerator
         EmitInterceptorSubjectImplementation(builder, metadata);
         EmitDefaultProperties(builder, metadata);
         EmitConstructors(builder, metadata);
+        EmitPropertyTraits(builder, metadata);
         EmitProperties(builder, metadata);
         EmitMethods(builder, metadata);
         EmitHelperMethods(builder, metadata);
@@ -120,6 +121,21 @@ internal static class SubjectCodeGenerator
             builder.AppendLine($"    partial {containingType.Keyword} {containingType.Name}");
             builder.AppendLine("    {");
         }
+    }
+
+    private static void EmitPropertyTraits(StringBuilder builder, SubjectMetadata metadata)
+    {
+        if (metadata.Properties.All(static property => property.CanUseScalarFastPath))
+        {
+            return;
+        }
+
+        builder.AppendLine("        private static class __InterceptorPropertyTraits<TProperty>");
+        builder.AppendLine("        {");
+        builder.AppendLine("            internal static readonly bool CanContainSubjects =");
+        builder.AppendLine("                Namotion.Interceptor.Tracking.SubjectPropertyTypeExtensions.CanContainSubjects<TProperty>(typeof(TProperty));");
+        builder.AppendLine("        }");
+        builder.AppendLine();
     }
 
     private static void EmitContainingTypeClosing(StringBuilder builder, ContainingType[] containingTypes)
@@ -461,8 +477,8 @@ internal static class SubjectCodeGenerator
             }
             else
             {
-                builder.AppendLine($"                return InterceptorExecutor.IsStructuralProperty<{property.FullTypeName}>()");
-                builder.AppendLine($"                    ? ((IInterceptorSubject)this).Executor.GetGeneratedPropertyValue<{property.FullTypeName}>(nameof({property.Name}), static (o) => (({metadata.ClassName})o)._{property.Name})");
+                builder.AppendLine($"                return __InterceptorPropertyTraits<{property.FullTypeName}>.CanContainSubjects");
+                builder.AppendLine($"                    ? ((InterceptorExecutor)((IInterceptorSubject)this).Executor).GetGeneratedPropertyValue<{property.FullTypeName}>(nameof({property.Name}), static (o) => (({metadata.ClassName})o)._{property.Name})");
                 builder.AppendLine($"                    : GetPropertyValue<{property.FullTypeName}>(nameof({property.Name}), static (o) => (({metadata.ClassName})o)._{property.Name});");
             }
             builder.AppendLine("            }");
@@ -497,8 +513,8 @@ internal static class SubjectCodeGenerator
             }
             else
             {
-                builder.AppendLine($"                if (!cancel && (InterceptorExecutor.IsStructuralProperty<{property.FullTypeName}>()");
-                builder.AppendLine($"                    ? ((IInterceptorSubject)this).Executor.SetGeneratedPropertyValue(nameof({property.Name}), newValue, static (o) => (({metadata.ClassName})o)._{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v)");
+                builder.AppendLine($"                if (!cancel && (__InterceptorPropertyTraits<{property.FullTypeName}>.CanContainSubjects");
+                builder.AppendLine($"                    ? ((InterceptorExecutor)((IInterceptorSubject)this).Executor).SetGeneratedPropertyValue(nameof({property.Name}), newValue, static (o) => (({metadata.ClassName})o)._{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v)");
                 builder.AppendLine($"                    : SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v)))");
             }
             builder.AppendLine("                {");
@@ -508,8 +524,8 @@ internal static class SubjectCodeGenerator
             }
             else
             {
-                builder.AppendLine($"                    var writtenValue = InterceptorExecutor.IsStructuralProperty<{property.FullTypeName}>()");
-                builder.AppendLine($"                        ? ((IInterceptorSubject)this).Executor.GetGeneratedPropertyValue<{property.FullTypeName}>(nameof({property.Name}), static (o) => (({metadata.ClassName})o)._{property.Name}, executeInterceptors: false)");
+                builder.AppendLine($"                    var writtenValue = __InterceptorPropertyTraits<{property.FullTypeName}>.CanContainSubjects");
+                builder.AppendLine($"                        ? ((InterceptorExecutor)((IInterceptorSubject)this).Executor).GetGeneratedPropertyValue<{property.FullTypeName}>(nameof({property.Name}), static (o) => (({metadata.ClassName})o)._{property.Name}, executeInterceptors: false)");
                 builder.AppendLine($"                        : _{property.Name};");
                 builder.AppendLine($"                    On{property.Name}Changed(writtenValue);");
             }
