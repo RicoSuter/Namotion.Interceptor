@@ -12,14 +12,16 @@ internal static class WriteInterceptorFactory<TProperty>
         {
             return static (ref context, innerWriteValue) =>
             {
+                var terminalValue = context.FreezeNewValue();
                 // Hoisted: innerWriteValue is opaque to the JIT, so a second read of the property
                 // reference could not be folded into the first (PropertyReference advises this).
                 var property = context.Property;
                 var subject = property.Subject;
                 lock (context.Executor.SyncRoot)
                 {
-                    innerWriteValue(subject, context.NewValue);
+                    innerWriteValue(subject, terminalValue);
                     context.IsWritten = true;
+                    context.IsTerminalCommitted = true;
                     // Plain increment, no Interlocked: the enclosing lock and the revision counter live on
                     // the same executor, so the increment is exclusive. The lock protects the SUBJECT's
                     // backing fields, and the executor-belongs-to-subject half of that is only a
@@ -46,12 +48,14 @@ internal static class WriteInterceptorFactory<TProperty>
             interceptors,
             static (ref context, innerWriteValue) =>
             {
+                var terminalValue = context.FreezeNewValue();
                 var property = context.Property;
                 var subject = property.Subject;
                 lock (context.Executor.SyncRoot)
                 {
-                    innerWriteValue(subject, context.NewValue);
+                    innerWriteValue(subject, terminalValue);
                     context.IsWritten = true;
+                    context.IsTerminalCommitted = true;
                     // See the zero-interceptor terminal above for why the property is hoisted, why the
                     // increment needs no Interlocked, and what the assert covers that the lock does not.
                     Debug.Assert(ReferenceEquals(context.Executor.Subject, subject),
@@ -67,7 +71,7 @@ internal static class WriteInterceptorFactory<TProperty>
                     var raw = context.WriteTimestampRaw;
                     property.SetWriteState(raw > 0 ? raw : 0, context.Revision, isFromSource);
                 }
-                return context.NewValue;
+                return terminalValue;
             }
         );
         return chain.Execute;

@@ -155,7 +155,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         next(ref context);
 
-        if (!context.IsWritten)
+        if (!context.IsTerminalCommitted)
         {
             return;
         }
@@ -402,7 +402,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // newValue is the value the stabilization loop settled on and the value paired with
         // oldValue by the guards above. The cascade re-entry path publishes it rather than
         // re-invoking the getter, which could return a later value that never coexisted with
-        // oldValue (see PropertyWriteContext.FinalValueIsNewValue).
+        // oldValue (see PropertyWriteContext.GetFinalValue).
         derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate, rawTimestamp);
 
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)

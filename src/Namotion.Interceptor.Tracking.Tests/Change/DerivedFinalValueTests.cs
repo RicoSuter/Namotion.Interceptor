@@ -1,5 +1,6 @@
 using System.Reactive.Concurrency;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -13,6 +14,16 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 /// </summary>
 public class DerivedFinalValueTests
 {
+    [RunsAfter(typeof(DerivedPropertyChangeHandler), typeof(PropertyChangeInterceptor))]
+    private sealed class SuppressingWriteInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            context.IsWritten = false;
+        }
+    }
+
     [Fact]
     public void WhenDerivedRecalculationIsPublished_ThenPublishedValueIsTheStabilizedValue()
     {
@@ -58,6 +69,30 @@ public class DerivedFinalValueTests
         // Assert
         Assert.Equal(1, invocationsWithoutConsumer);
         Assert.Equal(invocationsWithoutConsumer, invocationsWithConsumer);
+    }
+
+    [Fact]
+    public void WhenInnerInterceptorClearsIsWrittenAfterNext_ThenDerivedChangeStillPublishes()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => new SuppressingWriteInterceptor());
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+        var sensor = new CountingDerivedSensor(context);
+        changes.Clear();
+
+        // Act
+        sensor.RawValue = 2;
+
+        // Assert
+        Assert.Contains(changes, change =>
+            change.Property.Name == nameof(CountingDerivedSensor.ScaledValue) &&
+            change.GetNewValue<int>() == 4);
     }
 
     private static int MeasureCascadeGetterInvocations(bool withConsumer)

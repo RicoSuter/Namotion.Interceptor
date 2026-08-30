@@ -163,7 +163,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
 
         next(ref context);
 
-        if (!context.IsWritten)
+        if (!context.IsTerminalCommitted)
         {
             return; // vetoed by an inner interceptor: nothing was stored, publish nothing
         }
@@ -212,7 +212,7 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void DispatchLateConsumers<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
-        if (!context.IsWritten)
+        if (!context.IsTerminalCommitted)
         {
             return; // vetoed: nothing was stored
         }

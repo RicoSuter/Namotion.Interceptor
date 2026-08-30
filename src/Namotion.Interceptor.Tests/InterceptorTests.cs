@@ -4,6 +4,60 @@ namespace Namotion.Interceptor.Tests;
 
 public class InterceptorTests
 {
+    private sealed class PostTerminalMutationInterceptor : IWriteInterceptor
+    {
+        public object? FinalValue { get; private set; }
+
+        public object? UnwoundValue { get; private set; }
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            context.NewValue = (TProperty)(object)99;
+            UnwoundValue = context.NewValue;
+            FinalValue = context.GetFinalValue();
+        }
+    }
+
+    private sealed class DoubleNextInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            next(ref context);
+        }
+    }
+
+    private sealed class VetoingWriteInterceptor(bool forgeIsWritten = false) : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            context.IsWritten = forgeIsWritten;
+        }
+    }
+
+    private sealed class SuppressingWriteInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            context.IsWritten = false;
+        }
+    }
+
+    private sealed class ThrowingAfterNextInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            throw new TestWriteException();
+        }
+    }
+
+    private sealed class TestWriteException : Exception
+    {
+    }
+
     [Fact]
     public Task WhenReadingProperties_ThenInterceptorsAreCalledInTheRightOrder()
     {
@@ -63,6 +117,103 @@ public class InterceptorTests
         // Assert
         Assert.Equal(7, car.Speed); // both interceptors added 1
         return Verify(logs);
+    }
+
+    [Fact]
+    public void WhenInterceptorMutatesNewValueAfterNext_ThenOnlyItsUnwindStateChanges()
+    {
+        // Arrange
+        var interceptor = new PostTerminalMutationInterceptor();
+        var context = InterceptorSubjectContext.Create().WithService(() => interceptor);
+        var car = new Car(context);
+
+        // Act
+        car.Speed = 5;
+
+        // Assert
+        Assert.Equal(5, car.Speed);
+        Assert.Equal(99, interceptor.UnwoundValue);
+        Assert.Equal(5, interceptor.FinalValue);
+    }
+
+    [Fact]
+    public void WhenInterceptorInvokesNextTwice_ThenTheSecondTerminalIsRejected()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithService(() => new DoubleNextInterceptor());
+        var car = new Car(context);
+        var executor = (InterceptorExecutor)((IInterceptorSubject)car).Executor;
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => car.Speed = 5);
+        Assert.Equal(5, car.Speed);
+        Assert.Equal(1, executor.Revision);
+    }
+
+    [Fact]
+    public void WhenInterceptorVetoesWrite_ThenNoTerminalRevisionIsCreated()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithService(() => new VetoingWriteInterceptor());
+        var car = new Car(context);
+        var executor = (InterceptorExecutor)((IInterceptorSubject)car).Executor;
+
+        // Act
+        car.Speed = 5;
+
+        // Assert
+        Assert.Equal(0, car.Speed);
+        Assert.Equal(0, executor.Revision);
+    }
+
+    [Fact]
+    public void WhenInterceptorForgesIsWrittenWithoutNext_ThenExecutorReportsNoCommit()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithService(() => new VetoingWriteInterceptor(forgeIsWritten: true));
+        var car = new Car(context);
+        var executor = (InterceptorExecutor)((IInterceptorSubject)car).Executor;
+        var storedValue = 0;
+
+        // Act
+        var written = executor.SetPropertyValue(nameof(Car.Speed), 5, 0, (_, value) => storedValue = value);
+
+        // Assert
+        Assert.False(written);
+        Assert.Equal(0, storedValue);
+        Assert.Equal(0, executor.Revision);
+    }
+
+    [Fact]
+    public void WhenInterceptorClearsIsWrittenAfterNext_ThenExecutorReportsTheCommit()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithService(() => new SuppressingWriteInterceptor());
+        var car = new Car(context);
+        var executor = (InterceptorExecutor)((IInterceptorSubject)car).Executor;
+        var storedValue = 0;
+
+        // Act
+        var written = executor.SetPropertyValue(nameof(Car.Speed), 5, 0, (_, value) => storedValue = value);
+
+        // Assert
+        Assert.True(written);
+        Assert.Equal(5, storedValue);
+        Assert.Equal(1, executor.Revision);
+    }
+
+    [Fact]
+    public void WhenInterceptorThrowsAfterNext_ThenTheSingleTerminalCommitRemains()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithService(() => new ThrowingAfterNextInterceptor());
+        var car = new Car(context);
+        var executor = (InterceptorExecutor)((IInterceptorSubject)car).Executor;
+
+        // Act & Assert
+        Assert.Throws<TestWriteException>(() => car.Speed = 5);
+        Assert.Equal(5, car.Speed);
+        Assert.Equal(1, executor.Revision);
     }
 
     public class TestWriteInterceptor : IWriteInterceptor

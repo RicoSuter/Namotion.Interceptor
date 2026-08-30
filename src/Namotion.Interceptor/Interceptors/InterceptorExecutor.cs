@@ -455,7 +455,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             attachedContext.ExecuteInterceptedWrite(propertyTypeIndex, ref context, writeValue);
         }
 
-        return context.IsWritten;
+        return context.IsTerminalCommitted;
     }
 
     /// <summary>
@@ -562,7 +562,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 currentValue,
                 newValue);
             UninterceptedChain<TProperty>.Write(ref writeContext, writeValue);
-            return writeContext.IsWritten;
+            return writeContext.IsTerminalCommitted;
         }
 
         var context = new PropertyWriteContext<TProperty>(
@@ -572,16 +572,15 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             newValue);
 
         attachedContext.ExecuteInterceptedWrite(contextState, propertyTypeIndex, ref context, writeValue);
-        return context.IsWritten;
+        return context.IsTerminalCommitted;
     }
 
     /// <summary>
     /// Cascade re-entry path: skips the lazy-resolve machinery by pre-populating the new write
     /// context's timestamp cache. Lets the cascade share the trigger's captured time without
     /// pushing a <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/> scope.
-    /// The new value is already the stabilized getter output on this path, so publishing reuses it
-    /// instead of invoking the getter again (see
-    /// <see cref="PropertyWriteContext{TProperty}.FinalValueIsNewValue"/>).
+    /// The new value is already the stabilized getter output on this path, so the terminal freezes
+    /// it and publishing reuses it instead of invoking the getter again.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, long rawTimestamp)
@@ -607,7 +606,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 InterceptorSubjectContext.PropertyTypeIndex<TProperty>.Value, ref context, writeValue);
         }
 
-        return context.IsWritten;
+        return context.IsTerminalCommitted;
     }
 
     /// <inheritdoc />

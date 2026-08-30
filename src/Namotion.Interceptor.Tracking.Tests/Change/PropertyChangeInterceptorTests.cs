@@ -1,4 +1,6 @@
 using System.Reactive.Concurrency;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -7,6 +9,103 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 
 public class PropertyChangeInterceptorTests
 {
+    [RunsAfter(typeof(PropertyChangeInterceptor))]
+    private sealed class PostTerminalMutationInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            context.NewValue = (TProperty)(object)"unwind-only";
+        }
+    }
+
+    [RunsAfter(typeof(PropertyChangeInterceptor))]
+    private sealed class ForgingVetoInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            context.IsWritten = true;
+        }
+    }
+
+    [RunsAfter(typeof(PropertyChangeInterceptor))]
+    private sealed class SuppressingWriteInterceptor : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+            context.IsWritten = false;
+        }
+    }
+
+    [Fact]
+    public void WhenInnerInterceptorMutatesNewValueAfterNext_ThenPublishedValueRemainsFrozen()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithPropertyChangeSubscriptions()
+            .WithService(() => new PostTerminalMutationInterceptor());
+        var person = new Person(context);
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        // Act
+        person.FirstName = "stored";
+
+        // Assert
+        var change = Assert.Single(changes);
+        Assert.Equal("stored", person.FirstName);
+        Assert.Equal("stored", change.GetNewValue<string?>());
+    }
+
+    [Fact]
+    public void WhenInnerInterceptorForgesIsWrittenOnVeto_ThenNoChangeIsPublished()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithPropertyChangeSubscriptions()
+            .WithService(() => new ForgingVetoInterceptor());
+        var person = new Person(context);
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        // Act
+        person.FirstName = "vetoed";
+
+        // Assert
+        Assert.Null(person.FirstName);
+        Assert.Empty(changes);
+    }
+
+    [Fact]
+    public void WhenInnerInterceptorClearsIsWrittenAfterNext_ThenChangeIsStillPublished()
+    {
+        // Arrange
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithPropertyChangeSubscriptions()
+            .WithService(() => new SuppressingWriteInterceptor());
+        var person = new Person(context);
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        // Act
+        person.FirstName = "stored";
+
+        // Assert
+        var change = Assert.Single(changes);
+        Assert.Equal("stored", person.FirstName);
+        Assert.Equal("stored", change.GetNewValue<string?>());
+    }
+
     [Fact]
     public void WhenQueueSubscriberExists_ThenWriteIsEnqueued()
     {

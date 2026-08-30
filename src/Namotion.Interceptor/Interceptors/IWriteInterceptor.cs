@@ -55,23 +55,18 @@ public struct PropertyWriteContext<TProperty>
     // on every committed write.
     internal readonly InterceptorExecutor Executor;
 
+    private TProperty _currentValue;
+    private TProperty _newValue;
+    private TProperty _terminalValue = default!;
+    private bool _terminalEntered;
+
+    internal bool IsTerminalCommitted;
+
     /// <summary>
     /// The subject's commit revision assigned by the terminal write, or 0 when the write did not
     /// commit. Monotonic per subject, not comparable across subjects.
     /// </summary>
     internal long Revision;
-
-    /// <summary>
-    /// Set by the cascade re-entry constructor, where <see cref="NewValue"/> is already the
-    /// stabilized getter output. Stops <see cref="GetFinalValue"/> from re-invoking the getter,
-    /// which would run user code at publish time and could return a value that never paired
-    /// atomically with this change's old value.
-    ///
-    /// The published value is therefore <see cref="NewValue"/> as of publish time, not as of entry.
-    /// <see cref="NewValue"/> is publicly settable, so an interceptor that rewrites it on a derived
-    /// recalculation now changes what is published; the getter re-read used to mask such a rewrite.
-    /// </summary>
-    internal bool FinalValueIsNewValue;
 
     /// <summary>
     /// Gets the property to write a value to.
@@ -81,13 +76,17 @@ public struct PropertyWriteContext<TProperty>
     /// <summary>
     /// Gets the current property value.
     /// </summary>
-    public TProperty CurrentValue { get; }
+    public TProperty CurrentValue => _currentValue;
 
     /// <summary>
     /// Gets the new value to write (might be different than the value returned by calling the
     /// getter after the write, use <see cref="GetFinalValue"/> for that).
     /// </summary>
-    public TProperty NewValue { get; set; }
+    public TProperty NewValue
+    {
+        get => _newValue;
+        set => _newValue = value;
+    }
 
     /// <summary>
     /// Gets or sets whether the write was performed.
@@ -122,8 +121,8 @@ public struct PropertyWriteContext<TProperty>
     {
         Executor = executor;
         Property = property;
-        CurrentValue = currentValue;
-        NewValue = newValue;
+        _currentValue = currentValue;
+        _newValue = newValue;
         IsWritten = false;
         _writeTimestamp = 0;
         PendingOrigin.TryConsume(in property, out _attempted);
@@ -138,19 +137,28 @@ public struct PropertyWriteContext<TProperty>
     /// this property (see <see cref="PendingOrigin"/>) as a side effect of construction.
     ///
     /// Cascade re-entry is only ever reached with a new value that is already the stabilized getter
-    /// output, so <see cref="FinalValueIsNewValue"/> is set here rather than passed in.
+    /// output, which the terminal freezes before publishing.
     /// </summary>
     internal PropertyWriteContext(InterceptorExecutor executor, PropertyReference property, TProperty currentValue, TProperty newValue, long rawTimestamp)
     {
         Executor = executor;
         Property = property;
-        CurrentValue = currentValue;
-        NewValue = newValue;
+        _currentValue = currentValue;
+        _newValue = newValue;
         IsWritten = false;
-        FinalValueIsNewValue = true;
         _writeTimestamp = rawTimestamp;
         PendingOrigin.TryConsume(in property, out _attempted);
     }
+
+    internal TProperty FreezeNewValue()
+    {
+        if (_terminalEntered)
+            throw new InvalidOperationException("The write terminal can only be entered once.");
+        _terminalEntered = true;
+        return _terminalValue = _newValue;
+    }
+
+    internal void SetTerminalPredecessor(TProperty value) => _currentValue = value;
 
     /// <summary>
     /// Gets the timestamp stamped on the property by this write, or <c>null</c> if the write used
@@ -245,9 +253,9 @@ public struct PropertyWriteContext<TProperty>
     /// <returns>The property value.</returns>
     public TProperty GetFinalValue()
     {
-        if (FinalValueIsNewValue)
+        if (_terminalEntered)
         {
-            return NewValue;
+            return _terminalValue;
         }
 
         var property = Property;
@@ -278,11 +286,12 @@ public struct PropertyWriteContext<TProperty>
         // explicitly ('null is TProperty' is always false), else a legitimately stored null would demote
         // to Local and defeat echo suppression. A box the pattern rejects falls back to the setter's own
         // unbox (see SentValueEqualsAfterUnbox); a box the setter would reject demotes.
+        var finalValue = GetFinalValue();
         var survives = _attempted.SentValue is TProperty typedSentValue
-            ? EqualityComparer<TProperty>.Default.Equals(typedSentValue, NewValue)
+            ? EqualityComparer<TProperty>.Default.Equals(typedSentValue, finalValue)
             : _attempted.SentValue is null
-                ? NewValue is null
-                : SentValueEqualsAfterUnbox(_attempted.SentValue, NewValue);
+                ? finalValue is null
+                : SentValueEqualsAfterUnbox(_attempted.SentValue, finalValue);
 
         return survives ? _attempted.Origin : default;
     }
