@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Interceptors;
@@ -9,11 +8,13 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 internal sealed class OwnershipGraph
 {
     internal sealed record GraphState(ImmutableDictionary<IInterceptorSubject, SubjectOwnership> Owned,
-        ImmutableDictionary<PropertyReference, StructuralSnapshot> Snapshots)
+        ImmutableDictionary<PropertyReference, StructuralSnapshot> Snapshots,
+        bool DeferredSweep)
     {
         internal static readonly GraphState Empty = new(
             ImmutableDictionary.Create<IInterceptorSubject, SubjectOwnership>(ReferenceEqualityComparer.Instance),
-            ImmutableDictionary.Create<PropertyReference, StructuralSnapshot>(PropertyReference.Comparer));
+            ImmutableDictionary.Create<PropertyReference, StructuralSnapshot>(PropertyReference.Comparer),
+            false);
     }
 
     private readonly ITopologyAdmissionCoordinator _coordinator;
@@ -40,7 +41,7 @@ internal sealed class OwnershipGraph
             owned[subject] = owned[subject].Clone();
         }
 
-        _state = new GraphState(owned.ToImmutable(), source._state.Snapshots);
+        _state = new GraphState(owned.ToImmutable(), source._state.Snapshots, source._state.DeferredSweep);
         _releasing.UnionWith(source._releasing);
     }
 
@@ -69,14 +70,14 @@ internal sealed class OwnershipGraph
     {
         var ownership = new SubjectOwnership(propertyNames ?? subject.Properties.Keys.ToImmutableArray());
         var state = _state;
-        _state = new GraphState(state.Owned.SetItem(subject, ownership), state.Snapshots);
+        _state = new GraphState(state.Owned.SetItem(subject, ownership), state.Snapshots, state.DeferredSweep);
         return ownership;
     }
 
     public void RemoveOwnership(IInterceptorSubject subject)
     {
         var state = _state;
-        _state = new GraphState(state.Owned.Remove(subject), state.Snapshots);
+        _state = new GraphState(state.Owned.Remove(subject), state.Snapshots, state.DeferredSweep);
     }
 
     public bool IsReleasing(IInterceptorSubject subject)
@@ -109,15 +110,18 @@ internal sealed class OwnershipGraph
     public void SetSnapshot(PropertyReference property, StructuralSnapshot snapshot)
     {
         var state = _state;
-        _state = new GraphState(state.Owned, state.Snapshots.SetItem(property, snapshot));
+        _state = new GraphState(state.Owned, state.Snapshots.SetItem(property, snapshot), state.DeferredSweep);
     }
 
     internal sealed class PreparedTopologyChange(
         OwnershipGraph owner,
         GraphState publication,
-        ImmutableArray<InterceptorExecutor.AttachmentTransition> attachmentUpdates) : IDisposable
+        ImmutableArray<InterceptorExecutor.AttachmentTransition> attachmentUpdates,
+        bool refreshCollection = false) : IDisposable
     {
         private bool _isPublished;
+
+        internal bool RefreshCollection { get; } = refreshCollection;
 
         internal void Publish()
         {
@@ -144,7 +148,6 @@ internal sealed class OwnershipGraph
 
     internal PreparedTopologyChange PrepareWrite(
         PropertyReference property,
-        object? value,
         StructuralSnapshot capturedSnapshot,
         long revision,
         Dictionary<PropertyReference, StructuralSnapshot> seededSnapshots,
@@ -168,9 +171,8 @@ internal sealed class OwnershipGraph
         var oldSnapshot = baseline.Snapshots.GetValueOrDefault(property, StructuralSnapshot.Empty);
         var newSnapshot = capturedSnapshot with { SourceRevision = revision };
         prepared.SetSnapshot(property, newSnapshot);
-        prepared.ReconcilePrepared(
+        var refreshCollection = prepared.ReconcilePrepared(
             property,
-            value,
             oldSnapshot.Occurrences,
             newSnapshot.Occurrences,
             reservations,
@@ -179,23 +181,22 @@ internal sealed class OwnershipGraph
         return new PreparedTopologyChange(
             this,
             prepared._state,
-            prepared.PrepareAttachmentUpdates(reservations));
+            prepared.PrepareAttachmentUpdates(reservations),
+            refreshCollection);
     }
 
     internal void Publish(PreparedTopologyChange change) => change.Publish();
 
-    internal void Reconcile(
+    internal bool Reconcile(
         PropertyReference property,
-        object? value,
         StructuralSnapshot snapshot,
         Dictionary<IInterceptorSubject, OwnershipReservationToken>? reservations,
         LifecycleNotifier notifier)
     {
         var previous = GetSnapshot(property);
         SetSnapshot(property, snapshot);
-        ReconcilePrepared(
+        return ReconcilePrepared(
             property,
-            value,
             previous.Occurrences,
             snapshot.Occurrences,
             reservations ?? [],
@@ -270,7 +271,7 @@ internal sealed class OwnershipGraph
     }
 
     private ImmutableArray<InterceptorExecutor.AttachmentTransition> PrepareAttachmentUpdates(
-        Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations)
+        Dictionary<IInterceptorSubject, OwnershipReservationToken>? reservations)
     {
         if (_preparedAttachments is null)
         {
@@ -290,7 +291,8 @@ internal sealed class OwnershipGraph
                     continue;
                 }
 
-                reservations.TryGetValue(subject, out var reservation);
+                OwnershipReservationToken? reservation = null;
+                reservations?.TryGetValue(subject, out reservation);
                 updates.Add(((InterceptorExecutor)subject.Executor).PrepareAttachmentUpdate(
                     (InterceptorSubjectContext)Context,
                     target.Context,
@@ -311,9 +313,8 @@ internal sealed class OwnershipGraph
         }
     }
 
-    private void ReconcilePrepared(
+    private bool ReconcilePrepared(
         PropertyReference property,
-        object? value,
         ImmutableArray<StructuralOccurrence> oldOccurrences,
         ImmutableArray<StructuralOccurrence> newOccurrences,
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
@@ -321,6 +322,7 @@ internal sealed class OwnershipGraph
     {
         var oldCounts = LifecycleScratch.RentSubjectCounter();
         var newCounts = LifecycleScratch.RentSubjectCounter();
+        var retainedCounts = LifecycleScratch.RentSubjectCounter();
         try
         {
             foreach (var occurrence in oldOccurrences)
@@ -333,34 +335,18 @@ internal sealed class OwnershipGraph
                 newCounts[occurrence.Subject] = newCounts.GetValueOrDefault(occurrence.Subject) + 1;
             }
 
-            for (var index = oldOccurrences.Length - 1; index >= 0; index--)
+            foreach (var entry in oldCounts)
             {
-                var occurrence = oldOccurrences[index];
-                var remaining = oldCounts[occurrence.Subject];
-                if (remaining <= newCounts.GetValueOrDefault(occurrence.Subject))
-                {
-                    continue;
-                }
-
-                oldCounts[occurrence.Subject] = remaining - 1;
-                RemovePreparedEdge(
-                    occurrence.Subject,
-                    property,
-                    occurrence.SubjectOrdinal,
-                    occurrence.Index,
-                    notifier);
-                if (!IsOwned(property.Subject))
-                {
-                    return;
-                }
+                retainedCounts[entry.Key] = Math.Min(entry.Value, newCounts.GetValueOrDefault(entry.Key));
             }
 
+            var additionEntryStart = notifier.JournalEntryCount;
             foreach (var occurrence in newOccurrences)
             {
-                var retained = oldCounts.GetValueOrDefault(occurrence.Subject);
+                var retained = retainedCounts.GetValueOrDefault(occurrence.Subject);
                 if (retained > 0)
                 {
-                    oldCounts[occurrence.Subject] = retained - 1;
+                    retainedCounts[occurrence.Subject] = retained - 1;
                     continue;
                 }
 
@@ -373,16 +359,47 @@ internal sealed class OwnershipGraph
                     notifier);
                 if (!IsOwned(property.Subject))
                 {
-                    return;
+                    return false;
                 }
             }
 
-            RefreshPreparedIndices(property, value, oldOccurrences, newOccurrences, newCounts, notifier);
+            var deferredAdditions = notifier.DeferJournalEntriesFrom(additionEntryStart);
+            try
+            {
+                for (var index = oldOccurrences.Length - 1; index >= 0; index--)
+                {
+                    var occurrence = oldOccurrences[index];
+                    var remaining = oldCounts[occurrence.Subject];
+                    if (remaining <= newCounts.GetValueOrDefault(occurrence.Subject))
+                    {
+                        continue;
+                    }
+
+                    oldCounts[occurrence.Subject] = remaining - 1;
+                    RemovePreparedEdge(
+                        occurrence.Subject,
+                        property,
+                        occurrence.SubjectOrdinal,
+                        occurrence.Index,
+                        notifier);
+                    if (!IsOwned(property.Subject))
+                    {
+                        return false;
+                    }
+                }
+            }
+            finally
+            {
+                notifier.AppendJournalEntries(deferredAdditions);
+            }
+
+            return RefreshPreparedIndices(property, oldOccurrences, newOccurrences, newCounts);
         }
         finally
         {
             LifecycleScratch.Return(oldCounts);
             LifecycleScratch.Return(newCounts);
+            LifecycleScratch.Return(retainedCounts);
         }
     }
 
@@ -396,6 +413,11 @@ internal sealed class OwnershipGraph
     {
         var ownership = TryGetOwnership(subject);
         var isContextAttach = ownership is null;
+        if (ownership?.ContainsIncoming(property, subjectOrdinal) == true)
+        {
+            return;
+        }
+
         if (ownership is null)
         {
             if (!ReferenceEquals(subject.Executor.AttachedContext, Context))
@@ -446,7 +468,7 @@ internal sealed class OwnershipGraph
     {
         subject.Executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
         if (anchor == SubjectAttachmentAnchorKind.Provisional && ReferenceEquals(attachedContext, Context) &&
-            new ReachabilityWalk(this).IsAnchorReachable(property.Subject, subject))
+            IsReachableFromRoot(property.Subject, subject, includeProtectors: false))
         {
             SetAnchor(
                 subject,
@@ -469,7 +491,7 @@ internal sealed class OwnershipGraph
             return;
         }
 
-        if (IsPreparedSubjectHeld(subject, ownership))
+        if (IsPreparedSubjectHeld(subject))
         {
             notifier.PublishEdgeRemoved(subject, property, index, ownership.IncomingCount);
         }
@@ -479,11 +501,21 @@ internal sealed class OwnershipGraph
         }
     }
 
-    private bool IsPreparedSubjectHeld(IInterceptorSubject subject, SubjectOwnership ownership) =>
-        HasReservation(subject) || HasStructuralLease(subject) ||
-        (ownership.IncomingCount > 0
-            ? new ReachabilityWalk(this).IsAnchorReachable(subject, null)
-            : IsAnchored(subject));
+    private bool IsPreparedSubjectHeld(IInterceptorSubject subject)
+    {
+        if (IsReachableFromRoot(subject, null, includeProtectors: false))
+        {
+            return true;
+        }
+
+        if (IsReachableFromRoot(subject, null, includeProtectors: true))
+        {
+            SetDeferredSweep(true);
+            return true;
+        }
+
+        return false;
+    }
 
     private void ReleasePrepared(
         IInterceptorSubject subject,
@@ -554,19 +586,17 @@ internal sealed class OwnershipGraph
         }
     }
 
-    private void RefreshPreparedIndices(
+    private bool RefreshPreparedIndices(
         PropertyReference property,
-        object? value,
         ImmutableArray<StructuralOccurrence> oldOccurrences,
         ImmutableArray<StructuralOccurrence> newOccurrences,
-        Dictionary<IInterceptorSubject, int> newCounts,
-        LifecycleNotifier notifier)
+        Dictionary<IInterceptorSubject, int> newCounts)
     {
-        if (value is not IEnumerable || value is string || newOccurrences.IsEmpty ||
+        if (!newOccurrences.Any(static occurrence => occurrence.Index is not null) ||
             !oldOccurrences.Any(occurrence =>
                 occurrence.SubjectOrdinal < newCounts.GetValueOrDefault(occurrence.Subject)))
         {
-            return;
+            return false;
         }
 
         var indicesBySubject = LifecycleScratch.RentIndexGroups();
@@ -593,22 +623,115 @@ internal sealed class OwnershipGraph
             LifecycleScratch.Return(indicesBySubject);
         }
 
-        notifier.RefreshCollectionProperty(property, value);
+        return true;
     }
 
-    internal List<IInterceptorSubject>? PrepareDeferredSweep()
+    internal bool HasDeferredSweep => _state.DeferredSweep;
+
+    internal void MarkDeferredSweep() => SetDeferredSweep(true);
+
+    private void SetDeferredSweep(bool value)
     {
-        List<IInterceptorSubject>? result = null;
-        foreach (var entry in _state.Owned)
+        var state = _state;
+        _state = new GraphState(state.Owned, state.Snapshots, value);
+    }
+
+    internal PreparedTopologyChange? PrepareDeferredSweep(LifecycleNotifier notifier)
+    {
+        if (!_state.DeferredSweep)
         {
-            if (entry.Value.IncomingCount == 0 && !IsAnchored(entry.Key) &&
-                !HasReservation(entry.Key) && !HasStructuralLease(entry.Key))
+            return null;
+        }
+
+        var prepared = new OwnershipGraph(this);
+        var outgoing = new Dictionary<IInterceptorSubject, List<IInterceptorSubject>>(
+            ReferenceEqualityComparer.Instance);
+        foreach (var entry in prepared._state.Snapshots)
+        {
+            if (!prepared.IsOwned(entry.Key.Subject))
             {
-                (result ??= []).Add(entry.Key);
+                continue;
+            }
+
+            if (!outgoing.TryGetValue(entry.Key.Subject, out var children))
+            {
+                children = [];
+                outgoing.Add(entry.Key.Subject, children);
+            }
+
+            foreach (var occurrence in entry.Value.Occurrences)
+            {
+                if (prepared.IsOwned(occurrence.Subject))
+                {
+                    children.Add(occurrence.Subject);
+                }
             }
         }
 
-        return result;
+        var reachable = LifecycleScratch.RentSubjectSet();
+        var pending = LifecycleScratch.RentSubjectStack();
+        try
+        {
+            foreach (var subject in prepared._state.Owned.Keys)
+            {
+                if (prepared.IsAnchored(subject))
+                {
+                    pending.Push(subject);
+                }
+            }
+
+            MarkReachable(outgoing, reachable, pending);
+            var anchorReachableCount = reachable.Count;
+
+            foreach (var subject in prepared._state.Owned.Keys)
+            {
+                if (prepared.HasProtector(subject))
+                {
+                    pending.Push(subject);
+                }
+            }
+
+            MarkReachable(outgoing, reachable, pending);
+            prepared.SetDeferredSweep(reachable.Count > anchorReachableCount);
+
+            foreach (var subject in prepared._state.Owned.Keys.ToArray())
+            {
+                if (!reachable.Contains(subject) && prepared.TryGetOwnership(subject) is { } ownership)
+                {
+                    prepared.ReleasePrepared(subject, ownership, null, null, notifier);
+                }
+            }
+
+            return new PreparedTopologyChange(
+                this,
+                prepared._state,
+                prepared.PrepareAttachmentUpdates(null));
+        }
+        finally
+        {
+            LifecycleScratch.Return(reachable);
+            LifecycleScratch.Return(pending);
+        }
+    }
+
+    private static void MarkReachable(
+        Dictionary<IInterceptorSubject, List<IInterceptorSubject>> outgoing,
+        HashSet<IInterceptorSubject> reachable,
+        Stack<IInterceptorSubject> pending)
+    {
+        while (pending.Count > 0)
+        {
+            var subject = pending.Pop();
+            if (!reachable.Add(subject) || !outgoing.TryGetValue(subject, out var children))
+            {
+                continue;
+            }
+
+            foreach (var child in children)
+            {
+                pending.Push(child);
+            }
+        }
     }
 
     public bool HasSnapshot(PropertyReference property)
@@ -699,7 +822,7 @@ internal sealed class OwnershipGraph
             }
         }
 
-        _state = new GraphState(state.Owned, snapshots.ToImmutable());
+        _state = new GraphState(state.Owned, snapshots.ToImmutable(), state.DeferredSweep);
     }
 
     internal void RefreshPropertyNames(IInterceptorSubject subject)
@@ -719,8 +842,100 @@ internal sealed class OwnershipGraph
             (InterceptorSubjectContext)Context);
     }
 
-    internal static bool HasStructuralLease(IInterceptorSubject subject) =>
-        ((InterceptorExecutor)subject.Executor).StructuralLeaseCount > 0;
+    internal bool HasProtector(IInterceptorSubject subject) =>
+        HasReservation(subject) ||
+        ((InterceptorExecutor)subject.Executor).HasStructuralWriteLease((InterceptorSubjectContext)Context);
+
+    internal bool IsReachableFromRoot(
+        IInterceptorSubject start,
+        IInterceptorSubject? excluded,
+        bool includeProtectors)
+    {
+        if (IsReachabilityRoot(start, excluded, includeProtectors))
+        {
+            return true;
+        }
+
+        var current = start;
+        for (var step = 0; step < 8; step++)
+        {
+            var ownership = TryGetOwnership(current);
+            if (ownership is null || ownership.IncomingCount == 0)
+            {
+                return false;
+            }
+
+            if (!ownership.TryGetSingleIncoming(out var incoming))
+            {
+                break;
+            }
+
+            if (!ContainsOccurrence(incoming.Property, current, incoming.SubjectOrdinal))
+            {
+                return false;
+            }
+
+            var parent = incoming.Property.Subject;
+            if (ReferenceEquals(parent, start))
+            {
+                return false;
+            }
+
+            if (IsReachabilityRoot(parent, excluded, includeProtectors))
+            {
+                return true;
+            }
+
+            current = parent;
+        }
+
+        var visited = LifecycleScratch.RentSubjectSet();
+        var pending = LifecycleScratch.RentSubjectStack();
+        var edges = LifecycleScratch.RentEdgeList();
+        try
+        {
+            visited.Add(current);
+            pending.Push(current);
+            while (pending.Count > 0)
+            {
+                var subject = pending.Pop();
+                edges.Clear();
+                TryGetOwnership(subject)?.CopyIncomingEdges(edges);
+                foreach (var edge in edges)
+                {
+                    var parent = edge.Property.Subject;
+                    if (visited.Contains(parent) ||
+                        !ContainsOccurrence(edge.Property, subject, edge.SubjectOrdinal))
+                    {
+                        continue;
+                    }
+
+                    visited.Add(parent);
+                    if (IsReachabilityRoot(parent, excluded, includeProtectors))
+                    {
+                        return true;
+                    }
+
+                    pending.Push(parent);
+                }
+            }
+
+            return false;
+        }
+        finally
+        {
+            LifecycleScratch.Return(visited);
+            LifecycleScratch.Return(pending);
+            LifecycleScratch.Return(edges);
+        }
+    }
+
+    private bool IsReachabilityRoot(
+        IInterceptorSubject subject,
+        IInterceptorSubject? excluded,
+        bool includeProtectors) =>
+        !ReferenceEquals(subject, excluded) &&
+        (IsAnchored(subject) || includeProtectors && HasProtector(subject));
 
     internal void ReleaseUnusedReservation(IDisposable participant)
     {
@@ -820,13 +1035,12 @@ internal sealed class OwnershipGraph
                 return;
             }
 
-            var updated = reservation is not null
-                ? reservation.TryUpdateAttachment(
-                    revision,
-                    (InterceptorSubjectContext)Context,
-                    anchor,
-                    out _)
-                : executor.TryUpdateAttachment(revision, Context, anchor, out _);
+            var updated = ((InterceptorExecutor)executor).TryUpdateAttachmentAnchor(
+                reservation,
+                revision,
+                (InterceptorSubjectContext)Context,
+                anchor,
+                out _);
             if (updated)
             {
                 return;
@@ -848,17 +1062,6 @@ internal sealed class OwnershipGraph
         SubjectAttachmentAnchorKind Anchor,
         OwnershipReservationToken? Reservation);
 
-
-    public void DiscoverComponent(
-        Type declaredType,
-        object? value,
-        HashSet<IInterceptorSubject> visited,
-        List<IInterceptorSubject> discovered,
-        bool includeAttached = false)
-    {
-        var snapshot = StructuralSnapshotBuilder.Build(declaredType, value, 0);
-        DiscoverComponent(snapshot, visited, discovered, includeAttached);
-    }
 
     public void DiscoverComponent(
         StructuralSnapshot snapshot,
@@ -915,8 +1118,9 @@ internal sealed class OwnershipGraph
                         discovered.Add(subject);
                     }
 
-                    if (IsOwned(subject))
+                    if (TryGetOwnership(subject) is { } ownership)
                     {
+                        seededPropertyNames?.TryAdd(subject, ownership.PropertyNames);
                         continue;
                     }
                 }

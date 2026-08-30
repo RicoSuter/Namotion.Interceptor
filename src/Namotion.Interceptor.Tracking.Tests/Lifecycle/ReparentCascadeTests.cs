@@ -44,6 +44,14 @@ public class ReparentCascadeTests
         root.Mother = stepchild;
         stepchild.Father = child;
         child.Father = grandchild;
+        var detached = new List<IInterceptorSubject>();
+        context.TryGetLifecycleInterceptor()!.SubjectDetaching += change =>
+        {
+            if (change.IsContextDetach)
+            {
+                detached.Add(change.Subject);
+            }
+        };
 
         // The reparent target is already owned here, so the capture taken before the terminal runs
         // contributes nothing for it or for anything below it.
@@ -56,6 +64,8 @@ public class ReparentCascadeTests
         // Assert: the subject that lost its support is gone, and everything the committed graph
         // still reaches is still owned and still counted.
         Assert.Null(((IInterceptorSubject)stepchild).TryGetContext());
+        Assert.DoesNotContain(child, detached);
+        Assert.DoesNotContain(grandchild, detached);
         Assert.Same(context, ((IInterceptorSubject)child).TryGetContext());
         Assert.Equal(1, ((IInterceptorSubject)child).GetReferenceCount());
 

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Reflection;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
@@ -7,8 +8,18 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 
+[Collection(TemporaryRootTraceCollection.Name)]
 public class OwnershipReservationProtocolTests
 {
+    private sealed class RecordingTraceListener : TraceListener
+    {
+        internal List<string> Messages { get; } = [];
+
+        public override void Write(string? message) => Messages.Add(message ?? string.Empty);
+
+        public override void WriteLine(string? message) => Messages.Add(message ?? string.Empty);
+    }
+
     [RunsAfter(typeof(LifecycleInterceptor))]
     private sealed class ReservationVisibilityInterceptor(Action observe) : IWriteInterceptor
     {
@@ -137,52 +148,46 @@ public class OwnershipReservationProtocolTests
         // Arrange
         var context = CreateContext();
         var foreignContext = CreateContext();
-        var parent = new ReorderingDevice();
-        ((IInterceptorSubject)parent).AttachToContext(context);
-        var kept = new ReorderingDevice { Name = "kept" };
-        var dropped = new ReorderingDevice { Name = "dropped" };
+        var graph = GetGraph(context);
+        var dropped = new Person { FirstName = "dropped" };
+        var reservation = graph.ReserveForStructuralWrite(dropped);
 
         // Act
-        parent.Children = [kept, dropped];
-        ((IInterceptorSubject)dropped).AttachToContext(foreignContext);
+        graph.ReleaseUnusedReservation(reservation);
+        dropped.AttachToContext(foreignContext);
 
         // Assert
-        Assert.Same(foreignContext, ((IInterceptorSubject)dropped).TryGetContext());
+        Assert.Same(foreignContext, dropped.TryGetContext());
     }
 
     [Fact]
     public void WhenWritingAlreadyOwnedChild_ThenReservationBlocksRawDetachUntilSupportCommits()
     {
         // Arrange
-        var child = new Person { FirstName = "child" };
-        var attemptDetach = false;
-        Exception? detachException = null;
-        var observer = new ReservationVisibilityInterceptor(() =>
-        {
-            if (!attemptDetach)
-            {
-                return;
-            }
-
-            var executor = ((IInterceptorSubject)child).Executor;
-            executor.TryGetAttachment(out _, out _, out var revision);
-            detachException = Record.Exception(() => executor.TryUpdateAttachment(
-                revision,
-                null,
-                SubjectAttachmentAnchorKind.None,
-                out _));
-        });
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithLifecycle()
-            .WithService(() => observer, _ => false);
+        var context = CreateContext();
+        var graph = GetGraph(context);
         var firstParent = new Person(context) { FirstName = "first" };
         var secondParent = new Person(context) { FirstName = "second" };
+        var child = new Person { FirstName = "child" };
         firstParent.Father = child;
-        attemptDetach = true;
+        var reservation = graph.ReserveForStructuralWrite(child);
+        var executor = ((IInterceptorSubject)child).Executor;
+        executor.TryGetAttachment(out _, out _, out var revision);
 
         // Act
-        secondParent.Mother = child;
+        var detachException = Record.Exception(() => executor.TryUpdateAttachment(
+            revision,
+            null,
+            SubjectAttachmentAnchorKind.None,
+            out _));
+        try
+        {
+            secondParent.Mother = child;
+        }
+        finally
+        {
+            graph.ReleaseUnusedReservation(reservation);
+        }
 
         // Assert
         Assert.IsAssignableFrom<InvalidOperationException>(detachException);
@@ -344,5 +349,220 @@ public class OwnershipReservationProtocolTests
         {
             graph.ReleaseUnusedReservation(reservation);
         }
+
+        Assert.Null(child.TryGetContext());
     }
+
+    [Fact]
+    public void WhenDescendantLeaseProtectsAnOrphanedCycle_ThenItsClosureRemainsUntilCompletion()
+    {
+        // Arrange
+        var context = CreateContext();
+        var foreignContext = CreateContext();
+        var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
+        var root = new Person(context) { FirstName = "root" };
+        var first = new Person { FirstName = "first" };
+        var protectedSubject = new Person { FirstName = "protected" };
+        root.Father = first;
+        first.Father = protectedSubject;
+        protectedSubject.Father = first;
+        var detached = new List<IInterceptorSubject>();
+        lifecycle.SubjectDetaching += change =>
+        {
+            if (change.IsContextDetach)
+            {
+                detached.Add(change.Subject);
+            }
+        };
+        var lease = ((ITopologyAdmissionCoordinator)lifecycle).AcquireStructuralWriteLease(
+            (InterceptorExecutor)((IInterceptorSubject)protectedSubject).Executor);
+
+        // Act
+        root.Father = null;
+        var foreignException = Record.Exception(() => first.AttachToContext(foreignContext));
+
+        // Assert
+        Assert.Null(root.Father);
+        Assert.Same(context, first.TryGetContext());
+        Assert.Same(context, protectedSubject.TryGetContext());
+        Assert.IsAssignableFrom<InvalidOperationException>(foreignException);
+        Assert.Empty(detached);
+
+        var completionException = lease.Complete(null);
+        Assert.Null(completionException);
+        Assert.Null(first.TryGetContext());
+        Assert.Null(protectedSubject.TryGetContext());
+        Assert.Equal(1, detached.Count(subject => ReferenceEquals(subject, first)));
+        Assert.Equal(1, detached.Count(subject => ReferenceEquals(subject, protectedSubject)));
+    }
+
+    [Fact]
+    public void WhenOverlappingLeasesProtectAClosedCycle_ThenTheFinalLeaseReleasesItOnce()
+    {
+        // Arrange
+        var context = CreateContext();
+        var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
+        var root = new Person(context) { FirstName = "root" };
+        var first = new Person { FirstName = "first" };
+        var second = new Person { FirstName = "second" };
+        root.Father = first;
+        first.Father = second;
+        second.Father = first;
+        var detached = new List<IInterceptorSubject>();
+        lifecycle.SubjectDetaching += change =>
+        {
+            if (change.IsContextDetach)
+            {
+                detached.Add(change.Subject);
+            }
+        };
+        var coordinator = (ITopologyAdmissionCoordinator)lifecycle;
+        var firstLease = coordinator.AcquireStructuralWriteLease(
+            (InterceptorExecutor)((IInterceptorSubject)first).Executor);
+        var secondLease = coordinator.AcquireStructuralWriteLease(
+            (InterceptorExecutor)((IInterceptorSubject)second).Executor);
+        root.Father = null;
+
+        // Act
+        var firstCompletionException = firstLease.Complete(null);
+
+        // Assert
+        Assert.Null(firstCompletionException);
+        Assert.Same(context, first.TryGetContext());
+        Assert.Same(context, second.TryGetContext());
+        Assert.Empty(detached);
+
+        var secondCompletionException = secondLease.Complete(null);
+        Assert.Null(secondCompletionException);
+        Assert.Null(first.TryGetContext());
+        Assert.Null(second.TryGetContext());
+        Assert.Equal(1, detached.Count(subject => ReferenceEquals(subject, first)));
+        Assert.Equal(1, detached.Count(subject => ReferenceEquals(subject, second)));
+    }
+
+    [Fact]
+    public void WhenNewSupportCommitsBeforeTheFinalProtectorLeaves_ThenTheClosureStaysAttached()
+    {
+        // Arrange
+        var context = CreateContext();
+        var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
+        var firstRoot = new Person(context) { FirstName = "first root" };
+        var secondRoot = new Person(context) { FirstName = "second root" };
+        var first = new Person { FirstName = "first" };
+        var second = new Person { FirstName = "second" };
+        firstRoot.Father = first;
+        first.Father = second;
+        second.Father = first;
+        var detached = new List<IInterceptorSubject>();
+        lifecycle.SubjectDetaching += change =>
+        {
+            if (change.IsContextDetach)
+            {
+                detached.Add(change.Subject);
+            }
+        };
+        var lease = ((ITopologyAdmissionCoordinator)lifecycle).AcquireStructuralWriteLease(
+            (InterceptorExecutor)((IInterceptorSubject)first).Executor);
+        firstRoot.Father = null;
+
+        // Act
+        secondRoot.Mother = first;
+        var completionException = lease.Complete(null);
+
+        // Assert
+        Assert.Null(completionException);
+        Assert.Same(context, first.TryGetContext());
+        Assert.Same(context, second.TryGetContext());
+        Assert.Empty(detached);
+
+        secondRoot.Mother = null;
+        Assert.Null(first.TryGetContext());
+        Assert.Null(second.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenDeferredSweepCallbackFails_ThenExplicitCompletionAggregatesThePrimaryException()
+    {
+        // Arrange
+        var context = CreateContext();
+        var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
+        var root = new Person(context) { FirstName = "root" };
+        var first = new Person { FirstName = "first" };
+        var second = new Person { FirstName = "second" };
+        root.Father = first;
+        first.Father = second;
+        second.Father = first;
+        var callbackFailure = new InvalidOperationException("deferred sweep callback failed");
+        lifecycle.SubjectDetaching += change =>
+        {
+            if (change.IsContextDetach && ReferenceEquals(change.Subject, first))
+            {
+                throw callbackFailure;
+            }
+        };
+        var lease = ((ITopologyAdmissionCoordinator)lifecycle).AcquireStructuralWriteLease(
+            (InterceptorExecutor)((IInterceptorSubject)first).Executor);
+        root.Father = null;
+        var primaryFailure = new InvalidOperationException("primary chain failed");
+
+        // Act
+        var completionException = lease.Complete(primaryFailure);
+
+        // Assert
+        var aggregate = Assert.IsType<AggregateException>(completionException);
+        Assert.Collection(
+            aggregate.InnerExceptions,
+            exception => Assert.Same(primaryFailure, exception),
+            exception => Assert.Same(callbackFailure, exception));
+        Assert.Null(first.TryGetContext());
+        Assert.Null(second.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenDeferredSweepCallbackFailsDuringFallbackDisposal_ThenFailureIsTracedWithoutThrowing()
+    {
+        // Arrange
+        var context = CreateContext();
+        var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
+        var root = new Person(context) { FirstName = "root" };
+        var first = new Person { FirstName = "first" };
+        var second = new Person { FirstName = "second" };
+        root.Father = first;
+        first.Father = second;
+        second.Father = first;
+        lifecycle.SubjectDetaching += change =>
+        {
+            if (change.IsContextDetach && ReferenceEquals(change.Subject, first))
+            {
+                throw new InvalidOperationException("fallback sweep callback failed");
+            }
+        };
+        var lease = ((ITopologyAdmissionCoordinator)lifecycle).AcquireStructuralWriteLease(
+            (InterceptorExecutor)((IInterceptorSubject)first).Executor);
+        root.Father = null;
+        var listener = new RecordingTraceListener();
+        Trace.Listeners.Add(listener);
+
+        try
+        {
+            // Act
+            var disposalException = Record.Exception(lease.Dispose);
+
+            // Assert
+            Assert.Null(disposalException);
+            Assert.Contains(listener.Messages, message => message.Contains("fallback sweep callback failed"));
+            Assert.Null(first.TryGetContext());
+            Assert.Null(second.TryGetContext());
+        }
+        finally
+        {
+            Trace.Listeners.Remove(listener);
+        }
+    }
+}
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class TemporaryRootTraceCollection
+{
+    public const string Name = "Temporary root trace";
 }

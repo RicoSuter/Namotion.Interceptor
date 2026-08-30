@@ -184,6 +184,43 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         return TryUpdateAttachmentCore(reservation, expectedRevision, context, anchor, out currentRevision);
     }
 
+    internal bool TryUpdateAttachmentAnchor(
+        OwnershipReservationToken? reservation,
+        long expectedRevision,
+        InterceptorSubjectContext context,
+        SubjectAttachmentAnchorKind anchor,
+        out long currentRevision)
+    {
+        lock (_attachmentLock)
+        {
+            var current = _attachment;
+            currentRevision = current.Revision;
+            if (current.Revision != expectedRevision)
+            {
+                return false;
+            }
+
+            var reservationMatches = reservation is not null
+                ? reservation.IsActive(this) && ReferenceEquals(_ownershipReservation, reservation.Reservation)
+                : _ownershipReservation is null;
+            if (current.Phase != AttachmentPhase.Stable ||
+                !ReferenceEquals(current.Context, context) ||
+                !reservationMatches)
+            {
+                throw LifecycleConflictException.Retryable(_subject);
+            }
+
+            currentRevision++;
+            _attachment = new AttachmentState(
+                context,
+                anchor,
+                currentRevision,
+                AttachmentPhase.Stable,
+                current.StructuralLeaseCount);
+            return true;
+        }
+    }
+
     private bool TryUpdateAttachmentCore(
         OwnershipReservationToken? reservation,
         long expectedRevision,
@@ -291,6 +328,15 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         }
     }
 
+    internal bool HasStructuralWriteLease(InterceptorSubjectContext context)
+    {
+        lock (_attachmentLock)
+        {
+            return _activeStructuralLeases is { Count: > 0 } &&
+                   ReferenceEquals(_attachment.Context, context);
+        }
+    }
+
     internal AttachmentTransition? TryAcquireAttachmentTransition(
         long expectedRevision,
         AttachmentPhase phase,
@@ -338,12 +384,13 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         lock (_attachmentLock)
         {
             var current = _attachment;
+            var isAnchorUpdate = context is not null && ReferenceEquals(current.Context, context);
             var reservationMatches = reservation is not null
                 ? reservation.IsActive(this) && ReferenceEquals(_ownershipReservation, reservation.Reservation)
                 : _ownershipReservation is null;
             if (!ReferenceEquals(current.Context, expectedContext) ||
                 current.Phase != AttachmentPhase.Stable ||
-                current.StructuralLeaseCount != 0 ||
+                !isAnchorUpdate && current.StructuralLeaseCount != 0 ||
                 !reservationMatches)
             {
                 throw LifecycleConflictException.Retryable(_subject);
@@ -354,7 +401,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 anchor,
                 current.Revision + 1,
                 AttachmentPhase.Stable,
-                0);
+                current.StructuralLeaseCount);
             var transition = new AttachmentTransition(this, preparedState);
             _activeAttachmentTransition = transition;
             _attachment = current.WithPhase(

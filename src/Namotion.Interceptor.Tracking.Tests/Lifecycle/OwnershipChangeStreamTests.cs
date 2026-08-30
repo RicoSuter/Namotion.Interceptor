@@ -324,21 +324,11 @@ public class OwnershipChangeStreamTests
     }
 
     /// <summary>
-    /// Records existing behavior for a reparent onto a subject this context already owns. The target
-    /// is held through a different property than the one being written, so the retention rule does
-    /// not reach it: it is released by the cascade from the dropped subject and re-attached by the
-    /// addition pass, and the committed graph is correct either way.
-    ///
-    /// Master does the same thing. Measured at 0418410c with <c>WithContextInheritance()</c>, which is
-    /// the configuration whose attach descends into the subtree the way <c>WithLifecycle()</c> does
-    /// here, master publishes five changes for this shape too, differing only in the detach order:
-    /// <c>G detached, C detached, S detached, G attached, C attached</c>, deepest first where the
-    /// sequence below is top-down. Master under a bare <c>WithLifecycle()</c> publishes two changes
-    /// instead, but that is not a comparable configuration: it never attached the subtree at all, and
-    /// the grandchild is left with reference count zero afterwards.
+    /// New support is staged before obsolete support, while the journal retains the public
+    /// old-edge-before-new-edge order. The retained target and its subtree never detach.
     /// </summary>
     [Fact]
-    public void WhenAReparentTargetIsAlreadyOwned_ThenTheWholeChainDetachesAndReattaches()
+    public void WhenAReparentTargetIsAlreadyOwned_ThenOldEdgeRemovalPrecedesNewEdgeAdditionWithoutDetach()
     {
         // Arrange: a three level chain hanging off the edge that is about to be replaced.
         var recorder = new LifecycleChangeStreamRecorder();
@@ -360,10 +350,8 @@ public class OwnershipChangeStreamTests
         Assert.Equal(
         [
             "S edge removed, detached Mother[-] references=0",
-            "C edge removed, detached Father[-] references=0",
-            "G edge removed, detached Father[-] references=0",
-            "G attached, edge added Father[-] references=1",
-            "C attached, edge added Mother[-] references=1"
+            "C edge removed Father[-] references=1",
+            "C edge added Mother[-] references=2"
         ], recorder.Changes);
     }
 }

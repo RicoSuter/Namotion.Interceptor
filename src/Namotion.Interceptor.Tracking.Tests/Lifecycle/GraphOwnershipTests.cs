@@ -594,7 +594,6 @@ public class GraphOwnershipTests
         var ownership = new SubjectOwnership();
         ownership.AddIncoming(property, 0, new EqualityThrowingIndex(10));
         ownership.AddIncoming(property, 1, new EqualityThrowingIndex(11));
-        ownership.ActivateParents();
         var indices = new CountingOrdinalIndices(
             new EqualityThrowingIndex(20),
             new EqualityThrowingIndex(21));
@@ -603,13 +602,12 @@ public class GraphOwnershipTests
         var exception = Record.Exception(() =>
         {
             ownership.UpdateIncomingIndices(property, indices);
-            ownership.RepublishParents();
         });
 
         // Assert
         Assert.Null(exception);
         Assert.Equal(2, indices.AccessCount);
-        Assert.True(ownership.TryGetPublishedParents(out var parents));
+        var parents = ownership.Parents;
         Assert.Equal(20, Assert.IsType<EqualityThrowingIndex>(parents[0].Index).Value);
         Assert.Equal(21, Assert.IsType<EqualityThrowingIndex>(parents[1].Index).Value);
     }

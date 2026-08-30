@@ -11,11 +11,14 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
         long sourceRevision = 0,
         Dictionary<IInterceptorSubject, OwnershipReservationToken>? reservations = null)
     {
-        graph.Reconcile(
+        var refreshCollection = graph.Reconcile(
             property,
-            newValue,
             StructuralSnapshotBuilder.Build(metadata.Type, newValue, sourceRevision),
             reservations,
             notifier);
+        if (refreshCollection)
+        {
+            notifier.RefreshCollectionProperty(property, newValue);
+        }
     }
 }

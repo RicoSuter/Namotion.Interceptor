@@ -192,7 +192,10 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
         {
             if (value is not null)
             {
-                graph.DiscoverComponent(metadata.Type, value, visited, claimed);
+                graph.DiscoverComponent(
+                    StructuralSnapshotBuilder.Build(metadata.Type, value, 0),
+                    visited,
+                    claimed);
             }
         }
 

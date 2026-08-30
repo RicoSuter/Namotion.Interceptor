@@ -53,7 +53,22 @@ internal sealed class SubjectOwnership
         Publish(_state.Edges.Add(new IncomingEdge(property, subjectOrdinal, index)));
     }
 
+    public bool ContainsIncoming(PropertyReference property, int subjectOrdinal) =>
+        FindIncomingIndex(property, subjectOrdinal) >= 0;
+
     public bool RemoveIncoming(PropertyReference property, int subjectOrdinal)
+    {
+        var index = FindIncomingIndex(property, subjectOrdinal);
+        if (index < 0)
+        {
+            return false;
+        }
+
+        Publish(_state.Edges.RemoveAt(index));
+        return true;
+    }
+
+    private int FindIncomingIndex(PropertyReference property, int subjectOrdinal)
     {
         var edges = _state.Edges;
         for (var index = 0; index < edges.Length; index++)
@@ -61,12 +76,11 @@ internal sealed class SubjectOwnership
             var edge = edges[index];
             if (edge.Property.Equals(property) && edge.SubjectOrdinal == subjectOrdinal)
             {
-                Publish(edges.RemoveAt(index));
-                return true;
+                return index;
             }
         }
 
-        return false;
+        return -1;
     }
 
     public void UpdateIncomingIndices(PropertyReference property, IReadOnlyList<object?> indices)
@@ -99,18 +113,6 @@ internal sealed class SubjectOwnership
     }
 
     public void CopyIncomingEdges(List<IncomingEdge> target) => target.AddRange(_state.Edges);
-
-    public bool TryGetPublishedParents(out ImmutableArray<SubjectParent> parents)
-    {
-        parents = _state.Parents;
-        return true;
-    }
-
-    public ImmutableArray<SubjectParent> ActivateParents() => _state.Parents;
-
-    public void RepublishParents()
-    {
-    }
 
     private void Publish(ImmutableArray<IncomingEdge> edges)
     {

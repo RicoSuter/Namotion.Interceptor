@@ -187,13 +187,17 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                         _graph.CommitReservations(reservations);
                         using var change = _graph.PrepareWrite(
                             context.Property,
-                            value,
                             snapshot,
                             context.Executor.Revision + 1,
                             seededSnapshots,
                             seededPropertyNames,
                             reservations,
                             _notifier);
+                        if (change.RefreshCollection)
+                        {
+                            _notifier.RefreshCollectionProperty(context.Property, value);
+                        }
+
                         var journal = journalCapture.Complete(
                             context.Property,
                             context.Executor.Revision + 1);
@@ -266,29 +270,25 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         StructuralWriteLease lease,
         Exception? primaryException)
     {
-        List<IInterceptorSubject>? deferredSweep;
+        bool runDeferredSweep;
         using (EnterGate())
         {
             executor.ReleaseStructuralWriteLease(lease);
-            deferredSweep = _graph.PrepareDeferredSweep();
+            runDeferredSweep = _graph.HasDeferredSweep;
         }
 
-        if (deferredSweep is null)
-        {
-            return primaryException;
-        }
+        return runDeferredSweep ? DrainDeferredSweep(primaryException) : primaryException;
+    }
 
+    private Exception? DrainDeferredSweep(Exception? primaryException)
+    {
         using var capture = _notifier.BeginJournal();
         using (EnterGate())
         {
-            foreach (var subject in deferredSweep)
+            using var change = _graph.PrepareDeferredSweep(_notifier);
+            if (change is not null)
             {
-                var ownership = _graph.TryGetOwnership(subject);
-                if (ownership is { IncomingCount: 0 } && !_graph.IsAnchored(subject) &&
-                    !_graph.HasReservation(subject) && !OwnershipGraph.HasStructuralLease(subject))
-                {
-                    _release.ReleaseRoot(subject);
-                }
+                _graph.Publish(change);
             }
         }
 
@@ -310,6 +310,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         OwnershipReservationToken token,
         bool retainCommittedOwnership)
     {
+        bool runDeferredSweep;
         using (EnterGate())
         {
             if (!retainCommittedOwnership)
@@ -320,6 +321,19 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             }
 
             executor.ReleaseOwnershipReservation(token, detachIfLast: !retainCommittedOwnership);
+            runDeferredSweep = _graph.HasDeferredSweep;
+        }
+
+        if (runDeferredSweep && DrainDeferredSweep(null) is { } exception)
+        {
+            try
+            {
+                Trace.TraceError($"Completing an ownership reservation failed: {exception}");
+            }
+            catch
+            {
+                // Reservation disposal and cleanup remain no-throw when diagnostics are misconfigured.
+            }
         }
     }
 
@@ -482,9 +496,13 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                 return;
             }
 
-            if (ownership.IncomingCount == 0 || !_reachability.IsAnchorReachable(subject, null))
+            if (!_reachability.IsAnchorReachable(subject, null, includeProtectors: true))
             {
                 _release.ReleaseRoot(subject);
+            }
+            else if (!_reachability.IsAnchorReachable(subject, null))
+            {
+                _graph.MarkDeferredSweep();
             }
         }
     }

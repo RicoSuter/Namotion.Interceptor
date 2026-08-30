@@ -186,6 +186,29 @@ internal sealed class LifecycleNotifier(
     private JournalBuilder? CurrentBuilder =>
         _currentJournal is { Owner: var owner } builder && ReferenceEquals(owner, this) ? builder : null;
 
+    internal int JournalEntryCount => CurrentBuilder?.Entries.Count ?? -1;
+
+    internal List<Action>? DeferJournalEntriesFrom(int start)
+    {
+        var entries = CurrentBuilder?.Entries;
+        if (entries is null || entries.Count == start)
+        {
+            return null;
+        }
+
+        var deferred = entries.GetRange(start, entries.Count - start);
+        entries.RemoveRange(start, entries.Count - start);
+        return deferred;
+    }
+
+    internal void AppendJournalEntries(List<Action>? entries)
+    {
+        if (entries is not null)
+        {
+            CurrentBuilder!.Entries.AddRange(entries);
+        }
+    }
+
     private void RecordEvent(
         Action<SubjectLifecycleChange>? handlers,
         SubjectLifecycleChange change,

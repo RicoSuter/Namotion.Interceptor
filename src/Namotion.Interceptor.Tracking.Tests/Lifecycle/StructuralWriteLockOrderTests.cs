@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -35,6 +37,34 @@ public class StructuralWriteLockOrderTests
         }
     }
 
+    private static void WaitFor(ManualResetEventSlim signal, string phase)
+    {
+        if (!signal.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+        {
+            throw new TimeoutException($"Timed out waiting for {phase}.");
+        }
+    }
+
+    [RunsAfter(typeof(LifecycleInterceptor))]
+    private sealed class LeaseAdmissionBarrier(
+        IInterceptorSubject target,
+        ManualResetEventSlim admitted,
+        ManualResetEventSlim resume) : IWriteInterceptor
+    {
+        public void WriteProperty<TProperty>(
+            ref PropertyWriteContext<TProperty> context,
+            WriteInterceptionDelegate<TProperty> next)
+        {
+            if (ReferenceEquals(context.Property.Subject, target) && context.Property.Name == nameof(Person.Mother))
+            {
+                admitted.Set();
+                WaitFor(resume, "the admitted structural write to resume");
+            }
+
+            next(ref context);
+        }
+    }
+
     [Fact]
     [Trait("Category", "Concurrency")]
     public void WhenChildWritesRaceParentRemovals_ThenBothDirectionsCompleteWithoutDeadlock()
@@ -63,6 +93,13 @@ public class StructuralWriteLockOrderTests
                     child.Father = new Person { FirstName = $"F{i}" };
                     child.Father = null;
                 }
+                catch (LifecycleConflictException)
+                {
+                }
+                catch (InvalidOperationException exception) when (
+                    exception.Message.StartsWith("Another context claimed a subject of this graph"))
+                {
+                }
                 catch (Exception exception)
                 {
                     lock (exceptions)
@@ -85,6 +122,9 @@ public class StructuralWriteLockOrderTests
                 {
                     root.Mother = null;
                     root.Mother = child;
+                }
+                catch (LifecycleConflictException)
+                {
                 }
                 catch (Exception exception)
                 {
@@ -120,7 +160,7 @@ public class StructuralWriteLockOrderTests
 
     [Fact]
     [Trait("Category", "Concurrency")]
-    public void WhenStructuralWritesRaceExplicitAttachAndDetach_ThenTransientRacesOrderInsteadOfThrowing()
+    public void WhenStructuralWritesRaceExplicitAttachAndDetach_ThenBothDirectionsCompleteWithoutDeadlock()
     {
         // Arrange: the second direction pair, through the explicit attach and detach entry points
         // rather than a parent edge. The writes on the transitioning subject either run attached
@@ -144,6 +184,13 @@ public class StructuralWriteLockOrderTests
                     subject.Father = new Person { FirstName = $"F{i}" };
                     subject.Father = null;
                 }
+                catch (LifecycleConflictException)
+                {
+                }
+                catch (InvalidOperationException exception) when (
+                    exception.Message.StartsWith("Another context claimed a subject of this graph"))
+                {
+                }
                 catch (Exception exception)
                 {
                     lock (exceptions)
@@ -166,6 +213,13 @@ public class StructuralWriteLockOrderTests
                 {
                     subject.AttachToContext(context);
                     subject.DetachFromContext(context);
+                }
+                catch (LifecycleConflictException)
+                {
+                }
+                catch (InvalidOperationException exception) when (
+                    exception.Message.StartsWith("Another context claimed a subject of this graph"))
+                {
                 }
                 catch (Exception exception)
                 {
@@ -231,5 +285,109 @@ public class StructuralWriteLockOrderTests
         root.Mother = child;
         Assert.Same(context, father.TryGetContext());
         Assert.Equal(1, father.GetReferenceCount());
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenProtectorAdmissionPrecedesRemovalPublication_ThenReachabilityIncludesItsClosure()
+    {
+        // Arrange
+        var admitted = new ManualResetEventSlim(false);
+        var resume = new ManualResetEventSlim(false);
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var root = new Person(context) { FirstName = "root" };
+        var first = new Person { FirstName = "first" };
+        var second = new Person { FirstName = "second" };
+        root.Father = first;
+        first.Father = second;
+        second.Father = first;
+        context.AddService<IWriteInterceptor>(new LeaseAdmissionBarrier(first, admitted, resume));
+        var newChild = new Person { FirstName = "new child" };
+        Exception? writerException = null;
+        var writer = new Thread(() =>
+        {
+            try
+            {
+                first.Mother = newChild;
+            }
+            catch (Exception exception)
+            {
+                writerException = exception;
+            }
+        }) { IsBackground = true };
+
+        // Act
+        writer.Start();
+        WaitFor(admitted, "the structural lease admission");
+        try
+        {
+            root.Father = null;
+
+            // Assert
+            Assert.Same(context, first.TryGetContext());
+            Assert.Same(context, second.TryGetContext());
+        }
+        finally
+        {
+            resume.Set();
+        }
+
+        Assert.True(writer.Join(WriteProtocolAcceptance.RendezvousTimeout), "the protected writer never completed");
+        Assert.Null(writerException);
+        Assert.Null(first.TryGetContext());
+        Assert.Null(second.TryGetContext());
+        Assert.Null(newChild.TryGetContext());
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenProtectorAdmissionFollowsRemovalPublication_ThenItUsesTheNewAttachmentEpoch()
+    {
+        // Arrange
+        var published = new ManualResetEventSlim(false);
+        var detachedWriteCompleted = new ManualResetEventSlim(false);
+        var context = CreateContext();
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var root = new Person(context) { FirstName = "root" };
+        var child = new Person { FirstName = "child" };
+        var grandchild = new Person { FirstName = "grandchild" };
+        root.Father = child;
+        lifecycle.SubjectDetaching += change =>
+        {
+            if (change.IsContextDetach && ReferenceEquals(change.Subject, child))
+            {
+                published.Set();
+                WaitFor(detachedWriteCompleted, "the detached-epoch write");
+            }
+        };
+        Exception? removalException = null;
+        var remover = new Thread(() =>
+        {
+            try
+            {
+                root.Father = null;
+            }
+            catch (Exception exception)
+            {
+                removalException = exception;
+            }
+        }) { IsBackground = true };
+
+        // Act
+        remover.Start();
+        WaitFor(published, "the removal publication");
+        var writeException = Record.Exception(() => child.Father = grandchild);
+        detachedWriteCompleted.Set();
+
+        // Assert
+        Assert.True(remover.Join(WriteProtocolAcceptance.RendezvousTimeout), "the removal never completed");
+        Assert.Null(removalException);
+        Assert.Null(writeException);
+        Assert.Null(child.TryGetContext());
+        Assert.Null(grandchild.TryGetContext());
+
+        root.Father = child;
+        Assert.Same(context, child.TryGetContext());
+        Assert.Same(context, grandchild.TryGetContext());
     }
 }
