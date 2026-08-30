@@ -51,6 +51,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     private volatile AttachmentState _attachment = AttachmentState.Unattached;
     private HashSet<StructuralWriteLease>? _activeStructuralLeases;
     private AttachmentTransition? _activeAttachmentTransition;
+    private OwnershipReservation? _ownershipReservation;
 
     /// <summary>
     /// Creates an executor for <paramref name="subject"/>. Prefer <see cref="GetOrCreate"/>, which
@@ -78,6 +79,122 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
 
     /// <inheritdoc />
     public bool TryUpdateAttachment(long expectedRevision, IInterceptorSubjectContext? context, SubjectAttachmentAnchorKind anchor, out long currentRevision)
+        => TryUpdateAttachmentCore(null, expectedRevision, context, anchor, out currentRevision);
+
+    internal OwnershipReservationToken TryAcquireOwnershipReservation(
+        InterceptorSubjectContext context,
+        ReservationMode mode)
+    {
+        lock (_attachmentLock)
+        {
+            var current = _attachment;
+            if (current.Phase != AttachmentPhase.Stable ||
+                (current.Context is not null && !ReferenceEquals(current.Context, context)) ||
+                (mode == ReservationMode.Exclusive && current.StructuralLeaseCount != 0))
+            {
+                throw LifecycleConflictException.Retryable(_subject);
+            }
+
+            var reservation = _ownershipReservation;
+            if (reservation is null)
+            {
+                reservation = new OwnershipReservation(
+                    context,
+                    mode);
+                _ownershipReservation = reservation;
+            }
+            else if (!ReferenceEquals(reservation.Context, context) ||
+                     reservation.Mode == ReservationMode.Exclusive ||
+                     mode == ReservationMode.Exclusive)
+            {
+                throw LifecycleConflictException.Retryable(_subject);
+            }
+
+            reservation.ParticipantCount++;
+            return new OwnershipReservationToken(this, reservation);
+        }
+    }
+
+    internal void ReleaseOwnershipReservation(OwnershipReservationToken token, bool detachIfLast)
+    {
+        lock (_attachmentLock)
+        {
+            var reservation = token.Reservation;
+            if (!ReferenceEquals(_ownershipReservation, reservation))
+            {
+                return;
+            }
+
+            reservation.ParticipantCount--;
+            if (reservation.ParticipantCount == 0)
+            {
+                var current = _attachment;
+                if (detachIfLast && current.Phase == AttachmentPhase.Stable &&
+                    current.StructuralLeaseCount == 0 &&
+                    ReferenceEquals(current.Context, reservation.Context))
+                {
+                    _attachment = new AttachmentState(
+                        null,
+                        SubjectAttachmentAnchorKind.None,
+                        current.Revision + 1,
+                        AttachmentPhase.Stable,
+                        0);
+                }
+
+                _ownershipReservation = null;
+            }
+        }
+    }
+
+    internal bool HasOwnershipReservation(InterceptorSubjectContext context)
+    {
+        lock (_attachmentLock)
+        {
+            return ReferenceEquals(_ownershipReservation?.Context, context);
+        }
+    }
+
+    internal bool TryUpdateAttachment(
+        OwnershipReservationToken reservation,
+        long expectedRevision,
+        InterceptorSubjectContext context,
+        SubjectAttachmentAnchorKind anchor,
+        out long currentRevision)
+    {
+        if (!ReferenceEquals(reservation.Reservation.Context, context))
+        {
+            throw new InvalidOperationException("The attachment context does not match the ownership reservation.");
+        }
+
+        return TryUpdateAttachmentCore(reservation, expectedRevision, context, anchor, out currentRevision);
+    }
+
+    private bool TryUpdateAttachmentCore(
+        OwnershipReservationToken? reservation,
+        long expectedRevision,
+        IInterceptorSubjectContext? context,
+        SubjectAttachmentAnchorKind anchor,
+        out long currentRevision)
+    {
+        ValidateAttachment(context, anchor);
+        var phase = context is null ? AttachmentPhase.Detaching : AttachmentPhase.Attaching;
+        using var transition = TryAcquireAttachmentTransition(
+            expectedRevision,
+            phase,
+            out currentRevision,
+            reservation);
+        if (transition is null)
+        {
+            return false;
+        }
+
+        transition.Commit((InterceptorSubjectContext?)context, anchor, out currentRevision);
+        return true;
+    }
+
+    private static void ValidateAttachment(
+        IInterceptorSubjectContext? context,
+        SubjectAttachmentAnchorKind anchor)
     {
         if (context is null && anchor != SubjectAttachmentAnchorKind.None)
         {
@@ -96,16 +213,6 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 "independently: interceptor chains compile inside the built-in implementation, so a " +
                 "foreign context would attach without any interception.");
         }
-
-        var phase = context is null ? AttachmentPhase.Detaching : AttachmentPhase.Attaching;
-        using var transition = TryAcquireAttachmentTransition(expectedRevision, phase, out currentRevision);
-        if (transition is null)
-        {
-            return false;
-        }
-
-        transition.Commit((InterceptorSubjectContext?)context, anchor, out currentRevision);
-        return true;
     }
 
     internal StructuralWriteLease TryAcquireStructuralWriteLease()
@@ -113,7 +220,8 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         lock (_attachmentLock)
         {
             var current = _attachment;
-            if (current.Phase != AttachmentPhase.Stable)
+            if (current.Phase != AttachmentPhase.Stable ||
+                _ownershipReservation?.Mode == ReservationMode.Exclusive)
             {
                 throw LifecycleConflictException.Retryable(_subject);
             }
@@ -142,7 +250,8 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     internal AttachmentTransition? TryAcquireAttachmentTransition(
         long expectedRevision,
         AttachmentPhase phase,
-        out long currentRevision)
+        out long currentRevision,
+        OwnershipReservationToken? reservation = null)
     {
         if (phase == AttachmentPhase.Stable)
         {
@@ -158,7 +267,12 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 return null;
             }
 
-            if (current.Phase != AttachmentPhase.Stable || current.StructuralLeaseCount != 0)
+            var reservationMatches = reservation is not null
+                ? reservation.IsActive(this) &&
+                  ReferenceEquals(_ownershipReservation, reservation.Reservation)
+                : _ownershipReservation is null;
+            if (current.Phase != AttachmentPhase.Stable || current.StructuralLeaseCount != 0 ||
+                !reservationMatches)
             {
                 throw LifecycleConflictException.Retryable(_subject);
             }

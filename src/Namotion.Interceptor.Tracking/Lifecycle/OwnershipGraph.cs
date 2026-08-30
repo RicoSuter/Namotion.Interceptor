@@ -24,7 +24,9 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// <c>GetReferenceCount</c> must not take that lock, so they need a lock-free way to find a
 /// subject's record.
 /// </remarks>
-internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
+internal sealed class OwnershipGraph(
+    IInterceptorSubjectContext context,
+    Func<IDisposable> enterTopologyGate)
 {
     // Reference equality, explicitly: graph membership is identity, and a hand-written subject
     // may override Equals/GetHashCode, which under default equality could merge distinct nodes or
@@ -253,6 +255,34 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
 
     #region Anchors and executor claims
 
+    internal IDisposable ReserveForStructuralWrite(IInterceptorSubject subject)
+    {
+        return ((InterceptorExecutor)subject.Executor).TryAcquireOwnershipReservation(
+            (InterceptorSubjectContext)Context,
+            ReservationMode.Shared);
+    }
+
+    internal bool HasReservation(IInterceptorSubject subject)
+    {
+        return ((InterceptorExecutor)subject.Executor).HasOwnershipReservation(
+            (InterceptorSubjectContext)Context);
+    }
+
+    internal void ReleaseUnusedReservation(IDisposable participant)
+    {
+        var reservation = (OwnershipReservationToken)participant;
+        using (enterTopologyGate())
+        {
+            var subject = reservation.Subject;
+            subject.Executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
+            var hasCommittedSupport = IsOwned(subject) ||
+                                      (anchor != SubjectAttachmentAnchorKind.None &&
+                                       ReferenceEquals(attachedContext, Context));
+            reservation.ReleaseUnused(
+                !hasCommittedSupport && ReferenceEquals(attachedContext, Context));
+        }
+    }
+
     /// <summary>
     /// Whether the subject carries a root anchor on this context. The anchor lives on the executor
     /// and is never mirrored into the graph state, so there is nothing to keep in sync.
@@ -267,35 +297,22 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     }
 
     /// <summary>
-    /// Claims the subject for this context, or confirms an existing claim. Returns false when a
-    /// competing context owns it, which is a lost race rather than a caller error and is answered by
-    /// releasing this operation's own claims.
+    /// Legacy Task 8/9 adapter. It uses the executor reservation as its only claim state, commits
+    /// immediately for the pre-transaction attach/admission paths, then releases its participant.
     /// </summary>
     public bool TryClaim(IInterceptorSubject subject, SubjectAttachmentAnchorKind anchor)
     {
-        var executor = subject.Executor;
-        while (true)
+        try
         {
-            executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out var revision);
-            if (attachedContext is not null)
-            {
-                if (!ReferenceEquals(attachedContext, Context))
-                {
-                    return false;
-                }
-
-                // Already ours: never weaken the anchor a previous claim or an explicit attach set.
-                if (anchor == SubjectAttachmentAnchorKind.None || currentAnchor == anchor ||
-                    currentAnchor == SubjectAttachmentAnchorKind.Explicit)
-                {
-                    return true;
-                }
-            }
-
-            if (executor.TryUpdateAttachment(revision, Context, anchor, out _))
-            {
-                return true;
-            }
+            using var reservation = ((InterceptorExecutor)subject.Executor).TryAcquireOwnershipReservation(
+                (InterceptorSubjectContext)Context,
+                anchor == SubjectAttachmentAnchorKind.None ? ReservationMode.Shared : ReservationMode.Exclusive);
+            CommitReservation(reservation, anchor);
+            return true;
+        }
+        catch (LifecycleConflictException)
+        {
+            return false;
         }
     }
 
@@ -326,8 +343,17 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     /// <see cref="SubjectAttachmentAnchorKind.Provisional"/>, because an explicit anchor that landed
     /// concurrently must survive rather than be degraded by the adoption.
     /// </summary>
-    public void SetAnchor(IInterceptorSubject subject, SubjectAttachmentAnchorKind anchor, SubjectAttachmentAnchorKind? onlyFrom = null)
+    public void SetAnchor(
+        IInterceptorSubject subject,
+        SubjectAttachmentAnchorKind anchor,
+        SubjectAttachmentAnchorKind? onlyFrom = null,
+        OwnershipReservationToken? reservation = null)
     {
+        if (reservation is not null && !ReferenceEquals(reservation.Subject, subject))
+        {
+            throw new InvalidOperationException("The ownership reservation belongs to a different subject.");
+        }
+
         var executor = subject.Executor;
         while (true)
         {
@@ -338,7 +364,14 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
                 return;
             }
 
-            if (executor.TryUpdateAttachment(revision, Context, anchor, out _))
+            var updated = reservation is not null
+                ? reservation.TryUpdateAttachment(
+                    revision,
+                    (InterceptorSubjectContext)Context,
+                    anchor,
+                    out _)
+                : executor.TryUpdateAttachment(revision, Context, anchor, out _);
+            if (updated)
             {
                 return;
             }
@@ -364,20 +397,22 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
         Type declaredType,
         object? value,
         HashSet<IInterceptorSubject> visited,
-        List<IInterceptorSubject> unattached)
+        List<IInterceptorSubject> discovered,
+        bool includeAttached = false)
     {
         var snapshot = StructuralSnapshotBuilder.Build(declaredType, value, 0);
         foreach (var occurrence in snapshot.Occurrences)
         {
-            DiscoverComponent(occurrence.Subject, visited, unattached);
+            DiscoverComponent(occurrence.Subject, visited, discovered, includeAttached);
         }
     }
 
-    /// <inheritdoc cref="DiscoverComponent(Type,object?,HashSet{IInterceptorSubject},List{IInterceptorSubject})"/>
+    /// <inheritdoc cref="DiscoverComponent(Type,object?,HashSet{IInterceptorSubject},List{IInterceptorSubject},bool)"/>
     public void DiscoverComponent(
         IInterceptorSubject start,
         HashSet<IInterceptorSubject> visited,
-        List<IInterceptorSubject> unattached)
+        List<IInterceptorSubject> discovered,
+        bool includeAttached = false)
     {
         var pending = LifecycleScratch.RentSubjectStack();
         try
@@ -401,10 +436,15 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
                             "join this graph. Detach it from that context first.");
                     }
 
+                    if (includeAttached)
+                    {
+                        discovered.Add(subject);
+                    }
+
                     continue;
                 }
 
-                unattached.Add(subject);
+                discovered.Add(subject);
 
                 foreach (var entry in subject.Properties)
                 {
@@ -434,9 +474,36 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     }
 
     /// <summary>
-    /// Claims every discovered unattached subject. A lost race releases the claims this call made
-    /// and reports failure, so the caller can throw before touching the backing property.
+    /// Reserves every discovered subject. A lost race releases this operation's participants and
+    /// reports failure, so the caller can throw before touching the backing property.
     /// </summary>
+    public bool TryReserveDiscovered(
+        List<IInterceptorSubject> unattached,
+        Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations)
+    {
+        for (var i = 0; i < unattached.Count; i++)
+        {
+            var subject = unattached[i];
+            if (reservations.ContainsKey(subject))
+            {
+                continue;
+            }
+
+            try
+            {
+                var reservation = (OwnershipReservationToken)ReserveForStructuralWrite(subject);
+                reservations.Add(subject, reservation);
+            }
+            catch (LifecycleConflictException)
+            {
+                ReleaseUnusedReservations(reservations);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public bool TryClaimDiscovered(List<IInterceptorSubject> unattached, IInterceptorSubject? explicitRoot, SubjectAttachmentAnchorKind rootAnchor)
     {
         for (var i = 0; i < unattached.Count; i++)
@@ -459,12 +526,24 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
         return true;
     }
 
-    /// <summary>
-    /// Hands back every claim that did not end up carrying ownership, which happens when the
-    /// terminal or the authoritative getter reread throws, when a normalizing setter stores a
-    /// different graph than the one that was validated, or when a downstream write interceptor
-    /// suppresses the continuation.
-    /// </summary>
+    public void CommitReservations(Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations)
+    {
+        foreach (var reservation in reservations.Values)
+        {
+            CommitReservation(reservation, SubjectAttachmentAnchorKind.None);
+        }
+    }
+
+    public void ReleaseUnusedReservations(Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations)
+    {
+        foreach (var reservation in reservations.Values)
+        {
+            ReleaseUnusedReservation(reservation);
+        }
+
+        reservations.Clear();
+    }
+
     public void ReleaseUnusedClaims(List<IInterceptorSubject> claimed)
     {
         foreach (var subject in claimed)
@@ -472,6 +551,37 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
             if (!IsOwned(subject) && !IsAnchored(subject))
             {
                 ReleaseClaim(subject);
+            }
+        }
+    }
+
+    private void CommitReservation(
+        OwnershipReservationToken reservation,
+        SubjectAttachmentAnchorKind anchor)
+    {
+        var executor = reservation.Subject.Executor;
+        while (true)
+        {
+            executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out var revision);
+            if (attachedContext is not null && !ReferenceEquals(attachedContext, Context))
+            {
+                throw LifecycleConflictException.Retryable(reservation.Subject);
+            }
+
+            if (attachedContext is not null &&
+                (anchor == SubjectAttachmentAnchorKind.None || currentAnchor == anchor ||
+                 currentAnchor == SubjectAttachmentAnchorKind.Explicit))
+            {
+                return;
+            }
+
+            if (reservation.TryUpdateAttachment(
+                revision,
+                (InterceptorSubjectContext)Context,
+                anchor,
+                out _))
+            {
+                return;
             }
         }
     }

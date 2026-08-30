@@ -2,6 +2,8 @@ using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
+using Namotion.Interceptor.Interceptors;
+
 /// <summary>
 /// Thread-static scratch pools for the lifecycle's traversals. Every graph operation needs a handful
 /// of short-lived lists, sets and stacks, and reentrancy (a release descent re-entered from a
@@ -58,6 +60,11 @@ internal static class LifecycleScratch
     public static List<IInterceptorSubject> RentSubjectList()
         => TryRent<List<IInterceptorSubject>>(out var list) ? list : new List<IInterceptorSubject>(8);
 
+    public static Dictionary<IInterceptorSubject, OwnershipReservationToken> RentOwnershipReservations()
+        => TryRent<Dictionary<IInterceptorSubject, OwnershipReservationToken>>(out var reservations)
+            ? reservations
+            : new Dictionary<IInterceptorSubject, OwnershipReservationToken>(8, ReferenceEqualityComparer.Instance);
+
     public static List<(PropertyReference Property, StructuralOccurrence Occurrence)> RentChildList()
         => TryRent<List<(PropertyReference, StructuralOccurrence)>>(out var list) ? list : new List<(PropertyReference, StructuralOccurrence)>(8);
 
@@ -95,6 +102,12 @@ internal static class LifecycleScratch
     {
         counter.Clear();
         Recycle(counter);
+    }
+
+    public static void Return(Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations)
+    {
+        reservations.Clear();
+        Recycle(reservations);
     }
 
     public static void Return(Dictionary<IInterceptorSubject, List<object?>> groups)

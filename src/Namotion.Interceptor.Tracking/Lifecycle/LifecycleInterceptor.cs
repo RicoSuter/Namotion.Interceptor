@@ -96,7 +96,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     {
         _context = context;
         _notifier = new LifecycleNotifier(context);
-        _graph = new OwnershipGraph(context);
+        _graph = new OwnershipGraph(context, () => EnterGate());
         _reachability = new ReachabilityWalk(_graph);
         _attach = new AttachTraversal(_notifier, _graph, _reachability);
         _release = new ReleaseTraversal(_notifier, _graph, _reachability);
@@ -234,10 +234,11 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                 return;
             }
 
-            var claimed = LifecycleScratch.RentSubjectList();
+            var discovered = LifecycleScratch.RentSubjectList();
+            var reservations = LifecycleScratch.RentOwnershipReservations();
             try
             {
-                ClaimProposedComponent(metadata.Type, context.NewValue, claimed);
+                ReserveProposedComponent(metadata.Type, context.NewValue, discovered, reservations);
 
                 next(ref context);
 
@@ -251,17 +252,17 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                     // not the one now in the property. Claiming what was actually stored keeps the
                     // foreign-subject rejection ahead of every graph mutation: the snapshot, the
                     // ownership records and the attach notifications all come after this point.
-                    ClaimProposedComponent(metadata.Type, storedValue, claimed);
+                    ReserveProposedComponent(metadata.Type, storedValue, discovered, reservations);
                 }
 
-                _reconciler.Reconcile(property, metadata, storedValue, context.Revision);
+                _graph.CommitReservations(reservations);
+                _reconciler.Reconcile(property, metadata, storedValue, context.Revision, reservations);
             }
             finally
             {
-                // Claims that never became ownership are handed back; see
-                // OwnershipGraph.ReleaseUnusedClaims for what leaves them behind.
-                _graph.ReleaseUnusedClaims(claimed);
-                LifecycleScratch.Return(claimed);
+                _graph.ReleaseUnusedReservations(reservations);
+                LifecycleScratch.Return(reservations);
+                LifecycleScratch.Return(discovered);
             }
         }
     }
@@ -307,7 +308,11 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// Validates every subject the proposed value reaches against this context and claims the
     /// unattached ones, before the backing writer runs.
     /// </summary>
-    private void ClaimProposedComponent(Type declaredType, object? proposedValue, List<IInterceptorSubject> claimed)
+    private void ReserveProposedComponent(
+        Type declaredType,
+        object? proposedValue,
+        List<IInterceptorSubject> discovered,
+        Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations)
     {
         if (proposedValue is null)
         {
@@ -317,16 +322,21 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var visited = LifecycleScratch.RentSubjectSet();
         try
         {
-            _graph.DiscoverComponent(declaredType, proposedValue, visited, claimed);
+            _graph.DiscoverComponent(
+                declaredType,
+                proposedValue,
+                visited,
+                discovered,
+                includeAttached: true);
         }
         finally
         {
             LifecycleScratch.Return(visited);
         }
 
-        if (!_graph.TryClaimDiscovered(claimed, null, SubjectAttachmentAnchorKind.None))
+        if (!_graph.TryReserveDiscovered(discovered, reservations))
         {
-            claimed.Clear();
+            discovered.Clear();
             throw new InvalidOperationException(
                 "Another context claimed a subject of the assigned graph while this write was validating it. " +
                 "The write was rejected before reaching the backing field.");
@@ -379,9 +389,16 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// </summary>
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
+        HandleLifecycleChange(change, null);
+    }
+
+    internal void HandleLifecycleChange(
+        SubjectLifecycleChange change,
+        Dictionary<IInterceptorSubject, OwnershipReservationToken>? reservations)
+    {
         if (change is { IsContextAttach: true, Property: not null })
         {
-            _attach.SeedChildrenIfNeeded(change.Subject);
+            _attach.SeedChildrenIfNeeded(change.Subject, reservations);
         }
     }
 

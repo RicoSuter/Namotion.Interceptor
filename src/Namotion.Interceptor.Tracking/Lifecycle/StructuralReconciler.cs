@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Immutable;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -10,7 +11,8 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
         PropertyReference property,
         SubjectPropertyMetadata metadata,
         object? newValue,
-        long sourceRevision = 0)
+        long sourceRevision = 0,
+        Dictionary<IInterceptorSubject, OwnershipReservationToken>? reservations = null)
     {
         var oldSnapshot = graph.GetSnapshot(property);
         var newSnapshot = StructuralSnapshotBuilder.Build(metadata.Type, newValue, sourceRevision);
@@ -21,14 +23,15 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
         }
 
         graph.SetSnapshot(property, newSnapshot);
-        ReconcileOccurrences(property, newValue, oldSnapshot.Occurrences, newSnapshot.Occurrences);
+        ReconcileOccurrences(property, newValue, oldSnapshot.Occurrences, newSnapshot.Occurrences, reservations);
     }
 
     private void ReconcileOccurrences(
         PropertyReference property,
         object? newValue,
         ImmutableArray<StructuralOccurrence> oldOccurrences,
-        ImmutableArray<StructuralOccurrence> newOccurrences)
+        ImmutableArray<StructuralOccurrence> newOccurrences,
+        Dictionary<IInterceptorSubject, OwnershipReservationToken>? reservations)
     {
         var parent = property.Subject;
         var oldCounts = LifecycleScratch.RentSubjectCounter();
@@ -79,7 +82,8 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
                     occurrence.Subject,
                     property,
                     occurrence.SubjectOrdinal,
-                    occurrence.Index);
+                    occurrence.Index,
+                    reservations);
                 if (!graph.IsOwned(parent))
                 {
                     return;

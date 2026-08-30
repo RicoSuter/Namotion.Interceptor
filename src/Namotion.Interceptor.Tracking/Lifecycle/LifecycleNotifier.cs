@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Interceptors;
+
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
@@ -44,13 +46,23 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context)
         });
     }
 
-    public void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, SubjectLifecycleChange change)
+    public void InvokeAddedLifecycleHandlers(
+        IInterceptorSubject subject,
+        SubjectLifecycleChange change,
+        Dictionary<IInterceptorSubject, OwnershipReservationToken>? reservations = null)
     {
         using var scope = CallbackReentrancyGuard.EnterScope();
         var handlers = context.GetServices<ILifecycleHandler>();
         for (var index = 0; index < handlers.Length; index++)
         {
-            handlers[index].HandleLifecycleChange(change);
+            if (handlers[index] is LifecycleInterceptor lifecycleInterceptor)
+            {
+                lifecycleInterceptor.HandleLifecycleChange(change, reservations);
+            }
+            else
+            {
+                handlers[index].HandleLifecycleChange(change);
+            }
         }
 
         if (subject is ILifecycleHandler subjectHandler)

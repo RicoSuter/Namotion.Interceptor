@@ -98,9 +98,10 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
     {
         // The zero-edge short circuit is what keeps tree-shaped removals free of any walk; the walk
         // itself already answers the subject's own anchor.
-        return ownership.IncomingCount > 0
-            ? reachability.IsAnchorReachable(subject, null)
-            : graph.IsAnchored(subject);
+        return graph.HasReservation(subject) ||
+               (ownership.IncomingCount > 0
+                   ? reachability.IsAnchorReachable(subject, null)
+                   : graph.IsAnchored(subject));
     }
 
     private void Release(IInterceptorSubject subject, SubjectOwnership ownership, PropertyReference? property, object? index)
