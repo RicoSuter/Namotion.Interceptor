@@ -568,20 +568,16 @@ public class GraphOwnershipTests
     }
 
     [Fact]
-    public void WhenStoredIncomingIndexLagsTheCommittedValue_ThenSamePropertyFallbackDrainsTheEdge()
+    public void WhenStoredIncomingIndexChanges_ThenOrdinalIdentityDrainsTheEdge()
     {
-        // Arrange: a reconcile commits the property's new value before it refreshes the retained
-        // edges' stored indices, so inside that window a release descent can drain a committed
-        // edge whose new index the subject has not adopted yet. The callback contract forbids
-        // the reentrant graph shape that used to cover this end to end, so the fallback is
-        // pinned directly here until its stored-index-lag justification is independently
-        // retired.
+        // Arrange: index is mutable payload, while property plus child-specific ordinal is the
+        // immutable occurrence identity.
         var parent = new Person { FirstName = "P" };
         var property = new PropertyReference(parent, nameof(Person.Children));
         var ownership = new SubjectOwnership();
-        ownership.AddIncoming(property, 1);
+        ownership.AddIncoming(property, 0, 1);
 
-        // Act: the committed value holds the subject at index 0, the stored edge still says 1.
+        // Act
         var removed = ownership.RemoveIncoming(property, 0);
 
         // Assert
@@ -590,13 +586,12 @@ public class GraphOwnershipTests
     }
 
     [Fact]
-    public void WhenRemovingAnEdgeOfAnotherProperty_ThenTheSamePropertyFallbackDoesNotApply()
+    public void WhenRemovingAnEdgeOfAnotherProperty_ThenOrdinalIdentityDoesNotMatch()
     {
-        // Arrange: the fallback is scoped to occurrences of the same property; an edge of a
-        // different property must never be drained in its place.
+        // Arrange
         var parent = new Person { FirstName = "P" };
         var ownership = new SubjectOwnership();
-        ownership.AddIncoming(new PropertyReference(parent, nameof(Person.Children)), 0);
+        ownership.AddIncoming(new PropertyReference(parent, nameof(Person.Children)), 0, 0);
 
         // Act
         var removed = ownership.RemoveIncoming(new PropertyReference(parent, nameof(Person.Father)), 0);
@@ -607,17 +602,17 @@ public class GraphOwnershipTests
     }
 
     [Fact]
-    public void WhenTheLaggingEdgeIsNotTheFirstSlot_ThenSamePropertyFallbackStillDrainsIt()
+    public void WhenTheMatchingOrdinalEdgeIsNotTheFirstSlot_ThenItIsStillRemoved()
     {
-        // Arrange: the lagging edge lives in the additional-edges list because another property
-        // occupies the first slot, so the fallback must find it there.
+        // Arrange: the matching edge lives in the additional-edges list because another property
+        // occupies the first slot.
         var parent = new Person { FirstName = "P" };
         var property = new PropertyReference(parent, nameof(Person.Children));
         var ownership = new SubjectOwnership();
-        ownership.AddIncoming(new PropertyReference(parent, nameof(Person.Father)), null);
-        ownership.AddIncoming(property, 2);
+        ownership.AddIncoming(new PropertyReference(parent, nameof(Person.Father)), 0, null);
+        ownership.AddIncoming(property, 0, 2);
 
-        // Act: the committed value holds the subject at index 0, the stored edge still says 2.
+        // Act
         var removed = ownership.RemoveIncoming(property, 0);
 
         // Assert

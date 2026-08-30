@@ -19,10 +19,10 @@ public class ReconcileRetentionWindowTests
             .WithLifecycle();
     }
 
-    private static object? GetCommittedBaseline(IInterceptorSubjectContext context, IInterceptorSubject subject, string propertyName)
+    private static StructuralSnapshot GetCommittedSnapshot(IInterceptorSubjectContext context, IInterceptorSubject subject, string propertyName)
     {
         var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
-        return lifecycle.Graph.GetBaseline(new PropertyReference(subject, propertyName));
+        return lifecycle.Graph.GetSnapshot(new PropertyReference(subject, propertyName));
     }
 
     /// <summary>
@@ -34,7 +34,7 @@ public class ReconcileRetentionWindowTests
     /// The window is held open artificially by parking inside the detach callback of a second subject
     /// that the same removal pass genuinely drops. That callback is ordinary user code running inside
     /// the window, and the park is positioned by phase rather than by ordering: the guard below
-    /// asserts that the committed baseline is already the new value when the park runs, which is what
+    /// asserts that the committed snapshot is already the new value when the park runs, which is what
     /// makes this the removal pass and not some earlier point.
     ///
     /// Suppressing the release of the retained subject makes this pass, and removing that suppression
@@ -53,7 +53,7 @@ public class ReconcileRetentionWindowTests
         var released = new ManualResetEventSlim(false);
         var claimAttempted = new ManualResetEventSlim(false);
         var parkObserved = false;
-        object? baselineAtPark = null;
+        StructuralSnapshot? snapshotAtPark = null;
         Car? mover = null;
         Garage? garage = null;
         var handler = new DelegateLifecycleHandler(change =>
@@ -63,7 +63,7 @@ public class ReconcileRetentionWindowTests
                 return;
             }
 
-            baselineAtPark = GetCommittedBaseline(context, garage!, nameof(Garage.CarsByName));
+            snapshotAtPark = GetCommittedSnapshot(context, garage!, nameof(Garage.CarsByName));
             released.Set();
             parkObserved = claimAttempted.Wait(WriteProtocolAcceptance.RendezvousTimeout);
         });
@@ -102,7 +102,9 @@ public class ReconcileRetentionWindowTests
         // failing means the instrument moved rather than the behaviour changing.
         Assert.True(claimerCompleted, "the claiming thread never finished");
         Assert.True(parkObserved, "the release descent never parked inside the reconcile window");
-        Assert.Same(newValue, baselineAtPark);
+        var occurrenceAtPark = Assert.Single(Assert.IsType<StructuralSnapshot>(snapshotAtPark).Occurrences);
+        Assert.Same(mover, occurrenceAtPark.Subject);
+        Assert.Equal("moved", occurrenceAtPark.Index);
 
         // A subject the new value still holds must not become claimable during the transition.
         Assert.True(moverAttachedDuringWindow,

@@ -28,7 +28,7 @@ public class TerminalStoreContractTests
     /// <summary>
     /// Pins the terminal-store contract and the one boundary it has. A terminal that stores a
     /// subject the write never proposed is a contract violation, and the rejection now comes from
-    /// the claim taken over the stored value, which runs before the reconcile commits a baseline or
+    /// the claim taken over the stored value, which runs before the reconcile commits a snapshot or
     /// records any ownership. So the graph is left exactly as it was, asserted per kind of state
     /// rather than through one probe.
     ///
@@ -55,6 +55,9 @@ public class TerminalStoreContractTests
         var foreign = new SubstitutingDevice();
         ((IInterceptorSubject)foreign).AttachToContext(otherContext);
         parent.Substitute = foreign;
+        var graph = GetGraph(context);
+        var property = new PropertyReference(parent, nameof(SubstitutingDevice.Child));
+        var snapshotBeforeWrite = graph.GetSnapshot(property);
 
         // Act
         var exception = Record.Exception(() => parent.Child = new SubstitutingDevice());
@@ -64,10 +67,7 @@ public class TerminalStoreContractTests
 
         // Every kind of graph state the write would have published is absent, which is what makes
         // the rejection one that arrived before the reconcile rather than during it.
-        var graph = GetGraph(context);
-        var property = new PropertyReference(parent, nameof(SubstitutingDevice.Child));
-        Assert.True(graph.GetBaseline(property) is null,
-            "the rejected write committed the terminal's value as the property baseline");
+        Assert.Same(snapshotBeforeWrite, graph.GetSnapshot(property));
         Assert.False(graph.IsOwned(foreign),
             "the rejected write recorded ownership for a subject owned by another context");
         Assert.Same(otherContext, ((IInterceptorSubject)foreign).TryGetContext());
@@ -77,7 +77,7 @@ public class TerminalStoreContractTests
         Assert.True(ReferenceEquals(parent.Child, foreign),
             "the backing field no longer holds what the terminal stored, so the terminal-store " +
             "contract has moved: the documented guarantee is that a rejected write leaves no " +
-            "baseline, no ownership and no claim, and explicitly not that it restores the field, " +
+            "snapshot, no ownership and no claim, and explicitly not that it restores the field, " +
             "because the only store the framework has is the terminal the subject handed it and a " +
             "terminal that ignores the value it is given cannot be replayed to restore anything");
     }
@@ -165,8 +165,8 @@ public class TerminalStoreContractTests
         // Assert
         Assert.NotNull(exception);
         var graph = GetGraph(context);
-        Assert.False(graph.CommitsEdgeTo(new PropertyReference(device, nameof(StoredValueClaimDevice.Stamped)), foreign),
-            "the rejected write committed a value the claim never validated as the property baseline");
+        var snapshot = graph.GetSnapshot(new PropertyReference(device, nameof(StoredValueClaimDevice.Stamped)));
+        Assert.DoesNotContain(snapshot.Occurrences, occurrence => ReferenceEquals(occurrence.Subject, foreign));
         Assert.False(graph.IsOwned(foreign),
             "the rejected write recorded ownership for a subject owned by another context");
         Assert.Same(otherContext, ((IInterceptorSubject)foreign).TryGetContext());

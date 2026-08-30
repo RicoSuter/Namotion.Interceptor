@@ -77,7 +77,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// <summary>
     /// Raised when a subject is about to be detached from the object graph.
     /// Fires BEFORE ILifecycleHandler.HandleLifecycleChange (symmetric with SubjectAttached which fires AFTER).
-    /// The subject's ownership record and baselines are already gone by this point, so GetParents()
+    /// The subject's ownership record and snapshots are already gone by this point, so GetParents()
     /// answers empty and GetReferenceCount() answers zero; the subject still resolves its context,
     /// which is what the teardown callbacks need.
     /// Handlers must be exception-free and fast (invoked inside lock).
@@ -249,12 +249,12 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                 {
                     // The terminal stored something else, so the claim above covers a graph that is
                     // not the one now in the property. Claiming what was actually stored keeps the
-                    // foreign-subject rejection ahead of every graph mutation: the baseline, the
+                    // foreign-subject rejection ahead of every graph mutation: the snapshot, the
                     // ownership records and the attach notifications all come after this point.
                     ClaimProposedComponent(metadata.Type, storedValue, claimed);
                 }
 
-                _reconciler.Reconcile(property, metadata, storedValue);
+                _reconciler.Reconcile(property, metadata, storedValue, context.Revision);
             }
             finally
             {
@@ -445,16 +445,16 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// <summary>
     /// Hands back everything a rejected attach had already written. Discovery reads user values
     /// before the claim publishes anything, so a concurrent write can install a child that seeding
-    /// then refuses, and the anchor, the seeded baselines and the claims taken in between must not
+    /// then refuses, and the anchor, the seeded snapshots and the claims taken in between must not
     /// outlive that refusal.
     /// </summary>
     /// <remarks>
-    /// Whatever the seed managed to publish hangs off the root's committed baselines, so removing
+    /// Whatever the seed managed to publish hangs off the root's committed snapshots, so removing
     /// those edges releases it the ordinary way, cascade and detach callbacks included. That is also
     /// the only handle on a subject a concurrent write installed after the scan: it is published but
     /// was never in the claimed set, so a claim-only rollback would leave it attached.
     ///
-    /// The order is deliberate: the root keeps its anchor, its baselines and its claim until the
+    /// The order is deliberate: the root keeps its anchor, its snapshots and its claim until the
     /// drain has actually finished, so a rollback that cannot complete leaves the root attached and
     /// detachable rather than stripped of the very state <c>DetachFromContext</c> needs.
     /// </remarks>
@@ -466,7 +466,11 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             _graph.CollectStructuralChildren(subject, children, seed: false);
             foreach (var (property, occurrence) in children)
             {
-                _release.RemoveEdge(occurrence.Subject, property, occurrence.Index);
+                _release.RemoveEdge(
+                    occurrence.Subject,
+                    property,
+                    occurrence.SubjectOrdinal,
+                    occurrence.Index);
             }
 
             _graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None);
@@ -475,7 +479,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             {
                 if (!_graph.IsOwned(claimedSubject))
                 {
-                    _graph.RemoveBaselines(claimedSubject);
+                    _graph.RemoveSnapshots(claimedSubject);
                 }
             }
 
@@ -575,7 +579,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
 
     #region Committed state queries
 
-    // Internal for tests only: committed baselines have no public observer, and the
+    // Internal for tests only: committed snapshots have no public observer, and the
     // released-parent regression tests must assert that none survives a subject's release.
     internal OwnershipGraph Graph => _graph;
 

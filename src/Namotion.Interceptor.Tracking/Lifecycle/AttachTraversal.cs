@@ -13,7 +13,7 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
 {
     public void SeedChildrenIfNeeded(IInterceptorSubject subject)
     {
-        if (!graph.AreBaselinesSeeded(subject))
+        if (!graph.AreSnapshotsSeeded(subject))
         {
             SeedAndAttachChildren(subject);
         }
@@ -27,7 +27,7 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
             graph.CollectStructuralChildren(subject, children, seed: true);
             foreach (var (property, occurrence) in children)
             {
-                AttachEdge(occurrence.Subject, property, occurrence.Index);
+                AttachEdge(occurrence.Subject, property, occurrence.SubjectOrdinal, occurrence.Index);
             }
         }
         finally
@@ -40,7 +40,7 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
     /// Records one incoming edge occurrence and publishes it, entering the subject into the graph
     /// when this is its first edge.
     /// </summary>
-    public void AttachEdge(IInterceptorSubject subject, PropertyReference property, object? index)
+    public void AttachEdge(IInterceptorSubject subject, PropertyReference property, int subjectOrdinal, object? index)
     {
         var existing = graph.TryGetOwnership(subject);
         var isContextAttach = existing is null;
@@ -60,7 +60,7 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
             ownership = graph.AddOwnership(subject);
         }
 
-        ownership.AddIncoming(property, index);
+        ownership.AddIncoming(property, subjectOrdinal, index);
         var referenceCount = ownership.IncomingCount;
 
         // Authoritative parent and anchor state before the first handler observes the change.

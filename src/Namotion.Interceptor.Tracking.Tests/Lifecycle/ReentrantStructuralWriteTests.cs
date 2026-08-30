@@ -7,10 +7,9 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 
 /// <summary>
-/// Reconciliation reads the committed baseline, scans user values, and only then commits the new
-/// baseline. Those scans run at callback depth zero, where a nested write of the same property is
-/// legal, so the outer operation can commit its own baseline on top of the newer one the nested
-/// write already committed.
+/// Structural values execute user enumeration only while their immutable occurrence snapshot is
+/// built. A later reconcile or release consumes that committed snapshot without executing the old
+/// value again.
 /// </summary>
 public class ReentrantStructuralWriteTests
 {
@@ -19,13 +18,6 @@ public class ReentrantStructuralWriteTests
         return InterceptorSubjectContext
             .Create()
             .WithLifecycle();
-    }
-
-    private static object? GetCommittedBaseline(IInterceptorSubjectContext context, EnumerableChildrenHolder holder)
-    {
-        var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
-        return lifecycle.Graph.GetBaseline(
-            new PropertyReference(holder, nameof(EnumerableChildrenHolder.Children)));
     }
 
     /// <summary>
@@ -66,68 +58,31 @@ public class ReentrantStructuralWriteTests
     }
 
     /// <summary>
-    /// Reproduces the finding that a reentrant write from inside a user enumerable commits a newer
-    /// baseline which the outer operation then overwrites. Reproduces on a single thread, with no
-    /// artificially held window: the reentrancy is the enumerable's own code running where the
-    /// reconciler invokes it.
-    ///
-    /// The re-entry lands in the reconcile phase, specifically in the scan of the committed baseline
-    /// the reconcile performs on its way in. That position is the whole point of the test and is
-    /// pinned by two guards below: the terminal has already stored the outer value (so this is not
-    /// the capture phase, where the protocol claims the proposed component before the terminal
-    /// runs), and the outer baseline has not been committed yet (so the overwrite is still ahead).
-    /// The capture phase was measured and does not reproduce this: a re-entry there commits its
-    /// baseline before the outer reconcile reads it, so the outer diffs correctly and the graph
-    /// stays consistent. Anyone changing which values the reconcile scans, or how often, should
-    /// expect this test to fail loudly rather than quietly stop exercising anything.
+    /// The committed value is user-owned and may become unsafe to enumerate immediately after the
+    /// setter returns. Replacing it must diff against the immutable occurrence snapshot captured by
+    /// the successful setter, not against another pass over the enumerable.
     /// </summary>
     [Fact]
-    public void WhenAUserEnumerableWritesTheSamePropertyWhileItIsScanned_ThenTheOuterWriteDoesNotOverwriteTheNewerBaseline()
+    public void WhenACommittedEnumerableIsReplaced_ThenItIsNotEnumeratedAgain()
     {
-        // Arrange: the committed value is a user enumerable, so the reconcile of the next write runs
-        // user code after the terminal stored and before the new baseline is committed.
+        // Arrange
         var context = CreateContext();
         var holder = new EnumerableChildrenHolder(context);
-        var firstChild = new Person { FirstName = "first" };
-        var outerChild = new Person { FirstName = "outer" };
-        var nestedChild = new Person { FirstName = "nested" };
-
-        var committedValue = new ScanHookEnumerable([firstChild]);
+        var child = new Person();
+        var committedValue = new ScanHookEnumerable([child]);
         holder.Children = committedValue;
-
-        var outerValue = new List<Person> { outerChild };
-        object? fieldAtReentry = null;
-        object? baselineAtReentry = null;
-
-        committedValue.ShouldReenter = () => !ReferenceEquals(holder.Children, committedValue);
-        committedValue.OnReenter = () =>
-        {
-            fieldAtReentry = holder.Children;
-            baselineAtReentry = GetCommittedBaseline(context, holder);
-            holder.Children = new List<Person> { nestedChild };
-        };
+        var committedEnumerations = committedValue.Enumerations;
+        committedValue.ShouldReenter = () => true;
+        committedValue.OnReenter = () => throw new InvalidOperationException("The committed value was enumerated again.");
 
         // Act
-        holder.Children = outerValue;
+        var exception = Record.Exception(() => holder.Children = []);
 
-        // Assert: the re-entry happened, and it happened in the phase this test is about. Either
-        // guard failing means the instrument moved, not that the behaviour changed.
-        Assert.True(committedValue.HasReentered,
-            $"the reentrant write never ran; the committed value was scanned {committedValue.Enumerations} times");
-        Assert.Same(outerValue, fieldAtReentry);
-        Assert.Same(committedValue, baselineAtReentry);
-
-        // The nested write is the newer one and its value is what the property holds afterwards.
-        Assert.Equal([nestedChild], holder.Children!);
-        Assert.Same(context, ((IInterceptorSubject)nestedChild).TryGetContext());
-
-        // The outer write committed its own baseline over the newer one, then published an edge
-        // for a value the property no longer holds.
-        Assert.True(((IInterceptorSubject)outerChild).TryGetContext() is null,
-            "the outer write overwrote the newer baseline committed by the reentrant write and " +
-            "published an ownership edge for a value the committed property no longer holds, so " +
-            $"'{outerChild.FirstName}' is attached with {((IInterceptorSubject)outerChild).GetReferenceCount()} " +
-            "incoming edge(s) while unreachable from the subject graph");
+        // Assert
+        Assert.Null(exception);
+        Assert.Equal(committedEnumerations, committedValue.Enumerations);
+        Assert.False(committedValue.HasReentered);
+        Assert.Null(child.TryGetContext());
     }
 
     /// <summary>

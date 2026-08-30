@@ -29,11 +29,11 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
             return;
         }
 
-        if (!graph.AreBaselinesSeeded(subject))
+        if (!graph.AreSnapshotsSeeded(subject))
         {
             // Owned but not yet seeded: an edge-driven attach records ownership before the descent
-            // seeds, so a handler that adds properties lands in that window. Committing a baseline
-            // here would decide the pending seeding by name, because AreBaselinesSeeded answers
+            // seeds, so a handler that adds properties lands in that window. Committing a snapshot
+            // here would decide the pending seeding by name, because AreSnapshotsSeeded answers
             // from whichever structural property enumerates first. The descent reads every
             // structural getter, the ones this batch adds included, so it publishes these edges
             // itself; only the property callbacks belong to this call.
@@ -59,28 +59,17 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
             registration.Publish();
             InvokePropertyAttachCallbacks(subject, batch);
 
-            // Commit the captured values as ordinary assignments: the reconciler sees no baseline,
-            // so every occurrence becomes a fresh edge, and the value becomes the baseline later
-            // writes diff against. A null value writes the entry directly, because every structural
-            // property of an owned subject must carry one, present or null.
+            // Commit the captured values as ordinary assignments. The reconciler sees an empty
+            // snapshot, so every occurrence becomes a fresh edge.
             foreach (var (metadata, value) in captured)
             {
                 var property = new PropertyReference(subject, metadata.Name);
-                if (value is null)
+                if (!graph.IsOwned(subject))
                 {
-                    // Same guard the reconciler applies at entry: a baseline written for a subject
-                    // an earlier entry's reconcile released mid-batch is never removed again.
-                    if (!graph.IsOwned(subject))
-                    {
-                        return;
-                    }
+                    return;
+                }
 
-                    graph.SetBaseline(property, null);
-                }
-                else
-                {
-                    reconciler.Reconcile(property, metadata, value);
-                }
+                reconciler.Reconcile(property, metadata, value);
             }
         }
         finally
@@ -99,7 +88,7 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
     /// </summary>
     /// <remarks>
     /// Two shapes exist. When the descent has not seeded the subject yet, only metadata publishes:
-    /// the descent will seed every baseline, including the new properties', and fan out the
+    /// the descent will seed every snapshot, including the new properties', and fan out the
     /// then-current property set when it attaches the subject. When the subject is already seeded
     /// (an explicit attach seeds the root before owning it, and a subject with no structural
     /// properties counts as seeded), the descent will not come back, so the new structural
@@ -110,12 +99,12 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
     /// A releasing subject presents the same attached-but-unowned shape from the opposite direction
     /// and takes the metadata-only arm too: it has no descent coming, and an edge published from it
     /// would name an owner the release already removed, so nothing would ever release the child.
-    /// The marker is what extends that arm to a subject whose baselines were empty to begin with.
+    /// The marker is what extends that arm to a subject whose snapshots were empty to begin with.
     /// </remarks>
     public void AdmitUnowned(SubjectPropertyRegistration registration)
     {
         var subject = registration.Subject;
-        if (graph.IsReleasing(subject) || !graph.AreBaselinesSeeded(subject))
+        if (graph.IsReleasing(subject) || !graph.AreSnapshotsSeeded(subject))
         {
             registration.Publish();
             return;
@@ -145,30 +134,20 @@ internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconcil
             // Seed rather than reconcile: the reconciler's released-parent early exits read
             // IsOwned on the writing parent, which is legitimately false here, so it would stop
             // after the first occurrence. Seeding is the descent's own shape for exactly this
-            // state: commit the outgoing baseline, then attach one edge per occurrence.
-            var occurrences = LifecycleScratch.RentOccurrenceList();
-            try
+            // state: commit the outgoing snapshot, then attach one edge per occurrence.
+            foreach (var (metadata, value) in captured)
             {
-                foreach (var (metadata, value) in captured)
+                var property = new PropertyReference(subject, metadata.Name);
+                var snapshot = StructuralSnapshotBuilder.Build(metadata.Type, value, 0);
+                graph.SetSnapshot(property, snapshot);
+                foreach (var occurrence in snapshot.Occurrences)
                 {
-                    var property = new PropertyReference(subject, metadata.Name);
-                    graph.SetBaseline(property, value);
-                    if (value is null)
-                    {
-                        continue;
-                    }
-
-                    occurrences.Clear();
-                    StructuralValueScanner.CollectOccurrences(metadata.Type, value, occurrences);
-                    foreach (var occurrence in occurrences)
-                    {
-                        attach.AttachEdge(occurrence.Subject, property, occurrence.Index);
-                    }
+                    attach.AttachEdge(
+                        occurrence.Subject,
+                        property,
+                        occurrence.SubjectOrdinal,
+                        occurrence.Index);
                 }
-            }
-            finally
-            {
-                LifecycleScratch.Return(occurrences);
             }
         }
         finally

@@ -5,14 +5,13 @@ using Namotion.Interceptor.Tracking.Parent;
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
-/// One committed incoming graph edge: the parent property that references the subject, and the
-/// occurrence index within that property's value (null for a scalar reference, the boxed position
-/// for a collection, the key for a dictionary). Every occurrence is one edge, so a subject listed
-/// twice in the same collection carries two incoming edges.
+/// One committed incoming graph edge. Property plus child-specific ordinal is its identity; index
+/// is publication payload only and is never compared by lifecycle code.
 /// </summary>
-internal readonly struct IncomingEdge(PropertyReference property, object? index)
+internal readonly struct IncomingEdge(PropertyReference property, int subjectOrdinal, object? index)
 {
     public readonly PropertyReference Property = property;
+    public readonly int SubjectOrdinal = subjectOrdinal;
     public readonly object? Index = index;
 }
 
@@ -35,6 +34,7 @@ internal sealed class SubjectOwnership
     // The single-edge case stays inline: most subjects have exactly one parent, and a list would
     // double the per-subject footprint for them.
     private PropertyReference _firstProperty;
+    private int _firstSubjectOrdinal;
     private object? _firstIndex;
     private List<IncomingEdge>? _additionalEdges;
 
@@ -64,19 +64,20 @@ internal sealed class SubjectOwnership
     /// <summary>The number of committed incoming edge occurrences, which is the reference count.</summary>
     public int IncomingCount => _incomingCount;
 
-    public void AddIncoming(PropertyReference property, object? index)
+    public void AddIncoming(PropertyReference property, int subjectOrdinal, object? index)
     {
         lock (this)
         {
             if (_incomingCount == 0)
             {
                 _firstProperty = property;
+                _firstSubjectOrdinal = subjectOrdinal;
                 _firstIndex = index;
             }
             else
             {
                 _additionalEdges ??= [];
-                _additionalEdges.Add(new IncomingEdge(property, index));
+                _additionalEdges.Add(new IncomingEdge(property, subjectOrdinal, index));
             }
 
             _incomingCount++;
@@ -84,22 +85,9 @@ internal sealed class SubjectOwnership
     }
 
     /// <summary>
-    /// Removes one incoming edge occurrence of the property, preferring an exact index match and
-    /// falling back to any occurrence of the same property.
+    /// Removes the edge identified by parent property and child-specific ordinal.
     /// </summary>
-    /// <remarks>
-    /// The inexact case is reachable and must not fail. A reconcile commits the property's new
-    /// value before it refreshes the retained edges' stored indices, so a release descent that
-    /// runs inside that window collects children through the committed baseline and presents
-    /// indices this record has not adopted yet. Lifecycle callbacks cannot open the window
-    /// anymore (topology mutation from a callback throws, see
-    /// <see cref="CallbackReentrancyGuard"/>), but side-effecting user code the reconcile loops
-    /// invoke at callback depth zero, such as a dictionary-key <c>Equals</c> or a user collection
-    /// implementation, still can. Only the per-property occurrence count is authoritative in that
-    /// window; refusing to remove would leak the edge and leave the subject attached to a
-    /// released parent.
-    /// </remarks>
-    public bool RemoveIncoming(PropertyReference property, object? index)
+    public bool RemoveIncoming(PropertyReference property, int subjectOrdinal)
     {
         lock (this)
         {
@@ -108,85 +96,77 @@ internal sealed class SubjectOwnership
                 return false;
             }
 
-            var fallbackInFirst = false;
-            if (_firstProperty.Equals(property))
-            {
-                if (Equals(_firstIndex, index))
-                {
-                    RemoveFirstSlot();
-                    return true;
-                }
-
-                fallbackInFirst = true;
-            }
-
-            var fallbackInAdditional = -1;
-            if (_additionalEdges is not null)
-            {
-                for (var i = 0; i < _additionalEdges.Count; i++)
-                {
-                    var edge = _additionalEdges[i];
-                    if (!edge.Property.Equals(property))
-                    {
-                        continue;
-                    }
-
-                    if (Equals(edge.Index, index))
-                    {
-                        RemoveAdditionalAt(i);
-                        return true;
-                    }
-
-                    if (fallbackInAdditional < 0)
-                    {
-                        fallbackInAdditional = i;
-                    }
-                }
-            }
-
-            if (fallbackInFirst)
+            if (_firstProperty.Equals(property) && _firstSubjectOrdinal == subjectOrdinal)
             {
                 RemoveFirstSlot();
                 return true;
             }
 
-            if (fallbackInAdditional >= 0)
+            if (_additionalEdges is not null)
             {
-                RemoveAdditionalAt(fallbackInAdditional);
-                return true;
+                for (var i = 0; i < _additionalEdges.Count; i++)
+                {
+                    var edge = _additionalEdges[i];
+                    if (!edge.Property.Equals(property) || edge.SubjectOrdinal != subjectOrdinal)
+                    {
+                        continue;
+                    }
+
+                    RemoveAdditionalAt(i);
+                    return true;
+                }
             }
 
             return false;
         }
     }
 
-    /// <summary>
-    /// Rewrites the occurrence indices of every edge of the property, in storage order. Occurrences
-    /// of one subject within one property are interchangeable, so only the multiset of indices is
-    /// meaningful; assigning the whole set at once is what makes a reorder or a duplicate whose new
-    /// index collides with a retained one come out right.
-    /// </summary>
-    public void SetIncomingIndices(PropertyReference property, List<object?> indices)
+    /// <summary>Replaces every payload index of one child property atomically by ordinal.</summary>
+    public void UpdateIncomingIndices(
+        PropertyReference property,
+        IInterceptorSubject subject,
+        ImmutableArray<StructuralOccurrence> occurrences)
     {
         lock (this)
         {
-            var next = 0;
-            if (_incomingCount > 0 && _firstProperty.Equals(property) && next < indices.Count)
+            if (_incomingCount > 0 && _firstProperty.Equals(property) &&
+                TryGetIndex(subject, _firstSubjectOrdinal, occurrences, out var firstIndex))
             {
-                _firstIndex = indices[next++];
+                _firstIndex = firstIndex;
             }
 
             if (_additionalEdges is not null)
             {
-                for (var i = 0; i < _additionalEdges.Count && next < indices.Count; i++)
+                for (var i = 0; i < _additionalEdges.Count; i++)
                 {
-                    if (_additionalEdges[i].Property.Equals(property))
+                    var edge = _additionalEdges[i];
+                    if (edge.Property.Equals(property) &&
+                        TryGetIndex(subject, edge.SubjectOrdinal, occurrences, out var index))
                     {
-                        _additionalEdges[i] = new IncomingEdge(property, indices[next++]);
+                        _additionalEdges[i] = new IncomingEdge(property, edge.SubjectOrdinal, index);
                     }
                 }
             }
         }
+    }
+
+    private static bool TryGetIndex(
+        IInterceptorSubject subject,
+        int subjectOrdinal,
+        ImmutableArray<StructuralOccurrence> occurrences,
+        out object? index)
+    {
+        foreach (var occurrence in occurrences)
+        {
+            if (occurrence.SubjectOrdinal == subjectOrdinal && ReferenceEquals(occurrence.Subject, subject))
+            {
+                index = occurrence.Index;
+                return true;
+            }
+        }
+
+        index = null;
+        return false;
     }
 
     /// <summary>
@@ -194,17 +174,17 @@ internal sealed class SubjectOwnership
     /// for every other count. Lets a caller that only needs the one-edge case read it without
     /// copying the edges out.
     /// </summary>
-    public bool TryGetSingleIncoming(out PropertyReference property)
+    public bool TryGetSingleIncoming(out IncomingEdge edge)
     {
         lock (this)
         {
             if (_incomingCount != 1)
             {
-                property = default;
+                edge = default;
                 return false;
             }
 
-            property = _firstProperty;
+            edge = new IncomingEdge(_firstProperty, _firstSubjectOrdinal, _firstIndex);
             return true;
         }
     }
@@ -222,7 +202,7 @@ internal sealed class SubjectOwnership
                 return;
             }
 
-            target.Add(new IncomingEdge(_firstProperty, _firstIndex));
+            target.Add(new IncomingEdge(_firstProperty, _firstSubjectOrdinal, _firstIndex));
             if (_additionalEdges is not null)
             {
                 target.AddRange(_additionalEdges);
@@ -307,11 +287,13 @@ internal sealed class SubjectOwnership
             var promoted = _additionalEdges[0];
             _additionalEdges.RemoveAt(0);
             _firstProperty = promoted.Property;
+            _firstSubjectOrdinal = promoted.SubjectOrdinal;
             _firstIndex = promoted.Index;
         }
         else
         {
             _firstProperty = default;
+            _firstSubjectOrdinal = 0;
             _firstIndex = null;
         }
 

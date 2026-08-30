@@ -46,20 +46,17 @@ internal static class LifecycleScratch
         (Pool<T>.Buffers ??= new Stack<T>()).Push(buffer);
     }
 
-    public static List<SubjectOccurrence> RentOccurrenceList()
-        => TryRent<List<SubjectOccurrence>>(out var list) ? list : new List<SubjectOccurrence>(8);
-
     public static List<IncomingEdge> RentEdgeList()
         => TryRent<List<IncomingEdge>>(out var list) ? list : new List<IncomingEdge>(4);
 
-    public static List<object?> RentIndexList()
-        => TryRent<List<object?>>(out var list) ? list : new List<object?>(4);
+    public static List<StructuralOccurrence> RentStructuralOccurrenceList()
+        => TryRent<List<StructuralOccurrence>>(out var list) ? list : new List<StructuralOccurrence>(8);
 
     public static List<IInterceptorSubject> RentSubjectList()
         => TryRent<List<IInterceptorSubject>>(out var list) ? list : new List<IInterceptorSubject>(8);
 
-    public static List<(PropertyReference Property, SubjectOccurrence Occurrence)> RentChildList()
-        => TryRent<List<(PropertyReference, SubjectOccurrence)>>(out var list) ? list : new List<(PropertyReference, SubjectOccurrence)>(8);
+    public static List<(PropertyReference Property, StructuralOccurrence Occurrence)> RentChildList()
+        => TryRent<List<(PropertyReference, StructuralOccurrence)>>(out var list) ? list : new List<(PropertyReference, StructuralOccurrence)>(8);
 
     public static HashSet<IInterceptorSubject> RentSubjectSet()
         => TryRent<HashSet<IInterceptorSubject>>(out var set) ? set : new HashSet<IInterceptorSubject>(8, ReferenceEqualityComparer.Instance);
@@ -69,9 +66,6 @@ internal static class LifecycleScratch
 
     public static Dictionary<IInterceptorSubject, int> RentSubjectCounter()
         => TryRent<Dictionary<IInterceptorSubject, int>>(out var counter) ? counter : new Dictionary<IInterceptorSubject, int>(8, ReferenceEqualityComparer.Instance);
-
-    public static Dictionary<IInterceptorSubject, List<object?>> RentIndexGroups()
-        => TryRent<Dictionary<IInterceptorSubject, List<object?>>>(out var groups) ? groups : new Dictionary<IInterceptorSubject, List<object?>>(8, ReferenceEqualityComparer.Instance);
 
     public static void Return<TItem>(List<TItem> list)
     {
@@ -97,15 +91,4 @@ internal static class LifecycleScratch
         Recycle(counter);
     }
 
-    /// <summary>Returns the group map and every index list it handed out.</summary>
-    public static void Return(Dictionary<IInterceptorSubject, List<object?>> groups)
-    {
-        foreach (var group in groups)
-        {
-            Return(group.Value);
-        }
-
-        groups.Clear();
-        Recycle(groups);
-    }
 }

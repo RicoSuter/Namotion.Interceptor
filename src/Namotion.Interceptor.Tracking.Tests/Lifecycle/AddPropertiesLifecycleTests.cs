@@ -569,7 +569,7 @@ public class AddPropertiesLifecycleTests
     }
 
     [Fact]
-    public void WhenACapturedCollectionReleasesTheAdmittingSubjectMidCommit_ThenNoBaselineEntrySurvives()
+    public void WhenACapturedCollectionReleasesTheAdmittingSubjectMidCommit_ThenNoSnapshotEntrySurvives()
     {
         // Arrange: the trap collection enumerates benignly during component discovery and releases
         // the admitting subject during the reconcile's occurrence collection, which is depth-zero
@@ -594,14 +594,14 @@ public class AddPropertiesLifecycleTests
         // Act
         subject.AddProperties(batch);
 
-        // Assert: no baseline entry survives for the released subject. GetBaseline cannot
+        // Assert: no snapshot entry survives for the released subject. GetSnapshot cannot
         // distinguish a committed null from no entry, so presence is asserted directly.
         Assert.Equal(2, trap.EnumerationCount);
         Assert.Null(subject.TryGetContext());
         Assert.Null(child.TryGetContext());
         var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
-        Assert.False(lifecycle.Graph.HasBaseline(new PropertyReference(subject, "Trap")));
-        Assert.False(lifecycle.Graph.HasBaseline(new PropertyReference(subject, "Extra")));
+        Assert.False(lifecycle.Graph.HasSnapshot(new PropertyReference(subject, "Trap")));
+        Assert.False(lifecycle.Graph.HasSnapshot(new PropertyReference(subject, "Extra")));
     }
 
     /// <summary>

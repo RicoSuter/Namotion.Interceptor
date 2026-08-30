@@ -56,12 +56,12 @@ internal sealed class ReachabilityWalk(OwnershipGraph graph)
 
             // The same validation the search applies to every candidate parent; its sole edge being
             // uncommitted leaves the closure empty rather than merely dropping one candidate.
-            if (!graph.CommitsEdgeTo(incoming, current))
+            if (!graph.ContainsOccurrence(incoming.Property, current, incoming.SubjectOrdinal))
             {
                 return false;
             }
 
-            var parent = incoming.Subject;
+            var parent = incoming.Property.Subject;
             if (ReferenceEquals(parent, start))
             {
                 // Back where it began, so the closure is exactly the chain just walked and every
@@ -117,7 +117,7 @@ internal sealed class ReachabilityWalk(OwnershipGraph graph)
                     // updates the incoming records, so the two legitimately disagree in that window.
                     // A rejected parent is deliberately not marked visited, because it can still be
                     // a valid parent of another subject later in this same walk.
-                    if (!graph.CommitsEdgeTo(edge.Property, current))
+                    if (!graph.ContainsOccurrence(edge.Property, current, edge.SubjectOrdinal))
                     {
                         continue;
                     }

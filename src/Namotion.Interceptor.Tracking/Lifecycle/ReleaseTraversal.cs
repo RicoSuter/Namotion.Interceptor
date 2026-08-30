@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// support, and reaches each of them exactly once in first-visit order. That makes detach callbacks
 /// arrive top-down, so a parent stops before the children it uses.
 ///
-/// A released subject's record and baselines are dropped before its callbacks run, which is what
+/// A released subject's record and snapshots are dropped before its callbacks run, which is what
 /// makes the descent safe to re-enter from a callback: the re-entry finds the subject already gone,
 /// and a reachability walk can no longer route through it.
 /// </remarks>
@@ -21,10 +21,14 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
     /// Removes one committed incoming edge occurrence and releases the subject, and everything below
     /// it that this removal orphans, when nothing holds it anymore.
     /// </summary>
-    public void RemoveEdge(IInterceptorSubject subject, PropertyReference property, object? index)
+    public void RemoveEdge(
+        IInterceptorSubject subject,
+        PropertyReference property,
+        int subjectOrdinal,
+        object? index)
     {
         var ownership = graph.TryGetOwnership(subject);
-        if (ownership is null || !ownership.RemoveIncoming(property, index))
+        if (ownership is null || !ownership.RemoveIncoming(property, subjectOrdinal))
         {
             // Already released, or the edge was drained by a reentrant descent.
             return;
@@ -76,7 +80,7 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
             ownership.CopyIncomingEdges(remaining);
             foreach (var edge in remaining)
             {
-                ownership.RemoveIncoming(edge.Property, edge.Index);
+                ownership.RemoveIncoming(edge.Property, edge.SubjectOrdinal);
                 ownership.RepublishParents();
                 notifier.PublishEdgeRemoved(subject, edge.Property, edge.Index, ownership.IncomingCount);
             }
@@ -106,12 +110,12 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
         {
             graph.CollectStructuralChildren(subject, children, seed: false);
 
-            // Drop the ownership record and the baselines first: from here on the subject is
+            // Drop the ownership record and the snapshots first: from here on the subject is
             // released as far as every other query is concerned, which is what makes the callbacks
             // below safe to re-enter this descent from, and what makes them see no parents at all
             // rather than only the edge being removed.
             graph.RemoveOwnership(subject);
-            graph.RemoveBaselines(subject);
+            graph.RemoveSnapshots(subject);
 
             // Attached but unowned is also what a claimed, not yet published attach looks like, and
             // property admission has to publish edges for that one and none for this one.
@@ -148,7 +152,11 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
 
             foreach (var (childProperty, occurrence) in children)
             {
-                RemoveEdge(occurrence.Subject, childProperty, occurrence.Index);
+                RemoveEdge(
+                    occurrence.Subject,
+                    childProperty,
+                    occurrence.SubjectOrdinal,
+                    occurrence.Index);
             }
         }
         finally

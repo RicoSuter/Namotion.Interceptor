@@ -500,24 +500,16 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return false;
         }
 
-        var occurrences = LifecycleScratch.RentOccurrenceList();
-        try
+        var snapshot = StructuralSnapshotBuilder.Build(property.Metadata.Type, value, 0);
+        foreach (var occurrence in snapshot.Occurrences)
         {
-            StructuralValueScanner.CollectOccurrences(property.Metadata.Type, value, occurrences);
-            foreach (var occurrence in occurrences)
+            if (!ReferenceEquals(occurrence.Subject.TryGetContext(), context))
             {
-                if (!ReferenceEquals(occurrence.Subject.TryGetContext(), context))
-                {
-                    return true;
-                }
+                return true;
             }
+        }
 
-            return false;
-        }
-        finally
-        {
-            LifecycleScratch.Return(occurrences);
-        }
+        return false;
     }
 
     [DoesNotReturn]

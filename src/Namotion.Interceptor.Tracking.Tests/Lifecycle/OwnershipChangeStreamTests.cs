@@ -7,11 +7,11 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// <summary>
 /// Characterization tests for the ordered lifecycle change stream. They record what the current
 /// implementation publishes, in order, for the graph shapes whose outcome depends on
-/// <c>OwnershipGraph.CommitsEdgeTo</c>. Every one of these shapes converges to the same final graph
+/// <c>OwnershipGraph.ContainsOccurrence</c>. Every one of these shapes converges to the same final graph
 /// state whether or not that predicate discriminates, so only the intermediate stream distinguishes
 /// them and only an ordered assertion can catch a change.
 ///
-/// The mechanism they surround: a reconcile commits the property's new value as the baseline before
+/// The mechanism they surround: a reconcile commits the property's new snapshot before
 /// it updates any incoming edge record, so during the removal pass a recorded incoming edge can name
 /// a parent whose committed value no longer contains the subject. The reachability walk rejects such
 /// an edge, which is what decides whether a subject is released on the removal that orphans it or
@@ -73,11 +73,11 @@ public class OwnershipChangeStreamTests
         }
     }
 
-    private static object? GetCommittedBaseline(
+    private static StructuralSnapshot GetCommittedSnapshot(
         IInterceptorSubjectContext context, IInterceptorSubject subject, string propertyName)
     {
         var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
-        return lifecycle.Graph.GetBaseline(new PropertyReference(subject, propertyName));
+        return lifecycle.Graph.GetSnapshot(new PropertyReference(subject, propertyName));
     }
 
     private static IInterceptorSubjectContext CreateContext(LifecycleChangeStreamRecorder recorder)
@@ -244,7 +244,7 @@ public class OwnershipChangeStreamTests
     /// <summary>
     /// Records existing behavior for the walk's second caller, anchor adoption, which reaches the
     /// same stale-edge window only through a nested operation. An outer reconcile is midway through
-    /// its removal pass, so the collection's baseline no longer lists the host but the host's
+    /// its removal pass, so the collection's snapshot no longer lists the host but the host's
     /// incoming record still exists. A detach callback fired by an earlier removal adds a dynamic
     /// property to that host, which is the supported dynamic-property-initializer case: the thread
     /// already holds the topology gate, so the admission is admitted rather than rejected. The
@@ -260,7 +260,7 @@ public class OwnershipChangeStreamTests
     public void WhenANestedAdmissionAdoptsAProvisionalRootUnderAStaleAncestorEdge_ThenTheAnchorSurvives()
     {
         // Arrange: the host sits at the lower index so the sibling is released first and its detach
-        // callback runs while the host is still owned through an edge the baseline has already dropped.
+        // callback runs while the host is still owned through an edge the snapshot has already dropped.
         var recorder = new LifecycleChangeStreamRecorder();
         var context = CreateContext(recorder);
         var root = new Person { FirstName = "R" };
@@ -274,7 +274,7 @@ public class OwnershipChangeStreamTests
         var admissionRan = false;
         Exception? admissionException = null;
         var hostReferenceCountAtAdmission = -1;
-        object? childrenBaselineAtAdmission = null;
+        StructuralSnapshot? childrenSnapshotAtAdmission = null;
         recorder.OnChange = change =>
         {
             if (!change.IsContextDetach || !ReferenceEquals(change.Subject, sibling))
@@ -284,7 +284,7 @@ public class OwnershipChangeStreamTests
 
             admissionRan = true;
             hostReferenceCountAtAdmission = ((IInterceptorSubject)host).GetReferenceCount();
-            childrenBaselineAtAdmission = GetCommittedBaseline(context, root, nameof(Person.Children));
+            childrenSnapshotAtAdmission = GetCommittedSnapshot(context, root, nameof(Person.Children));
             admissionException = Record.Exception(() => ((IInterceptorSubject)host).AddProperties(
                 new SubjectPropertyMetadata(
                     "Adopted", typeof(Person), [], _ => provisionalRoot, null,
@@ -303,7 +303,7 @@ public class OwnershipChangeStreamTests
         Assert.True(admissionRan, "the detach callback for the released sibling never ran");
         Assert.Null(admissionException);
         Assert.Equal(1, hostReferenceCountAtAdmission);
-        Assert.Empty(Assert.IsType<Person[]>(childrenBaselineAtAdmission));
+        Assert.Empty(Assert.IsType<StructuralSnapshot>(childrenSnapshotAtAdmission).Occurrences);
 
         // Asserted ahead of the stream because it is the sharper consequence: the adopted subject
         // keeps the anchor it arrived with, so losing its only edge a moment later leaves it an

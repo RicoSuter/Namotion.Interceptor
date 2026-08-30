@@ -7,16 +7,13 @@ using Namotion.Interceptor.Tracking.Parent;
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 /// <summary>
-/// The committed ownership state of one context: which subjects it owns, the last reconciled value
+/// The committed ownership state of one context: which subjects it owns, the last occurrence snapshot
 /// of every structural property, and the primitives that claim executors for this context or hand
 /// them back.
 /// </summary>
 /// <remarks>
-/// Committed outgoing edges are not stored separately. The property baselines are the outgoing
-/// truth: a subject commits an edge to a child exactly when the baseline of one of its structural
-/// properties still contains that child. One representation instead of two removes the whole class
-/// of bugs where the two disagree, and it is what makes the release descent and the reachability
-/// walk read the same relation.
+/// Property snapshots are the outgoing truth. Incoming edge identities contain the same property
+/// and child-specific ordinal, while their index or key is publication payload only.
 ///
 /// The claim primitives (claiming, releasing and re-anchoring executors) take the executor's
 /// attachment monitor through <c>TryUpdateAttachment</c>, so they require the topology gate to
@@ -33,7 +30,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     // may override Equals/GetHashCode, which under default equality could merge distinct nodes or
     // strand a subject whose hash mutates while it is owned.
     private readonly ConcurrentDictionary<IInterceptorSubject, SubjectOwnership> _owned = new(ReferenceEqualityComparer.Instance);
-    private readonly Dictionary<PropertyReference, object?> _baselines = new(PropertyReference.Comparer);
+    private readonly Dictionary<PropertyReference, StructuralSnapshot> _snapshots = new(PropertyReference.Comparer);
 
     // Written only by the release descent, under the topology lock, and read only by the
     // admission path; a set rather than a field because a release can nest inside a callback.
@@ -136,125 +133,118 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
         return ownership.TryGetPublishedParents(out var published) ? published : ownership.ActivateParents();
     }
 
-    #region Property baselines, which are also the committed outgoing edges
+    #region Property snapshots, which are also the committed outgoing edges
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public object? GetBaseline(PropertyReference property)
+    public StructuralSnapshot GetSnapshot(PropertyReference property)
     {
-        return _baselines.GetValueOrDefault(property);
+        return _snapshots.GetValueOrDefault(property, StructuralSnapshot.Empty);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void SetBaseline(PropertyReference property, object? value)
+    public void SetSnapshot(PropertyReference property, StructuralSnapshot snapshot)
     {
-        _baselines[property] = value;
+        _snapshots[property] = snapshot;
     }
 
     /// <summary>
-    /// Whether a baseline entry exists at all: a committed null and a missing entry both read as
-    /// null through <see cref="GetBaseline"/>, and the released-subject regression tests must tell
-    /// them apart.
+    /// Whether a snapshot entry exists at all. An empty committed value and a missing entry both
+    /// expose no occurrences, so released-subject tests use this distinction.
     /// </summary>
-    public bool HasBaseline(PropertyReference property)
+    public bool HasSnapshot(PropertyReference property)
     {
-        return _baselines.ContainsKey(property);
+        return _snapshots.ContainsKey(property);
     }
 
     /// <summary>
-    /// Whether the parent still commits an outgoing edge to the target through the given property.
-    /// Every algorithm that reads incoming edges validates candidates through this: a reconcile
-    /// commits the new property value before it updates the incoming records, so a stored incoming
-    /// edge can name a parent that no longer references the subject.
+    /// Whether the committed snapshot contains the exact child occurrence named by an incoming edge.
     /// </summary>
-    public bool CommitsEdgeTo(PropertyReference property, IInterceptorSubject target)
+    public bool ContainsOccurrence(PropertyReference property, IInterceptorSubject target, int subjectOrdinal)
     {
-        return _baselines.TryGetValue(property, out var value) &&
-               StructuralValueScanner.Contains(property, value, target);
+        if (!_snapshots.TryGetValue(property, out var snapshot))
+        {
+            return false;
+        }
+
+        foreach (var occurrence in snapshot.Occurrences)
+        {
+            if (occurrence.SubjectOrdinal == subjectOrdinal && ReferenceEquals(occurrence.Subject, target))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
     /// Walks the subject's structural properties and appends the occurrences their values contain, in
     /// property enumeration order and then value order, which is the order the release descent visits
-    /// children in. Seeding reads the current getter output and commits it as the baseline;
-    /// collecting reads the committed baseline. That one difference is why both callers exist.
+    /// children in. Seeding reads the current getter output and commits its snapshot; collecting
+    /// reads the committed snapshot. That one difference is why both callers exist.
     /// </summary>
     public void CollectStructuralChildren(
         IInterceptorSubject subject,
-        List<(PropertyReference Property, SubjectOccurrence Occurrence)> children,
+        List<(PropertyReference Property, StructuralOccurrence Occurrence)> children,
         bool seed)
     {
-        var occurrences = LifecycleScratch.RentOccurrenceList();
-        try
+        foreach (var entry in subject.Properties)
         {
-            foreach (var entry in subject.Properties)
+            var metadata = entry.Value;
+            if (!IsStructural(metadata))
             {
-                var metadata = entry.Value;
-                if (!IsStructural(metadata))
-                {
-                    continue;
-                }
-
-                var property = new PropertyReference(subject, entry.Key);
-                object? value;
-                if (seed)
-                {
-                    value = metadata.GetValue?.Invoke(subject);
-                    _baselines[property] = value;
-                }
-                else if (!_baselines.TryGetValue(property, out value))
-                {
-                    continue;
-                }
-
-                if (value is null)
-                {
-                    continue;
-                }
-
-                occurrences.Clear();
-                StructuralValueScanner.CollectOccurrences(metadata.Type, value, occurrences);
-                foreach (var occurrence in occurrences)
-                {
-                    children.Add((property, occurrence));
-                }
+                continue;
             }
-        }
-        finally
-        {
-            LifecycleScratch.Return(occurrences);
+
+            var property = new PropertyReference(subject, entry.Key);
+            StructuralSnapshot snapshot;
+            if (seed)
+            {
+                snapshot = StructuralSnapshotBuilder.Build(metadata.Type, metadata.GetValue?.Invoke(subject), 0);
+                _snapshots[property] = snapshot;
+            }
+            else if (!_snapshots.TryGetValue(property, out snapshot!))
+            {
+                continue;
+            }
+
+            foreach (var occurrence in snapshot.Occurrences)
+            {
+                children.Add((property, occurrence));
+            }
         }
     }
 
     /// <summary>
-    /// Whether the subject's structural properties already carry committed baselines, which is what
+    /// Whether the subject's structural properties already carry committed snapshots, which is what
     /// tells an attach whether the subject's own component still has to be discovered. Checking the
-    /// baselines rather than a flag keeps one source of truth: seeding is exactly what writes them.
+    /// snapshots rather than a flag keeps one source of truth: seeding is exactly what writes them.
     /// </summary>
     /// <remarks>
-    /// The first structural property answers for all of them: seeding writes every baseline of a
+    /// The first structural property answers for all of them: seeding writes every snapshot of a
     /// subject under the topology lock, so they are present or absent together.
     /// </remarks>
-    public bool AreBaselinesSeeded(IInterceptorSubject subject)
+    public bool AreSnapshotsSeeded(IInterceptorSubject subject)
     {
         foreach (var entry in subject.Properties)
         {
             if (IsStructural(entry.Value))
             {
-                return _baselines.ContainsKey(new PropertyReference(subject, entry.Key));
+                return _snapshots.ContainsKey(new PropertyReference(subject, entry.Key));
             }
         }
 
         return true;
     }
 
-    /// <summary>Drops every structural baseline of the subject; called when it leaves the graph.</summary>
-    public void RemoveBaselines(IInterceptorSubject subject)
+    /// <summary>Drops every structural snapshot of the subject; called when it leaves the graph.</summary>
+    public void RemoveSnapshots(IInterceptorSubject subject)
     {
         foreach (var entry in subject.Properties)
         {
             if (IsStructural(entry.Value))
             {
-                _baselines.Remove(new PropertyReference(subject, entry.Key));
+                _snapshots.Remove(new PropertyReference(subject, entry.Key));
             }
         }
     }
@@ -376,18 +366,10 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
         HashSet<IInterceptorSubject> visited,
         List<IInterceptorSubject> unattached)
     {
-        var occurrences = LifecycleScratch.RentOccurrenceList();
-        try
+        var snapshot = StructuralSnapshotBuilder.Build(declaredType, value, 0);
+        foreach (var occurrence in snapshot.Occurrences)
         {
-            StructuralValueScanner.CollectOccurrences(declaredType, value, occurrences);
-            foreach (var occurrence in occurrences)
-            {
-                DiscoverComponent(occurrence.Subject, visited, unattached);
-            }
-        }
-        finally
-        {
-            LifecycleScratch.Return(occurrences);
+            DiscoverComponent(occurrence.Subject, visited, unattached);
         }
     }
 
@@ -437,18 +419,10 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
                         continue;
                     }
 
-                    var occurrences = LifecycleScratch.RentOccurrenceList();
-                    try
+                    var snapshot = StructuralSnapshotBuilder.Build(entry.Value.Type, childValue, 0);
+                    foreach (var occurrence in snapshot.Occurrences)
                     {
-                        StructuralValueScanner.CollectOccurrences(entry.Value.Type, childValue, occurrences);
-                        foreach (var occurrence in occurrences)
-                        {
-                            pending.Push(occurrence.Subject);
-                        }
-                    }
-                    finally
-                    {
-                        LifecycleScratch.Return(occurrences);
+                        pending.Push(occurrence.Subject);
                     }
                 }
             }

@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// downstream of LifecycleInterceptor, inside its next call, at callback depth zero and holding the
 /// lifecycle gate reentrantly. From there it can release the writing parent before the reconcile of
 /// the write it sits under is entered. These tests pin that such a release leaves nothing behind:
-/// no subject stays attached through an edge from the released parent, and no committed baseline
+/// no subject stays attached through an edge from the released parent, and no committed snapshot
 /// survives for it.
 /// </summary>
 public class DownstreamWriteInterceptorReleaseTests
@@ -39,7 +39,7 @@ public class DownstreamWriteInterceptorReleaseTests
         Assert.Null(parent.TryGetContext());
         Assert.Null(child.TryGetContext());
         Assert.Empty(child.GetParents());
-        AssertNoBaseline(context, parent);
+        AssertNoSnapshot(context, parent);
     }
 
     [Fact]
@@ -63,16 +63,16 @@ public class DownstreamWriteInterceptorReleaseTests
         Assert.Null(parent.TryGetContext());
         Assert.Null(child.TryGetContext());
         Assert.Empty(child.GetParents());
-        AssertNoBaseline(context, parent);
+        AssertNoSnapshot(context, parent);
     }
 
-    private static void AssertNoBaseline(IInterceptorSubjectContext context, Person parent)
+    private static void AssertNoSnapshot(IInterceptorSubjectContext context, Person parent)
     {
-        // The committed baseline is the released parent's outgoing edge record. Baselines are
+        // The committed snapshot is the released parent's outgoing edge record. Snapshots are
         // removed exactly once, by the parent's own release, so an entry recreated after that
         // release would survive forever and keep validating edges from a dead owner.
         var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
-        Assert.Null(lifecycle.Graph.GetBaseline(new PropertyReference(parent, nameof(Person.Father))));
+        Assert.False(lifecycle.Graph.HasSnapshot(new PropertyReference(parent, nameof(Person.Father))));
     }
 
     /// <summary>

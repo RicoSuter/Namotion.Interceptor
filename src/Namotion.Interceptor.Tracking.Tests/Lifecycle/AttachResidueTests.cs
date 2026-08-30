@@ -50,7 +50,7 @@ public class AttachResidueTests
     /// Reproduces the finding that a rejected explicit attach leaves residue behind. The rollback
     /// contract is that a rejected attach publishes nothing at all, so this asserts each kind of
     /// state the attach would have written separately rather than probing one of them and inferring
-    /// the rest: no committed baseline for the root's structural property, no ownership record, no
+    /// the rest: no committed snapshot for the root's structural property, no ownership record, no
     /// root anchor, and no claim on the context. Asserting them one by one is what makes a partial
     /// rollback report which part leaked instead of failing on whichever probe happened to be used.
     ///
@@ -115,8 +115,8 @@ public class AttachResidueTests
 
         // The attach was rejected, so every kind of state it would have written must be absent.
         var graph = GetLifecycle(context).Graph;
-        Assert.False(graph.HasBaseline(new PropertyReference(holder, nameof(EnumerableChildrenHolder.Children))),
-            "the rejected attach left a committed baseline for the root's structural property");
+        Assert.False(graph.HasSnapshot(new PropertyReference(holder, nameof(EnumerableChildrenHolder.Children))),
+            "the rejected attach left a committed snapshot for the root's structural property");
         Assert.False(graph.IsOwned(holder),
             "the rejected attach left an ownership record for the root");
         Assert.False(((IInterceptorSubject)holder).Executor.AttachmentAnchor != SubjectAttachmentAnchorKind.None,
@@ -206,7 +206,7 @@ public class AttachResidueTests
     /// still detachable, which is the state a rejected attach leaves on master as well.
     ///
     /// Deterministic and single-threaded, because it does not need the discovery race: a handler
-    /// that refuses the child's attach makes the seed throw after the edge and the baseline are
+    /// that refuses the child's attach makes the seed throw after the edge and the snapshot are
     /// already committed, which is the same state the raced attach reaches, and refusing the child's
     /// detach then makes the rollback throw too.
     /// </summary>
