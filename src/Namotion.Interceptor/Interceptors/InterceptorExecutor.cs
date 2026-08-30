@@ -54,6 +54,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     }
 
     internal long Revision;
+    internal long CurrentRevision => Volatile.Read(ref Revision);
 
     private readonly object _attachmentLock = new();
     private volatile AttachmentState _attachment = AttachmentState.Unattached;
@@ -375,7 +376,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     }
 
     internal AttachmentTransition PrepareAttachmentUpdate(
-        InterceptorSubjectContext expectedContext,
+        InterceptorSubjectContext? expectedContext,
         InterceptorSubjectContext? context,
         SubjectAttachmentAnchorKind anchor,
         OwnershipReservationToken? reservation = null)

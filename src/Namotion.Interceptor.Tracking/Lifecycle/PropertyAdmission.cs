@@ -1,224 +1,82 @@
+using System.Collections.Immutable;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
-/// <summary>
-/// Admits an <see cref="IInterceptorSubject.AddProperties"/> batch on an owned subject: one atomic
-/// publication of metadata, property callbacks and initial ownership edges, or nothing. Runs under
-/// the lifecycle's topology gate, entered by
-/// <see cref="LifecycleInterceptor.TryAddProperties"/>.
-/// </summary>
-/// <remarks>
-/// The order is the load-bearing part. The batch is materialized and duplicate-validated first,
-/// then every qualifying getter is invoked exactly once and its result captured, then the complete
-/// prospective component is discovered and claimed, and only then does anything publish: the
-/// metadata swap, the property callbacks in input order, and finally the captured values as
-/// ordinary structural assignments. Everything before the metadata swap can fail, and failing
-/// there publishes nothing and releases the provisional claims. Everything after it is
-/// exception-free by contract, and a violating callback propagates without rollback, like every
-/// other lifecycle callback.
-/// </remarks>
-internal sealed class PropertyAdmission(OwnershipGraph graph, StructuralReconciler reconciler, AttachTraversal attach)
+/// <summary>Captures and publishes one lifecycle-aware property batch.</summary>
+internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGraph graph)
 {
-    public void Admit(SubjectPropertyRegistration registration)
+    internal sealed record Capture(
+        SubjectPropertyRegistration Registration,
+        ImmutableArray<string> AddedPropertyNames,
+        ImmutableArray<PropertyReference> StructuralProperties,
+        Dictionary<PropertyReference, StructuralSnapshot> Snapshots,
+        Dictionary<IInterceptorSubject, ImmutableArray<string>> PropertyNames);
+
+    internal Capture CaptureBatch(
+        SubjectPropertyRegistration registration,
+        List<IInterceptorSubject> discovered)
     {
-        var subject = registration.Subject;
         var batch = registration.GetProperties();
-        if (batch.Count == 0)
-        {
-            return;
-        }
-
-        if (!graph.AreSnapshotsSeeded(subject))
-        {
-            // Owned but not yet seeded: an edge-driven attach records ownership before the descent
-            // seeds, so a handler that adds properties lands in that window. Committing a snapshot
-            // here would decide the pending seeding by name, because AreSnapshotsSeeded answers
-            // from whichever structural property enumerates first. The descent reads every
-            // structural getter, the ones this batch adds included, so it publishes these edges
-            // itself; only the property callbacks belong to this call.
-            Publish(registration);
-            InvokePropertyAttachCallbacks(subject, batch);
-            return;
-        }
-
-        var captured = CaptureStructuralValues(subject, batch);
-        if (captured is null)
-        {
-            Publish(registration);
-            InvokePropertyAttachCallbacks(subject, batch);
-            return;
-        }
-
+        var subject = registration.Subject;
+        var snapshots = new Dictionary<PropertyReference, StructuralSnapshot>(PropertyReference.Comparer);
+        var propertyNames = new Dictionary<IInterceptorSubject, ImmutableArray<string>>(
+            ReferenceEqualityComparer.Instance);
+        var addedNames = ImmutableArray.CreateBuilder<string>(batch.Count);
+        var structuralProperties = ImmutableArray.CreateBuilder<PropertyReference>();
         var visited = LifecycleScratch.RentSubjectSet();
-        var claimed = LifecycleScratch.RentSubjectList();
+        var graphState = graph.State;
         try
         {
-            ClaimCapturedComponents(captured, visited, claimed);
-
-            Publish(registration);
-            InvokePropertyAttachCallbacks(subject, batch);
-
-            // Commit the captured values as ordinary assignments. The reconciler sees an empty
-            // snapshot, so every occurrence becomes a fresh edge.
-            foreach (var (metadata, value) in captured)
+            foreach (var metadata in batch)
             {
-                var property = new PropertyReference(subject, metadata.Name);
-                if (!graph.IsOwned(subject))
+                addedNames.Add(metadata.Name);
+                if (!OwnershipGraph.IsStructural(metadata))
                 {
-                    return;
+                    continue;
                 }
 
-                reconciler.Reconcile(property, metadata, value);
+                var property = new PropertyReference(subject, metadata.Name);
+                var snapshot = StructuralSnapshotBuilder.Build(
+                    metadata.Type, metadata.GetValue?.Invoke(subject), 0);
+                structuralProperties.Add(property);
+                snapshots.Add(property, snapshot);
+                StructuralSnapshotBuilder.CaptureComponent(
+                    snapshot, graph.Context, graphState, visited, discovered, snapshots, propertyNames);
             }
+
+            registration.PreparePublication();
+            propertyNames[subject] = registration.PreparedProperties.Keys.ToImmutableArray();
+            return new Capture(
+                registration,
+                addedNames.MoveToImmutable(),
+                structuralProperties.ToImmutable(),
+                snapshots,
+                propertyNames);
         }
         finally
         {
-            // Claims that never became ownership are handed back; see
-            // OwnershipGraph.ReleaseUnusedClaims for what leaves them behind.
-            graph.ReleaseUnusedClaims(claimed);
             LifecycleScratch.Return(visited);
-            LifecycleScratch.Return(claimed);
         }
     }
 
-    /// <summary>
-    /// Admits a batch on a subject that is claimed for this context but not owned by the graph,
-    /// which is observable from inside this thread's own attach descent and from a detach callback.
-    /// </summary>
-    /// <remarks>
-    /// Two shapes exist. When the descent has not seeded the subject yet, only metadata publishes:
-    /// the descent will seed every snapshot, including the new properties', and fan out the
-    /// then-current property set when it attaches the subject. When the subject is already seeded
-    /// (an explicit attach seeds the root before owning it, and a subject with no structural
-    /// properties counts as seeded), the descent will not come back, so the new structural
-    /// properties are seeded here the same way the descent would have. Property callbacks are not
-    /// invoked on either shape, because the pending context-attach publication fans out the
-    /// then-current property set, new properties included.
-    ///
-    /// A releasing subject presents the same attached-but-unowned shape from the opposite direction
-    /// and takes the metadata-only arm too: it has no descent coming, and an edge published from it
-    /// would name an owner the release already removed, so nothing would ever release the child.
-    /// The marker is what extends that arm to a subject whose snapshots were empty to begin with.
-    /// </remarks>
-    public void AdmitUnowned(SubjectPropertyRegistration registration)
+    internal OwnershipGraph.PreparedTopologyChange Prepare(
+        Capture capture,
+        Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations)
     {
-        var subject = registration.Subject;
-        if (graph.IsReleasing(subject) || !graph.AreSnapshotsSeeded(subject))
-        {
-            Publish(registration);
-            return;
-        }
-
-        var batch = registration.GetProperties();
-        if (batch.Count == 0)
-        {
-            return;
-        }
-
-        var captured = CaptureStructuralValues(subject, batch);
-        if (captured is null)
-        {
-            Publish(registration);
-            return;
-        }
-
-        var visited = LifecycleScratch.RentSubjectSet();
-        var claimed = LifecycleScratch.RentSubjectList();
-        try
-        {
-            ClaimCapturedComponents(captured, visited, claimed);
-
-            Publish(registration);
-
-            // Seed rather than reconcile: the reconciler's released-parent early exits read
-            // IsOwned on the writing parent, which is legitimately false here, so it would stop
-            // after the first occurrence. Seeding is the descent's own shape for exactly this
-            // state: commit the outgoing snapshot, then attach one edge per occurrence.
-            foreach (var (metadata, value) in captured)
-            {
-                var property = new PropertyReference(subject, metadata.Name);
-                var snapshot = StructuralSnapshotBuilder.Build(metadata.Type, value, 0);
-                graph.SetSnapshot(property, snapshot);
-                foreach (var occurrence in snapshot.Occurrences)
-                {
-                    attach.AttachEdge(
-                        occurrence.Subject,
-                        property,
-                        occurrence.SubjectOrdinal,
-                        occurrence.Index);
-                }
-            }
-        }
-        finally
-        {
-            graph.ReleaseUnusedClaims(claimed);
-            LifecycleScratch.Return(visited);
-            LifecycleScratch.Return(claimed);
-        }
+        notifier.AttachSubjectProperties(capture.Registration.Subject, capture.AddedPropertyNames);
+        return graph.PrepareAdmission(
+            capture.Registration.Subject,
+            capture.StructuralProperties,
+            capture.Snapshots,
+            capture.PropertyNames,
+            reservations,
+            notifier);
     }
 
-    /// <summary>
-    /// Classifies the initial ownership candidates and invokes each qualifying getter exactly once,
-    /// before anything publishes. The captured value is committed by the caller rather than re-read,
-    /// so an unstable getter cannot commit edges for a graph nobody stored.
-    /// </summary>
-    private static List<(SubjectPropertyMetadata Metadata, object? Value)>? CaptureStructuralValues(
-        IInterceptorSubject subject, IReadOnlyList<SubjectPropertyMetadata> batch)
+    internal void Publish(Capture capture, OwnershipGraph.PreparedTopologyChange change)
     {
-        List<(SubjectPropertyMetadata Metadata, object? Value)>? captured = null;
-        foreach (var metadata in batch)
-        {
-            if (OwnershipGraph.IsStructural(metadata))
-            {
-                (captured ??= []).Add((metadata, metadata.GetValue?.Invoke(subject)));
-            }
-        }
-
-        return captured;
-    }
-
-    /// <summary>
-    /// Discovers the complete prospective component of every captured value and claims the
-    /// unattached subjects as one batch. A foreign subject or a lost claim race throws before
-    /// anything publishes, with this call's own claims released.
-    /// </summary>
-    private void ClaimCapturedComponents(
-        List<(SubjectPropertyMetadata Metadata, object? Value)> captured,
-        HashSet<IInterceptorSubject> visited,
-        List<IInterceptorSubject> claimed)
-    {
-        foreach (var (metadata, value) in captured)
-        {
-            if (value is not null)
-            {
-                graph.DiscoverComponent(
-                    StructuralSnapshotBuilder.Build(metadata.Type, value, 0),
-                    visited,
-                    claimed);
-            }
-        }
-
-        if (!graph.TryClaimDiscovered(claimed, null, SubjectAttachmentAnchorKind.None))
-        {
-            claimed.Clear();
-            throw new InvalidOperationException(
-                "Another context claimed a subject of the admitted graph while this call was " +
-                "validating it. Nothing was published.");
-        }
-    }
-
-    private static void InvokePropertyAttachCallbacks(IInterceptorSubject subject, IReadOnlyList<SubjectPropertyMetadata> batch)
-    {
-        for (var index = 0; index < batch.Count; index++)
-        {
-            subject.AttachSubjectProperty(new PropertyReference(subject, batch[index].Name));
-        }
-    }
-
-    private void Publish(SubjectPropertyRegistration registration)
-    {
-        registration.Publish();
-        graph.RefreshPropertyNames(registration.Subject);
+        capture.Registration.PublishPrepared();
+        graph.Publish(change);
     }
 }

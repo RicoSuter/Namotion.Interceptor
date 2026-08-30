@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Immutable;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -100,5 +101,110 @@ internal static class StructuralSnapshotBuilder
     private static bool HasKeyedEntries(Type declaredType, object value)
     {
         return declaredType.IsSubjectDictionaryType() || value.GetType().IsSubjectDictionaryType();
+    }
+
+    internal static void CaptureComponent(
+        StructuralSnapshot roots,
+        IInterceptorSubjectContext context,
+        OwnershipGraph.GraphState graphState,
+        HashSet<IInterceptorSubject> visited,
+        List<IInterceptorSubject> discovered,
+        Dictionary<PropertyReference, StructuralSnapshot> snapshots,
+        Dictionary<IInterceptorSubject, ImmutableArray<string>> propertyNames,
+        bool includeAttached = true)
+    {
+        var pending = LifecycleScratch.RentSubjectStack();
+        foreach (var occurrence in roots.Occurrences)
+        {
+            pending.Push(occurrence.Subject);
+        }
+
+        CapturePending(context, graphState, visited, discovered, snapshots, propertyNames, includeAttached, pending);
+    }
+
+    internal static void CaptureComponent(
+        IInterceptorSubject root,
+        IInterceptorSubjectContext context,
+        OwnershipGraph.GraphState graphState,
+        HashSet<IInterceptorSubject> visited,
+        List<IInterceptorSubject> discovered,
+        Dictionary<PropertyReference, StructuralSnapshot> snapshots,
+        Dictionary<IInterceptorSubject, ImmutableArray<string>> propertyNames)
+    {
+        var pending = LifecycleScratch.RentSubjectStack();
+        pending.Push(root);
+        CapturePending(context, graphState, visited, discovered, snapshots, propertyNames, true, pending);
+    }
+
+    private static void CapturePending(
+        IInterceptorSubjectContext context,
+        OwnershipGraph.GraphState graphState,
+        HashSet<IInterceptorSubject> visited,
+        List<IInterceptorSubject> discovered,
+        Dictionary<PropertyReference, StructuralSnapshot> snapshots,
+        Dictionary<IInterceptorSubject, ImmutableArray<string>> propertyNames,
+        bool includeAttached,
+        Stack<IInterceptorSubject> pending)
+    {
+        try
+        {
+            while (pending.Count > 0)
+            {
+                var subject = pending.Pop();
+                if (!visited.Add(subject))
+                {
+                    continue;
+                }
+
+                var attachedContext = subject.Executor.AttachedContext;
+                if (attachedContext is not null && !ReferenceEquals(attachedContext, context))
+                {
+                    throw new InvalidOperationException(
+                        $"The subject '{subject.GetType().Name}' is owned by a different context and cannot " +
+                        "join this graph. Detach it from that context first.");
+                }
+
+                if (attachedContext is null || includeAttached)
+                {
+                    discovered.Add(subject);
+                }
+
+                if (graphState.Owned.TryGetValue(subject, out var ownership))
+                {
+                    propertyNames.TryAdd(subject, ownership.PropertyNames);
+                    continue;
+                }
+
+                var executor = (InterceptorExecutor)subject.Executor;
+                var revision = executor.CurrentRevision;
+                var names = ImmutableArray.CreateBuilder<string>(subject.Properties.Count);
+                foreach (var entry in subject.Properties)
+                {
+                    names.Add(entry.Key);
+                    if (!OwnershipGraph.IsStructural(entry.Value))
+                    {
+                        continue;
+                    }
+
+                    var snapshot = Build(entry.Value.Type, entry.Value.GetValue?.Invoke(subject), 0);
+                    snapshots.Add(new PropertyReference(subject, entry.Key), snapshot);
+                    foreach (var occurrence in snapshot.Occurrences)
+                    {
+                        pending.Push(occurrence.Subject);
+                    }
+                }
+
+                if (executor.CurrentRevision != revision)
+                {
+                    throw LifecycleConflictException.Retryable(subject);
+                }
+
+                propertyNames.Add(subject, names.MoveToImmutable());
+            }
+        }
+        finally
+        {
+            LifecycleScratch.Return(pending);
+        }
     }
 }

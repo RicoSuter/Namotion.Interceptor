@@ -77,35 +77,25 @@ internal sealed class LifecycleNotifier(
 
     public void InvokeAddedLifecycleHandlers(
         IInterceptorSubject subject,
-        SubjectLifecycleChange change,
-        Dictionary<IInterceptorSubject, Interceptors.OwnershipReservationToken>? reservations = null) =>
-        InvokeAddedLifecycleHandlersCore(subject, change, reservations, null);
+        SubjectLifecycleChange change) =>
+        InvokeAddedLifecycleHandlersCore(subject, change, null);
 
     internal void InvokePreparedAddedLifecycleHandlers(
         IInterceptorSubject subject,
         SubjectLifecycleChange change,
-        Dictionary<IInterceptorSubject, Interceptors.OwnershipReservationToken> reservations,
         Action? prepareChildren) =>
-        InvokeAddedLifecycleHandlersCore(subject, change, reservations, prepareChildren);
+        InvokeAddedLifecycleHandlersCore(subject, change, prepareChildren);
 
     private void InvokeAddedLifecycleHandlersCore(
         IInterceptorSubject subject,
         SubjectLifecycleChange change,
-        Dictionary<IInterceptorSubject, Interceptors.OwnershipReservationToken>? reservations,
         Action? prepareChildren)
     {
         foreach (var handler in GetLifecycleHandlers())
         {
             if (ReferenceEquals(handler, originatingLifecycle))
             {
-                if (prepareChildren is null)
-                {
-                    originatingLifecycle.HandleLifecycleChange(change, reservations);
-                }
-                else
-                {
-                    prepareChildren();
-                }
+                prepareChildren?.Invoke();
             }
             else
             {
@@ -228,7 +218,8 @@ internal sealed class LifecycleNotifier(
         bool propertyCallback = false,
         IInterceptorSubject? attachedSubject = null)
     {
-        var expectedRevision = attachedSubject?.Executor.AttachmentRevision;
+        var expectedRevision = attachedSubject?.Executor.AttachmentRevision +
+            (attachedSubject?.Executor.AttachedContext is null ? 1 : 0);
         bool IsCurrentAttachment() => attachedSubject?.Executor.AttachmentRevision == expectedRevision;
 
         void Invoke()

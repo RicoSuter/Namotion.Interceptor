@@ -11,9 +11,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
 {
     private readonly IInterceptorSubjectContext _context;
     private readonly OwnershipGraph _graph;
-    private readonly ReachabilityWalk _reachability;
     private readonly ReleaseTraversal _release;
-    private readonly StructuralReconciler _reconciler;
     private readonly AttachTraversal _attach;
     private readonly LifecycleNotifier _notifier;
     private readonly PropertyAdmission _admission;
@@ -48,11 +46,9 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         _context = context;
         _notifier = new LifecycleNotifier(context, this);
         _graph = new OwnershipGraph(context, this);
-        _reachability = new ReachabilityWalk(_graph);
         _attach = new AttachTraversal(_notifier, _graph);
         _release = new ReleaseTraversal(_notifier, _graph);
-        _reconciler = new StructuralReconciler(_notifier, _graph);
-        _admission = new PropertyAdmission(_graph, _reconciler, _attach);
+        _admission = new PropertyAdmission(_notifier, _graph);
     }
 
     private GateScope EnterGate()
@@ -184,7 +180,6 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                             throw LifecycleConflictException.Retryable(context.Property.Subject);
                         }
 
-                        _graph.CommitReservations(reservations);
                         using var change = _graph.PrepareWrite(
                             context.Property,
                             snapshot,
@@ -237,11 +232,12 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var visited = LifecycleScratch.RentSubjectSet();
         try
         {
-            _graph.DiscoverComponent(
+            StructuralSnapshotBuilder.CaptureComponent(
                 snapshot,
+                _context,
+                _graph.State,
                 visited,
                 discovered,
-                includeAttached: true,
                 seededSnapshots,
                 seededPropertyNames);
         }
@@ -340,41 +336,94 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// <inheritdoc />
     public bool TryAddProperties(SubjectPropertyRegistration registration)
     {
-        using var logicalScope = InterceptorExecutor.EnterLogicalContext((InterceptorSubjectContext)_context);
-        using (EnterGate())
+        InterceptorExecutor.LogicalContextScope logicalScope;
+        try
         {
-            var subject = registration.Subject;
-            if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
+            logicalScope = InterceptorExecutor.EnterLogicalContext((InterceptorSubjectContext)_context);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new LifecycleContractViolationException(exception.Message);
+        }
+
+        using var logicalContextScope = logicalScope;
+        var discovered = LifecycleScratch.RentSubjectList();
+        var reservations = LifecycleScratch.RentOwnershipReservations();
+        try
+        {
+            var capture = _admission.CaptureBatch(registration, discovered);
+            if (capture.AddedPropertyNames.IsEmpty)
             {
-                return false;
+                return true;
             }
 
-            if (_graph.IsOwned(subject))
+            if (!_graph.TryReserveDiscovered(discovered, reservations))
             {
-                _admission.Admit(registration);
+                throw new InvalidOperationException(
+                    "Another context claimed a subject of the admitted graph while this call was validating it.");
             }
-            else
+
+            using var journalCapture = _notifier.BeginJournal();
+            LifecycleJournal journal;
+            var runWithheld = false;
+            try
             {
-                _admission.AdmitUnowned(registration);
+                var gate = EnterGate();
+                try
+                {
+                    var subject = registration.Subject;
+                    if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
+                    {
+                        return false;
+                    }
+
+                    if (!_graph.IsOwned(subject))
+                    {
+                        registration.PublishPrepared();
+                        return true;
+                    }
+
+                    if (reservations.Values.Any(reservation =>
+                        !((InterceptorExecutor)reservation.Subject.Executor).IsOwnershipReservationActive(
+                            reservation, (InterceptorSubjectContext)_context)))
+                    {
+                        throw LifecycleConflictException.Retryable(subject);
+                    }
+
+                    using var change = _admission.Prepare(capture, reservations);
+                    journal = journalCapture.Complete(default, 0);
+                    _admission.Publish(capture, change);
+                }
+                finally
+                {
+                    runWithheld = gate.ExitWithoutCallouts();
+                }
+            }
+            finally
+            {
+                if (runWithheld)
+                {
+                    RunWithheldRecalculations();
+                }
+            }
+
+            if (journal.Drain(null) is { } exception)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception).Throw();
             }
 
             return true;
+        }
+        finally
+        {
+            _graph.ReleaseUnusedReservations(reservations);
+            LifecycleScratch.Return(reservations);
+            LifecycleScratch.Return(discovered);
         }
     }
 
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        HandleLifecycleChange(change, null);
-    }
-
-    internal void HandleLifecycleChange(
-        SubjectLifecycleChange change,
-        Dictionary<IInterceptorSubject, OwnershipReservationToken>? reservations)
-    {
-        if (change is { IsContextAttach: true, Property: not null })
-        {
-            _attach.SeedChildrenIfNeeded(change.Subject, reservations);
-        }
     }
 
     /// <inheritdoc />
@@ -393,80 +442,78 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         }
 
         using var logicalScope = InterceptorExecutor.EnterLogicalContext((InterceptorSubjectContext)_context);
-        using (EnterGate())
+        var executor = subject.Executor;
+        executor.TryGetAttachment(out var initialContext, out var initialAnchor, out _);
+        InterceptorSubjectExtensions.ValidateRootAnchor(initialContext, initialAnchor, context, anchor);
+        if (initialContext is not null)
         {
-            var executor = subject.Executor;
-            executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out _);
-            InterceptorSubjectExtensions.ValidateRootAnchor(attachedContext, currentAnchor, context, anchor);
-
-            if (attachedContext is not null)
+            var anchorUpdated = false;
+            using (EnterGate())
             {
-                if (anchor != SubjectAttachmentAnchorKind.Provisional)
+                executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out _);
+                InterceptorSubjectExtensions.ValidateRootAnchor(attachedContext, currentAnchor, context, anchor);
+                if (attachedContext is not null)
                 {
-                    _graph.SetAnchor(subject, anchor);
-                }
+                    if (anchor != SubjectAttachmentAnchorKind.Provisional)
+                    {
+                        using var change = _attach.Prepare(subject, anchor, [], [], []);
+                        _attach.Publish(change);
+                    }
 
+                    anchorUpdated = true;
+                }
+            }
+
+            if (anchorUpdated)
+            {
                 return;
             }
-
-            var claimed = LifecycleScratch.RentSubjectList();
-            var published = false;
-            try
-            {
-                ClaimComponentForRoot(subject, anchor, claimed);
-                SeedAndAttachComponent(subject);
-                published = true;
-            }
-            finally
-            {
-                if (!published)
-                {
-                    RollbackRejectedAttach(subject, claimed);
-                }
-
-                LifecycleScratch.Return(claimed);
-            }
         }
-    }
 
-    private void RollbackRejectedAttach(IInterceptorSubject subject, List<IInterceptorSubject> claimed)
-    {
-        var children = LifecycleScratch.RentChildList();
+        var visited = LifecycleScratch.RentSubjectSet();
+        var discovered = LifecycleScratch.RentSubjectList();
+        var reservations = LifecycleScratch.RentOwnershipReservations();
+        var snapshots = new Dictionary<PropertyReference, StructuralSnapshot>(PropertyReference.Comparer);
+        var propertyNames = new Dictionary<IInterceptorSubject, ImmutableArray<string>>(ReferenceEqualityComparer.Instance);
         try
         {
-            _graph.CollectStructuralChildren(subject, children, seed: false);
-            foreach (var (property, occurrence) in children)
+            _attach.Capture(subject, visited, discovered, snapshots, propertyNames);
+            if (!_graph.TryReserveDiscovered(discovered, reservations, subject))
             {
-                _release.RemoveEdge(
-                    occurrence.Subject,
-                    property,
-                    occurrence.SubjectOrdinal,
-                    occurrence.Index);
+                throw new InvalidOperationException(
+                    "Another context claimed a subject of this graph while the attach was validating it.");
             }
 
-            _graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None);
-
-            foreach (var claimedSubject in claimed)
+            using var journalCapture = _notifier.BeginJournal();
+            LifecycleJournal journal;
+            using (EnterGate())
             {
-                if (!_graph.IsOwned(claimedSubject))
+                executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out _);
+                InterceptorSubjectExtensions.ValidateRootAnchor(attachedContext, currentAnchor, context, anchor);
+                if (reservations.Values.Any(reservation =>
+                    !((InterceptorExecutor)reservation.Subject.Executor).IsOwnershipReservationActive(
+                        reservation, (InterceptorSubjectContext)_context)))
                 {
-                    _graph.RemoveSnapshots(claimedSubject);
+                    throw LifecycleConflictException.Retryable(subject);
                 }
+
+                using var change = _attach.Prepare(
+                    subject, anchor, snapshots, propertyNames, reservations);
+                journal = journalCapture.Complete(default, 0);
+                _attach.Publish(change);
             }
 
-            _graph.ReleaseUnusedClaims(claimed);
-        }
-        catch (Exception exception)
-        {
-            Trace.TraceError(
-                $"LifecycleInterceptor: rolling back a rejected attach of {subject.GetType().Name} " +
-                $"failed with {exception.GetType().Name}: {exception.Message}. The attach's own " +
-                "exception is propagating and this one is not, so part of the attach is still " +
-                "published and the root is still attached; detach it explicitly to clean up.");
+            if (journal.Drain(null) is { } exception)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception).Throw();
+            }
         }
         finally
         {
-            LifecycleScratch.Return(children);
+            _graph.ReleaseUnusedReservations(reservations);
+            LifecycleScratch.Return(reservations);
+            LifecycleScratch.Return(discovered);
+            LifecycleScratch.Return(visited);
         }
     }
 
@@ -481,57 +528,21 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         }
 
         using var logicalScope = InterceptorExecutor.EnterLogicalContext((InterceptorSubjectContext)_context);
+        using var journalCapture = _notifier.BeginJournal();
+        LifecycleJournal journal;
         using (EnterGate())
         {
             var executor = subject.Executor;
             executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
             InterceptorSubjectExtensions.ValidateDetach(attachedContext, anchor, context);
-
-            _graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None);
-
-            var ownership = _graph.TryGetOwnership(subject);
-            if (ownership is null)
-            {
-                _graph.ReleaseClaim(subject);
-                return;
-            }
-
-            if (!_reachability.IsAnchorReachable(subject, null, includeProtectors: true))
-            {
-                _release.ReleaseRoot(subject);
-            }
-            else if (!_reachability.IsAnchorReachable(subject, null))
-            {
-                _graph.MarkDeferredSweep();
-            }
+            using var change = _release.Prepare(subject);
+            journal = journalCapture.Complete(default, 0);
+            _release.Publish(change);
         }
-    }
 
-    private void SeedAndAttachComponent(IInterceptorSubject subject)
-    {
-        _attach.SeedAndAttachChildren(subject);
-
-        if (!_graph.IsOwned(subject))
+        if (journal.Drain(null) is { } exception)
         {
-            _attach.AttachRoot(subject);
-        }
-    }
-
-    private void ClaimComponentForRoot(IInterceptorSubject subject, SubjectAttachmentAnchorKind anchor, List<IInterceptorSubject> unattached)
-    {
-        var visited = LifecycleScratch.RentSubjectSet();
-        try
-        {
-            _graph.DiscoverComponent(subject, visited, unattached);
-            if (!_graph.TryClaimDiscovered(unattached, subject, anchor))
-            {
-                throw new InvalidOperationException(
-                    "Another context claimed a subject of this graph while the attach was validating it.");
-            }
-        }
-        finally
-        {
-            LifecycleScratch.Return(visited);
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception).Throw();
         }
     }
 

@@ -2,12 +2,8 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGraph graph)
 {
-    public void RemoveEdge(
-        IInterceptorSubject subject,
-        PropertyReference property,
-        int subjectOrdinal,
-        object? index) =>
-        graph.RemoveEdge(subject, property, subjectOrdinal, index, notifier);
+    public OwnershipGraph.PreparedTopologyChange Prepare(IInterceptorSubject subject) =>
+        graph.PrepareDetach(subject, notifier);
 
-    public void ReleaseRoot(IInterceptorSubject subject) => graph.ReleaseRoot(subject, notifier);
+    public void Publish(OwnershipGraph.PreparedTopologyChange change) => graph.Publish(change);
 }

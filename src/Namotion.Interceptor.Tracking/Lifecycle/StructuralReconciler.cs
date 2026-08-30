@@ -1,24 +1,18 @@
+using System.Collections.Immutable;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 internal sealed class StructuralReconciler(LifecycleNotifier notifier, OwnershipGraph graph)
 {
-    public void Reconcile(
+    public OwnershipGraph.PreparedTopologyChange Prepare(
         PropertyReference property,
-        SubjectPropertyMetadata metadata,
-        object? newValue,
-        long sourceRevision = 0,
-        Dictionary<IInterceptorSubject, OwnershipReservationToken>? reservations = null)
-    {
-        var refreshCollection = graph.Reconcile(
-            property,
-            StructuralSnapshotBuilder.Build(metadata.Type, newValue, sourceRevision),
-            reservations,
-            notifier);
-        if (refreshCollection)
-        {
-            notifier.RefreshCollectionProperty(property, newValue);
-        }
-    }
+        StructuralSnapshot snapshot,
+        Dictionary<PropertyReference, StructuralSnapshot> seededSnapshots,
+        Dictionary<IInterceptorSubject, ImmutableArray<string>> seededPropertyNames,
+        Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations) =>
+        graph.PrepareReconcile(
+            property, snapshot, seededSnapshots, seededPropertyNames, reservations, notifier);
+
+    public void Publish(OwnershipGraph.PreparedTopologyChange change) => graph.Publish(change);
 }

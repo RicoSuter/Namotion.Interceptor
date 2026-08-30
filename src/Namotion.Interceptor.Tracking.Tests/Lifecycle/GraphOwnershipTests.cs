@@ -18,6 +18,26 @@ public class GraphOwnershipTests
     }
 
     [Fact]
+    public void WhenAdmissionPublishesNewOwnership_ThenAnEarlierOwnershipValueRemainsUnchanged()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new Person(context) { FirstName = "P" };
+        var graph = context.TryGetLifecycleInterceptor()!.Graph;
+        var ownershipBeforeAdmission = graph.TryGetOwnership(subject)!;
+        var propertiesBeforeAdmission = ownershipBeforeAdmission.PropertyNames;
+
+        // Act
+        ((IInterceptorSubject)subject).AddProperties(new SubjectPropertyMetadata(
+            "Added", typeof(string), [], _ => "value", null, isIntercepted: true, isDynamic: true));
+
+        // Assert
+        Assert.Equal(propertiesBeforeAdmission, ownershipBeforeAdmission.PropertyNames);
+        Assert.DoesNotContain("Added", ownershipBeforeAdmission.PropertyNames);
+        Assert.Contains("Added", graph.TryGetOwnership(subject)!.PropertyNames);
+    }
+
+    [Fact]
     public void WhenSubjectAppearsTwiceInCollection_ThenReferenceCountIsTwo()
     {
         // Arrange
@@ -575,10 +595,10 @@ public class GraphOwnershipTests
         var parent = new Person { FirstName = "P" };
         var property = new PropertyReference(parent, nameof(Person.Children));
         var ownership = new SubjectOwnership();
-        ownership.AddIncoming(property, 0, 1);
+        ownership = ownership.AddIncoming(property, 0, 1);
 
         // Act
-        var removed = ownership.RemoveIncoming(property, 0);
+        var removed = ownership.TryRemoveIncoming(property, 0, out ownership);
 
         // Assert
         Assert.True(removed);
@@ -592,8 +612,8 @@ public class GraphOwnershipTests
         var parent = new Person { FirstName = "P" };
         var property = new PropertyReference(parent, nameof(Person.Children));
         var ownership = new SubjectOwnership();
-        ownership.AddIncoming(property, 0, new EqualityThrowingIndex(10));
-        ownership.AddIncoming(property, 1, new EqualityThrowingIndex(11));
+        ownership = ownership.AddIncoming(property, 0, new EqualityThrowingIndex(10));
+        ownership = ownership.AddIncoming(property, 1, new EqualityThrowingIndex(11));
         var indices = new CountingOrdinalIndices(
             new EqualityThrowingIndex(20),
             new EqualityThrowingIndex(21));
@@ -601,7 +621,7 @@ public class GraphOwnershipTests
         // Act
         var exception = Record.Exception(() =>
         {
-            ownership.UpdateIncomingIndices(property, indices);
+            ownership = ownership.UpdateIncomingIndices(property, indices);
         });
 
         // Assert
@@ -618,10 +638,11 @@ public class GraphOwnershipTests
         // Arrange
         var parent = new Person { FirstName = "P" };
         var ownership = new SubjectOwnership();
-        ownership.AddIncoming(new PropertyReference(parent, nameof(Person.Children)), 0, 0);
+        ownership = ownership.AddIncoming(new PropertyReference(parent, nameof(Person.Children)), 0, 0);
 
         // Act
-        var removed = ownership.RemoveIncoming(new PropertyReference(parent, nameof(Person.Father)), 0);
+        var removed = ownership.TryRemoveIncoming(
+            new PropertyReference(parent, nameof(Person.Father)), 0, out ownership);
 
         // Assert
         Assert.False(removed);
@@ -636,11 +657,11 @@ public class GraphOwnershipTests
         var parent = new Person { FirstName = "P" };
         var property = new PropertyReference(parent, nameof(Person.Children));
         var ownership = new SubjectOwnership();
-        ownership.AddIncoming(new PropertyReference(parent, nameof(Person.Father)), 0, null);
-        ownership.AddIncoming(property, 0, 2);
+        ownership = ownership.AddIncoming(new PropertyReference(parent, nameof(Person.Father)), 0, null);
+        ownership = ownership.AddIncoming(property, 0, 2);
 
         // Act
-        var removed = ownership.RemoveIncoming(property, 0);
+        var removed = ownership.TryRemoveIncoming(property, 0, out ownership);
 
         // Assert
         Assert.True(removed);

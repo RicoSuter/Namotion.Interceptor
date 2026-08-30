@@ -6,9 +6,8 @@ using Namotion.Interceptor.Tracking.Parent;
 namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 
 /// <summary>
-/// End-to-end pin for hand-written subjects against the real lifecycle: a setter that calls the
-/// one SetPropertyValue entry on a subject-typed property must behave exactly like a generated
-/// structural setter, attaching the assigned child and updating the parent edges.
+/// Hand-written structural setters cannot provide the trusted raw reader required by coordinated
+/// lifecycle storage, so an attached write is rejected before its writer or graph can commit.
 /// </summary>
 public class HandWrittenSubjectLifecycleTests
 {
@@ -68,7 +67,7 @@ public class HandWrittenSubjectLifecycleTests
     }
 
     [Fact]
-    public void WhenHandWrittenSetterAssignsAChildSubject_ThenTheChildAttachesAndTheParentEdgeAppears()
+    public void WhenAttachedHandWrittenSetterAssignsAChildSubject_ThenWriteIsRejectedBeforeCommit()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -78,21 +77,10 @@ public class HandWrittenSubjectLifecycleTests
         ((IInterceptorSubject)parent).AttachToContext(context);
         var child = new HandWrittenDevice();
 
-        // Act
-        parent.Child = child;
-
-        // Assert: the assigned child is owned by the parent's context and the ownership edge
-        // points back at the parent through the written property.
-        Assert.Same(context, ((IInterceptorSubject)child).TryGetContext());
-        var parents = ((IInterceptorSubject)child).GetParents();
-        var edge = Assert.Single(parents);
-        Assert.Same(parent, edge.Property.Subject);
-        Assert.Equal(nameof(HandWrittenDevice.Child), edge.Property.Name);
-
-        // Act: clearing the edge releases the child.
-        parent.Child = null;
-
-        // Assert
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => parent.Child = child);
+        Assert.Contains("trusted raw reader", exception.Message);
+        Assert.Null(parent.Child);
         Assert.Null(((IInterceptorSubject)child).TryGetContext());
         Assert.Empty(((IInterceptorSubject)child).GetParents());
     }

@@ -85,24 +85,10 @@ public class ReentrantStructuralWriteTests
         Assert.Null(child.TryGetContext());
     }
 
-    /// <summary>
-    /// An explicit attach claims the whole prospective component before it seeds the root, so
-    /// between those two steps the root is attached to the context and not yet in its ownership
-    /// graph. The seed reads the root's structural getters and scans their values at callback depth
-    /// zero, which is where a user enumerable's own code runs, so a structural write can arrive in
-    /// exactly that window. This is the only shape in the tree that reaches the write protocol's
-    /// claimed-but-unpublished arm, and it is what that arm is for: there is no owner to reconcile
-    /// against yet, and the seed that follows reads the committed value anyway.
-    ///
-    /// The re-entry is positioned by phase, not by an enumeration ordinal, and the guard below
-    /// asserts the phase. The same enumerable is also scanned by the discovery walk that runs before
-    /// the claim, where the root is still unattached, so an ordinal armed against today's scan count
-    /// would fire in the wrong one.
-    /// </summary>
     [Fact]
-    public void WhenAUserEnumerableWritesTheRootWhileTheAttachSeedsIt_ThenTheWritePassesThroughAndTheAttachCompletes()
+    public void WhenAUserEnumerableWritesTheRootDuringCapture_ThenTheChangedSnapshotIsRejected()
     {
-        // Arrange: an unattached root whose structural value runs user code when it is scanned.
+        // Arrange
         var context = CreateContext();
         var seededChild = new Person { FirstName = "seeded" };
         var lateChild = new Person { FirstName = "late" };
@@ -113,37 +99,21 @@ public class ReentrantStructuralWriteTests
 
         var lateValue = new List<Person> { lateChild };
         var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
-        var wasClaimedButUnpublished = false;
-
-        initialValue.ShouldReenter = () =>
-            ((IInterceptorSubject)holder).TryGetContext() is not null && !lifecycle.Graph.IsOwned(holder);
-
-        initialValue.OnReenter = () =>
-        {
-            wasClaimedButUnpublished = true;
-            holder.Children = lateValue;
-        };
+        initialValue.ShouldReenter = () => true;
+        initialValue.OnReenter = () => holder.Children = lateValue;
 
         // Act
         var exception = Record.Exception(() => ((IInterceptorSubject)holder).AttachToContext(context));
 
-        // Assert: the re-entry happened, and it happened in the window this test is about.
-        Assert.Null(exception);
-        Assert.True(wasClaimedButUnpublished,
-            $"the reentrant write never ran in the seeding window; the initial value was scanned " +
-            $"{initialValue.Enumerations} times");
-
-        // The write passed through to the backing field rather than being rejected or reconciled.
+        // Assert: capture invokes the user value once, observes its revision change and publishes no
+        // graph or attachment state for either the stale or replacement occurrence.
+        Assert.IsType<LifecycleConflictException>(exception);
+        Assert.True(initialValue.HasReentered);
+        Assert.Equal(1, initialValue.Enumerations);
         Assert.Same(lateValue, holder.Children);
-
-        // The attach still completed, with the seed's own scan result attached through its edge.
-        Assert.Same(context, ((IInterceptorSubject)holder).TryGetContext());
-        Assert.True(lifecycle.Graph.IsOwned(holder));
-        Assert.Same(context, ((IInterceptorSubject)seededChild).TryGetContext());
-        Assert.Equal(1, ((IInterceptorSubject)seededChild).GetReferenceCount());
-
-        // Nothing claimed the value the pass-through stored: the seed had already scanned the
-        // committed value, so no edge is published for this one.
+        Assert.Null(((IInterceptorSubject)holder).TryGetContext());
+        Assert.False(lifecycle.Graph.IsOwned(holder));
+        Assert.Null(((IInterceptorSubject)seededChild).TryGetContext());
         Assert.Null(((IInterceptorSubject)lateChild).TryGetContext());
     }
 }

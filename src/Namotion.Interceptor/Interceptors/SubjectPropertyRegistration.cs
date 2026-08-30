@@ -23,6 +23,8 @@ public sealed class SubjectPropertyRegistration
     private readonly IEnumerable<SubjectPropertyMetadata> _properties;
     private readonly Action<IReadOnlyDictionary<string, SubjectPropertyMetadata>> _publishProperties;
     private SubjectPropertyMetadata[]? _materialized;
+    private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _preparedFrom;
+    private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _preparedProperties;
     private bool _published;
 
     /// <summary>
@@ -87,6 +89,12 @@ public sealed class SubjectPropertyRegistration
     /// <see cref="GetProperties"/>) or was already published.</exception>
     public void Publish()
     {
+        PreparePublication();
+        PublishPrepared();
+    }
+
+    internal void PreparePublication()
+    {
         var batch = GetProperties();
         if (batch.Count == 0)
         {
@@ -124,7 +132,34 @@ public sealed class SubjectPropertyRegistration
             merged.Add(metadata.Name, metadata);
         }
 
+        _preparedFrom = existingProperties;
+        _preparedProperties = merged.ToFrozenDictionary();
+    }
+
+    internal IReadOnlyDictionary<string, SubjectPropertyMetadata> PreparedProperties =>
+        _preparedProperties ?? Subject.Properties;
+
+    internal void PublishPrepared()
+    {
+        if (_materialized is not { Length: > 0 })
+        {
+            return;
+        }
+
+        if (_published)
+        {
+            throw new InvalidOperationException(
+                "The property batch was already published; the publication continuation is invoked at most once.");
+        }
+
+        if (_preparedProperties is null || !ReferenceEquals(Subject.Properties, _preparedFrom))
+        {
+            throw new InvalidOperationException(
+                $"The properties of subject '{Subject.GetType().Name}' changed while this batch was being admitted. " +
+                "The batch was not published.");
+        }
+
         _published = true;
-        _publishProperties(merged.ToFrozenDictionary());
+        _publishProperties(_preparedProperties);
     }
 }

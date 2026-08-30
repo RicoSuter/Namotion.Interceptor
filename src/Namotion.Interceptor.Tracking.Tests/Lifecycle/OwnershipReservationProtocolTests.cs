@@ -1,6 +1,4 @@
-using System.Collections.Immutable;
 using System.Diagnostics;
-using System.Reflection;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -49,74 +47,6 @@ public class OwnershipReservationProtocolTests
         if (!signal.Wait(WriteProtocolAcceptance.RendezvousTimeout))
         {
             throw new TimeoutException($"Timed out waiting for {phase}.");
-        }
-    }
-
-    private static void InsertLifecycleHandler(
-        InterceptorSubjectContext context,
-        LifecycleInterceptor handler)
-    {
-        var stateField = typeof(InterceptorSubjectContext).GetField("_state", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        var state = stateField.GetValue(context)!;
-        var stateType = state.GetType();
-        var services = (ImmutableArray<object>)stateType
-            .GetField("Services", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetValue(state)!;
-        var replacement = Activator.CreateInstance(
-            stateType,
-            BindingFlags.Instance | BindingFlags.NonPublic,
-            binder: null,
-            args: [services.Insert(0, handler)],
-            culture: null)!;
-        stateField.SetValue(context, replacement);
-    }
-
-    [Fact]
-    public void WhenSeparateLifecycleHandlerSeedsReservedChild_ThenOriginReservationIsNotForwarded()
-    {
-        // Arrange
-        var context = (InterceptorSubjectContext)CreateContext();
-        var origin = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
-        var separate = new LifecycleInterceptor(context);
-        var parent = new Person(context) { FirstName = "parent" };
-        var child = new Person(context) { FirstName = "child" };
-        parent.Father = child;
-        origin.Graph.SetAnchor(child, SubjectAttachmentAnchorKind.Provisional);
-        separate.Graph.AddOwnership(parent);
-        InsertLifecycleHandler(context, separate);
-        Assert.Same(separate, context.GetServices<ILifecycleHandler>()[0]);
-
-        var reservation = origin.Graph.ReserveForStructuralWrite(child);
-        var reservations = (System.Collections.IDictionary)Activator.CreateInstance(
-            typeof(Dictionary<,>).MakeGenericType(typeof(IInterceptorSubject), reservation.GetType()))!;
-        reservations[child] = reservation;
-        var notifier = (LifecycleNotifier)typeof(LifecycleInterceptor)
-            .GetField("_notifier", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetValue(origin)!;
-        var invokeHandlers = typeof(LifecycleNotifier).GetMethod(nameof(LifecycleNotifier.InvokeAddedLifecycleHandlers))!;
-        var change = new SubjectLifecycleChange
-        {
-            Subject = parent,
-            Property = new PropertyReference(parent, nameof(Person.Father)),
-            ReferenceCount = 1,
-            IsContextAttach = true,
-            IsPropertyReferenceAdded = true
-        };
-
-        try
-        {
-            // Act
-            var exception = Record.Exception(() => invokeHandlers.Invoke(notifier, [parent, change, reservations]));
-            ((IInterceptorSubject)child).Executor.TryGetAttachment(out _, out var anchor, out _);
-
-            // Assert
-            Assert.IsAssignableFrom<InvalidOperationException>(
-                Assert.IsType<TargetInvocationException>(exception).InnerException);
-            Assert.Equal(SubjectAttachmentAnchorKind.Provisional, anchor);
-        }
-        finally
-        {
-            origin.Graph.ReleaseUnusedReservation(reservation);
         }
     }
 

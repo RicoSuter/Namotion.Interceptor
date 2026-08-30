@@ -10,70 +10,42 @@ internal readonly struct IncomingEdge(PropertyReference property, int subjectOrd
     public readonly object? Index = index;
 }
 
-internal sealed class SubjectOwnership
+internal sealed record SubjectOwnership(
+    ImmutableArray<IncomingEdge> Edges,
+    ImmutableArray<SubjectParent> Parents,
+    ImmutableArray<string> PropertyNames)
 {
-    private sealed record State(ImmutableArray<IncomingEdge> Edges,
-        ImmutableArray<SubjectParent> Parents,
-        ImmutableArray<string> PropertyNames)
-    {
-        internal static readonly State Empty = new([], [], []);
-    }
-    private volatile State _state;
-
-    internal SubjectOwnership()
-        : this(State.Empty)
+    internal SubjectOwnership() : this([], [], [])
     {
     }
 
-    internal SubjectOwnership(ImmutableArray<string> propertyNames)
-        : this(new State([], [], propertyNames))
+    internal SubjectOwnership(ImmutableArray<string> propertyNames) : this([], [], propertyNames)
     {
     }
 
-    private SubjectOwnership(State state)
-    {
-        _state = state;
-    }
-
-    public int IncomingCount => _state.Edges.Length;
-
-    internal ImmutableArray<SubjectParent> Parents => _state.Parents;
-
-    internal ImmutableArray<string> PropertyNames => _state.PropertyNames;
-
-    internal void SetPropertyNames(ImmutableArray<string> propertyNames)
-    {
-        _state = _state with { PropertyNames = propertyNames };
-    }
-
-    internal SubjectOwnership Clone() => new(_state);
-
-    public void AddIncoming(PropertyReference property, int subjectOrdinal, object? index)
-    {
-        Publish(_state.Edges.Add(new IncomingEdge(property, subjectOrdinal, index)));
-    }
+    public int IncomingCount => Edges.Length;
 
     public bool ContainsIncoming(PropertyReference property, int subjectOrdinal) =>
         FindIncomingIndex(property, subjectOrdinal) >= 0;
 
-    public bool RemoveIncoming(PropertyReference property, int subjectOrdinal)
+    public SubjectOwnership AddIncoming(PropertyReference property, int subjectOrdinal, object? index) =>
+        WithEdges(Edges.Add(new IncomingEdge(property, subjectOrdinal, index)));
+
+    public bool TryRemoveIncoming(
+        PropertyReference property,
+        int subjectOrdinal,
+        out SubjectOwnership ownership)
     {
         var index = FindIncomingIndex(property, subjectOrdinal);
-        if (index < 0)
-        {
-            return false;
-        }
-
-        Publish(_state.Edges.RemoveAt(index));
-        return true;
+        ownership = index < 0 ? this : WithEdges(Edges.RemoveAt(index));
+        return index >= 0;
     }
 
     private int FindIncomingIndex(PropertyReference property, int subjectOrdinal)
     {
-        var edges = _state.Edges;
-        for (var index = 0; index < edges.Length; index++)
+        for (var index = 0; index < Edges.Length; index++)
         {
-            var edge = edges[index];
+            var edge = Edges[index];
             if (edge.Property.Equals(property) && edge.SubjectOrdinal == subjectOrdinal)
             {
                 return index;
@@ -83,28 +55,26 @@ internal sealed class SubjectOwnership
         return -1;
     }
 
-    public void UpdateIncomingIndices(PropertyReference property, IReadOnlyList<object?> indices)
+    public SubjectOwnership UpdateIncomingIndices(PropertyReference property, IReadOnlyList<object?> indices)
     {
-        var edges = _state.Edges;
-        var builder = edges.ToBuilder();
-        for (var index = 0; index < edges.Length; index++)
+        var builder = Edges.ToBuilder();
+        for (var index = 0; index < Edges.Length; index++)
         {
-            var edge = edges[index];
+            var edge = Edges[index];
             if (edge.Property.Equals(property) && edge.SubjectOrdinal < indices.Count)
             {
                 builder[index] = new IncomingEdge(property, edge.SubjectOrdinal, indices[edge.SubjectOrdinal]);
             }
         }
 
-        Publish(builder.MoveToImmutable());
+        return WithEdges(builder.MoveToImmutable());
     }
 
     public bool TryGetSingleIncoming(out IncomingEdge edge)
     {
-        var edges = _state.Edges;
-        if (edges.Length == 1)
+        if (Edges.Length == 1)
         {
-            edge = edges[0];
+            edge = Edges[0];
             return true;
         }
 
@@ -112,9 +82,9 @@ internal sealed class SubjectOwnership
         return false;
     }
 
-    public void CopyIncomingEdges(List<IncomingEdge> target) => target.AddRange(_state.Edges);
+    public void CopyIncomingEdges(List<IncomingEdge> target) => target.AddRange(Edges);
 
-    private void Publish(ImmutableArray<IncomingEdge> edges)
+    private SubjectOwnership WithEdges(ImmutableArray<IncomingEdge> edges)
     {
         var parents = ImmutableArray.CreateBuilder<SubjectParent>(edges.Length);
         foreach (var edge in edges)
@@ -122,6 +92,6 @@ internal sealed class SubjectOwnership
             parents.Add(new SubjectParent(edge.Property, edge.Index));
         }
 
-        _state = new State(edges, parents.MoveToImmutable(), _state.PropertyNames);
+        return new SubjectOwnership(edges, parents.MoveToImmutable(), PropertyNames);
     }
 }

@@ -6,14 +6,16 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 
 /// <summary>
-/// Proves the structural write lock order: lifecycle gate, then attachment monitor, then SyncRoot.
+/// Proves the two structural lock orders. Lease admission and protector completion enter the
+/// lifecycle gate before one attachment monitor. A structural terminal holds its subject's
+/// SyncRoot, then enters the lifecycle gate, then prepares attachment transitions one monitor at
+/// a time. Explicit attach captures getters before entering either order.
 ///
-/// The inverted order deadlocks: a structural write on a child that entered the child's attachment
-/// monitor before the topology gate waits for the gate, while a parent removal that holds the gate
-/// reaches the child's release and waits for that same monitor. The stress tests below drive both
-/// directions concurrently; a wrong order shows up as a hang, so every join is bounded and fails
-/// the test rather than hanging the suite, and the failure message carries each thread's progress
-/// so a timeout distinguishes a deadlock from slow progress.
+/// Holding an attachment monitor while waiting for the topology gate would deadlock against a
+/// publication that holds the gate and needs that monitor. The stress tests drive both directions
+/// concurrently. Lifecycle conflicts, and the legacy claim conflict during an exclusive attach,
+/// are permitted transient outcomes; any other exception fails. Every join is bounded so an order
+/// violation reports progress instead of hanging the suite.
 /// </summary>
 public class StructuralWriteLockOrderTests
 {
@@ -67,11 +69,49 @@ public class StructuralWriteLockOrderTests
 
     [Fact]
     [Trait("Category", "Concurrency")]
+    public void WhenExplicitAttachCapturesAStructuralGetter_ThenSameContextTopologyCanProgress()
+    {
+        // Arrange
+        var context = CreateContext();
+        var workerTarget = new Person(context) { FirstName = "worker target" };
+        var candidate = new Person { FirstName = "candidate" };
+        var getterCalls = 0;
+        var workerCompleted = false;
+        Exception? workerException = null;
+        ((IInterceptorSubject)candidate).AddProperties(new SubjectPropertyMetadata(
+            "Captured", typeof(Person), [], _ =>
+            {
+                getterCalls++;
+                if (getterCalls == 1)
+                {
+                    var worker = new Thread(() =>
+                    {
+                        workerException = Record.Exception(() => workerTarget.Father = new Person());
+                    }) { IsBackground = true };
+                    worker.Start();
+                    workerCompleted = worker.Join(WriteProtocolAcceptance.RendezvousTimeout);
+                }
+
+                return null;
+            }, null, isIntercepted: true, isDynamic: true));
+
+        // Act
+        candidate.AttachToContext(context);
+
+        // Assert
+        Assert.True(workerCompleted,
+            "the explicit attach held the topology gate while invoking the structural getter");
+        Assert.Null(workerException);
+        Assert.Equal(1, getterCalls);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
     public void WhenChildWritesRaceParentRemovals_ThenBothDirectionsCompleteWithoutDeadlock()
     {
-        // Arrange: direction one is a structural write on the child (gate, then the child's
-        // attachment monitor); direction two is a parent removal whose release descent hands the
-        // child's claim back through that same monitor while holding the gate.
+        // Arrange: direction one admits through gate then monitor and later completes its terminal
+        // through SyncRoot then gate then prepared monitors. Direction two removes the parent edge
+        // through the gate and prepares the child's attachment transition through its monitor.
         var context = CreateContext();
         var root = new Person(context) { FirstName = "Root" };
         var child = new Person { FirstName = "Child" };
@@ -151,7 +191,7 @@ public class StructuralWriteLockOrderTests
             $"parent remover at {Volatile.Read(ref removerProgress)}/{iterations}");
         ThrowIfAny(exceptions);
 
-        // The settled graph is consistent: transient races ordered instead of throwing.
+        // The settled graph is consistent after the permitted transient conflicts above.
         root.Mother = child;
         child.Father = null;
         Assert.Same(context, child.TryGetContext());
@@ -163,8 +203,8 @@ public class StructuralWriteLockOrderTests
     public void WhenStructuralWritesRaceExplicitAttachAndDetach_ThenBothDirectionsCompleteWithoutDeadlock()
     {
         // Arrange: the second direction pair, through the explicit attach and detach entry points
-        // rather than a parent edge. The writes on the transitioning subject either run attached
-        // (through the gate) or unattached (through the monitor alone); neither outcome throws.
+        // rather than a parent edge. A racing write may run on either attachment epoch or report
+        // one of the explicitly permitted transient conflicts handled below.
         var context = CreateContext();
         var subject = new Person { FirstName = "S" };
 

@@ -192,28 +192,10 @@ public class AttachResidueTests
             "the rejected attach left the root claimed by the context it was rejected from");
     }
 
-    /// <summary>
-    /// The rollback publishes detach callbacks while the attach's own exception is in flight, so a
-    /// callback that throws there could replace the exception that says why the attach was refused
-    /// with one that only says the cleanup after it went wrong. That must not happen: the attach's
-    /// exception wins and the rollback's is traced.
-    ///
-    /// The other half of the contract is what a rollback that cannot finish must leave behind. It
-    /// leaks, unavoidably, because the callback that refused to run is the only thing that could
-    /// have released that subtree. What it must not do is also strip the root's anchor and claim,
-    /// because those are what an explicit detach needs: a leak the caller can still clean up is
-    /// strictly better than one it cannot. So the assertion is that the root is still attached and
-    /// still detachable, which is the state a rejected attach leaves on master as well.
-    ///
-    /// Deterministic and single-threaded, because it does not need the discovery race: a handler
-    /// that refuses the child's attach makes the seed throw after the edge and the snapshot are
-    /// already committed, which is the same state the raced attach reaches, and refusing the child's
-    /// detach then makes the rollback throw too.
-    /// </summary>
     [Fact]
-    public void WhenARollbackCallbackThrows_ThenTheAttachExceptionIsTheOneThatEscapes()
+    public void WhenAttachAndDetachCallbacksThrow_ThenEachPreparedPublicationStillCommits()
     {
-        // Arrange: the handler refuses both directions, so the seed throws and so does the rollback.
+        // Arrange
         var child = new Person { FirstName = "C" };
         var context = CreateContext()
             .WithService(() => new DelegateLifecycleHandler(change =>
@@ -239,15 +221,20 @@ public class AttachResidueTests
         // Act
         var exception = Record.Exception(() => ((IInterceptorSubject)holder).AttachToContext(context));
 
-        // Assert: the reason the attach failed survives the rollback that ran after it.
+        // Assert: the callback fails only after the complete attach publication.
         Assert.NotNull(exception);
         Assert.Contains("the attach was refused", exception.Message);
-        Assert.DoesNotContain("the rollback was refused", exception.ToString());
-
-        // The rollback stopped where it stood, so what it had not undone is still published; the
-        // root keeps the anchor and claim that make that cleanable.
-        Assert.NotNull(((IInterceptorSubject)holder).TryGetContext());
+        Assert.Same(context, ((IInterceptorSubject)holder).TryGetContext());
+        Assert.Same(context, ((IInterceptorSubject)child).TryGetContext());
         Assert.Equal(SubjectAttachmentAnchorKind.Explicit, ((IInterceptorSubject)holder).Executor.AttachmentAnchor);
-        Assert.Null(Record.Exception(() => ((IInterceptorSubject)holder).DetachFromContext(context)));
+
+        // Act
+        var detachException = Record.Exception(() => ((IInterceptorSubject)holder).DetachFromContext(context));
+
+        // Assert: detach likewise publishes before its callback journal drains.
+        Assert.NotNull(detachException);
+        Assert.Contains("the rollback was refused", detachException.Message);
+        Assert.Null(((IInterceptorSubject)holder).TryGetContext());
+        Assert.Null(((IInterceptorSubject)child).TryGetContext());
     }
 }

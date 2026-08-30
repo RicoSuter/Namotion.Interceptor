@@ -52,6 +52,26 @@ public class AddPropertiesLifecycleTests
     }
 
     [Fact]
+    public void WhenAdmissionCapturesACollection_ThenItsOccurrencesAreEnumeratedExactlyOnce()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new Person(context) { FirstName = "R" };
+        var child = new Person { FirstName = "C" };
+        var captured = new TrapEnumerable([child]);
+
+        // Act
+        ((IInterceptorSubject)root).AddProperties(new SubjectPropertyMetadata(
+            "Captured", typeof(IEnumerable<Person>), [], _ => captured, null,
+            isIntercepted: true, isDynamic: true));
+
+        // Assert
+        Assert.Equal(1, captured.EnumerationCount);
+        Assert.Same(context, child.TryGetContext());
+        Assert.Equal(1, child.GetReferenceCount());
+    }
+
+    [Fact]
     public void WhenPropertiesAreAddedToAnUnattachedSubject_ThenTheInputSequenceIsEnumeratedExactlyOnce()
     {
         // Arrange
@@ -380,11 +400,10 @@ public class AddPropertiesLifecycleTests
     }
 
     [Fact]
-    public void WhenAPropertyHandlerThrowsDuringAdmissionFanOut_ThenMetadataStaysPublishedAndClaimsAreReleased()
+    public void WhenAPropertyHandlerThrowsDuringAdmissionFanOut_ThenPreparedAdmissionStaysPublished()
     {
-        // Arrange: callbacks after the metadata swap are exception-free by contract; a violating
-        // handler propagates with no rollback, so the metadata stays published while the claims
-        // that never became ownership are handed back.
+        // Arrange: metadata and ownership publish before the journal drains. A violating callback
+        // propagates after that publication and does not leave a partial metadata-only admission.
         var context = CreateContext()
             .WithService(() => new DelegatePropertyAttachHandler(change =>
             {
@@ -404,8 +423,8 @@ public class AddPropertiesLifecycleTests
         // Assert
         Assert.Equal("violating handler", exception.Message);
         Assert.True(subject.Properties.ContainsKey("Poison"));
-        Assert.Null(child.TryGetContext());
-        Assert.Equal(0, child.GetReferenceCount());
+        Assert.Same(context, child.TryGetContext());
+        Assert.Equal(1, child.GetReferenceCount());
     }
 
     [Fact]
@@ -568,62 +587,13 @@ public class AddPropertiesLifecycleTests
         Assert.Equal(0, publisherCalls);
     }
 
-    [Fact]
-    public void WhenACapturedCollectionReleasesTheAdmittingSubjectMidCommit_ThenNoSnapshotEntrySurvives()
-    {
-        // Arrange: the trap collection enumerates benignly during component discovery and releases
-        // the admitting subject during the reconcile's occurrence collection, which is depth-zero
-        // user code holding the gate reentrantly. The reconcile then bails on its ownership check,
-        // and the batch's next captured value, a null, is committed by the admission directly.
-        var context = CreateContext();
-        var person = new Person { FirstName = "P" };
-        person.AttachToContext(context);
-        var subject = (IInterceptorSubject)person;
-        var child = new Person { FirstName = "C" };
-        var trap = new TrapEnumerable([child]);
-        trap.OnSecondEnumeration = () => person.DetachFromContext(context);
-
-        var batch = new[]
-        {
-            new SubjectPropertyMetadata(
-                "Trap", typeof(IEnumerable<Person>), [], _ => trap, null,
-                isIntercepted: true, isDynamic: true),
-            CreateStructuralProperty("Extra", _ => null)
-        };
-
-        // Act
-        subject.AddProperties(batch);
-
-        // Assert: no snapshot entry survives for the released subject. GetSnapshot cannot
-        // distinguish a committed null from no entry, so presence is asserted directly.
-        Assert.Equal(2, trap.EnumerationCount);
-        Assert.Null(subject.TryGetContext());
-        Assert.Null(child.TryGetContext());
-        var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
-        Assert.False(lifecycle.Graph.HasSnapshot(new PropertyReference(subject, "Trap")));
-        Assert.False(lifecycle.Graph.HasSnapshot(new PropertyReference(subject, "Extra")));
-    }
-
-    /// <summary>
-    /// A captured collection whose enumeration runs arbitrary code. The admission enumerates it
-    /// once during component discovery and a second time inside the reconcile's occurrence
-    /// collection; the release must fire on the second, because a release during discovery
-    /// detaches the subject before the property attach callbacks and fails the whole admission.
-    /// </summary>
     private sealed class TrapEnumerable(IReadOnlyList<Person> items) : IEnumerable<Person>
     {
         public int EnumerationCount { get; private set; }
 
-        public Action? OnSecondEnumeration { get; set; }
-
         public IEnumerator<Person> GetEnumerator()
         {
             EnumerationCount++;
-            if (EnumerationCount == 2)
-            {
-                OnSecondEnumeration?.Invoke();
-            }
-
             return items.GetEnumerator();
         }
 
