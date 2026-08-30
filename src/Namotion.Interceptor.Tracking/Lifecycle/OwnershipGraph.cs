@@ -555,7 +555,7 @@ internal sealed class OwnershipGraph(
         }
     }
 
-    private void CommitReservation(
+    internal void CommitReservation(
         OwnershipReservationToken reservation,
         SubjectAttachmentAnchorKind anchor)
     {

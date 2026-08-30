@@ -62,7 +62,11 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
         }
         else
         {
-            if (!graph.TryClaim(subject, SubjectAttachmentAnchorKind.None))
+            if (reservations?.TryGetValue(subject, out var reservation) == true)
+            {
+                graph.CommitReservation(reservation, SubjectAttachmentAnchorKind.None);
+            }
+            else if (!graph.TryClaim(subject, SubjectAttachmentAnchorKind.None))
             {
                 throw new InvalidOperationException(
                     $"The subject '{subject.GetType().Name}' is owned by a different context and cannot join this graph.");
