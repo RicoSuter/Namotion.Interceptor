@@ -220,12 +220,16 @@ See [Source Monitoring](connectors-monitoring.md) for waiting on synchronization
 
 ### Inbound Update Error Handling
 
-When applying inbound updates (writing data from the external system to the local subject model), if an individual update fails (the action throws an exception), the error is logged and **the update is dropped**. There is no retry mechanism for inbound updates.
+When applying inbound updates (writing data from the external system to the local subject model), a property that fails to apply is logged and **dropped**. There is no retry mechanism for inbound updates.
 
 This is by design:
-- Individual update failures don't block other updates from being applied
-- Monitor logs for `Failed to apply subject update` errors to detect issues
+- A failed property does not block the other properties in the same update, at any nesting depth
 - Write failures to internal models are treated as non-transient because property writes are deterministic: they either succeed or fail consistently, so retrying would not help (this includes custom validation failures)
+- Monitor logs for `Failed to apply subject update` errors to detect issues
+
+The whole update still reports failure to its caller once every property has been attempted: a single failure is rethrown as itself, several are wrapped in an `AggregateException`. Callers that retry, such as a source's initial state load, therefore still retry.
+
+Note that a failed update to an object, collection or dictionary property can leave child subjects partially updated while the parent still references its previous value, because children are updated in place before the parent is written.
 
 This differs from outbound changes (writing from local model to external system), which use a retry queue to handle transient failures.
 
