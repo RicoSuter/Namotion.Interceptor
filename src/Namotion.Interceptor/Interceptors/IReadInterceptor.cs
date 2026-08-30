@@ -39,6 +39,8 @@ public struct PropertyReadContext<TProperty>
     // subject's executor (an interface dispatch plus a type test) on every locked read.
     internal readonly InterceptorExecutor Executor;
 
+    internal readonly bool LockTerminal;
+
     /// <summary>
     /// Gets the property to read a value from.
     /// </summary>
@@ -47,8 +49,14 @@ public struct PropertyReadContext<TProperty>
     // Internal so every meaningfully constructed context comes from the library's execution entry
     // points, which always thread the per-call chain state (such as the terminal) through it.
     internal PropertyReadContext(InterceptorExecutor executor, PropertyReference property)
+        : this(executor, property, lockTerminal: false)
+    {
+    }
+
+    internal PropertyReadContext(InterceptorExecutor executor, PropertyReference property, bool lockTerminal)
     {
         Executor = executor;
         Property = property;
+        LockTerminal = lockTerminal;
     }
 }

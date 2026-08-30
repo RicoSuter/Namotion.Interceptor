@@ -1,4 +1,5 @@
 ﻿using System.Collections.Immutable;
+using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Cache;
 
@@ -25,7 +26,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     /// terminals in <see cref="ReadInterceptorFactory{TProperty}"/> and
     /// <see cref="WriteInterceptorFactory{TProperty}"/>. One executor is published per subject, so
     /// this is a per-subject lock; without it a wide value type could be read while half written.
-    /// The innermost lock of the structural write order (see the note on <see cref="_attachmentLock"/>).
+    /// Structural writes hold no attachment monitor while taking it.
     /// </summary>
     internal readonly object SyncRoot = new();
 
@@ -43,30 +44,15 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     /// </summary>
     internal long Revision;
 
-    // The exact attachment state, held as one immutable object. Writes are serialized by a private
-    // monitor rather than SyncRoot so that transitioning the attachment never contends with
-    // ordinary property writes; reads are lock-free (the context read is the ownership predicate
-    // across the codebase, so it must cost a volatile load, not a monitor).
-    //
-    // One reference rather than three fields, because the three are decided on together: an anchor
-    // is only meaningful against the context it anchors to, and the revision is the compare-and-swap
-    // token for exactly the state it labels. Three separately volatile fields are each coherent and
-    // jointly not, so a lock-free reader landing between two stores observes a combination no
-    // committed state ever had, such as a non-None anchor with no context. Publishing the whole
-    // triple with the single volatile store below leaves a reader the new state or the previous one
-    // and nothing in between, which is also why the revision needs no Interlocked.Read on the
-    // 32-bit runtimes netstandard2.0 reaches: it is a readonly field of an object that the
-    // reference store already published.
-    //
-    // Lock order, stated once here and cross-referenced everywhere else: the structural write
-    // protocol is lifecycle gate, then _attachmentLock, then SyncRoot (the terminal). The gate
-    // must come first: a write that entered this monitor before the gate deadlocks against a
-    // removal that holds the gate and releases this subject's claim through this same monitor.
-    // The attachment transition (TryUpdateAttachment) takes _attachmentLock alone and runs no
-    // foreign code while holding it, so it is a leaf acquisition, and nothing enters
-    // _attachmentLock while holding a SyncRoot.
+    // Context, anchor, revision, transition phase, and structural lease count are one immutable
+    // publication. The monitor changes that publication and its private active-token identities;
+    // structural interceptor chains run after releasing it, so their user code never holds it.
     private readonly object _attachmentLock = new();
     private volatile AttachmentState _attachment = AttachmentState.Unattached;
+    private HashSet<long>? _activeStructuralLeaseIdentities;
+    private long _nextStructuralLeaseIdentity;
+    private long _activeAttachmentTransitionIdentity;
+    private long _nextAttachmentTransitionIdentity;
 
     /// <summary>
     /// Creates an executor for <paramref name="subject"/>. Prefer <see cref="GetOrCreate"/>, which
@@ -87,6 +73,10 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
 
     /// <inheritdoc />
     public long AttachmentRevision => _attachment.Revision;
+
+    internal int StructuralLeaseCount => _attachment.StructuralLeaseCount;
+
+    internal AttachmentPhase CurrentAttachmentPhase => _attachment.Phase;
 
     /// <inheritdoc />
     public bool TryUpdateAttachment(long expectedRevision, IInterceptorSubjectContext? context, SubjectAttachmentAnchorKind anchor, out long currentRevision)
@@ -109,13 +99,91 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 "foreign context would attach without any interception.");
         }
 
+        var phase = context is null ? AttachmentPhase.Detaching : AttachmentPhase.Attaching;
+        using var transition = TryAcquireAttachmentTransition(expectedRevision, phase, out currentRevision);
+        if (transition is null)
+        {
+            return false;
+        }
+
+        transition.Commit((InterceptorSubjectContext?)context, anchor, out currentRevision);
+        return true;
+    }
+
+    internal StructuralWriteLease TryAcquireStructuralWriteLease()
+    {
         lock (_attachmentLock)
         {
             var current = _attachment;
+            if (current.Phase != AttachmentPhase.Stable)
+            {
+                throw LifecycleConflictException.Retryable(_subject);
+            }
+
+            var identity = ++_nextStructuralLeaseIdentity;
+            (_activeStructuralLeaseIdentities ??= []).Add(identity);
+            _attachment = current.WithStructuralLeaseCount(current.StructuralLeaseCount + 1);
+            return new StructuralWriteLease(this, identity, current.Context, current.Revision);
+        }
+    }
+
+    internal void ReleaseStructuralWriteLease(long identity)
+    {
+        lock (_attachmentLock)
+        {
+            if (_activeStructuralLeaseIdentities?.Remove(identity) != true)
+            {
+                return;
+            }
+
+            var current = _attachment;
+            _attachment = current.WithStructuralLeaseCount(current.StructuralLeaseCount - 1);
+        }
+    }
+
+    internal AttachmentTransition? TryAcquireAttachmentTransition(
+        long expectedRevision,
+        AttachmentPhase phase,
+        out long currentRevision)
+    {
+        if (phase == AttachmentPhase.Stable)
+        {
+            throw new ArgumentOutOfRangeException(nameof(phase));
+        }
+
+        lock (_attachmentLock)
+        {
+            var current = _attachment;
+            currentRevision = current.Revision;
             if (current.Revision != expectedRevision)
             {
-                currentRevision = current.Revision;
-                return false;
+                return null;
+            }
+
+            if (current.Phase != AttachmentPhase.Stable || current.StructuralLeaseCount != 0)
+            {
+                throw LifecycleConflictException.Retryable(_subject);
+            }
+
+            var identity = ++_nextAttachmentTransitionIdentity;
+            _activeAttachmentTransitionIdentity = identity;
+            _attachment = current.WithPhase(phase);
+            return new AttachmentTransition(this, identity);
+        }
+    }
+
+    private void CommitAttachmentTransition(
+        long identity,
+        InterceptorSubjectContext? context,
+        SubjectAttachmentAnchorKind anchor,
+        out long currentRevision)
+    {
+        lock (_attachmentLock)
+        {
+            var current = _attachment;
+            if (_activeAttachmentTransitionIdentity != identity || current.Phase == AttachmentPhase.Stable)
+            {
+                throw new InvalidOperationException("The attachment transition is no longer active.");
             }
 
             if (context is not null && current.Context is not null && !ReferenceEquals(current.Context, context))
@@ -125,8 +193,27 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             }
 
             currentRevision = current.Revision + 1;
-            _attachment = new AttachmentState((InterceptorSubjectContext?)context, anchor, currentRevision);
-            return true;
+            _attachment = new AttachmentState(
+                context,
+                anchor,
+                currentRevision,
+                AttachmentPhase.Stable,
+                current.StructuralLeaseCount);
+            _activeAttachmentTransitionIdentity = 0;
+        }
+    }
+
+    private void ReleaseAttachmentTransition(long identity)
+    {
+        lock (_attachmentLock)
+        {
+            if (_activeAttachmentTransitionIdentity != identity)
+            {
+                return;
+            }
+
+            _activeAttachmentTransitionIdentity = 0;
+            _attachment = _attachment.WithPhase(AttachmentPhase.Stable);
         }
     }
 
@@ -158,6 +245,15 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         // branch, small enough to inline into its own callers.
         return context ?? CreateAndPublish(ref context, subject);
     }
+
+    /// <summary>
+    /// Returns whether generated accessors for <typeparamref name="TProperty"/> require structural
+    /// synchronization. The JIT folds the per-type trait after its one-time initialization.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsStructuralProperty<TProperty>() =>
+        InterceptorSubjectContext.PropertyTypeIndex<TProperty>.CanContainSubjects;
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static IInterceptorExecutor CreateAndPublish(ref IInterceptorExecutor? context, IInterceptorSubject subject)
@@ -195,6 +291,38 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     }
 
     /// <inheritdoc />
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public TProperty GetGeneratedPropertyValue<TProperty>(
+        string propertyName,
+        Func<IInterceptorSubject, TProperty> readValue,
+        bool executeInterceptors = true)
+    {
+        if (!executeInterceptors)
+        {
+            lock (SyncRoot)
+            {
+                return readValue(_subject);
+            }
+        }
+
+        var attachedContext = _attachment.Context;
+        if (attachedContext is null)
+        {
+            lock (SyncRoot)
+            {
+                return readValue(_subject);
+            }
+        }
+
+        var context = new PropertyReadContext<TProperty>(
+            this,
+            new PropertyReference(_subject, propertyName),
+            lockTerminal: true);
+        return attachedContext.ExecuteInterceptedRead(ref context, readValue);
+    }
+
+    /// <inheritdoc />
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue)
     {
@@ -225,75 +353,84 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         return context.IsWritten;
     }
 
-    /// <summary>
-    /// The structural branch of the unified <c>SetPropertyValue</c> entry above: coordinates with the
-    /// lifecycle that owns the subject so an attach or detach racing this write orders against it
-    /// rather than failing it. Kept out of the unified entry's body so the scalar route stays
-    /// small enough to inline.
-    /// </summary>
-    private bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, int propertyTypeIndex)
+    /// <inheritdoc />
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public bool SetGeneratedPropertyValue<TProperty>(
+        string propertyName,
+        TProperty newValue,
+        Func<IInterceptorSubject, TProperty> readValue,
+        Action<IInterceptorSubject, TProperty> writeValue)
     {
-        // Lock order and why the gate comes first: see the note on _attachmentLock. Holding the
-        // monitor from before chain resolution through the terminal is what turns a racing
-        // attachment transition into ordering: the transition waits on the monitor instead of
-        // invalidating an in-flight write.
-        //
-        // The routing decision (is there a lifecycle to gate on?) and the write chain both derive
-        // from one pinned context state. Pinning is what keeps them consistent: a chain resolved
-        // from a second, fresh read could contain a lifecycle the routing did not see, and its
-        // WriteProperty would take the gate inside the attachment monitor, inverting the lock
-        // order above.
-        while (true)
+        var propertyTypeIndex = InterceptorSubjectContext.PropertyTypeIndex<TProperty>.Value;
+        return SetStructuralPropertyValue(
+            propertyName,
+            newValue,
+            default!,
+            readValue,
+            writeValue,
+            propertyTypeIndex);
+    }
+
+    /// <summary>
+    /// The structural branch of the unified <c>SetPropertyValue</c> entry above. A shared lease pins
+    /// its attachment while the chain runs; a racing exclusive transition fails promptly.
+    /// </summary>
+    private bool SetStructuralPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, int propertyTypeIndex) =>
+        SetStructuralPropertyValue(propertyName, newValue, currentValue, null, writeValue, propertyTypeIndex);
+
+    private bool SetStructuralPropertyValue<TProperty>(
+        string propertyName,
+        TProperty newValue,
+        TProperty currentValue,
+        Func<IInterceptorSubject, TProperty>? readValue,
+        Action<IInterceptorSubject, TProperty> writeValue,
+        int propertyTypeIndex)
+    {
+        using var lease = TryAcquireStructuralWriteLease();
+        if (readValue is not null)
         {
-            var attachedContext = _attachment.Context;
-            var contextState = attachedContext?.PinState();
-            var lifecycle = attachedContext?.TryGetServiceFromState<ILifecycleInterceptor>(contextState!);
-            if (lifecycle is null)
+            lock (SyncRoot)
             {
-                // No lifecycle to order against: either the subject is unattached, or the pinned
-                // state has no lifecycle. A lifecycle registered on the attached context after the
-                // pin is invisible to this write as a whole, routing and chain alike, and is seen
-                // by the next write, which pins a fresh state. One assumption remains: interceptors
-                // resolved through a lifecycle-free state must not take another context's lifecycle
-                // gate inside this chain.
-                lock (_attachmentLock)
-                {
-                    if (ReferenceEquals(_attachment.Context, attachedContext))
-                    {
-                        return WriteStructuralValue(attachedContext, contextState, propertyName, newValue, currentValue, writeValue, propertyTypeIndex);
-                    }
-                }
+                currentValue = readValue(_subject);
             }
-            else
-            {
-                lifecycle.EnterStructuralWriteGate();
-                try
-                {
-                    lock (_attachmentLock)
-                    {
-                        // Revalidate under both locks: the attachment may have moved between the
-                        // lock-free read above and the acquisitions. Falling out of the lock scopes
-                        // releases both and retries against the fresh attachment.
-                        if (ReferenceEquals(_attachment.Context, attachedContext))
-                        {
-                            return WriteStructuralValue(attachedContext, contextState, propertyName, newValue, currentValue, writeValue, propertyTypeIndex);
-                        }
-                    }
-                }
-                finally
-                {
-                    lifecycle.ExitStructuralWriteGate();
-                }
-            }
+        }
+
+        var attachedContext = lease.Context;
+        var contextState = attachedContext?.PinState();
+        var lifecycle = attachedContext?.TryGetServiceFromState<ILifecycleInterceptor>(contextState!);
+        if (lifecycle is null)
+        {
+            return WriteStructuralValue(
+                attachedContext,
+                contextState,
+                propertyName,
+                newValue,
+                currentValue,
+                writeValue,
+                propertyTypeIndex);
+        }
+
+        lifecycle.EnterStructuralWriteGate();
+        try
+        {
+            return WriteStructuralValue(
+                attachedContext,
+                contextState,
+                propertyName,
+                newValue,
+                currentValue,
+                writeValue,
+                propertyTypeIndex);
+        }
+        finally
+        {
+            lifecycle.ExitStructuralWriteGate();
         }
     }
 
     /// <summary>
-    /// Commits a structural write while the caller holds the attachment monitor (and the lifecycle
-    /// gate when the routing found a lifecycle). <paramref name="attachedContext"/> and
-    /// <paramref name="contextState"/> are the routing snapshot pair, revalidated by the caller
-    /// under the monitor and null together exactly when the subject was unattached at routing
-    /// time; the chain resolves from that pinned state so it cannot disagree with the routing.
+    /// Runs a structural write against the context and chain state pinned by its lease. The caller
+    /// may still hold the legacy lifecycle gate, but never the attachment monitor.
     /// </summary>
     private bool WriteStructuralValue<TProperty>(
         InterceptorSubjectContext? attachedContext,
@@ -306,12 +443,13 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     {
         if (attachedContext is null || contextState is null)
         {
-            // Unattached: nothing intercepts this subject, so the write is a plain backing store,
-            // as cheap as the pre-executor short circuit in the generated helper. It still runs
-            // under the attachment monitor, so a concurrent attach either sees the committed value
-            // when it seeds or waits until this write is done.
-            writeValue(_subject, newValue);
-            return true;
+            var writeContext = new PropertyWriteContext<TProperty>(
+                this,
+                new PropertyReference(_subject, propertyName),
+                currentValue,
+                newValue);
+            UninterceptedChain<TProperty>.Write(ref writeContext, writeValue);
+            return writeContext.IsWritten;
         }
 
         var context = new PropertyWriteContext<TProperty>(
@@ -413,26 +551,74 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     }
 
     /// <summary>
-    /// The attachment triple as one immutable value: the exact attached context, the anchor that
-    /// holds the subject there, and the revision labelling that state. Published by a single
-    /// volatile reference store, which is what makes the three coherent for a lock-free reader.
+    /// The attachment fields published together for coherent lock-free reads.
     /// </summary>
     private sealed class AttachmentState
     {
         /// <summary>The state every executor starts in, shared because it carries no identity.</summary>
-        internal static readonly AttachmentState Unattached = new(null, SubjectAttachmentAnchorKind.None, 0);
+        internal static readonly AttachmentState Unattached = new(
+            null,
+            SubjectAttachmentAnchorKind.None,
+            0,
+            AttachmentPhase.Stable,
+            0);
 
-        internal AttachmentState(InterceptorSubjectContext? context, SubjectAttachmentAnchorKind anchor, long revision)
+        internal AttachmentState(
+            InterceptorSubjectContext? context,
+            SubjectAttachmentAnchorKind anchor,
+            long revision,
+            AttachmentPhase phase,
+            int structuralLeaseCount)
         {
             Context = context;
             Anchor = anchor;
             Revision = revision;
+            Phase = phase;
+            StructuralLeaseCount = structuralLeaseCount;
         }
+
+        internal AttachmentState WithPhase(AttachmentPhase phase) =>
+            new(Context, Anchor, Revision, phase, StructuralLeaseCount);
+
+        internal AttachmentState WithStructuralLeaseCount(int structuralLeaseCount) =>
+            new(Context, Anchor, Revision, Phase, structuralLeaseCount);
 
         internal readonly InterceptorSubjectContext? Context;
 
         internal readonly SubjectAttachmentAnchorKind Anchor;
 
         internal readonly long Revision;
+
+        internal readonly AttachmentPhase Phase;
+
+        internal readonly int StructuralLeaseCount;
+    }
+
+    internal sealed class AttachmentTransition : IDisposable
+    {
+        private InterceptorExecutor? _executor;
+        private readonly long _identity;
+
+        internal AttachmentTransition(InterceptorExecutor executor, long identity)
+        {
+            _executor = executor;
+            _identity = identity;
+        }
+
+        internal void Commit(
+            InterceptorSubjectContext? context,
+            SubjectAttachmentAnchorKind anchor,
+            out long currentRevision)
+        {
+            var executor = _executor
+                ?? throw new ObjectDisposedException(nameof(AttachmentTransition));
+            executor.CommitAttachmentTransition(_identity, context, anchor, out currentRevision);
+            Interlocked.CompareExchange(ref _executor, null, executor);
+        }
+
+        public void Dispose()
+        {
+            Interlocked.Exchange(ref _executor, null)?.ReleaseAttachmentTransition(_identity);
+        }
     }
 }

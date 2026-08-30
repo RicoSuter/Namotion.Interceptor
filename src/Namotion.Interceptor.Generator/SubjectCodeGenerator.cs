@@ -455,7 +455,16 @@ internal static class SubjectCodeGenerator
             var getterModifiers = property.GetterAccessModifier is not null ? $"{property.GetterAccessModifier} " : "";
             builder.AppendLine($"            {getterModifiers}get");
             builder.AppendLine("            {");
-            builder.AppendLine($"                return GetPropertyValue<{property.FullTypeName}>(nameof({property.Name}), static (o) => (({metadata.ClassName})o)._{property.Name});");
+            if (property.CanUseScalarFastPath)
+            {
+                builder.AppendLine($"                return GetPropertyValue<{property.FullTypeName}>(nameof({property.Name}), static (o) => (({metadata.ClassName})o)._{property.Name});");
+            }
+            else
+            {
+                builder.AppendLine($"                return InterceptorExecutor.IsStructuralProperty<{property.FullTypeName}>()");
+                builder.AppendLine($"                    ? ((IInterceptorSubject)this).Executor.GetGeneratedPropertyValue<{property.FullTypeName}>(nameof({property.Name}), static (o) => (({metadata.ClassName})o)._{property.Name})");
+                builder.AppendLine($"                    : GetPropertyValue<{property.FullTypeName}>(nameof({property.Name}), static (o) => (({metadata.ClassName})o)._{property.Name});");
+            }
             builder.AppendLine("            }");
         }
 
@@ -482,9 +491,28 @@ internal static class SubjectCodeGenerator
             builder.AppendLine("                var newValue = value;");
             builder.AppendLine("                var cancel = false;");
             builder.AppendLine($"                On{property.Name}Changing(ref newValue, ref cancel);");
-            builder.AppendLine($"                if (!cancel && SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v))");
+            if (property.CanUseScalarFastPath)
+            {
+                builder.AppendLine($"                if (!cancel && SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v))");
+            }
+            else
+            {
+                builder.AppendLine($"                if (!cancel && (InterceptorExecutor.IsStructuralProperty<{property.FullTypeName}>()");
+                builder.AppendLine($"                    ? ((IInterceptorSubject)this).Executor.SetGeneratedPropertyValue(nameof({property.Name}), newValue, static (o) => (({metadata.ClassName})o)._{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v)");
+                builder.AppendLine($"                    : SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v)))");
+            }
             builder.AppendLine("                {");
-            builder.AppendLine($"                    On{property.Name}Changed(_{property.Name});");
+            if (property.CanUseScalarFastPath)
+            {
+                builder.AppendLine($"                    On{property.Name}Changed(_{property.Name});");
+            }
+            else
+            {
+                builder.AppendLine($"                    var writtenValue = InterceptorExecutor.IsStructuralProperty<{property.FullTypeName}>()");
+                builder.AppendLine($"                        ? ((IInterceptorSubject)this).Executor.GetGeneratedPropertyValue<{property.FullTypeName}>(nameof({property.Name}), static (o) => (({metadata.ClassName})o)._{property.Name}, executeInterceptors: false)");
+                builder.AppendLine($"                        : _{property.Name};");
+                builder.AppendLine($"                    On{property.Name}Changed(writtenValue);");
+            }
             builder.AppendLine($"                    {raisePropertyChangedCall};");
             builder.AppendLine("                }");
             builder.AppendLine("            }");

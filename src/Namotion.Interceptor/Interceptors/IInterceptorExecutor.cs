@@ -51,6 +51,8 @@ public interface IInterceptorExecutor
     /// revision on failure so the caller can retry or give up.</param>
     /// <returns>True when the transition was applied; false when the expected revision was stale.</returns>
     /// <exception cref="InvalidOperationException">The requested state shape is illegal.</exception>
+    /// <exception cref="LifecycleConflictException">A structural lease or another exclusive
+    /// transition is active. The caller can retry after that operation completes.</exception>
     bool TryUpdateAttachment(long expectedRevision, IInterceptorSubjectContext? context, SubjectAttachmentAnchorKind anchor, out long currentRevision);
 
     /// <summary>
@@ -75,13 +77,20 @@ public interface IInterceptorExecutor
     TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue);
 
     /// <summary>
+    /// Gets a generated structural property's value, serializing its trusted raw backing-field read
+    /// through the subject terminal lock even while the subject is detached. Generated setters pass
+    /// <paramref name="executeInterceptors"/> as false when reading the committed value for their
+    /// post-write callback, so that raw read remains synchronized without running a second chain.
+    /// </summary>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    TProperty GetGeneratedPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue, bool executeInterceptors = true);
+
+    /// <summary>
     /// Sets a property value through the interceptor chain with the current value already known.
     /// The write routes at runtime on <typeparamref name="TProperty"/>: a type that can contain
-    /// subjects takes the structural write protocol, coordinating with the lifecycle that owns the
-    /// subject so an attach or detach racing this write orders against it rather than failing it;
-    /// any other type writes without that synchronization. Only a persistent conflict, a subject
-    /// genuinely owned by another context, throws, and it throws before the backing field is
-    /// written. The classification follows <typeparamref name="TProperty"/> alone: a
+    /// subjects acquires a shared structural lease before the chain, while any other type writes
+    /// without that coordination. An exclusive attachment transition racing the lease fails
+    /// promptly before the chain. The classification follows <typeparamref name="TProperty"/> alone: a
     /// <typeparamref name="TProperty"/> that can contain subjects routes structurally, so a boxed
     /// <c>object</c> fails closed to the structural side, while explicitly narrowing
     /// <typeparamref name="TProperty"/> below the declared property type routes scalar and
@@ -98,6 +107,14 @@ public interface IInterceptorExecutor
     /// <param name="writeValue">A delegate that writes the new value to the backing field.</param>
     /// <returns>True if the value was written; false if the write was suppressed by an interceptor.</returns>
     bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue);
+
+    /// <summary>
+    /// Sets a generated structural property through trusted raw reader and writer delegates. The
+    /// reader runs under the subject terminal lock before interception; the writer runs only at the
+    /// terminal. Generated code is the only supported caller.
+    /// </summary>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    bool SetGeneratedPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> writeValue);
 
     /// <summary>
     /// Invokes a method through the interceptor chain.

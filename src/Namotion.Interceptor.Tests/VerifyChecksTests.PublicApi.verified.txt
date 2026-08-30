@@ -184,8 +184,10 @@ namespace Namotion.Interceptor.Interceptors
         Namotion.Interceptor.SubjectAttachmentAnchorKind AttachmentAnchor { get; }
         long AttachmentRevision { get; }
         void AddProperties(Namotion.Interceptor.Interceptors.SubjectPropertyRegistration registration);
+        TProperty GetGeneratedPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue, bool executeInterceptors = true);
         TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue);
         object? InvokeMethod(string methodName, object?[] parameters, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod);
+        bool SetGeneratedPropertyValue<TProperty>(string propertyName, TProperty newValue, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue);
         bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue);
         bool TryGetAttachment(out Namotion.Interceptor.IInterceptorSubjectContext? context, out Namotion.Interceptor.SubjectAttachmentAnchorKind anchor, out long revision);
         bool TryUpdateAttachment(long expectedRevision, Namotion.Interceptor.IInterceptorSubjectContext? context, Namotion.Interceptor.SubjectAttachmentAnchorKind anchor, out long currentRevision);
@@ -217,14 +219,18 @@ namespace Namotion.Interceptor.Interceptors
         public Namotion.Interceptor.SubjectAttachmentAnchorKind AttachmentAnchor { get; }
         public long AttachmentRevision { get; }
         public void AddProperties(Namotion.Interceptor.Interceptors.SubjectPropertyRegistration registration) { }
+        public TProperty GetGeneratedPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue, bool executeInterceptors = true) { }
         public TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         public object? InvokeMethod(string methodName, object?[] parameters, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod) { }
+        public bool SetGeneratedPropertyValue<TProperty>(string propertyName, TProperty newValue, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue) { }
         public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue) { }
         public bool TryGetAttachment(out Namotion.Interceptor.IInterceptorSubjectContext? context, out Namotion.Interceptor.SubjectAttachmentAnchorKind anchor, out long revision) { }
         public bool TryUpdateAttachment(long expectedRevision, Namotion.Interceptor.IInterceptorSubjectContext? context, Namotion.Interceptor.SubjectAttachmentAnchorKind anchor, out long currentRevision) { }
         public static Namotion.Interceptor.Interceptors.IInterceptorExecutor GetOrCreate(ref Namotion.Interceptor.Interceptors.IInterceptorExecutor? context, Namotion.Interceptor.IInterceptorSubject subject) { }
+        public static bool IsStructuralProperty<TProperty>() { }
     }
     public delegate object? InvokeMethodInterceptionDelegate(ref Namotion.Interceptor.Interceptors.MethodInvocationContext context);
+    public sealed class LifecycleConflictException : System.InvalidOperationException { }
     public struct MethodInvocationContext
     {
         public string MethodName { get; }

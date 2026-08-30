@@ -9,7 +9,18 @@ internal static class ReadInterceptorFactory<TProperty>
     {
         if (interceptors.Length == 0)
         {
-            return static (ref PropertyReadContext<TProperty> context, Func<IInterceptorSubject, TProperty> innerReadValue) => innerReadValue(context.Property.Subject);
+            return static (ref PropertyReadContext<TProperty> context, Func<IInterceptorSubject, TProperty> innerReadValue) =>
+            {
+                if (!context.LockTerminal)
+                {
+                    return innerReadValue(context.Property.Subject);
+                }
+
+                lock (context.Executor.SyncRoot)
+                {
+                    return innerReadValue(context.Property.Subject);
+                }
+            };
         }
 
         var chain = new ReadInterceptorChain<TProperty>(

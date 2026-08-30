@@ -337,6 +337,7 @@ internal static class SubjectMetadataExtractor
                     hasSetter,
                     hasInit,
                     IsFromInterface: false,
+                    CanUseScalarFastPath: typeInfo.Type is { } propertyType && CanUseScalarFastPath(propertyType),
                     getterAccessModifier,
                     setterAccessModifier,
                     InterfaceTypeName: null,
@@ -685,6 +686,7 @@ internal static class SubjectMetadataExtractor
                     hasSetter,
                     hasInit,
                     IsFromInterface: true,
+                    CanUseScalarFastPath: CanUseScalarFastPath(property.Type),
                     GetterAccessModifier: null,
                     SetterAccessModifier: null,
                     InterfaceTypeName: interfaceTypeName));
@@ -692,6 +694,21 @@ internal static class SubjectMetadataExtractor
         }
 
         return interfaceProperties;
+    }
+
+    private static bool CanUseScalarFastPath(ITypeSymbol type)
+    {
+        if (type is INamedTypeSymbol namedType &&
+            namedType.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
+        {
+            return CanUseScalarFastPath(namedType.TypeArguments[0]);
+        }
+
+        return type.SpecialType == SpecialType.System_String ||
+               type.TypeKind == TypeKind.Enum ||
+               type.IsValueType && type.SpecialType != SpecialType.None ||
+               type.ContainingNamespace?.ToDisplayString() == "System" &&
+               type.Name is "DateTimeOffset" or "TimeSpan" or "Guid";
     }
 
     /// <summary>
