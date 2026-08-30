@@ -293,7 +293,6 @@ git commit -m "fix: reserve structural ownership without claim gaps"
 - Add: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/TerminalRevisionTests.cs`
 - Add or modify: Task 1 terminal-boundary tests assigned to this task
 - Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/TerminalStoreContractTests.cs`
-- Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/DownstreamWriteInterceptorReleaseTests.cs`
 
 - [ ] Add tests that a downstream interceptor can rewrite `context.NewValue`, veto, start and wait for another structural write, and throw after `next`. Assert preparation sees the final pre-terminal value, veto allocates no reservation, worker writes make progress, and a post-`next` exception cannot leave committed field topology unreconciled.
 - [ ] Add A/B and reentrant A/B/C terminal-revision tests. Park A after its terminal, let B commit and reconcile, release A, and assert A cannot overwrite B's snapshot or notifications.
@@ -319,12 +318,12 @@ internal interface IWriteTerminalCoordinator
 - [ ] Implement `Preparing -> Storing -> Pending -> Committed | Superseded | Faulted`, including `Storing -> Superseded | Faulted` after terminal failure, plus an atomic `RegisterOrRun` completion operation. Terminal transition detaches continuations without invoking them under the topology gate. `TerminalFailed` retains the original exception, releases `SyncRoot`, then either supersedes an already replaced descriptor or performs best-effort authoritative capture and publishes sticky fault state before rethrowing. Every path removes the optional registry entry, unlinks reservation participants, releases unneeded reservations, and dispatches detached continuations outside locks. If ordinary finalization fails after successful authoritative capture, retain only same-context reservations required by the actual snapshot and release known dropped proposals. If capture failed, conservatively retain proposals. Surface sticky fault through structural reads and graph-sensitive operations.
 - [ ] Add recovery tests. A later successful structural setter must supersede `Faulted`, commit a consistent snapshot, clear the fault, and release old fault reservations. Explicit detach must also clear the fault. A foreign subject revealed by a normalizer remains foreign and keeps the property faulted until recovery.
 - [ ] Preserve pending origin and timestamp semantics by executing the interceptor chain and terminal exactly once. Do not reroute after a terminal.
-- [ ] Make the Task 1 terminal-boundary and downstream interceptor worker-wait assertions green. Leave topology publication assertions for Task 6, callback and event callout assertions for Task 7, and stale-attach assertions for Task 8; none of those later assertions may be weakened to make this task pass.
+- [ ] Make the Task 1 terminal-boundary and downstream interceptor worker-wait assertions green. Leave last-support and derived-release protection for Task 6, callback and event callout assertions for Task 7, and explicit-transition coherence for Task 8; none of those later assertions may be weakened to make this task pass. In particular, do not change `DownstreamWriteInterceptorReleaseTests` in this task: those tests require pending-release protection rather than terminal coordination alone.
 
 Run:
 
 ```bash
-dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --no-restore --filter "FullyQualifiedName~TerminalBoundaryCoordinatorTests|FullyQualifiedName~TerminalRevisionTests|FullyQualifiedName~TerminalStoreContractTests|FullyQualifiedName~DownstreamWriteInterceptorReleaseTests"
+dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --no-restore --filter "FullyQualifiedName~TerminalBoundaryCoordinatorTests|FullyQualifiedName~TerminalRevisionTests|FullyQualifiedName~TerminalStoreContractTests"
 dotnet test src/Namotion.Interceptor.Tests/Namotion.Interceptor.Tests.csproj --no-restore --filter "FullyQualifiedName~StructuralWrite|FullyQualifiedName~PropertyWrite|FullyQualifiedName~Origin|FullyQualifiedName~Timestamp"
 dotnet test src/Namotion.Interceptor.Generator.Tests/Namotion.Interceptor.Generator.Tests.csproj --no-restore --filter "FullyQualifiedName~GeneratedExecutor|FullyQualifiedName~UnifiedSetterEmission"
 git diff --check
@@ -359,6 +358,9 @@ git commit -m "fix: coordinate lifecycle at the structural write terminal"
 - Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/OwnershipChangeStreamTests.cs`
 - Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/LifecycleEventsTests.cs`
 - Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/OwnershipReservationProtocolTests.cs`
+- Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/DownstreamWriteInterceptorReleaseTests.cs`
+- Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/StructuralWriteLockOrderTests.cs`
+- Modify: `src/Namotion.Interceptor.Tracking.Tests/Change/DerivedPropertyConcurrencyTests.cs`
 - Modify: `src/Namotion.Interceptor.Registry.Tests/GraphBehavior/OccurrenceProjectionTests.cs`
 - Modify: `src/Namotion.Interceptor.Registry.Tests/GraphBehavior/CycleTests.cs`
 
@@ -367,6 +369,7 @@ git commit -m "fix: coordinate lifecycle at the structural write terminal"
 - [ ] Add publication-sequence tests. Park a writer between two per-subject publications, run a public one-subject read and an internal multi-subject walk, and assert the public result is one immutable per-subject snapshot while the internal walk retries until it observes one even unchanged sequence.
 - [ ] Add an admission-freeze race. Let a transaction stage release from `leaseCount == 0`, then attempt an ordinary parent lease and a proposed-child reservation before final publication. Assert each acquisition either linearizes before freeze and appears as an exact pending-release protector, or receives a prompt retryable conflict before returning its token. The parent lease conflict is before the interceptor chain; the proposed-child reservation conflict is after downstream interceptors but before the terminal store. Neither may return a token for an attachment epoch the transaction clears.
 - [ ] Add a leased-descendant release case: park `child.Children` while its parent removes the last incoming edge. Give `child` an unleased `grandchild` and assert the parent write does not wait, both descendants remain attached and foreign-unclaimable in one `ReleasePending` group, and release plus detach notification occurs only when the child's final structural lease exits unless new support arrived.
+- [ ] Make the unchanged downstream last-support, derived structural-write release, and parent-removal lock-order tests green through the same pending-release mechanism. Do not catch the conflict, remove settled-consistency assertions, or add a preflight shim around the legacy traversal. Task 8 owns any remaining explicit attach/detach transition race.
 - [ ] Add two overlapping pending closures protected by different leases. Assert the groups merge, disposing one lease cannot release any member still protected by the other, and only the final protector triggers recomputation. Acquire another same-context lease after the group forms and assert it joins the protector set. Add new same-context support before final disposal and assert reachable members survive without detach or attach churn.
 - [ ] Add deterministic provisional-anchor cases for `B -> A` where A has the earlier context-wide attachment ordinal, two provisional subjects in a cycle, several provisional roots with one later explicit ancestor, self-edge, and back-edge. Allocate a unique context-wide `AttachmentOrdinal` when an attachment epoch first publishes context. After consuming roots reachable from explicit anchors, condense reachability between remaining provisional subjects into strongly connected components and retain the lowest-ordinal representative from every source component. Assert the result is independent of traversal and callback order.
 - [ ] Update the reparent event assertion to the truthful stream:
@@ -397,7 +400,7 @@ Do not emit context detach or attach for the retained child or grandchild.
 Run:
 
 ```bash
-dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --no-restore --filter "FullyQualifiedName~GraphOwnership|FullyQualifiedName~OwnershipOracle|FullyQualifiedName~ReparentCascade|FullyQualifiedName~OwnershipChangeStream|FullyQualifiedName~LifecycleEvents"
+dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --no-restore --filter "FullyQualifiedName~GraphOwnership|FullyQualifiedName~OwnershipOracle|FullyQualifiedName~ReparentCascade|FullyQualifiedName~OwnershipChangeStream|FullyQualifiedName~LifecycleEvents|FullyQualifiedName~DownstreamWriteInterceptorReleaseTests|FullyQualifiedName~DerivedPropertyConcurrencyTests|FullyQualifiedName~WhenChildWritesRaceParentRemovals"
 dotnet test src/Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj --no-restore --filter "FullyQualifiedName~OccurrenceProjection|FullyQualifiedName~Cycle|FullyQualifiedName~Dag|FullyQualifiedName~Dictionary"
 dotnet test src/Namotion.Interceptor.Tests/Namotion.Interceptor.Tests.csproj --no-restore --filter "FullyQualifiedName~StructuralWriteLease|FullyQualifiedName~OwnershipReservation"
 git diff --check
@@ -468,6 +471,8 @@ git commit -m "fix: publish revisioned lifecycle callbacks outside locks"
 - Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/DetachAnchorVisibilityTests.cs`
 - Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/DetachParentVisibilityTests.cs`
 - Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/GraphOwnershipTests.cs`
+- Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/DownstreamWriteInterceptorReleaseTests.cs` if its explicit-detach case remains pending after Task 6
+- Modify: `src/Namotion.Interceptor.Tracking.Tests/Lifecycle/StructuralWriteLockOrderTests.cs`
 
 - [ ] Add exclusive attach conflict tests for a structural lease, another attach, a detach, and a foreign component reservation. Assert prompt conflict and no partial publication.
 - [ ] Add capture-version tests that mutate a detached structural property through its coordinated setter before and after the getter capture. Assert attach either retries capture and owns the latest child or fails before publication. It must never publish the stale child.
@@ -477,12 +482,13 @@ git commit -m "fix: publish revisioned lifecycle callbacks outside locks"
 - [ ] Remove claimed-but-unowned pass-through branches, `RollbackRejectedAttach`, seeded-baseline markers, and release-time getter scans.
 - [ ] Preserve the exact context throughout all overlapping notification holds for a detaching subject and clear it when the final hold exits, including aggregate-exception paths.
 - [ ] Add the end-to-end detach-context-lifetime test: park an earlier attach callback across a later detach callback, assert `GetContext()` remains the exact context throughout both callback bodies, and assert it becomes null only after the completed detach epoch's notification count reaches zero.
+- [ ] Make the unchanged explicit attach/detach churn test green without accepting `context != null` with anchor `None` as a completed public state. If the downstream explicit-detach case did not become green through Task 6 pending release, make it green here through the common detach transaction without weakening its settled-state assertions.
 - [ ] Run all lifecycle attach, detach, anchor, and graph tests.
 
 Run:
 
 ```bash
-dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --no-restore --filter "FullyQualifiedName~Attach|FullyQualifiedName~Detach|FullyQualifiedName~Anchor|FullyQualifiedName~AttachmentState|FullyQualifiedName~GraphOwnership"
+dotnet test src/Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj --no-restore --filter "FullyQualifiedName~Attach|FullyQualifiedName~Detach|FullyQualifiedName~Anchor|FullyQualifiedName~AttachmentState|FullyQualifiedName~GraphOwnership|FullyQualifiedName~WhenStructuralWritesRaceExplicitAttachAndDetach"
 git diff --check
 ```
 
