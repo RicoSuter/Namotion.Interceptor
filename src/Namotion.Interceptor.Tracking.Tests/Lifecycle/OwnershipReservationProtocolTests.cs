@@ -203,12 +203,13 @@ public class OwnershipReservationProtocolTests
             ((IInterceptorSubject)root).AttachToContext(
                 context, SubjectAttachmentAnchorKind.Provisional));
 
-        // Assert: removing the anchor commits while the exact shared reservation protects the
-        // closure. Provisional attach cannot bypass the exclusive epoch boundary on either side
-        // of that commit. Completing the final participant runs the one deferred release.
-        Assert.IsType<LifecycleConflictException>(provisionalBeforeDetachException);
+        // Assert: a stable same-context provisional request is a cheap no-op even while the Shared
+        // reservation protects the exact epoch. Removing the anchor commits while that reservation
+        // retains the closure, and the same no-op leaves the unanchored subject alone. Completing
+        // the final participant then runs the one deferred release.
+        Assert.Null(provisionalBeforeDetachException);
         Assert.Null(detachException);
-        Assert.IsType<LifecycleConflictException>(provisionalAfterDetachException);
+        Assert.Null(provisionalAfterDetachException);
         Assert.Same(context, root.TryGetContext());
         Assert.Equal(SubjectAttachmentAnchorKind.None,
             ((IInterceptorSubject)root).Executor.AttachmentAnchor);
@@ -226,6 +227,47 @@ public class OwnershipReservationProtocolTests
                 context, SubjectAttachmentAnchorKind.Provisional));
         Assert.IsAssignableFrom<InvalidOperationException>(staleContextException);
         Assert.Same(foreignContext, root.TryGetContext());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenStableProvisionalAttachHasAnActiveProtector_ThenItSucceedsWithoutRecapturing(
+        bool useSharedReservation)
+    {
+        // Arrange
+        var context = CreateContext();
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var root = new Person(context) { FirstName = "root" };
+        var executor = (InterceptorExecutor)((IInterceptorSubject)root).Executor;
+        var getterReads = 0;
+        ((IInterceptorSubject)root).AddProperties(new SubjectPropertyMetadata(
+            "NoOpChild",
+            typeof(Person),
+            [],
+            _ =>
+            {
+                getterReads++;
+                return null;
+            },
+            null,
+            isIntercepted: true,
+            isDynamic: true));
+        var readsBeforeNoOp = getterReads;
+        using IDisposable protector = useSharedReservation
+            ? lifecycle.Graph.ReserveForStructuralWrite(executor)
+            : executor.TryAcquireStructuralWriteLease((InterceptorSubjectContext)context);
+
+        // Act
+        var exception = Record.Exception(() =>
+            ((IInterceptorSubject)root).AttachToContext(
+                context, SubjectAttachmentAnchorKind.Provisional));
+
+        // Assert
+        Assert.Null(exception);
+        Assert.Equal(readsBeforeNoOp, getterReads);
+        Assert.Same(context, root.TryGetContext());
+        Assert.Equal(SubjectAttachmentAnchorKind.Provisional, executor.AttachmentAnchor);
     }
 
     [Fact]

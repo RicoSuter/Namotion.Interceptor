@@ -87,7 +87,7 @@ public class DetachAnchorVisibilityTests
     }
 
     [Fact]
-    public void WhenAStaleDetachmentFinalizerFindsNewSupport_ThenItDoesNotClearTheAttachment()
+    public void WhenExactDetachmentFinalizerFindsGraphSupport_ThenGraphOwnershipAlonePreventsClear()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
@@ -95,19 +95,97 @@ public class DetachAnchorVisibilityTests
         var lifecycle = context.TryGetLifecycleInterceptor()!;
         var executor = (InterceptorExecutor)((IInterceptorSubject)simulation).Executor;
         executor.TryGetAttachment(out _, out _, out var revision);
-        var staleDetachment = new OwnershipGraph.DetachmentPlan(
-            executor, (InterceptorSubjectContext)context, revision);
+        using var transition = executor.PrepareAttachmentUpdate(
+            (InterceptorSubjectContext)context, null, SubjectAttachmentAnchorKind.None);
+        transition.PublishPrepared();
+        var detachingRevision = revision + 1;
+        var exactDetachment = new OwnershipGraph.DetachmentPlan(
+            executor, (InterceptorSubjectContext)context, detachingRevision);
 
         // Act
-        var exception = Record.Exception(() => lifecycle.CompleteDetachments([staleDetachment]));
+        var exception = Record.Exception(() => lifecycle.CompleteDetachments([exactDetachment]));
 
-        // Assert: a delayed finalizer is conditional on graph absence. New ownership wins without
-        // throwing from the cleanup path or clearing the subject's newer supported attachment.
-        Assert.Null(exception);
+        // Assert: every executor guard matches the real prepared record. Graph ownership is the
+        // only reason cleanup preserves it; invoking that same executor finalizer directly clears
+        // it. Restore a stable attached fixture in finally even if an assertion fails.
+        try
+        {
+            Assert.Null(exception);
+            Assert.Same(context, simulation.TryGetContext());
+            Assert.Equal(SubjectAttachmentAnchorKind.None, executor.AttachmentAnchor);
+            Assert.Equal(detachingRevision, executor.AttachmentRevision);
+            Assert.Equal(AttachmentPhase.Detaching, executor.CurrentAttachmentPhase);
+
+            executor.FinalizeDetachment((InterceptorSubjectContext)context, detachingRevision);
+            Assert.Null(simulation.TryGetContext());
+        }
+        finally
+        {
+            SetAttachment(executor, (InterceptorSubjectContext)context,
+                SubjectAttachmentAnchorKind.Provisional, detachingRevision + 2, AttachmentPhase.Stable);
+        }
+
+        Assert.True(lifecycle.Graph.IsOwned(simulation));
         Assert.Same(context, simulation.TryGetContext());
         Assert.Equal(SubjectAttachmentAnchorKind.Provisional,
             ((IInterceptorSubject)simulation).Executor.AttachmentAnchor);
         Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenProvisionalAttachRacesDetachingAndForeignReattach_ThenItCannotReturnStaleSuccess()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var foreignContext = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var simulation = new Simulation(context) { Name = "Root" };
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var callbackEntered = new ManualResetEventSlim(false);
+        var allowCallbackToReturn = new ManualResetEventSlim(false);
+        lifecycle.SubjectDetaching += change =>
+        {
+            if (change.IsContextDetach && ReferenceEquals(change.Subject, simulation))
+            {
+                callbackEntered.Set();
+                if (!allowCallbackToReturn.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+                {
+                    throw new TimeoutException("Timed out waiting to finish the detaching epoch.");
+                }
+            }
+        };
+        Exception? detachException = null;
+        var detacher = new Thread(() =>
+        {
+            detachException = Record.Exception(() => simulation.DetachFromContext(context));
+        }) { IsBackground = true };
+
+        // Act
+        detacher.Start();
+        Assert.True(callbackEntered.Wait(WriteProtocolAcceptance.RendezvousTimeout));
+        Exception? detachingAttachException;
+        try
+        {
+            detachingAttachException = Record.Exception(() =>
+                ((IInterceptorSubject)simulation).AttachToContext(
+                    context, SubjectAttachmentAnchorKind.Provisional));
+        }
+        finally
+        {
+            allowCallbackToReturn.Set();
+        }
+
+        Assert.True(detacher.Join(WriteProtocolAcceptance.RendezvousTimeout));
+        simulation.AttachToContext(foreignContext);
+        var foreignAttachException = Record.Exception(() =>
+            ((IInterceptorSubject)simulation).AttachToContext(
+                context, SubjectAttachmentAnchorKind.Provisional));
+
+        // Assert
+        Assert.IsType<LifecycleConflictException>(detachingAttachException);
+        Assert.Null(detachException);
+        Assert.IsAssignableFrom<InvalidOperationException>(foreignAttachException);
+        Assert.Same(foreignContext, simulation.TryGetContext());
     }
 
     [Fact]
@@ -188,5 +266,18 @@ public class DetachAnchorVisibilityTests
         Assert.False(recalculationRan);
         Assert.Null(simulation.TryGetContext());
         Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
+    }
+
+    private static void SetAttachment(
+        InterceptorExecutor executor,
+        InterceptorSubjectContext? context,
+        SubjectAttachmentAnchorKind anchor,
+        long revision,
+        AttachmentPhase phase)
+    {
+        var field = typeof(InterceptorExecutor).GetField(
+            "_attachment", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        field.SetValue(executor, new InterceptorExecutor.AttachmentState(
+            context, anchor, revision, phase, 0));
     }
 }

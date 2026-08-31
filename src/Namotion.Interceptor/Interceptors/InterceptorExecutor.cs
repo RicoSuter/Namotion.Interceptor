@@ -218,6 +218,9 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 detachIfLast && current.Phase == AttachmentPhase.Stable &&
                 current.StructuralLeaseCount == 0 &&
                 ReferenceEquals(current.Context, reservation.Context);
+            var detachedRevision = clearsAttachment
+                ? GetNextAttachmentRevision(current.Revision)
+                : current.Revision;
             reservation.ParticipantCount--;
             if (reservation.ParticipantCount == 0)
             {
@@ -227,11 +230,13 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                     _attachment = new AttachmentState(
                         null,
                         SubjectAttachmentAnchorKind.None,
-                        GetNextAttachmentRevision(current.Revision),
+                        detachedRevision,
                         AttachmentPhase.Stable,
                         0);
                 }
             }
+
+            token.AcceptCompletion();
         }
     }
 
@@ -242,6 +247,8 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             return ReferenceEquals(_ownershipReservation?.Context, context);
         }
     }
+
+    internal AttachmentState AttachmentSnapshot => _attachment;
 
     internal bool TryUpdateAttachment(
         OwnershipReservationToken reservation,

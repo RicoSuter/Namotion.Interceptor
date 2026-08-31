@@ -6,6 +6,39 @@ namespace Namotion.Interceptor.Tests.Interceptors;
 
 public class OwnershipReservationTests
 {
+    private sealed class BlockingReservationCoordinator : ITopologyAdmissionCoordinator
+    {
+        internal ManualResetEventSlim CompletionEntered { get; } = new(false);
+        internal ManualResetEventSlim AllowCompletion { get; } = new(false);
+        internal int CompletionCount;
+
+        public StructuralWriteLease AcquireStructuralWriteLease(InterceptorExecutor executor) =>
+            throw new NotSupportedException();
+
+        public Exception? CompleteStructuralWrite(
+            InterceptorExecutor executor,
+            StructuralWriteLease lease,
+            Exception? primaryException) =>
+            throw new NotSupportedException();
+
+        public OwnershipReservationToken AcquireOwnershipReservation(
+            InterceptorExecutor executor,
+            ReservationMode mode,
+            bool joinExclusive) =>
+            throw new NotSupportedException();
+
+        public void CompleteOwnershipReservation(
+            InterceptorExecutor executor,
+            OwnershipReservationToken token,
+            bool retainCommittedOwnership)
+        {
+            Interlocked.Increment(ref CompletionCount);
+            CompletionEntered.Set();
+            AllowCompletion.Wait();
+            executor.ReleaseOwnershipReservation(token, detachIfLast: !retainCommittedOwnership);
+        }
+    }
+
     private static (StructuralHolder Subject, InterceptorExecutor Executor) CreateSubject()
     {
         var subject = new StructuralHolder();
@@ -257,7 +290,7 @@ public class OwnershipReservationTests
     }
 
     [Fact]
-    public void WhenFinalReservationCannotAdvanceAttachmentRevision_ThenItDoesNotStrandTheReservation()
+    public void WhenFinalReservationCannotAdvanceAttachmentRevision_ThenItRemainsProtectedAndCanRetry()
     {
         // Arrange
         var (_, executor) = CreateSubject();
@@ -275,12 +308,74 @@ public class OwnershipReservationTests
         // Act
         var exception = Record.Exception(() => reservation.Complete(retainCommittedOwnership: false));
 
-        // Assert: exhaustion fails before attachment publication, but the participant itself is
-        // still released because its token has already irreversibly entered completion.
+        // Assert: exhaustion rejects the whole completion before consuming the token, reservation,
+        // or attachment epoch. After the test restores one available revision, the same token can
+        // complete normally and leave no ownership or attachment residue.
         Assert.IsType<InvalidOperationException>(exception);
-        Assert.False(executor.HasOwnershipReservation(context));
+        Assert.True(reservation.IsActive(executor));
+        Assert.True(executor.HasOwnershipReservation(context));
+        Assert.Equal(1, reservation.Reservation.ParticipantCount);
         Assert.Same(context, executor.AttachedContext);
+        Assert.Equal(SubjectAttachmentAnchorKind.None, executor.AttachmentAnchor);
         Assert.Equal(long.MaxValue, executor.AttachmentRevision);
         Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
+
+        field.SetValue(executor, new InterceptorExecutor.AttachmentState(
+            context,
+            SubjectAttachmentAnchorKind.None,
+            long.MaxValue - 1,
+            AttachmentPhase.Stable,
+            0));
+
+        var cleanupException = Record.Exception(() =>
+            reservation.Complete(retainCommittedOwnership: false));
+        Assert.Null(cleanupException);
+        Assert.False(reservation.IsActive(executor));
+        Assert.False(executor.HasOwnershipReservation(context));
+        Assert.Equal(0, reservation.Reservation.ParticipantCount);
+        Assert.Null(executor.AttachedContext);
+        Assert.Equal(long.MaxValue, executor.AttachmentRevision);
+        Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
+    }
+
+    [Fact]
+    public async Task WhenReservationCompletesConcurrently_ThenOnlyOneCallerReleasesTheParticipant()
+    {
+        // Arrange
+        var (_, executor) = CreateSubject();
+        var context = CreateContext();
+        var coordinator = new BlockingReservationCoordinator();
+        var reservation = executor.TryAcquireOwnershipReservation(
+            context, ReservationMode.Shared, coordinator);
+        var secondStarted = new ManualResetEventSlim(false);
+        var first = Task.Run(() => reservation.Complete(retainCommittedOwnership: true));
+        Task? second = null;
+
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => coordinator.CompletionEntered.IsSet);
+            Assert.False(reservation.IsActive(executor));
+            second = Task.Run(() =>
+            {
+                secondStarted.Set();
+                reservation.Complete(retainCommittedOwnership: true);
+            });
+            await AsyncTestHelpers.WaitUntilAsync(() => secondStarted.IsSet);
+
+            // Act
+            coordinator.AllowCompletion.Set();
+            await Task.WhenAll(first, second);
+        }
+        finally
+        {
+            coordinator.AllowCompletion.Set();
+            await Task.WhenAll(first, second ?? Task.CompletedTask);
+        }
+
+        // Assert
+        Assert.Equal(1, coordinator.CompletionCount);
+        Assert.Equal(0, reservation.Reservation.ParticipantCount);
+        Assert.False(reservation.IsActive(executor));
+        Assert.False(executor.HasOwnershipReservation(context));
     }
 }

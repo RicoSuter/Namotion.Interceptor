@@ -18,6 +18,7 @@ internal sealed class OwnershipReservation(
 internal sealed class OwnershipReservationToken : IDisposable
 {
     private InterceptorExecutor? _executor;
+    private bool _completionAccepted;
 
     internal OwnershipReservationToken(
         InterceptorExecutor executor,
@@ -68,19 +69,30 @@ internal sealed class OwnershipReservationToken : IDisposable
 
     internal void Complete(bool retainCommittedOwnership)
     {
-        var executor = Interlocked.Exchange(ref _executor, null);
-        if (executor is null)
+        lock (this)
         {
-            return;
-        }
+            var executor = Interlocked.Exchange(ref _executor, null);
+            if (executor is null)
+            {
+                return;
+            }
 
-        if (Coordinator is not null)
-        {
-            Coordinator.CompleteOwnershipReservation(executor, this, retainCommittedOwnership);
-        }
-        else
-        {
-            executor.ReleaseOwnershipReservation(this, detachIfLast: !retainCommittedOwnership);
+            try
+            {
+                if (Coordinator is not null)
+                    Coordinator.CompleteOwnershipReservation(executor, this, retainCommittedOwnership);
+                else
+                    executor.ReleaseOwnershipReservation(this, detachIfLast: !retainCommittedOwnership);
+            }
+            catch
+            {
+                if (!_completionAccepted)
+                    Volatile.Write(ref _executor, executor);
+
+                throw;
+            }
         }
     }
+
+    internal void AcceptCompletion() => _completionAccepted = true;
 }

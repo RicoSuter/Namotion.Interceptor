@@ -504,8 +504,17 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
 
         using var logicalScope = InterceptorExecutor.EnterLogicalContext((InterceptorSubjectContext)_context);
         var executor = subject.Executor;
-        executor.TryGetAttachment(out var initialContext, out var initialAnchor, out _);
-        InterceptorSubjectExtensions.ValidateRootAnchor(initialContext, initialAnchor, context, anchor);
+        lock (_gate)
+        {
+            var attachment = ((InterceptorExecutor)executor).AttachmentSnapshot;
+            if (attachment.Phase != AttachmentPhase.Stable)
+                throw LifecycleConflictException.Retryable(subject);
+
+            InterceptorSubjectExtensions.ValidateRootAnchor(
+                attachment.Context, attachment.Anchor, context, anchor);
+            if (anchor == SubjectAttachmentAnchorKind.Provisional && attachment.Context is not null)
+                return;
+        }
 
         var visited = LifecycleScratch.RentSubjectSet();
         var reservations = LifecycleScratch.RentOwnershipReservations();
@@ -544,11 +553,6 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                             executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out _);
                             InterceptorSubjectExtensions.ValidateRootAnchor(
                                 attachedContext, currentAnchor, context, anchor);
-                            if (anchor == SubjectAttachmentAnchorKind.Provisional && attachedContext is not null)
-                            {
-                                return;
-                            }
-
                             using var change = _graph.PrepareAttach(
                                 subject, anchor, snapshots, propertyNames, reservations, _notifier);
                             journal = journalCapture.Complete();
