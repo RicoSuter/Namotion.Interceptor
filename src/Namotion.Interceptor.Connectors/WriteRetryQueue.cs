@@ -116,14 +116,58 @@ internal sealed class WriteRetryQueue : IDisposable
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     public async ValueTask<bool> FlushAsync(ISubjectSource source, CancellationToken cancellationToken)
     {
-        if (IsEmpty)
+        if (!await TryEnterFlushAsync(cancellationToken).ConfigureAwait(false))
         {
-            return true;
+            return false;
         }
 
         try
         {
+            return await FlushCoreAsync(source, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            ReleaseFlush();
+        }
+    }
+
+    /// <summary>
+    /// Registers and writes a current batch after flushing all older retry writes.
+    /// </summary>
+    public ValueTask WriteAsync(
+        ISubjectSource source,
+        ReadOnlyMemory<SubjectPropertyChange> changes,
+        CancellationToken cancellationToken)
+    {
+        var rejected = false;
+        lock (_lock)
+        {
+            if (_retired)
+            {
+                rejected = true;
+            }
+            else
+            {
+                _activeWriteCount += changes.Length;
+            }
+        }
+
+        if (rejected)
+        {
+            _metrics.AddDropped(changes.Length);
+            return ValueTask.CompletedTask;
+        }
+
+        return WriteCoreAsync(source, changes, cancellationToken);
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<bool> TryEnterFlushAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
             await _flushSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return true;
         }
         catch (OperationCanceledException)
         {
@@ -134,96 +178,185 @@ internal sealed class WriteRetryQueue : IDisposable
             _logger.LogWarning(ex, "Error acquiring flush semaphore");
             return false;
         }
+    }
 
+    private void ReleaseFlush()
+    {
         try
         {
-            if (IsEmpty)
-            {
-                return true;
-            }
+            _flushSemaphore.Release();
+        }
+        catch
+        {
+            // The queue may already be disposed.
+        }
+    }
 
-            // Ensure buffer is large enough (grow up to MaxBatchSize, then loop)
-            if (_scratchBuffer.Length < MaxBatchSize)
-            {
-                var newSize = Math.Min(_scratchBuffer.Length * 2, MaxBatchSize);
-                _scratchBuffer = new SubjectPropertyChange[newSize];
-            }
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<bool> FlushCoreAsync(ISubjectSource source, CancellationToken cancellationToken)
+    {
+        if (IsEmpty)
+        {
+            return true;
+        }
 
-            // Process in batches up to MaxBatchSize, looping until queue is empty
-            var totalFlushed = 0;
-            while (true)
+        // Ensure buffer is large enough (grow up to MaxBatchSize, then loop)
+        if (_scratchBuffer.Length < MaxBatchSize)
+        {
+            var newSize = Math.Min(_scratchBuffer.Length * 2, MaxBatchSize);
+            _scratchBuffer = new SubjectPropertyChange[newSize];
+        }
+
+        // Process in batches up to MaxBatchSize, looping until queue is empty
+        var totalFlushed = 0;
+        while (true)
+        {
+            // Dequeue up to buffer size
+            int count;
+            lock (_lock)
             {
-                // Dequeue up to buffer size
-                int count;
-                lock (_lock)
+                count = Math.Min(_scratchBuffer.Length, _pendingWrites.Count);
+                if (count == 0)
                 {
-                    count = Math.Min(_scratchBuffer.Length, _pendingWrites.Count);
-                    if (count == 0)
-                    {
-                        break;
-                    }
-
-                    for (var i = 0; i < count; i++)
-                    {
-                        _scratchBuffer[i] = _pendingWrites[i];
-                    }
-                    _pendingWrites.RemoveRange(0, count);
-                    _activeWriteCount += count;
-                    Volatile.Write(ref _count, _pendingWrites.Count);
+                    break;
                 }
 
-                var memory = new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count);
-                var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
-                if (result.Error is not null)
+                for (var i = 0; i < count; i++)
                 {
-                    // FailedChanges is complete (see WriteChangesInBatchesAsync), so every failed
-                    // item is restored before ring capacity is applied to the combined queue.
-                    var settlement = SettleFlushedChanges(result.FailedChanges.AsSpan(), count);
-                    if (settlement.IsRetired)
-                    {
-                        Array.Clear(_scratchBuffer, 0, count);
-                        return false;
-                    }
+                    _scratchBuffer[i] = _pendingWrites[i];
+                }
+                _pendingWrites.RemoveRange(0, count);
+                _activeWriteCount += count;
+                Volatile.Write(ref _count, _pendingWrites.Count);
+            }
 
-                    var now = Environment.TickCount64;
-                    if (now - _lastFlushWarningTimestamp >= 5000)
-                    {
-                        _lastFlushWarningTimestamp = now;
-                        _logger.LogWarning(result.Error,
-                            "Failed to flush queued writes to source, re-queuing failed items ({QueueSize} writes queued).",
-                            settlement.PendingWriteCount);
-                    }
-
-                    _hasFlushWarnings = true;
-
-                    _metrics.AddDropped(settlement.DroppedCount);
+            var memory = new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count);
+            var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
+            if (result.Error is not null)
+            {
+                // FailedChanges is complete (see WriteChangesInBatchesAsync), so every failed
+                // item is restored before ring capacity is applied to the combined queue.
+                var settlement = SettleFlushedChanges(result.FailedChanges.AsSpan(), count);
+                if (settlement.IsRetired)
+                {
                     Array.Clear(_scratchBuffer, 0, count);
                     return false;
                 }
 
-                var successfulSettlement = SettleFlushedChanges(ReadOnlySpan<SubjectPropertyChange>.Empty, count);
-                if (successfulSettlement.IsRetired)
+                var now = Environment.TickCount64;
+                if (now - _lastFlushWarningTimestamp >= 5000)
                 {
-                    Array.Clear(_scratchBuffer, 0, count);
-                    return true;
+                    _lastFlushWarningTimestamp = now;
+                    _logger.LogWarning(result.Error,
+                        "Failed to flush queued writes to source, re-queuing failed items ({QueueSize} writes queued).",
+                        settlement.PendingWriteCount);
                 }
 
-                totalFlushed += count;
+                _hasFlushWarnings = true;
+
+                _metrics.AddDropped(settlement.DroppedCount);
                 Array.Clear(_scratchBuffer, 0, count);
+                return false;
             }
 
-            if (_hasFlushWarnings)
+            var successfulSettlement = SettleFlushedChanges(ReadOnlySpan<SubjectPropertyChange>.Empty, count);
+            if (successfulSettlement.IsRetired)
             {
-                _logger.LogWarning("Successfully flushed {Count} queued writes after retry.", totalFlushed);
-                _hasFlushWarnings = false;
-                _lastFlushWarningTimestamp = 0;
+                Array.Clear(_scratchBuffer, 0, count);
+                return true;
             }
 
-            return true;
+            totalFlushed += count;
+            Array.Clear(_scratchBuffer, 0, count);
+        }
+
+        if (_hasFlushWarnings)
+        {
+            _logger.LogWarning("Successfully flushed {Count} queued writes after retry.", totalFlushed);
+            _hasFlushWarnings = false;
+            _lastFlushWarningTimestamp = 0;
+        }
+
+        return true;
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
+    private async ValueTask WriteCoreAsync(
+        ISubjectSource source,
+        ReadOnlyMemory<SubjectPropertyChange> changes,
+        CancellationToken cancellationToken)
+    {
+        if (!await TryEnterFlushAsync(cancellationToken).ConfigureAwait(false))
+        {
+            RequeueUnattemptedCurrentWrite(changes.Span);
+            return;
+        }
+
+        try
+        {
+            if (!await FlushCoreAsync(source, cancellationToken).ConfigureAwait(false))
+            {
+                RequeueUnattemptedCurrentWrite(changes.Span);
+                return;
+            }
+
+            lock (_lock)
+            {
+                if (_retired)
+                {
+                    return;
+                }
+            }
+
+            var result = await source.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+            var droppedCount = SettleCurrentWrite(result.FailedChanges.AsSpan(), changes.Length);
+            if (droppedCount > 0)
+            {
+                _metrics.AddDropped(droppedCount);
+            }
         }
         finally
         {
-            try { _flushSemaphore.Release(); } catch { /* might be disposed already */ }
+            ReleaseFlush();
+        }
+    }
+
+    private void RequeueUnattemptedCurrentWrite(ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        int droppedCount;
+        lock (_lock)
+        {
+            if (_retired)
+            {
+                return;
+            }
+
+            _activeWriteCount -= changes.Length;
+            _pendingWrites.AddRange(changes);
+            droppedCount = TrimToCapacity();
+            Volatile.Write(ref _count, _pendingWrites.Count);
+        }
+
+        if (droppedCount > 0)
+        {
+            _metrics.AddDropped(droppedCount);
+        }
+    }
+
+    private int SettleCurrentWrite(ReadOnlySpan<SubjectPropertyChange> failedChanges, int attemptedCount)
+    {
+        lock (_lock)
+        {
+            if (_retired)
+            {
+                return 0;
+            }
+
+            _activeWriteCount -= attemptedCount;
+            _pendingWrites.InsertRange(0, failedChanges);
+            var droppedCount = TrimToCapacity();
+            Volatile.Write(ref _count, _pendingWrites.Count);
+            return droppedCount;
         }
     }
 
