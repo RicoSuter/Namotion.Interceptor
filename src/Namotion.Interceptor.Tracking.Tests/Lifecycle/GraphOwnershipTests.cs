@@ -25,16 +25,16 @@ public class GraphOwnershipTests
         var subject = new Person(context) { FirstName = "P" };
         var graph = context.TryGetLifecycleInterceptor()!.Graph;
         var ownershipBeforeAdmission = graph.TryGetOwnership(subject)!;
-        var propertiesBeforeAdmission = ownershipBeforeAdmission.PropertyNames;
+        var propertiesBeforeAdmission = ownershipBeforeAdmission.Properties.Select(property => property.Name).ToArray();
 
         // Act
         ((IInterceptorSubject)subject).AddProperties(new SubjectPropertyMetadata(
             "Added", typeof(string), [], _ => "value", null, isIntercepted: true, isDynamic: true));
 
         // Assert
-        Assert.Equal(propertiesBeforeAdmission, ownershipBeforeAdmission.PropertyNames);
-        Assert.DoesNotContain("Added", ownershipBeforeAdmission.PropertyNames);
-        Assert.Contains("Added", graph.TryGetOwnership(subject)!.PropertyNames);
+        Assert.Equal(propertiesBeforeAdmission, ownershipBeforeAdmission.Properties.Select(property => property.Name));
+        Assert.DoesNotContain(ownershipBeforeAdmission.Properties, property => property.Name == "Added");
+        Assert.Contains(graph.TryGetOwnership(subject)!.Properties, property => property.Name == "Added");
     }
 
     [Fact]

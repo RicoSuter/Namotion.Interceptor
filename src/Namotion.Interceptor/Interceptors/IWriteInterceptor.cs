@@ -22,6 +22,17 @@ public interface IWriteInterceptor
 
 public delegate void WriteInterceptionDelegate<TProperty>(ref PropertyWriteContext<TProperty> context);
 
+internal interface IWriteCommitGuard
+{
+    bool TryEnter();
+
+    void Exit();
+
+    bool TryDefer();
+
+    void Resume();
+}
+
 /// <summary>
 /// Context for a property write operation.
 /// <typeparamref name="TProperty"/> is a hint. It may be <c>object</c> when values are
@@ -49,6 +60,8 @@ public struct PropertyWriteContext<TProperty>
     internal IWriteTerminalCoordinator? TerminalCoordinator;
 
     internal StructuralWriteLease? StructuralLease;
+
+    internal IWriteCommitGuard? CommitGuard;
 
     internal object? CommittedLifecycleJournal;
 
@@ -145,7 +158,7 @@ public struct PropertyWriteContext<TProperty>
     {
         _terminalOrigin = ResolveFinalOrigin();
         _isTerminalOriginResolved = true;
-        _ = WriteTimestampRaw;
+        _ = WriteTimestampRawForCommit;
     }
 
     internal void SetTerminalPredecessor(TProperty value) => _currentValue = value;
@@ -199,6 +212,29 @@ public struct PropertyWriteContext<TProperty>
             var ticks = _writeTimestamp;
             if (ticks == 0) ticks = ResolveAndCacheWriteTimestamp();
             return ticks;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the timestamp needed by a committed write. A generated write before the subject
+    /// has crossed any attachment boundary still consumes a terminal revision for race safety, but
+    /// it preserves the historical pre-publication behavior of having no write timestamp. Before
+    /// generated structural coordination existed, those writes did not observe timestamp scopes.
+    /// </summary>
+    internal long WriteTimestampRawForCommit
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            var ticks = _writeTimestamp;
+            if (ticks != 0)
+            {
+                return ticks;
+            }
+
+            return Executor.SuppressGeneratedPrepublicationTimestamp
+                ? 0
+                : ResolveAndCacheWriteTimestamp();
         }
     }
 

@@ -179,9 +179,8 @@ public class CallbackContractTests
     public void WhenAnOlderJournalDrainsAfterANewerCommit_ThenEachOperationReceivesItsOwnFailure()
     {
         // Arrange: parking downstream of the terminal leaves the first operation's committed
-        // journal undrained while the second operation publishes and drains a newer journal for
-        // the same property. Removing the older journal as "stale" loses its callbacks and its
-        // callback failure instead of isolating failures by originating operation.
+        // journal undrained. A second operation touching the same lifecycle projection must retry
+        // rather than publish callbacks ahead of that older journal.
         var blocker = new BlockFirstCommittedWriteInterceptor();
         var first = new Person { FirstName = "first" };
         var second = new Person { FirstName = "second" };
@@ -252,13 +251,15 @@ public class CallbackContractTests
         firstWriter.Start();
         Assert.True(blocker.Committed.Wait(WriteProtocolAcceptance.RendezvousTimeout),
             "the first write did not reach its post-terminal park");
-        var secondException = Record.Exception(() => root.Father = second);
+        var conflictingException = Record.Exception(() => root.Father = second);
         blocker.Release.Set();
         Assert.True(firstWriter.Join(WriteProtocolAcceptance.RendezvousTimeout),
             "the first write did not finish after its journal was released");
+        var secondException = Record.Exception(() => root.Father = second);
 
         // Assert
         Assert.Equal("first journal", Assert.IsType<InvalidOperationException>(firstException).Message);
+        Assert.IsType<LifecycleConflictException>(conflictingException);
         Assert.Equal("second journal", Assert.IsType<InvalidOperationException>(secondException).Message);
         Assert.Equal(1, firstCallbacks);
         Assert.Equal(1, secondCallbacks);
@@ -430,25 +431,7 @@ public class CallbackContractTests
     }
 
     [Fact]
-    public void WhenADerivedValueExposesAnUnattachedSubjectTransiently_ThenTheRecalculationRetriesAndConverges()
-    {
-        // Arrange: derived evaluation runs outside lock(data), so a concurrent structural write
-        // can detach a projected subject after evaluation but before its cascade marks the data
-        // stale. The one-shot flag reproduces that window deterministically: one evaluation
-        // returns an unattached subject, the re-evaluation is clean.
-        var context = CreateDerivedContext();
-        var subject = new TransientOrphanDerivedSubject(context);
-        subject.ReturnUnattachedSubjectOnce = true;
-
-        // Act: the triggering write is innocent and must not observe a spurious throw.
-        subject.Name = "x";
-
-        // Assert
-        Assert.Null(subject.Current);
-    }
-
-    [Fact]
-    public void WhenADerivedValueKeepsExposingAnUnattachedSubject_ThenTheRecalculationThrowsAfterTheRetryBound()
+    public void WhenADerivedValueExposesAnUnreservedSubject_ThenTheRecalculationThrowsImmediately()
     {
         // Arrange: attach passes because the getter projects nothing yet; the projection is then
         // cached in a plain field, so clearing the stored edge turns every re-evaluation into the
@@ -461,11 +444,11 @@ public class CallbackContractTests
         // Act
         var exception = Record.Exception(() => subject.Stored = null);
 
-        // Assert: the throw must come out of the bounded retry loop, not the first detection.
+        // Assert
         Assert.IsType<LifecycleContractViolationException>(exception);
         Assert.True(
-            subject.EvaluationCount - evaluationsBeforeDetach >= DerivedPropertyChangeHandler.MaxStabilizationIterations,
-            "the recalculation must re-evaluate up to the retry bound before declaring a genuine orphan");
+            subject.EvaluationCount - evaluationsBeforeDetach < DerivedPropertyChangeHandler.MaxStabilizationIterations,
+            "an unreserved orphan must not receive the removed transaction-wide retry grace");
     }
 
     [Fact]

@@ -15,13 +15,15 @@ public static class PropertyReferenceExtensions
     /// the <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/> scope-push
     /// dance the derived-cascade would otherwise need to share the trigger's captured time.
     /// </summary>
-    internal static void SetPropertyValueWithInterception(this PropertyReference property, object? newValue,
-        object? currentValue, Action<IInterceptorSubject, object?> writeValue, long rawTimestamp)
+    internal static bool SetPropertyValueWithInterception(this PropertyReference property, object? newValue,
+        object? currentValue, Action<IInterceptorSubject, object?> writeValue, long rawTimestamp,
+        IWriteCommitGuard commitGuard)
     {
         // Hard cast: IInterceptorExecutor is not independently implementable (the chain terminals
         // and the commit revision live on the built-in executor), and silently skipping this write
         // would drop a derived-property cascade.
         var executor = (InterceptorExecutor)property.Subject.Executor;
-        executor.SetPropertyValue(property.Name, newValue, currentValue, writeValue, rawTimestamp);
+        return executor.SetDeferredPropertyValue(
+            property.Name, newValue, currentValue, writeValue, rawTimestamp, commitGuard);
     }
 }

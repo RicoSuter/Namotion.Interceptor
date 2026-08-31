@@ -27,7 +27,7 @@ public class RegisteredSubject
 
     internal IInterceptorSubjectContext? Context { get; }
 
-    internal long AttachmentRevision { get; }
+    internal long AttachmentRevision { get; private set; }
 
     /// <summary>
     /// Gets the current reference count (number of parent references), or 0 when the subject is
@@ -164,6 +164,16 @@ public class RegisteredSubject
 
             Volatile.Write(ref _parentsSnapshot, parents.ToArray());
         }
+    }
+
+    internal void CompleteAttachment(long attachmentRevision)
+    {
+        if (AttachmentRevision != 0)
+        {
+            throw new InvalidOperationException("Only a provisional Registry subject can complete attachment.");
+        }
+
+        AttachmentRevision = attachmentRevision;
     }
 
     internal void ReplaceParents(ImmutableArray<SubjectPropertyParent> parents)

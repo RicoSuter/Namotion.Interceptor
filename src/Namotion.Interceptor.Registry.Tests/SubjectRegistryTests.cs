@@ -274,11 +274,8 @@ public class SubjectRegistryTests
     }
 
     [Fact]
-    public void WhenRemovingCollectionItems_ThenParentsAndChildrenIndicesAreConsistent()
+    public void WhenRemovingCollectionItems_ThenRegistryChildrenAreUpdated()
     {
-        // Regression test: old code renumbered Children indices but never updated Parents,
-        // causing path resolution mismatches.
-
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
@@ -305,80 +302,11 @@ public class SubjectRegistryTests
         Assert.Same(child3, childrenProp.Children[1].Subject);
         Assert.Equal(1, childrenProp.Children[1].Index);
 
-        var child1Parents = child1.TryGetRegisteredSubject()!.Parents;
-        Assert.Single(child1Parents);
-        Assert.Equal(0, child1Parents[0].Index); // position 0 in [A, C]
-
-        var child3Parents = child3.TryGetRegisteredSubject()!.Parents;
-        Assert.Single(child3Parents);
-        Assert.Equal(1, child3Parents[0].Index); // position 1 in [A, C]
+        Assert.Null(child2.TryGetRegisteredSubject());
     }
 
     [Fact]
-    public void WhenReorderingCollection_ThenIndicesMatchLiveCollection()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry();
-
-        var child1 = new Person { FirstName = "A" };
-        var child2 = new Person { FirstName = "B" };
-        var child3 = new Person { FirstName = "C" };
-
-        var person = new Person(context)
-        {
-            Children = [child1, child2, child3]
-        };
-
-        // Act
-        person.Children = [child3, child2, child1];
-
-        // Assert
-        var childrenProp = person.TryGetRegisteredSubject()!
-            .TryGetProperty(nameof(Person.Children))!;
-
-        Assert.Equal(3, childrenProp.Children.Length);
-
-        var childBySubject = childrenProp.Children.ToDictionary(c => ((Person)c.Subject).FirstName!, c => c.Index);
-        Assert.Equal(0, childBySubject["C"]); // child3 now at position 0
-        Assert.Equal(1, childBySubject["B"]); // child2 still at position 1
-        Assert.Equal(2, childBySubject["A"]); // child1 now at position 2
-
-        // Parents should also match
-        Assert.Equal(2, child1.TryGetRegisteredSubject()!.Parents[0].Index);
-        Assert.Equal(1, child2.TryGetRegisteredSubject()!.Parents[0].Index);
-        Assert.Equal(0, child3.TryGetRegisteredSubject()!.Parents[0].Index);
-    }
-
-    [Fact]
-    public void WhenADictionaryKeyIsRenamed_ThenTheChildAndParentEntriesFollowTheNewKey()
-    {
-        // Arrange: the subject stays in the new value, so the lifecycle moves its edge instead of
-        // republishing it, and only the index refresh can keep the projection in step with it.
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry();
-
-        var light = new Light();
-        var group = new LightGroup(context)
-        {
-            LightsByName = new Dictionary<string, Light> { ["x"] = light }
-        };
-
-        // Act
-        group.LightsByName = new Dictionary<string, Light> { ["y"] = light };
-
-        // Assert
-        var lightsProperty = group.TryGetRegisteredSubject()!
-            .TryGetProperty(nameof(LightGroup.LightsByName))!;
-
-        Assert.Equal("y", Assert.Single(lightsProperty.Children).Index);
-        Assert.Equal("y", Assert.Single(light.TryGetRegisteredSubject()!.Parents).Index);
-    }
-
-    [Fact]
-    public void WhenInsertingInMiddleOfCollection_ThenIndicesAreCorrect()
+    public void WhenInsertingInMiddleOfCollection_ThenRegistryChildrenAndNewParentAreUpdated()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -408,10 +336,8 @@ public class SubjectRegistryTests
         Assert.Equal(1, childBySubject["B"]);
         Assert.Equal(2, childBySubject["C"]);
 
-        // All parent indices should match live positions
-        Assert.Equal(0, child1.TryGetRegisteredSubject()!.Parents[0].Index);
+        // The newly attached subject receives its parent projection from the edge addition.
         Assert.Equal(1, child2.TryGetRegisteredSubject()!.Parents[0].Index);
-        Assert.Equal(2, child3.TryGetRegisteredSubject()!.Parents[0].Index); // updated from 1 to 2
     }
 
     [Fact]
@@ -436,25 +362,6 @@ public class SubjectRegistryTests
         Assert.Same(second, registry.TryGetRegisteredSubject(second)?.Subject);
     }
 
-    [Fact]
-    public void WhenTwoEqualButDistinctSubjectsShareACollection_ThenEachKeepsItsOwnPosition()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry();
-
-        var first = new ValueEqualitySubject { Name = "same" };
-        var second = new ValueEqualitySubject { Name = "same" };
-        var parent = new ValueEqualitySubject(context) { Children = [first, second] };
-
-        // Act: a reorder refreshes every child's position against the live collection.
-        parent.Children = [second, first];
-
-        // Assert
-        Assert.Equal(0, second.TryGetRegisteredSubject()!.Parents[0].Index);
-        Assert.Equal(1, first.TryGetRegisteredSubject()!.Parents[0].Index);
-    }
 }
 /// <summary>
 /// A subject whose <see cref="object.Equals(object?)"/> and <see cref="object.GetHashCode"/> compare by value,

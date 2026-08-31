@@ -1,5 +1,6 @@
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -55,7 +56,7 @@ public class ConcurrentWriteLifecycleTests
 
                 allCreatedByA.AddRange(children);
                 if (i == 0) barrier.SignalAndWait();
-                root.Children = children;
+                WriteRetryingLifecycleConflict(() => root.Children = children);
             }
         });
 
@@ -71,7 +72,7 @@ public class ConcurrentWriteLifecycleTests
 
                 allCreatedByB.AddRange(children);
                 if (i == 0) barrier.SignalAndWait();
-                root.Children = children;
+                WriteRetryingLifecycleConflict(() => root.Children = children);
             }
         });
 
@@ -130,7 +131,7 @@ public class ConcurrentWriteLifecycleTests
                 var father = new Person { FirstName = $"FatherA{i}" };
                 allCreatedByA.Add(father);
                 if (i == 0) barrier.SignalAndWait();
-                root.Father = father;
+                WriteRetryingLifecycleConflict(() => root.Father = father);
             }
         });
 
@@ -141,7 +142,7 @@ public class ConcurrentWriteLifecycleTests
                 var father = new Person { FirstName = $"FatherB{i}" };
                 allCreatedByB.Add(father);
                 if (i == 0) barrier.SignalAndWait();
-                root.Father = father;
+                WriteRetryingLifecycleConflict(() => root.Father = father);
             }
         });
 
@@ -208,7 +209,7 @@ public class ConcurrentWriteLifecycleTests
                         allCreatedSubjects[threadIndex].AddRange(children);
                     }
 
-                    root.Children = children;
+                    WriteRetryingLifecycleConflict(() => root.Children = children);
                 }
             });
         }
@@ -237,5 +238,23 @@ public class ConcurrentWriteLifecycleTests
         // Verify registry only contains root + current children (no orphaned subjects)
         var registry = context.GetService<ISubjectRegistry>();
         Assert.Equal(1 + currentChildren.Count, registry.KnownSubjects.Count);
+    }
+
+    private static void WriteRetryingLifecycleConflict(Action write)
+    {
+        for (var attempt = 0; attempt < 1000; attempt++)
+        {
+            try
+            {
+                write();
+                return;
+            }
+            catch (LifecycleConflictException)
+            {
+                Thread.Yield();
+            }
+        }
+
+        throw new TimeoutException("The structural write did not observe stable lifecycle projections.");
     }
 }

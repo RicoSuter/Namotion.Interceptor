@@ -91,6 +91,16 @@ internal interface ITopologyAdmissionCoordinator
 {
     StructuralWriteLease AcquireStructuralWriteLease(InterceptorExecutor executor);
     Exception? CompleteStructuralWrite(InterceptorExecutor executor, StructuralWriteLease lease, Exception? primaryException);
-    OwnershipReservationToken AcquireOwnershipReservation(InterceptorExecutor executor, ReservationMode mode, bool joinExclusive);
+    OwnershipReservationToken AcquireOwnershipReservation(InterceptorExecutor executor, ReservationMode mode);
     void CompleteOwnershipReservation(InterceptorExecutor executor, OwnershipReservationToken token, bool retainCommittedOwnership);
+}
+
+internal interface INonStructuralWriteCompletionCoordinator
+{
+    Exception? CompleteNonStructuralWrite(Exception? primaryException);
+}
+
+internal interface ILogicalContextGuard
+{
+    void ThrowIfOtherLogicalContext();
 }

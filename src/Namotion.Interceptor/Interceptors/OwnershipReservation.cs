@@ -10,9 +10,22 @@ internal sealed class OwnershipReservation(
     InterceptorSubjectContext context,
     ReservationMode mode)
 {
+    private ManualResetEventSlim? _completion;
+
     internal InterceptorSubjectContext Context { get; } = context;
     internal ReservationMode Mode { get; } = mode;
     internal int ParticipantCount;
+
+    internal void WaitForCompletion()
+    {
+        if (Volatile.Read(ref ParticipantCount) == 0) return;
+        var created = new ManualResetEventSlim(false);
+        var completion = Interlocked.CompareExchange(ref _completion, created, null) ?? created;
+        if (!ReferenceEquals(completion, created)) created.Dispose();
+        if (Volatile.Read(ref ParticipantCount) != 0) completion.Wait();
+    }
+
+    internal void Complete() => Volatile.Read(ref _completion)?.Set();
 }
 
 internal sealed class OwnershipReservationToken : IDisposable
@@ -39,6 +52,12 @@ internal sealed class OwnershipReservationToken : IDisposable
             ? executor
             : throw new ObjectDisposedException(nameof(OwnershipReservationToken));
 
+    internal bool TryGetExecutor(out InterceptorExecutor executor)
+    {
+        executor = Volatile.Read(ref _executor)!;
+        return executor is not null;
+    }
+
     internal bool IsActive(InterceptorExecutor executor)
     {
         return Volatile.Read(ref _isCompleting) == 0 &&
@@ -49,15 +68,6 @@ internal sealed class OwnershipReservationToken : IDisposable
         Volatile.Read(ref _isCompleting) == 0 &&
         Volatile.Read(ref _executor) is { } executor &&
         executor.IsOwnershipReservationActive(this, context);
-
-    internal bool TryUpdateAttachment(
-        long expectedRevision,
-        InterceptorSubjectContext context,
-        SubjectAttachmentAnchorKind anchor,
-        out long currentRevision)
-    {
-        return Executor.TryUpdateAttachment(this, expectedRevision, context, anchor, out currentRevision);
-    }
 
     public void Dispose()
     {

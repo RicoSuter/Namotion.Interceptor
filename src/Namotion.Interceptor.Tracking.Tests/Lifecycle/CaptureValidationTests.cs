@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -74,6 +75,52 @@ public class CaptureValidationTests
         Assert.Equal(2, barrier.ReadCount);
         Assert.Equal(2, descendantScans);
         Assert.Equal(1, interceptor.Count);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenScalarCommitTemporarilyInvalidatesCapture_ThenStructuralWriteRetriesWithoutSurfacingConflict()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new CaptureBlockingHolder();
+        root.AttachToContext(context);
+        var child = new CaptureBlockingSubject();
+        child.AttachToContext(context);
+        child.BlockNextWrite();
+        Exception? scalarException = null;
+        Exception? structuralException = null;
+        var scalarWriter = new Thread(() =>
+        {
+            scalarException = Record.Exception(() => child.Count = 1);
+        }) { IsBackground = true };
+        var structuralWriter = new Thread(() =>
+        {
+            structuralException = Record.Exception(() => root.Child = child);
+        }) { IsBackground = true };
+
+        // Act
+        scalarWriter.Start();
+        Assert.True(
+            child.WriteEntered.Wait(WriteProtocolAcceptance.RendezvousTimeout),
+            "the scalar writer did not enter its raw terminal");
+        child.ObserveNextCapture();
+        structuralWriter.Start();
+        Assert.True(
+            child.CaptureObserved.Wait(WriteProtocolAcceptance.RendezvousTimeout),
+            "the structural writer did not observe the in-progress scalar commit");
+        child.ContinueWrite.Set();
+        var scalarCompleted = scalarWriter.Join(WriteProtocolAcceptance.RendezvousTimeout);
+        var structuralCompleted = structuralWriter.Join(WriteProtocolAcceptance.RendezvousTimeout);
+
+        // Assert
+        Assert.True(scalarCompleted, "the scalar writer did not complete");
+        Assert.True(structuralCompleted, "the structural writer did not complete");
+        Assert.Null(scalarException);
+        Assert.Null(structuralException);
+        Assert.Equal(1, child.Count);
+        Assert.Same(context, child.TryGetContext());
+        Assert.Same(child, root.Child);
     }
 
     [Fact]
@@ -238,23 +285,30 @@ public class CaptureValidationTests
 
     [Fact]
     [Trait("Category", "Concurrency")]
-    public void WhenAdmissionClaimsMetadata_ThenScalarCommitWaitsForGraphPublication()
+    public void WhenAdmissionReservesMetadata_ThenConcurrentScalarCommitCanRetryAfterPublication()
     {
         // Arrange
-        var interceptor = new CountingWriteInterceptor();
-        var context = CreateContext(interceptor);
+        var context = CreateContext();
         var root = new AdmissionClaimSubject();
         root.AttachToContext(context);
-        interceptor.Arm(root, nameof(AdmissionClaimSubject.Count));
         var executor = (InterceptorExecutor)root.Executor;
         var child = new Person { FirstName = "child" };
-        var writerBlocked = new ManualResetEventSlim(false);
-        executor.CaptureMutationBlocked = writerBlocked;
+        var conflictObserved = new ManualResetEventSlim(false);
+        var resumeWriter = new ManualResetEventSlim(false);
         var publisherCalls = 0;
         var scalarObservedPublishedGraph = false;
+        Exception? conflictException = null;
         Exception? writerException = null;
         var writer = new Thread(() =>
         {
+            conflictException = Record.Exception(() => root.Count = 1);
+            conflictObserved.Set();
+            if (!resumeWriter.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+            {
+                writerException = new TimeoutException("Timed out waiting to retry the scalar write.");
+                return;
+            }
+
             writerException = Record.Exception(() => root.Count = 1);
             scalarObservedPublishedGraph = root.Properties.ContainsKey("DynamicChild") &&
                                            ReferenceEquals(child.TryGetContext(), context);
@@ -268,32 +322,118 @@ public class CaptureValidationTests
             {
                 Interlocked.Increment(ref publisherCalls);
                 root.PublishProperties(properties);
-            })
-        {
-            BeforeTopologyPublication = () =>
-            {
                 writer.Start();
-                if (!writerBlocked.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+                if (!conflictObserved.Wait(WriteProtocolAcceptance.RendezvousTimeout))
                 {
-                    throw new TimeoutException("The scalar writer did not block on the publication claim.");
+                    throw new TimeoutException("The concurrent scalar write did not report its reservation conflict.");
                 }
-
-                Assert.NotEqual(0, executor.CaptureRevision & 1);
-            }
-        };
+            });
 
         // Act
         var admissionException = Record.Exception(() => executor.AddProperties(registration));
+        resumeWriter.Set();
         var writerCompleted = writer.Join(WriteProtocolAcceptance.RendezvousTimeout);
 
         // Assert
-        Assert.True(writerCompleted, "the scalar writer remained blocked after admission");
+        Assert.True(writerCompleted, "the scalar writer did not complete its retry after admission");
         Assert.Null(admissionException);
+        Assert.IsType<LifecycleConflictException>(conflictException);
         Assert.Null(writerException);
         Assert.True(scalarObservedPublishedGraph);
         Assert.Same(context, child.TryGetContext());
+        Assert.Equal(1, root.Count);
         Assert.Equal(1, publisherCalls);
-        Assert.Equal(1, interceptor.Count);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenAdmissionReservesCapturedChild_ThenConcurrentScalarCommitCanRetryAfterPublication()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new AdmissionClaimSubject();
+        root.AttachToContext(context);
+        var child = new AdmissionClaimSubject();
+        child.AttachToContext(context, SubjectAttachmentAnchorKind.Provisional);
+        var conflictObserved = new ManualResetEventSlim(false);
+        var resumeWriter = new ManualResetEventSlim(false);
+        var publisherCalls = 0;
+        Exception? conflictException = null;
+        Exception? writerException = null;
+        var writer = new Thread(() =>
+        {
+            conflictException = Record.Exception(() => child.Count = 1);
+            conflictObserved.Set();
+            if (!resumeWriter.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+            {
+                writerException = new TimeoutException("Timed out waiting to retry the child scalar write.");
+                return;
+            }
+
+            writerException = Record.Exception(() => child.Count = 1);
+        }) { IsBackground = true };
+        var registration = new SubjectPropertyRegistration(
+            root,
+            [new SubjectPropertyMetadata(
+                "DynamicChild", typeof(AdmissionClaimSubject), [], _ => child, null,
+                isIntercepted: true, isDynamic: true)],
+            properties =>
+            {
+                Interlocked.Increment(ref publisherCalls);
+                root.PublishProperties(properties);
+                writer.Start();
+                if (!conflictObserved.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+                {
+                    throw new TimeoutException("The child scalar write did not report its reservation conflict.");
+                }
+            });
+
+        // Act
+        var admissionException = Record.Exception(() => root.Executor.AddProperties(registration));
+        resumeWriter.Set();
+        var writerCompleted = writer.Join(WriteProtocolAcceptance.RendezvousTimeout);
+
+        // Assert
+        Assert.True(writerCompleted, "the child scalar writer did not complete its retry after admission");
+        Assert.Null(admissionException);
+        Assert.IsType<LifecycleConflictException>(conflictException);
+        Assert.Null(writerException);
+        Assert.True(root.Properties.ContainsKey("DynamicChild"));
+        Assert.Same(context, child.TryGetContext());
+        Assert.Equal(1, child.GetReferenceCount());
+        Assert.Equal(1, child.Count);
+        Assert.Equal(1, publisherCalls);
+    }
+
+    [Fact]
+    public void WhenAttachedAdmissionInvokesItsPublisher_ThenNoTopologyGateIsHeld()
+    {
+        // Arrange
+        var context = CreateContext();
+        var lifecycle = context.GetService<LifecycleInterceptor>();
+        var root = new AdmissionClaimSubject();
+        root.AttachToContext(context);
+        var gate = Assert.IsType<Lock>(typeof(LifecycleInterceptor)
+            .GetField("_gate", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(lifecycle));
+        var publisherHeldGate = false;
+        var registration = new SubjectPropertyRegistration(
+            root,
+            [new SubjectPropertyMetadata(
+                "Dynamic", typeof(string), [], _ => "value", null,
+                isIntercepted: true, isDynamic: true)],
+            properties =>
+            {
+                publisherHeldGate = gate.IsHeldByCurrentThread;
+                root.PublishProperties(properties);
+            });
+
+        // Act
+        root.Executor.AddProperties(registration);
+
+        // Assert
+        Assert.False(publisherHeldGate);
+        Assert.True(root.Properties.ContainsKey("Dynamic"));
     }
 
     [Fact]
@@ -531,5 +671,108 @@ public class CaptureValidationTests
 
         internal void PublishProperties(IReadOnlyDictionary<string, SubjectPropertyMetadata> properties) =>
             Volatile.Write(ref _properties, properties);
+    }
+
+    private sealed class CaptureBlockingSubject : IInterceptorSubject
+    {
+        private IInterceptorExecutor? _executor;
+        private readonly IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties;
+        private int _count;
+        private int _blockNextWrite;
+        private int _observeNextCapture;
+
+        internal CaptureBlockingSubject()
+        {
+            _properties = new Dictionary<string, SubjectPropertyMetadata>
+            {
+                [nameof(Count)] = new(
+                    nameof(Count), typeof(int), [],
+                    subject => ((CaptureBlockingSubject)subject)._count,
+                    (subject, value) => ((CaptureBlockingSubject)subject).Count = (int)value!,
+                    isIntercepted: true, isDynamic: false)
+            };
+        }
+
+        public IInterceptorExecutor Executor => InterceptorExecutor.GetOrCreate(ref _executor, this);
+
+        public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
+
+        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties
+        {
+            get
+            {
+                if (Interlocked.Exchange(ref _observeNextCapture, 0) == 1)
+                {
+                    CaptureObserved.Set();
+                }
+
+                return _properties;
+            }
+        }
+
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) =>
+            throw new NotSupportedException();
+
+        internal ManualResetEventSlim WriteEntered { get; } = new(false);
+
+        internal ManualResetEventSlim ContinueWrite { get; } = new(false);
+
+        internal ManualResetEventSlim CaptureObserved { get; } = new(false);
+
+        internal int Count
+        {
+            get => Executor.GetPropertyValue(nameof(Count), subject => ((CaptureBlockingSubject)subject)._count);
+            set => Executor.SetPropertyValue(nameof(Count), value, _count, (subject, newValue) =>
+            {
+                var target = (CaptureBlockingSubject)subject;
+                if (Interlocked.Exchange(ref target._blockNextWrite, 0) == 1)
+                {
+                    target.WriteEntered.Set();
+                    if (!target.ContinueWrite.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+                    {
+                        throw new TimeoutException("Timed out waiting to finish the scalar terminal.");
+                    }
+                }
+
+                target._count = newValue;
+            });
+        }
+
+        internal void BlockNextWrite() => Volatile.Write(ref _blockNextWrite, 1);
+
+        internal void ObserveNextCapture() => Volatile.Write(ref _observeNextCapture, 1);
+    }
+
+    private sealed class CaptureBlockingHolder : IInterceptorSubject
+    {
+        private IInterceptorExecutor? _executor;
+        private CaptureBlockingSubject? _child;
+
+        public IInterceptorExecutor Executor => InterceptorExecutor.GetOrCreate(ref _executor, this);
+
+        public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
+
+        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties { get; } =
+            new Dictionary<string, SubjectPropertyMetadata>
+            {
+                [nameof(Child)] = new(
+                    nameof(Child), typeof(CaptureBlockingSubject), [],
+                    subject => ((CaptureBlockingHolder)subject)._child,
+                    (subject, value) => ((CaptureBlockingHolder)subject).Child = (CaptureBlockingSubject?)value,
+                    isIntercepted: true, isDynamic: false)
+            };
+
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) =>
+            throw new NotSupportedException();
+
+        internal CaptureBlockingSubject? Child
+        {
+            get => Executor.GetPropertyValue(
+                nameof(Child), subject => ((CaptureBlockingHolder)subject)._child);
+            set => ((InterceptorExecutor)Executor).SetGeneratedPropertyValue(
+                nameof(Child), value,
+                subject => ((CaptureBlockingHolder)subject)._child,
+                (subject, newValue) => ((CaptureBlockingHolder)subject)._child = newValue);
+        }
     }
 }

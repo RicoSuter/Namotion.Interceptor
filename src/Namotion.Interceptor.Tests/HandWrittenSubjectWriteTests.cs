@@ -7,32 +7,19 @@ namespace Namotion.Interceptor.Tests;
 
 /// <summary>
 /// Pins the write protocol for subjects written by hand instead of generated: their setters call
-/// the one <see cref="IInterceptorExecutor.SetPropertyValue{TProperty}"/> entry, and the runtime
-/// routing must give a subject-typed property the structural protocol (the lifecycle gate before
-/// the chain) without the author choosing an accessor.
+/// the one <see cref="IInterceptorExecutor.SetPropertyValue{TProperty}"/> entry, and both scalar and
+/// subject-typed properties must still execute the configured interceptor chain.
 /// </summary>
 public class HandWrittenSubjectWriteTests
 {
     private static readonly TimeSpan RendezvousTimeout = TimeSpan.FromSeconds(20);
 
     /// <summary>
-    /// A minimal faithful lifecycle that counts gate entries and chain executions, so a test can
-    /// observe on which side of the structural routing a write ran.
+    /// A minimal lifecycle that counts write-chain executions.
     /// </summary>
-    private sealed class GateCountingLifecycle : ILifecycleInterceptor
+    private sealed class CountingLifecycle : ILifecycleInterceptor
     {
-        private readonly object _structuralWriteGate = new();
-
-        public int GateEnterCount;
         public int WritePropertyCount;
-
-        public void EnterStructuralWriteGate()
-        {
-            Monitor.Enter(_structuralWriteGate);
-            Interlocked.Increment(ref GateEnterCount);
-        }
-
-        public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
 
         public bool TryAddProperties(SubjectPropertyRegistration registration)
         {
@@ -185,11 +172,11 @@ public class HandWrittenSubjectWriteTests
     }
 
     [Fact]
-    public void WhenHandWrittenSetterAssignsASubjectTypedProperty_ThenTheWriteTakesTheLifecycleGate()
+    public void WhenHandWrittenSetterAssignsASubjectTypedProperty_ThenTheLifecycleChainRuns()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        var probe = new GateCountingLifecycle();
+        var probe = new CountingLifecycle();
         context.AddService(probe);
         var subject = new HandWrittenSubject();
         ((IInterceptorSubject)subject).AttachToContext(context);
@@ -198,19 +185,17 @@ public class HandWrittenSubjectWriteTests
         // Act
         subject.Child = child;
 
-        // Assert: the write entered the structural protocol (gate before the chain), not just the
-        // chain. A write that skips the gate still runs the chain, so both counters are needed.
-        Assert.Equal(1, probe.GateEnterCount);
+        // Assert
         Assert.Equal(1, probe.WritePropertyCount);
         Assert.Same(child, subject.Child);
     }
 
     [Fact]
-    public void WhenHandWrittenSetterAssignsAScalarProperty_ThenTheWriteTakesNoLifecycleGate()
+    public void WhenHandWrittenSetterAssignsAScalarProperty_ThenTheLifecycleChainRuns()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        var probe = new GateCountingLifecycle();
+        var probe = new CountingLifecycle();
         context.AddService(probe);
         var subject = new HandWrittenSubject();
         ((IInterceptorSubject)subject).AttachToContext(context);
@@ -218,10 +203,27 @@ public class HandWrittenSubjectWriteTests
         // Act
         subject.Count = 42;
 
-        // Assert: the scalar route never pays for the structural protocol.
-        Assert.Equal(0, probe.GateEnterCount);
+        // Assert
         Assert.Equal(1, probe.WritePropertyCount);
         Assert.Equal(42, subject.Count);
+    }
+
+    [Fact]
+    public void WhenNeverAttachedHandWrittenScalarWriteHasTimestampScope_ThenTimestampIsPreserved()
+    {
+        // Arrange
+        var subject = new HandWrittenSubject();
+        var timestamp = new DateTimeOffset(2026, 8, 31, 12, 0, 0, TimeSpan.Zero);
+
+        // Act
+        using (SubjectChangeContext.WithChangedTimestamp(timestamp))
+        {
+            subject.Count = 42;
+        }
+
+        // Assert
+        var property = new PropertyReference(subject, nameof(HandWrittenSubject.Count));
+        Assert.Equal(timestamp, property.TryGetWriteTimestamp());
     }
 
     [Fact]
@@ -288,6 +290,37 @@ public class HandWrittenSubjectWriteTests
         Assert.Equal(1, subject.PublisherCalls);
         Assert.True(subject.Properties.ContainsKey("Dynamic"));
         Assert.Equal(1, subject.Count);
+    }
+
+    [Fact]
+    public void WhenLifecycleFreeAdmissionInvokesItsPublisher_ThenNoAttachmentMonitorIsHeld()
+    {
+        // Arrange
+        var subject = new DynamicHandWrittenSubject();
+        var executor = (InterceptorExecutor)subject.Executor;
+        var attachmentMonitor = typeof(InterceptorExecutor)
+            .GetField("_attachmentLock", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(executor)!;
+        var publisherHeldMonitor = false;
+        var registration = new SubjectPropertyRegistration(
+            subject,
+            [new SubjectPropertyMetadata(
+                "Dynamic", typeof(string), [], _ => "value", null,
+                isIntercepted: true, isDynamic: true)],
+            properties =>
+            {
+                publisherHeldMonitor = Monitor.IsEntered(attachmentMonitor);
+                typeof(DynamicHandWrittenSubject)
+                    .GetField("_properties", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .SetValue(subject, properties);
+            });
+
+        // Act
+        executor.AddProperties(registration);
+
+        // Assert
+        Assert.False(publisherHeldMonitor);
+        Assert.True(subject.Properties.ContainsKey("Dynamic"));
     }
 
     [Fact]

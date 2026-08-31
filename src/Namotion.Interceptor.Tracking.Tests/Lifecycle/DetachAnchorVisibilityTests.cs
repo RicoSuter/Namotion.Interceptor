@@ -190,7 +190,7 @@ public class DetachAnchorVisibilityTests
 
     [Fact]
     [Trait("Category", "Concurrency")]
-    public async Task WhenFinalClearWaitsForAttachmentLock_ThenItIsNotATopologyTransaction()
+    public async Task WhenFinalClearWaitsForAttachmentLock_ThenItCompletesAfterLockRelease()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
@@ -244,14 +244,11 @@ public class DetachAnchorVisibilityTests
         Assert.True(attachmentLockHeld.Wait(WriteProtocolAcceptance.RendezvousTimeout));
         allowCallbackToReturn.Set();
         Assert.True(callbackReturning.Wait(WriteProtocolAcceptance.RendezvousTimeout));
-        var recalculationRan = false;
-        var withheld = false;
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
                 () => (detacher.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0,
                 message: "the final clear did not wait for the attachment lock");
-            withheld = lifecycle.TryRunWhenTransactionEnds(() => recalculationRan = true);
         }
         finally
         {
@@ -262,8 +259,6 @@ public class DetachAnchorVisibilityTests
         Assert.True(detacher.Join(WriteProtocolAcceptance.RendezvousTimeout));
         Assert.True(lockHolder.Join(WriteProtocolAcceptance.RendezvousTimeout));
         Assert.Null(detachException);
-        Assert.False(withheld);
-        Assert.False(recalculationRan);
         Assert.Null(simulation.TryGetContext());
         Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
     }
@@ -278,6 +273,6 @@ public class DetachAnchorVisibilityTests
         var field = typeof(InterceptorExecutor).GetField(
             "_attachment", BindingFlags.Instance | BindingFlags.NonPublic)!;
         field.SetValue(executor, new InterceptorExecutor.AttachmentState(
-            context, anchor, revision, phase, 0));
+            context, anchor, revision, phase));
     }
 }

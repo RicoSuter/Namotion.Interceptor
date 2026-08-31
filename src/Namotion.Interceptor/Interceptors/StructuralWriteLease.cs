@@ -12,17 +12,22 @@ internal enum AttachmentPhase
 internal sealed class AttachmentRouteChangedException : InvalidOperationException;
 
 /// <summary>
-/// Reports that a structural write and an attachment transition raced. The losing operation can be
-/// retried after the competing operation completes; it has not reached its terminal.
+/// Reports that an intercepted property write and an attachment publication raced. The losing
+/// operation can be retried after the competing operation completes; it has not reached its terminal.
 /// </summary>
 public sealed class LifecycleConflictException : InvalidOperationException
 {
-    private LifecycleConflictException(IInterceptorSubject subject)
-        : base($"A structural write conflicts with an attachment transition on '{subject.GetType().FullName}'. Retry the operation.")
+    private LifecycleConflictException(IInterceptorSubject subject, bool isTransientCapture)
+        : base($"An intercepted property write conflicts with attachment publication on '{subject.GetType().FullName}'. Retry the operation.")
     {
+        IsTransientCapture = isTransientCapture;
     }
 
-    internal static LifecycleConflictException Retryable(IInterceptorSubject subject) => new(subject);
+    internal bool IsTransientCapture { get; }
+
+    internal static LifecycleConflictException Retryable(IInterceptorSubject subject) => new(subject, false);
+
+    internal static LifecycleConflictException TransientCapture(IInterceptorSubject subject) => new(subject, true);
 }
 
 internal sealed class StructuralWriteLease : IDisposable

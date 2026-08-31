@@ -8,11 +8,12 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
 {
     internal sealed record Capture(
         SubjectPropertyRegistration Registration,
-        ImmutableArray<string> AddedPropertyNames,
+        IReadOnlyList<SubjectPropertyMetadata> AddedProperties,
         ImmutableArray<PropertyReference> StructuralProperties,
         Dictionary<PropertyReference, StructuralSnapshot> Snapshots,
-        Dictionary<IInterceptorSubject, CapturedSubjectProperties> PropertyNames,
-        ImmutableArray<StructuralSnapshotBuilder.CaptureParticipant> Participants);
+        Dictionary<IInterceptorSubject, ImmutableArray<SubjectPropertyMetadata>> SubjectProperties,
+        ImmutableArray<StructuralSnapshotBuilder.CaptureParticipant> Participants,
+        long ProjectionRevisionCapacity);
 
     internal Capture CaptureBatch(SubjectPropertyRegistration registration)
     {
@@ -21,9 +22,8 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
         var rootParticipant = StructuralSnapshotBuilder.CaptureParticipantState(subject, graphState);
         var batch = registration.GetProperties();
         var snapshots = new Dictionary<PropertyReference, StructuralSnapshot>(PropertyReference.Comparer);
-        var propertyNames = new Dictionary<IInterceptorSubject, CapturedSubjectProperties>(
+        var subjectProperties = new Dictionary<IInterceptorSubject, ImmutableArray<SubjectPropertyMetadata>>(
             ReferenceEqualityComparer.Instance);
-        var addedNames = ImmutableArray.CreateBuilder<string>(batch.Count);
         var structuralProperties = ImmutableArray.CreateBuilder<PropertyReference>();
         var participants = ImmutableArray.CreateBuilder<StructuralSnapshotBuilder.CaptureParticipant>();
         var visited = LifecycleScratch.RentSubjectSet();
@@ -33,7 +33,6 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
             visited.Add(subject);
             foreach (var metadata in batch)
             {
-                addedNames.Add(metadata.Name);
                 if (!OwnershipGraph.IsStructural(metadata))
                 {
                     continue;
@@ -45,7 +44,7 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
                 structuralProperties.Add(property);
                 snapshots.Add(property, snapshot);
                 participants.AddRange(StructuralSnapshotBuilder.CaptureComponent(
-                    snapshot, graph.Context, graphState, visited, snapshots, propertyNames));
+                    snapshot, graph.Context, graphState, visited, snapshots, subjectProperties));
             }
 
             registration.PreparePublication(rootParticipant.Executor);
@@ -54,24 +53,32 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
                 participants[0] = currentRoot;
             }
 
-            var names = ImmutableArray.CreateBuilder<string>(registration.PreparedProperties.Count);
             var preparedMetadata = ImmutableArray.CreateBuilder<SubjectPropertyMetadata>(registration.PreparedProperties.Count);
             foreach (var property in registration.PreparedProperties)
             {
-                names.Add(property.Key);
                 preparedMetadata.Add(property.Value);
             }
 
-            propertyNames[subject] = new CapturedSubjectProperties(
-                names.MoveToImmutable(), preparedMetadata.MoveToImmutable(),
-                subject as ILifecycleHandler, subject as IPropertyLifecycleHandler);
+            subjectProperties[subject] = preparedMetadata.MoveToImmutable();
+            var capturedParticipants = participants.ToImmutable();
+            long projectionRevisionCapacity = batch.Count;
+            checked
+            {
+                foreach (var snapshot in snapshots.Values)
+                    projectionRevisionCapacity += snapshot.Occurrences.Length;
+                foreach (var participant in capturedParticipants)
+                    if (participant.Ownership is null)
+                        projectionRevisionCapacity += subjectProperties[participant.Subject].Length;
+            }
+
             return new Capture(
                 registration,
-                addedNames.MoveToImmutable(),
+                batch,
                 structuralProperties.ToImmutable(),
                 snapshots,
-                propertyNames,
-                participants.ToImmutable());
+                subjectProperties,
+                capturedParticipants,
+                projectionRevisionCapacity);
         }
         finally
         {
@@ -83,13 +90,12 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
         Capture capture,
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations)
     {
-        var properties = capture.PropertyNames[capture.Registration.Subject];
         var graphEntryStart = notifier.JournalEntryCount;
         var change = graph.PrepareAdmission(
             capture.Registration.Subject,
             capture.StructuralProperties,
             capture.Snapshots,
-            capture.PropertyNames,
+            capture.SubjectProperties,
             reservations,
             notifier);
         // The completed graph is needed for the property payload, while callbacks still publish
@@ -100,9 +106,8 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
             var publication = change.Publication;
             notifier.AttachSubjectProperties(
                 capture.Registration.Subject,
-                properties.PropertyHandler,
-                capture.Participants[0].Executor,
-                properties.Metadata.Where(metadata => capture.AddedPropertyNames.Contains(metadata.Name)),
+                capture.Registration.Subject as IPropertyLifecycleHandler,
+                capture.AddedProperties,
                 publication.Snapshots,
                 publication);
             notifier.AppendJournalEntries(graphEntries);

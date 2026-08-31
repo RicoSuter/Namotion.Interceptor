@@ -8,30 +8,17 @@ namespace Namotion.Interceptor.Registry.Tests;
 /// Pins the write routing of dynamic properties added through
 /// <see cref="RegisteredSubject.AddProperty"/>: their metadata setter loses the compile-time
 /// property type (values travel boxed), so the routing must come from the declared type given at
-/// registration. A scalar-declared dynamic property (source telemetry, say) must write on the
-/// scalar route without paying the lifecycle gate, while a subject-capable one must take the full
-/// structural protocol.
+/// registration. Both scalar and subject-capable dynamic properties must execute the configured
+/// lifecycle chain and write the supplied value.
 /// </summary>
 public class DynamicPropertyWriteRoutingTests
 {
     /// <summary>
-    /// A minimal faithful lifecycle that counts gate entries and chain executions, so a test can
-    /// observe on which side of the structural routing a write ran.
+    /// A minimal lifecycle that counts write-chain executions.
     /// </summary>
-    private sealed class GateCountingLifecycle : ILifecycleInterceptor
+    private sealed class CountingLifecycle : ILifecycleInterceptor
     {
-        private readonly object _structuralWriteGate = new();
-
-        public int GateEnterCount;
         public int WritePropertyCount;
-
-        public void EnterStructuralWriteGate()
-        {
-            Monitor.Enter(_structuralWriteGate);
-            Interlocked.Increment(ref GateEnterCount);
-        }
-
-        public void ExitStructuralWriteGate() => Monitor.Exit(_structuralWriteGate);
 
         public bool TryAddProperties(SubjectPropertyRegistration registration)
         {
@@ -61,11 +48,11 @@ public class DynamicPropertyWriteRoutingTests
     }
 
     [Fact]
-    public void WhenDynamicPropertyDeclaredTypeIsScalar_ThenWriteTakesNoLifecycleGate()
+    public void WhenDynamicPropertyDeclaredTypeIsScalar_ThenWriteUsesTheLifecycleChain()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        var probe = new GateCountingLifecycle();
+        var probe = new CountingLifecycle();
         context.AddService(probe);
 
         IInterceptorSubject person = new Person();
@@ -79,28 +66,24 @@ public class DynamicPropertyWriteRoutingTests
             _ => storedValue,
             (_, value) => storedValue = (double)value!);
 
-        // Registration publishes the initial value as a null-to-value write, which a double chain
-        // cannot carry and which therefore routes as object. That one-off is not what this test
-        // pins: the invariant is the per-update cost of a scalar-declared dynamic property.
-        var gateEntriesAfterRegistration = probe.GateEnterCount;
+        // Registration publishes the initial value as a null-to-value write, which routes as
+        // object. This test pins the subsequent typed dynamic write.
         var writesAfterRegistration = probe.WritePropertyCount;
 
         // Act
         person.Properties["Temperature"].SetValue!(person, 42.0);
 
-        // Assert: the scalar declared type keeps the dynamic write off the structural protocol
-        // even though the value arrives boxed; the chain itself still runs.
-        Assert.Equal(gateEntriesAfterRegistration, probe.GateEnterCount);
+        // Assert
         Assert.Equal(writesAfterRegistration + 1, probe.WritePropertyCount);
         Assert.Equal(42.0, storedValue);
     }
 
     [Fact]
-    public void WhenDynamicPropertyDeclaredTypeCanContainSubjects_ThenWriteTakesTheLifecycleGate()
+    public void WhenDynamicPropertyDeclaredTypeCanContainSubjects_ThenWriteUsesTheLifecycleChain()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create();
-        var probe = new GateCountingLifecycle();
+        var probe = new CountingLifecycle();
         context.AddService(probe);
 
         IInterceptorSubject person = new Person();
@@ -119,10 +102,7 @@ public class DynamicPropertyWriteRoutingTests
         // Act
         person.Properties["Buddy"].SetValue!(person, buddy);
 
-        // Assert: the subject-capable declared type takes the structural protocol, the gate
-        // before the chain, so a racing attach or detach orders against this write. Registration
-        // issues no initial write for a subject-capable property, so this is the only one.
-        Assert.Equal(1, probe.GateEnterCount);
+        // Assert
         Assert.Equal(1, probe.WritePropertyCount);
         Assert.Same(buddy, storedValue);
     }

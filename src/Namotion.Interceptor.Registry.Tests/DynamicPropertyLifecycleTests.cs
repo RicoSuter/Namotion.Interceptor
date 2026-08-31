@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Reactive.Linq;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Tests.Models;
 using Namotion.Interceptor.Tracking;
@@ -13,6 +15,8 @@ namespace Namotion.Interceptor.Registry.Tests;
 /// </summary>
 public class DynamicPropertyLifecycleTests
 {
+    private static readonly TimeSpan ConcurrencyTimeout = TimeSpan.FromSeconds(10);
+
     [Fact]
     public void WhenWritingToDynamicDerivedPropertyWithSetter_ThenPropertyIsRecalculated()
     {
@@ -389,5 +393,89 @@ public class DynamicPropertyLifecycleTests
         Assert.Equal(0, child.GetReferenceCount());
         Assert.Null(child.TryGetRegisteredSubject());
         Assert.Single(registry.KnownSubjects);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenParentDetachesDuringAdmission_ThenLaterChildProjectionWins()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+        var child = new Person { FirstName = "Child" };
+        var oldParent = new Person { FirstName = "Old", Mother = child };
+        oldParent.AttachToContext(context);
+        var newParent = new AdmissionSubject();
+        newParent.AttachToContext(context);
+        var publisherReached = new ManualResetEventSlim(false);
+        var resumePublisher = new ManualResetEventSlim(false);
+        Exception? admissionException = null;
+        var registration = new SubjectPropertyRegistration(
+            newParent,
+            [new SubjectPropertyMetadata(
+                "DynamicChild", typeof(Person), [], _ => child, null,
+                isIntercepted: true, isDynamic: true)],
+            properties =>
+            {
+                newParent.PublishProperties(properties);
+                publisherReached.Set();
+                if (!resumePublisher.Wait(ConcurrencyTimeout))
+                {
+                    throw new TimeoutException("Timed out waiting to resume metadata publication.");
+                }
+            });
+        var admission = new Thread(() =>
+        {
+            admissionException = Record.Exception(() => newParent.Executor.AddProperties(registration));
+        }) { IsBackground = true };
+
+        // Act
+        admission.Start();
+        if (!publisherReached.Wait(ConcurrencyTimeout))
+        {
+            resumePublisher.Set();
+            admission.Join(ConcurrencyTimeout);
+            throw new TimeoutException("The admission publisher was never reached.");
+        }
+
+        var detachException = Record.Exception(() => oldParent.DetachFromContext(context));
+        resumePublisher.Set();
+        var admissionCompleted = admission.Join(ConcurrencyTimeout);
+        var retryException = Record.Exception(() => oldParent.DetachFromContext(context));
+
+        // Assert
+        Assert.True(admissionCompleted, "admission remained blocked after its publisher resumed");
+        Assert.IsType<LifecycleConflictException>(detachException);
+        Assert.Null(admissionException);
+        Assert.Null(retryException);
+        var registeredChild = Assert.IsType<RegisteredSubject>(child.TryGetRegisteredSubject());
+        var parent = Assert.Single(registeredChild.Parents);
+        Assert.Equal("DynamicChild", parent.Property.Name);
+        Assert.Same(newParent, parent.Property.Parent.Subject);
+        var registeredProperty = newParent.TryGetRegisteredSubject()!.TryGetProperty("DynamicChild");
+        Assert.NotNull(registeredProperty);
+        Assert.Single(registeredProperty.Children);
+        Assert.Same(child, registeredProperty.Children[0].Subject);
+    }
+
+    private sealed class AdmissionSubject : IInterceptorSubject
+    {
+        private IInterceptorExecutor? _executor;
+        private IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties =
+            new Dictionary<string, SubjectPropertyMetadata>();
+
+        public IInterceptorExecutor Executor => InterceptorExecutor.GetOrCreate(ref _executor, this);
+
+        public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
+
+        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties =>
+            Volatile.Read(ref _properties);
+
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) =>
+            Executor.AddProperties(new SubjectPropertyRegistration(this, properties, PublishProperties));
+
+        internal void PublishProperties(IReadOnlyDictionary<string, SubjectPropertyMetadata> properties) =>
+            Volatile.Write(ref _properties, properties);
     }
 }

@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -9,6 +11,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// admission from that state must not publish new edges under an owner the release already left
 /// behind.
 /// </summary>
+[Collection(TerminalBoundaryCoordinatorCollection.Name)]
 public class DetachCallbackAdmissionTests
 {
     private static SubjectPropertyMetadata CreateStructuralProperty(string name, IInterceptorSubject child)
@@ -136,5 +139,170 @@ public class DetachCallbackAdmissionTests
             "the admission published an ownership edge from a subject the release had already " +
             "removed from the graph, so the referenced child stayed attached to the context with " +
             "no owner that any later release can reach");
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenDetachingMetadataPublicationOverlapsFinalClear_ThenReleaseCompletesTheDetachment()
+    {
+        // Arrange
+        var callbackEntered = new ManualResetEventSlim(false);
+        var releaseCallback = new ManualResetEventSlim(false);
+        var publisherEntered = new ManualResetEventSlim(false);
+        var releasePublisher = new ManualResetEventSlim(false);
+        var subject = new DetachingAdmissionSubject();
+        var context = InterceptorSubjectContext.Create()
+            .WithLifecycle()
+            .WithService(() => new DelegateLifecycleHandler(change =>
+            {
+                if (change.IsContextDetach && ReferenceEquals(change.Subject, subject))
+                {
+                    callbackEntered.Set();
+                    if (!releaseCallback.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+                    {
+                        throw new TimeoutException("Timed out waiting to finish the detach callback.");
+                    }
+                }
+            }), _ => false);
+        subject.AttachToContext(context);
+        Exception? detachException = null;
+        var detacher = new Thread(() =>
+            detachException = Record.Exception(() => subject.DetachFromContext(context)))
+        { IsBackground = true };
+        Exception? admissionException = null;
+        var admission = new Thread(() => admissionException = Record.Exception(() =>
+            subject.AddProperty(CreateScalarProperty("Late"), properties =>
+            {
+                subject.Publish(properties);
+                publisherEntered.Set();
+                if (!releasePublisher.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+                {
+                    throw new TimeoutException("Timed out waiting to finish metadata publication.");
+                }
+            })))
+        { IsBackground = true };
+
+        // Act
+        detacher.Start();
+        Assert.True(callbackEntered.Wait(WriteProtocolAcceptance.RendezvousTimeout));
+        admission.Start();
+        Assert.True(publisherEntered.Wait(WriteProtocolAcceptance.RendezvousTimeout));
+        releaseCallback.Set();
+        var finalizerWaitedForClaim = SpinWait.SpinUntil(
+            () => (detacher.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0,
+            WriteProtocolAcceptance.RendezvousTimeout);
+        releasePublisher.Set();
+
+        // Assert
+        Assert.True(finalizerWaitedForClaim, "the finalizer did not wait for metadata publication");
+        Assert.True(detacher.Join(WriteProtocolAcceptance.RendezvousTimeout));
+        Assert.True(admission.Join(WriteProtocolAcceptance.RendezvousTimeout));
+        Assert.Null(detachException);
+        Assert.Null(admissionException);
+        Assert.Null(subject.TryGetContext());
+        Assert.Equal(AttachmentPhase.Stable, ((InterceptorExecutor)subject.Executor).CurrentAttachmentPhase);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenFinalClearWaitsForMetadataPublisherWhoseWorkerNeedsTopologyGate_ThenReleaseCompletes()
+    {
+        // Arrange
+        var callbackEntered = new ManualResetEventSlim(false);
+        var releaseCallback = new ManualResetEventSlim(false);
+        var publisherEntered = new ManualResetEventSlim(false);
+        var finalizerWaitedForCapture = new ManualResetEventSlim(false);
+        var subject = new DetachingAdmissionSubject();
+        var context = InterceptorSubjectContext.Create()
+            .WithLifecycle()
+            .WithService(() => new DelegateLifecycleHandler(change =>
+            {
+                if (change.IsContextDetach && ReferenceEquals(change.Subject, subject))
+                {
+                    callbackEntered.Set();
+                    if (!releaseCallback.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+                    {
+                        throw new TimeoutException("Timed out waiting to finish the detach callback.");
+                    }
+                }
+            }), _ => false);
+        subject.AttachToContext(context);
+        var workerRoot = new Person(context) { FirstName = "worker root" };
+        var workerChild = new Person { FirstName = "worker child" };
+        var executor = (InterceptorExecutor)subject.Executor;
+        executor.CaptureMutationBlocked = finalizerWaitedForCapture;
+
+        Exception? workerException = null;
+        var worker = new Thread(() =>
+            workerException = Record.Exception(() => workerRoot.Father = workerChild))
+        { IsBackground = true };
+        Exception? detachException = null;
+        var detacher = new Thread(() =>
+            detachException = Record.Exception(() => subject.DetachFromContext(context)))
+        { IsBackground = true };
+        Exception? admissionException = null;
+        var admission = new Thread(() => admissionException = Record.Exception(() =>
+            subject.AddProperty(CreateScalarProperty("LateWithWorker"), properties =>
+            {
+                subject.Publish(properties);
+                publisherEntered.Set();
+                if (!finalizerWaitedForCapture.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+                {
+                    throw new TimeoutException("Timed out waiting for final detachment to reach the capture claim.");
+                }
+
+                worker.Start();
+                if (!worker.Join(WriteProtocolAcceptance.RendezvousTimeout))
+                {
+                    throw new TimeoutException("The metadata publisher's topology worker could not enter the gate.");
+                }
+            })))
+        { IsBackground = true };
+
+        // Act
+        detacher.Start();
+        Assert.True(callbackEntered.Wait(WriteProtocolAcceptance.RendezvousTimeout));
+        admission.Start();
+        Assert.True(publisherEntered.Wait(WriteProtocolAcceptance.RendezvousTimeout));
+        releaseCallback.Set();
+        Assert.True(finalizerWaitedForCapture.Wait(WriteProtocolAcceptance.RendezvousTimeout));
+
+        // Assert
+        var completionTimeout = WriteProtocolAcceptance.RendezvousTimeout +
+                                WriteProtocolAcceptance.RendezvousTimeout;
+        Assert.True(admission.Join(completionTimeout));
+        Assert.True(detacher.Join(WriteProtocolAcceptance.RendezvousTimeout));
+        Assert.True(worker.Join(WriteProtocolAcceptance.RendezvousTimeout));
+        Assert.Null(admissionException);
+        Assert.Null(detachException);
+        Assert.Null(workerException);
+        Assert.Same(context, workerChild.TryGetContext());
+        Assert.Null(subject.TryGetContext());
+        Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
+    }
+
+    private static SubjectPropertyMetadata CreateScalarProperty(string name) =>
+        new(name, typeof(string), [], _ => "value", null, isIntercepted: true, isDynamic: true);
+
+    private sealed class DetachingAdmissionSubject : IInterceptorSubject
+    {
+        private IInterceptorExecutor? _executor;
+        private IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties =
+            new Dictionary<string, SubjectPropertyMetadata>();
+
+        public IInterceptorExecutor Executor => InterceptorExecutor.GetOrCreate(ref _executor, this);
+        public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
+        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => Volatile.Read(ref _properties);
+
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) =>
+            AddProperty(properties.Single(), Publish);
+
+        internal void AddProperty(
+            SubjectPropertyMetadata property,
+            Action<IReadOnlyDictionary<string, SubjectPropertyMetadata>> publisher) =>
+            Executor.AddProperties(new SubjectPropertyRegistration(this, [property], publisher));
+
+        internal void Publish(IReadOnlyDictionary<string, SubjectPropertyMetadata> properties) =>
+            Volatile.Write(ref _properties, properties);
     }
 }

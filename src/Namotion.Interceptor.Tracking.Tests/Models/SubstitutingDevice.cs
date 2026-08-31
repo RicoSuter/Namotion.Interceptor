@@ -4,11 +4,7 @@ using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Tests.Models;
 
-/// <summary>
-/// A hand-written subject whose terminal substitutes <see cref="Substitute"/> for the proposed
-/// value when one is armed. <see cref="Substitute"/> is a plain auto-property, absent from the
-/// metadata and therefore not intercepted, so arming it triggers no write of its own.
-/// </summary>
+/// <summary>A hand-written subject exposing a faithful raw structural storage pair.</summary>
 internal sealed class SubstitutingDevice : IInterceptorSubject
 {
     private static readonly FrozenDictionary<string, SubjectPropertyMetadata> Metadata =
@@ -18,7 +14,7 @@ internal sealed class SubstitutingDevice : IInterceptorSubject
                 nameof(Child),
                 typeof(SubstitutingDevice),
                 [],
-                static subject => ((SubstitutingDevice)subject).ReadAuthoritativeValue(),
+                static subject => ((SubstitutingDevice)subject)._child,
                 static (subject, value) => ((SubstitutingDevice)subject).Child = (SubstitutingDevice?)value,
                 isIntercepted: true,
                 isDynamic: false)
@@ -27,15 +23,8 @@ internal sealed class SubstitutingDevice : IInterceptorSubject
     private IInterceptorExecutor? _executor;
     private SubstitutingDevice? _child;
 
-    public SubstitutingDevice? Substitute { get; set; }
-
-    /// <summary>
-    /// Runs inside the authoritative getter the lifecycle rereads after the terminal stored and
-    /// before it reconciles, receiving the stored value. That reread is invoked by the lifecycle
-    /// itself, between its own <c>next</c> and its reconcile, so no interceptor ordering can move
-    /// it and the terminal lock is already released when it runs.
-    /// </summary>
-    public Action<SubstitutingDevice?>? OnAuthoritativeValueRead;
+    /// <summary>Runs after the faithful raw assignment and before graph publication.</summary>
+    public Action<SubstitutingDevice?>? OnRawValueWritten;
 
     /// <summary>
     /// The stored value read straight off the backing field, the way a device exposes state it also
@@ -54,20 +43,18 @@ internal sealed class SubstitutingDevice : IInterceptorSubject
     public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) =>
         throw new NotSupportedException("The hand-written subject declares all its properties statically.");
 
-    private SubstitutingDevice? ReadAuthoritativeValue()
-    {
-        OnAuthoritativeValueRead?.Invoke(_child);
-        return _child;
-    }
-
     public SubstitutingDevice? Child
     {
-        get => Executor.GetPropertyValue(nameof(Child), static subject => ((SubstitutingDevice)subject)._child);
-        set => Executor.SetPropertyValue(nameof(Child), value, _child,
+        get => ((InterceptorExecutor)Executor).GetGeneratedPropertyValue(
+            nameof(Child), static subject => ((SubstitutingDevice)subject)._child);
+        set => ((InterceptorExecutor)Executor).SetGeneratedPropertyValue(
+            nameof(Child), value,
+            static subject => ((SubstitutingDevice)subject)._child,
             static (subject, newValue) =>
             {
                 var device = (SubstitutingDevice)subject;
-                device._child = device.Substitute ?? newValue;
+                device._child = newValue;
+                device.OnRawValueWritten?.Invoke(newValue);
             });
     }
 }

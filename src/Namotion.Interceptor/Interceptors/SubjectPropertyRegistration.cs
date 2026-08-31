@@ -27,8 +27,6 @@ public sealed class SubjectPropertyRegistration
     private long _preparedCaptureRevision;
     private bool _published;
 
-    internal Action? BeforeTopologyPublication { get; set; }
-
     /// <summary>
     /// Creates the registration for one <see cref="IInterceptorSubject.AddProperties"/> call.
     /// </summary>
@@ -89,12 +87,12 @@ public sealed class SubjectPropertyRegistration
     /// </summary>
     /// <exception cref="InvalidOperationException">The batch is invalid (see
     /// <see cref="GetProperties"/>) or was already published.</exception>
-    public void Publish() => Publish((InterceptorExecutor)Subject.Executor);
-
-    internal void Publish(InterceptorExecutor executor)
+    public void Publish()
     {
+        var executor = (InterceptorExecutor)Subject.Executor;
+        var attachment = executor.AttachmentSnapshot;
         PreparePublication(executor);
-        if (!PublishPrepared(executor))
+        if (!TryPublishPrepared(executor, attachment))
         {
             throw new InvalidOperationException(
                 $"The properties of subject '{Subject.GetType().Name}' changed while this batch was being admitted. " +
@@ -144,7 +142,9 @@ public sealed class SubjectPropertyRegistration
 
         if (!executor.IsCaptureRevisionCurrent(captureRevision))
         {
-            throw LifecycleConflictException.Retryable(Subject);
+            throw executor.IsTransientCaptureConflict()
+                ? LifecycleConflictException.TransientCapture(Subject)
+                : LifecycleConflictException.Retryable(Subject);
         }
 
         _preparedCaptureRevision = captureRevision;
@@ -154,22 +154,11 @@ public sealed class SubjectPropertyRegistration
     internal IReadOnlyDictionary<string, SubjectPropertyMetadata> PreparedProperties =>
         _preparedProperties ?? Subject.Properties;
 
-    internal bool PublishPrepared(InterceptorExecutor executor)
+    internal bool TryPublishPrepared(
+        InterceptorExecutor executor,
+        InterceptorExecutor.AttachmentState attachment)
     {
-        if (_materialized is not { Length: > 0 })
-        {
-            return true;
-        }
-
-        if (!TryClaimPreparedPublication(executor)) return false;
-        try { PublishClaimed(); }
-        finally { ReleasePublicationClaim(executor); }
-
-        return true;
-    }
-
-    internal bool TryClaimPreparedPublication(InterceptorExecutor executor)
-    {
+        if (_materialized is not { Length: > 0 }) return true;
         if (_published)
         {
             throw new InvalidOperationException(
@@ -183,17 +172,37 @@ public sealed class SubjectPropertyRegistration
                 "The batch was not published.");
         }
 
-        if (!executor.TryBeginMetadataPublication(_preparedCaptureRevision))
+        if (!executor.TryBeginMetadataPublication(_preparedCaptureRevision, attachment))
         {
             return false;
         }
 
-        _published = true;
+        try
+        {
+            _published = true;
+            _publishProperties(_preparedProperties);
+        }
+        finally
+        {
+            executor.CompleteMetadataPublication(_preparedCaptureRevision);
+        }
+
         return true;
     }
 
-    internal void PublishClaimed() => _publishProperties(_preparedProperties!);
+    internal void PublishReserved(
+        InterceptorExecutor executor,
+        OwnershipReservationToken reservation)
+    {
+        _published = true;
+        try
+        {
+            _publishProperties(_preparedProperties!);
+        }
+        finally
+        {
+            executor.CompleteReservedMetadataPublication(_preparedCaptureRevision, reservation);
+        }
+    }
 
-    internal void ReleasePublicationClaim(InterceptorExecutor executor) =>
-        executor.CompleteMetadataPublication(_preparedCaptureRevision);
 }

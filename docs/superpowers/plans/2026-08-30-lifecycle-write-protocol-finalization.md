@@ -10,19 +10,37 @@
 
 **Spec:** [`docs/superpowers/specs/2026-08-30-lifecycle-write-protocol-redesign-design.md`](../specs/2026-08-30-lifecycle-write-protocol-redesign-design.md)
 
+## Local implementation checkpoint
+
+Tasks 1 through 6 and the implementation, simplification, audit, and verification portions of Task 7 have been completed on the local comparison branch. Public lifecycle documentation remains deferred until the maintainer chooses this candidate for integration, and benchmarks remain deferred until the maintainer approves a performance follow-up. The implementation keeps one ownership graph, one immutable lifecycle journal, one per-subject attachment authority, trusted raw structural reader/writer routing, exact leases and reservations as temporary roots, and callbacks outside framework locks.
+
+Deterministic race work added seven necessary refinements to the original plan:
+
+- ordinary scalar writes cross short pre-chain lifecycle publication admission and reject before interceptor side effects while the subject is non-stable or exclusively reserved;
+- a derived target temporarily fenced after its source committed coalesces and resumes one guarded synthetic notification instead of losing the notification or throwing back through the committed source write;
+- an ordinary derived retry uses exact attachment and recalculation sequence acquisition, so stale handoff cannot duplicate an already covered publication;
+- Registry retains immutable collection refresh publication, with separate attachment and parent projection revisions, so reorder and rekey updates cannot overwrite newer attachment state or enumerate live collections under Registry locks;
+- Registry removal ignores a missing property only when its parent subject is already absent, so cyclic detach converges without hiding a missing property on a registered parent;
+- generated structural access retains coordinated prepublication revisions while preserving historical timestamp `0` until the first successful attachment; and
+- commit markers classify the attempted source before final origin resolution, preserving source delivery and echo-suppression semantics when an inbound write resolves to a final local origin.
+
+Fresh local verification on 2026-08-31 is Core 196/196, Tracking 761/761, Registry 193/193, Generator 273/273, Dynamic 11/11, Connectors 738/738, and ConnectorTester 117/117. Focused derived deferral, rollback, exclusive admission, stale retry, graph capture, reservation, generated timestamp, source-marker, and Registry cycle tests are green. The complete non-integration solution test exited successfully. Debug and Release solution builds completed with zero warnings and zero errors. Release pack completed after the Release build, with only the expected warnings from projects that disable packaging.
+
+The original simplification budget is not met. Against latest PR branch `c5079c6f`, the five production projects are `+4,977/-3,384`, net `+1,593`; against current `origin/master` at `082bb1ce`, they are `+7,089/-2,394`, net `+4,695`. Core plus Tracking are net `+1,676` versus that PR branch and net `+4,261` versus master. Independent simplification review accepted the protocol design and the safe reductions already made, but found no remaining sizeable deletion that did not remove a distinct correctness invariant. This checkpoint must therefore be reviewed as a correctness candidate against the current PR, not treated as the final size-approved implementation.
+
 ## Global Constraints
 
-- Start from local protocol commit `23d4a54b928c5d1c62b8b152919361ef6854da73`, whose reviewed PR baseline is `c5079c6f0cb3a06ea2bc395e2dba7b812b3fa88b` and master baseline is `0418410c2da2ca5aa39fb25fb9d5fda3b53f429b`.
+- Continue on local branch `codex/pr-494-lifecycle-protocol-implementation`, whose reviewed PR baseline is `c5079c6f0cb3a06ea2bc395e2dba7b812b3fa88b` and current master comparison is `082bb1cee82f2428fe8e94839294b5405138d79c`.
 - Preserve the public `PropertyWriteContext<TProperty>.NewValue` setter. Interceptors may rewrite the value committed by the write only while forwarding the received context by `ref` toward one terminal invocation. Terminal entry shallow-snapshots it; later assignments remain context-local unwind state and have no commit or built-in publication effect.
 - Do not replay an interceptor chain. A veto creates no terminal revision, proposal reservation, property topology delta, or write journal. Its final lease release may still finish a deferred sweep caused by another committed operation.
 - Generated, opted-in Dynamic, and advanced hand-written structural raw writers must be faithful, synchronous, nonblocking, non-reentrant, and exception-free. Normalization belongs in `On<Property>Changing` or an interceptor.
 - The only nested framework-lock order is terminal `SyncRoot`, then the context topology gate, then one executor attachment monitor. A path without `SyncRoot` starts at the topology gate. No topology path may request `SyncRoot`, and no executor monitor may be retained while requesting the topology gate.
 - Interceptors, ordinary getters, enumerable traversal, equality implementations, metadata input iterators and publishers, lifecycle handlers, property handlers, Registry callbacks, derived recalculation, and events run outside framework locks. The contract-bound raw reader and faithful writer are the only callout exceptions.
-- Resolve and cache origin equality and write timestamp before framework locks. Inside the final commit, use only the cached result, trusted raw reader/writer, revision stamping, and pure immutable state swaps.
-- Preserve scalar generated fast paths. Structural generated accessors must use the coordinated reader/writer entry even while detached.
+- Resolve and cache origin equality and write timestamp before framework locks. Generated structural prepublication writes deliberately cache timestamp `0` until the first successful attachment. Inside the final commit, use only the cached result, trusted raw reader/writer, revision stamping, and pure immutable state swaps.
+- Preserve scalar generated code and public routing shape. With lifecycle active, scalar writes also cross the executor's short pre-chain publication admission so non-stable and exclusive phases reject before arbitrary interceptor side effects. Structural generated accessors use the coordinated reader/writer entry even while detached.
 - `StructuralSnapshotBuilder` is the only raw structural-value interpreter. `OwnershipGraph` stores immutable occurrence snapshots and library-owned records only.
 - Use subject reference plus child-specific occurrence ordinal as edge identity. Indexes and dictionary keys are payload, never identity.
-- Active leases and same-context reservations are temporary reachability roots. A removal may commit while retaining their protected closure; a single deferred-sweep flag triggers final reachability after the last relevant protector leaves. Do not add pending-release groups, closure merges, topology freezes, or retry queues.
+- Active leases and same-context reservations are temporary reachability roots. A removal may commit while retaining their protected closure; a single deferred-sweep flag triggers final reachability after the last relevant protector leaves. Do not add pending-release groups, closure merges, topology freezes, or general topology retry queues. One target-local deferred synthetic derived notification is permitted when its source already committed and target pre-chain admission is temporarily fenced.
 - Lifecycle callbacks are synchronous for their originating operation and outside locks. Topology-changing callback reentry and same-thread second-context topology entry remain rejected. Journals from different threads may overlap.
 - No hardcoded waits in tests. Use `ManualResetEventSlim`, `Barrier`, `CountdownEvent`, or `AsyncTestHelpers.WaitUntilAsync` with bounded joins.
 - Follow the repository's `When<Condition>_Then<ExpectedBehavior>` naming and Arrange, Act, Assert comments.
@@ -373,7 +391,7 @@ git commit -m "refactor: attach and detach through one ownership graph"
 
 ## Task 6: Rebuild property admission and simplify derived validation
 
-**Budget:** At least 650 production lines removed cumulatively from current HEAD after Task 5. Delete the four obsolete topology helper files with their final admission callers and add no production files.
+**Budget:** The four obsolete topology helper files are deleted with their final admission callers. The planned cumulative line reduction was not achieved because the completed admission, projection, deferred-sweep, and derived-cascade protocols required additional state and deterministic race handling. See Local implementation checkpoint.
 
 **Files:**
 
@@ -397,7 +415,7 @@ git commit -m "refactor: attach and detach through one ownership graph"
 **Interfaces:**
 
 - `PropertyAdmission` consumes materialized registrations, immutable snapshots, exclusive admission reservation, and the common graph publication.
-- Derived validation repeats an exact-reservation test and topology-gate barrier only while an uninstrumented alias observes a same-context reserved orphan. It adds no descriptor or continuation API.
+- Derived alias validation repeats an exact-reservation test and topology-gate barrier only while an uninstrumented alias observes a same-context reserved orphan. Separately, a target-local synthetic derived notification can defer before its chain when its target lifecycle is temporarily unavailable after the source terminal committed.
 
 - [ ] Add admission races for input materialization, duplicate names, foreign subjects, metadata generation, attach/detach, same-context callback admission, and a structural getter waiting for worker activity. Assert input once, accepted getter once per attempt, and publisher exactly once only after acceptance.
 - [ ] Add a derived-alias race that reads the raw field between faithful store and graph publication plus back-to-back writers exposing two consecutive transient values. Cross the gate and reevaluate while each orphan has an exact same-context reservation; throw only when the current orphan has no explaining reservation.
@@ -433,17 +451,17 @@ git commit -m "refactor: simplify lifecycle admission and derived validation"
 - Modify: `docs/design/tracking-lifecycle.md`
 - Modify: `docs/tracking.md`
 
-- [ ] Remove scratch pools used only by deleted traversals, test-only graph methods, repeated routing, immediate-claim adapters, duplicate notifier overloads, and migration types without a final responsibility.
-- [ ] Prove there is one snapshot builder, graph engine, terminal protocol, admission protocol, and journal path.
+- [x] Remove scratch pools used only by deleted traversals, test-only graph methods, repeated routing, immediate-claim adapters, duplicate notifier overloads, and migration types without a final responsibility.
+- [x] Prove there is one snapshot builder, graph engine, terminal protocol, admission protocol, and journal path.
 
 ```bash
 rg -n "EnterStructuralWriteGate|ExitStructuralWriteGate|StructuralReconciler|AttachTraversal|ReleaseTraversal|ReachabilityWalk|CallbackReentrancyGuard|RollbackRejectedAttach|AreSnapshotsSeeded|_transactionsInFlight|_withheld|TryRunWhenTransactionEnds|PendingTerminal|PendingStructuralWrite|RegisterOrRun|ReleasePending|TopologyFreeze|RefreshCollectionProperty" src/Namotion.Interceptor src/Namotion.Interceptor.Tracking src/Namotion.Interceptor.Dynamic src/Namotion.Interceptor.Registry src/Namotion.Interceptor.Generator src/Shared
 ```
 
-Expected: no match except the source-compatible `IPropertyLifecycleHandler.RefreshCollectionProperty` declaration and documentation. Built-in Registry and lifecycle production code have no caller or implementation.
+Expected: no match except the intentional `RefreshCollectionProperty` path. Registry consumes its immutable revisioned projection because retained collection reorder and rekey updates need publication without live enumeration.
 
-- [ ] Recalculate production deltas against PR head and master. List the remaining master delta by product-semantic responsibility. If a budget is missed, simplify the responsible owner before broad verification.
-- [ ] Run focused projects, then build, all non-integration tests, pack, public API checks, and repeated deterministic concurrency filters.
+- [x] Recalculate production deltas against PR head and master. List the remaining master delta by product-semantic responsibility. If a budget is missed, simplify the responsible owner before broad verification.
+- [x] Run focused projects, then build, all non-integration tests, pack, public API checks, and repeated deterministic concurrency filters.
 
 ```bash
 dotnet test src/Namotion.Interceptor.Tests/Namotion.Interceptor.Tests.csproj --no-restore
@@ -458,8 +476,8 @@ dotnet pack src/Namotion.Interceptor.slnx
 git diff --check origin/master...HEAD
 ```
 
-- [ ] Audit every framework lock for forbidden callouts and request independent correctness and deletion reviews.
-- [ ] Update lifecycle docs with final-value freeze, faithful terminal contract, lock order, temporary roots, callbacks, Dynamic/manual requirements, and direct mutable-collection limitation.
+- [x] Audit every framework lock for forbidden callouts and request independent correctness and deletion reviews.
+- [ ] Update public lifecycle docs with final-value freeze, faithful terminal contract, lock order, temporary roots, callbacks, Dynamic/manual requirements, and direct mutable-collection limitation after the maintainer selects this comparison candidate for integration.
 - [ ] Commit only after all required checks pass.
 
 ```bash

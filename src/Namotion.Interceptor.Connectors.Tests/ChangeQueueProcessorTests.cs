@@ -377,11 +377,13 @@ public class ChangeQueueProcessorTests
 
         // Act
         var property = new PropertyReference(subject, nameof(Person.FirstName));
-        EnqueueChange(processor, property, "Committed1", "Committed2", revision: 2);
-        EnqueueChange(processor, property, "Committed0", "Committed1", revision: 1);
-
-        // The higher revision is the committed state, whichever order they were enqueued in.
+        subject.FirstName = "Committed1";
+        Assert.True(property.TryGetWriteState(true, out var olderRevision, out _));
         subject.FirstName = "Committed2";
+        Assert.True(property.TryGetWriteState(true, out var newerRevision, out _));
+
+        EnqueueChange(processor, property, "Committed1", "Committed2", revision: newerRevision);
+        EnqueueChange(processor, property, "Committed0", "Committed1", revision: olderRevision);
 
         await TriggerFlushAsync(processor);
 
@@ -392,7 +394,7 @@ public class ChangeQueueProcessorTests
         var change = Assert.Single(writtenChanges);
         Assert.Equal("Committed0", change.GetOldValue<string>());
         Assert.Equal("Committed2", change.GetNewValue<string>());
-        Assert.Equal(2, change.Revision);
+        Assert.Equal(newerRevision, change.Revision);
     }
 
     [Fact]

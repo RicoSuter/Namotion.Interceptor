@@ -258,10 +258,11 @@ public class StructuralWriteTests
     }
 
     [Fact]
-    public void WhenAttachmentChangesDuringScalarWrite_ThenTheWriteDoesNotThrow()
+    public void WhenAttachmentChangesInsideScalarWrite_ThenTransitionRetriesBeforeTerminal()
     {
-        // Arrange: same mid-chain transition as the structural test, but through the scalar route,
-        // which must not pay for or react to attachment changes.
+        // Arrange: a scalar chain cannot publish an attachment transition before its own terminal.
+        // Otherwise the remainder of the chain would execute against a context that no longer owns
+        // the subject, and lifecycle consumers could observe the scalar write during publication.
         var transitioning = new AttachmentTransitionInterceptor();
         var context = InterceptorSubjectContext.Create();
         context.AddService(transitioning);
@@ -274,8 +275,9 @@ public class StructuralWriteTests
 
         // Assert
         Assert.Equal(42, subject.Speed);
-        Assert.True(transitioning.TransitionSucceeded);
-        Assert.False(transitioning.ConflictObserved);
+        Assert.False(transitioning.TransitionSucceeded);
+        Assert.True(transitioning.ConflictObserved);
+        Assert.Same(context, executor.AttachedContext);
     }
 
     [Fact]

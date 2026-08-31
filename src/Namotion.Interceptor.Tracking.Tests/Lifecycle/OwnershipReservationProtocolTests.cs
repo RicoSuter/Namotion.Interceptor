@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Reflection;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -40,13 +41,57 @@ public class OwnershipReservationProtocolTests
         public override void WriteLine(string? message) => Messages.Add(message ?? string.Empty);
     }
 
-    private sealed class ThrowingTraceListener : TraceListener
+    private sealed class AlwaysAdmittedWriteCommitGuard : IWriteCommitGuard
     {
-        public override void Write(string? message) =>
-            throw new InvalidOperationException("trace listener failed");
+        public bool TryEnter() => true;
 
-        public override void WriteLine(string? message) =>
-            throw new InvalidOperationException("trace listener failed");
+        public void Exit()
+        {
+        }
+
+        public bool TryDefer() => false;
+
+        public void Resume()
+        {
+        }
+    }
+
+    private sealed class BlockingScalarWriteInterceptor : IWriteInterceptor, IDisposable
+    {
+        private IInterceptorSubject? _subject;
+        private string? _propertyName;
+        private int _isArmed;
+
+        internal ManualResetEventSlim WriteEntered { get; } = new(false);
+        internal ManualResetEventSlim ContinueWrite { get; } = new(false);
+
+        internal void Arm(IInterceptorSubject subject, string propertyName)
+        {
+            _subject = subject;
+            _propertyName = propertyName;
+            Volatile.Write(ref _isArmed, 1);
+        }
+
+        public void WriteProperty<TProperty>(
+            ref PropertyWriteContext<TProperty> context,
+            WriteInterceptionDelegate<TProperty> next)
+        {
+            if (ReferenceEquals(context.Property.Subject, _subject) &&
+                context.Property.Name == _propertyName &&
+                Interlocked.Exchange(ref _isArmed, 0) == 1)
+            {
+                WriteEntered.Set();
+                WaitFor(ContinueWrite, "the scalar callback write to resume");
+            }
+
+            next(ref context);
+        }
+
+        public void Dispose()
+        {
+            WriteEntered.Dispose();
+            ContinueWrite.Dispose();
+        }
     }
 
     [RunsAfter(typeof(LifecycleInterceptor))]
@@ -79,6 +124,39 @@ public class OwnershipReservationProtocolTests
         {
             throw new TimeoutException($"Timed out waiting for {phase}.");
         }
+    }
+
+    [Fact]
+    public void WhenExclusiveReservationOwnsSubject_ThenScalarWriteRejectsBeforeInterceptorsRun()
+    {
+        // Arrange
+        var interceptorCalls = 0;
+        var isArmed = false;
+        var observer = new ReservationVisibilityInterceptor(() =>
+        {
+            if (isArmed)
+            {
+                Interlocked.Increment(ref interceptorCalls);
+            }
+        });
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => observer, _ => false);
+        var subject = new Person(context) { FirstName = "before" };
+        var executor = (InterceptorExecutor)((IInterceptorSubject)subject).Executor;
+        using var reservation = GetGraph(context).ReserveForStructuralWrite(
+            executor,
+            ReservationMode.Exclusive);
+        isArmed = true;
+
+        // Act
+        var exception = Record.Exception(() => subject.FirstName = "after");
+
+        // Assert
+        Assert.IsType<LifecycleConflictException>(exception);
+        Assert.Equal(0, interceptorCalls);
+        Assert.Equal("before", subject.FirstName);
     }
 
     [Fact]
@@ -422,6 +500,7 @@ public class OwnershipReservationProtocolTests
         var firstForeignAttempted = new ManualResetEventSlim(false);
         var firstReleased = new ManualResetEventSlim(false);
         var secondForeignAttempted = new ManualResetEventSlim(false);
+        var secondWriteCompleted = new ManualResetEventSlim(false);
         Exception? firstReservationException = null;
         Exception? secondReservationException = null;
         Exception? foreignWorkerException = null;
@@ -443,6 +522,9 @@ public class OwnershipReservationProtocolTests
                 reservation = null;
                 firstReleased.Set();
                 WaitFor(secondForeignAttempted, "the second foreign attempt");
+                // The reservation handoff is the race under test. Concurrent attachment
+                // publication may reject one writer at its documented non-stable boundary.
+                WaitFor(secondWriteCompleted, "the second structural write");
                 firstParent.Father = child;
             }
             catch (Exception exception)
@@ -472,6 +554,7 @@ public class OwnershipReservationProtocolTests
                 secondReserved.Set();
                 WaitFor(secondForeignAttempted, "the second foreign attempt");
                 secondParent.Mother = child;
+                secondWriteCompleted.Set();
             }
             catch (Exception exception)
             {
@@ -485,6 +568,7 @@ public class OwnershipReservationProtocolTests
                 }
 
                 secondReserved.Set();
+                secondWriteCompleted.Set();
             }
         }) { IsBackground = true };
 
@@ -565,6 +649,303 @@ public class OwnershipReservationProtocolTests
         }
 
         Assert.Null(child.TryGetContext());
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenAttachedScalarWriteIsActive_ThenSharedReservationCanOverlapIt()
+    {
+        // Arrange
+        using var blocker = new BlockingScalarWriteInterceptor();
+        var context = CreateContext()
+            .WithService(() => blocker, _ => false);
+        var graph = GetGraph(context);
+        var subject = new Person(context) { FirstName = "initial" };
+        var executor = (InterceptorExecutor)((IInterceptorSubject)subject).Executor;
+        blocker.Arm(subject, nameof(Person.FirstName));
+        Exception? writerException = null;
+        var writer = new Thread(
+            () => writerException = Record.Exception(() => subject.FirstName = "updated"))
+        {
+            IsBackground = true
+        };
+
+        // Act
+        writer.Start();
+        WaitFor(blocker.WriteEntered, "the attached scalar interceptor");
+        IDisposable? reservation = null;
+        var reservationException = Record.Exception(
+            () => reservation = graph.ReserveForStructuralWrite(executor));
+        blocker.ContinueWrite.Set();
+        var writerCompleted = writer.Join(WriteProtocolAcceptance.RendezvousTimeout);
+        reservation?.Dispose();
+
+        // Assert
+        Assert.True(writerCompleted, "the scalar writer did not complete");
+        Assert.Null(writerException);
+        Assert.Null(reservationException);
+        Assert.Equal("updated", subject.FirstName);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenDeferredSweepMeetsScalarRawCommit_ThenOrphanStillDetachesAfterCommit()
+    {
+        // Arrange
+        var context = CreateContext();
+        var graph = GetGraph(context);
+        var root = new Person(context) { FirstName = "root" };
+        var child = new Person { FirstName = "child" };
+        root.Father = child;
+        var executor = (InterceptorExecutor)((IInterceptorSubject)child).Executor;
+        var reservation = graph.ReserveForStructuralWrite(executor);
+        root.Father = null;
+        var rawCommitEntered = new ManualResetEventSlim(false);
+        var continueRawCommit = new ManualResetEventSlim(false);
+        Exception? writerException = null;
+        var writer = new Thread(() =>
+        {
+            writerException = Record.Exception(() => executor.SetPropertyValue(
+                nameof(Person.FirstName),
+                "updated",
+                child.FirstName,
+                (_, _) =>
+                {
+                    rawCommitEntered.Set();
+                    WaitFor(continueRawCommit, "the scalar raw commit to resume");
+                }));
+        }) { IsBackground = true };
+
+        // Act
+        writer.Start();
+        WaitFor(rawCommitEntered, "the scalar raw commit");
+        Exception? completionException;
+        try
+        {
+            completionException = Record.Exception(() => graph.ReleaseUnusedReservation(reservation));
+        }
+        finally
+        {
+            continueRawCommit.Set();
+        }
+
+        var writerCompleted = writer.Join(WriteProtocolAcceptance.RendezvousTimeout);
+
+        // Assert
+        Assert.True(writerCompleted, "the scalar writer never finished");
+        Assert.Null(writerException);
+        Assert.Null(completionException);
+        Assert.Null(child.TryGetContext());
+        Assert.False(graph.IsOwned(child));
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenDeferredSweepMeetsDerivedNotificationRawCommit_ThenOrphanStillDetachesAfterCommit()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+        var graph = GetGraph(context);
+        var root = new Person(context) { FirstName = "root" };
+        var child = new Person { FirstName = "child" };
+        root.Father = child;
+        var executor = (InterceptorExecutor)((IInterceptorSubject)child).Executor;
+        var reservation = graph.ReserveForStructuralWrite(executor);
+        root.Father = null;
+        var rawCommitEntered = new ManualResetEventSlim(false);
+        var continueRawCommit = new ManualResetEventSlim(false);
+        Exception? writerException = null;
+        var writer = new Thread(() =>
+        {
+            writerException = Record.Exception(() => executor.SetDeferredPropertyValue(
+                nameof(Person.FullName),
+                child.FullName,
+                "previous derived value",
+                (_, _) =>
+                {
+                    rawCommitEntered.Set();
+                    WaitFor(continueRawCommit, "the derived notification raw commit to resume");
+                },
+                DateTimeOffset.UtcNow.Ticks,
+                new AlwaysAdmittedWriteCommitGuard()));
+        }) { IsBackground = true };
+
+        // Act
+        writer.Start();
+        WaitFor(rawCommitEntered, "the derived notification raw commit");
+        Exception? completionException;
+        try
+        {
+            completionException = Record.Exception(() => graph.ReleaseUnusedReservation(reservation));
+        }
+        finally
+        {
+            continueRawCommit.Set();
+        }
+
+        var writerCompleted = writer.Join(WriteProtocolAcceptance.RendezvousTimeout);
+
+        // Assert
+        Assert.True(writerCompleted, "the derived notification writer never finished");
+        Assert.Null(writerException);
+        Assert.Null(completionException);
+        Assert.Null(child.TryGetContext());
+        Assert.False(graph.IsOwned(child));
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public async Task WhenSameContextCallbackCompletesScalarWriteDuringDeferredSweep_ThenCallbacksDoNotNestAndOrphanDetaches()
+    {
+        // Arrange
+        using var blocker = new BlockingScalarWriteInterceptor();
+        using var callbackDepth = new ThreadLocal<int>(() => 0);
+        using var childDetached = new ManualResetEventSlim(false);
+        Person? child = null;
+        Person? trigger = null;
+        var nestedCallbackCount = 0;
+        var handler = new DelegateLifecycleHandler(change =>
+        {
+            if (callbackDepth.Value != 0)
+            {
+                Interlocked.Increment(ref nestedCallbackCount);
+            }
+
+            callbackDepth.Value++;
+            try
+            {
+                if (change.IsContextAttach && ReferenceEquals(change.Subject, trigger))
+                {
+                    child!.FirstName = "updated";
+                }
+
+                if (change.IsContextDetach && ReferenceEquals(change.Subject, child))
+                {
+                    childDetached.Set();
+                }
+            }
+            finally
+            {
+                callbackDepth.Value--;
+            }
+        });
+        var context = CreateContext()
+            .WithService(() => blocker, _ => false)
+            .WithService(() => handler, _ => false);
+        var graph = GetGraph(context);
+        var root = new Person(context) { FirstName = "root" };
+        child = new Person { FirstName = "child" };
+        root.Father = child;
+        var reservation = graph.ReserveForStructuralWrite(
+            (InterceptorExecutor)((IInterceptorSubject)child).Executor);
+        root.Father = null;
+        trigger = new Person { FirstName = "trigger" };
+        blocker.Arm(child, nameof(Person.FirstName));
+        Exception? triggerException = null;
+        var triggerThread = new Thread(
+            () => triggerException = Record.Exception(() => trigger.AttachToContext(context)))
+        {
+            IsBackground = true
+        };
+
+        // Act
+        triggerThread.Start();
+        WaitFor(blocker.WriteEntered, "the same-context callback scalar write");
+        var completionException = Record.Exception(() => graph.ReleaseUnusedReservation(reservation));
+        try
+        {
+            Assert.Same(context, child.TryGetContext());
+        }
+        finally
+        {
+            blocker.ContinueWrite.Set();
+        }
+
+        var triggerCompleted = triggerThread.Join(WriteProtocolAcceptance.RendezvousTimeout);
+        WaitFor(childDetached, "the asynchronous same-context deferred sweep");
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => child.TryGetContext() is null,
+            timeout: WriteProtocolAcceptance.RendezvousTimeout,
+            message: "the same-context deferred sweep did not finalize the orphan");
+
+        // Assert
+        Assert.True(triggerCompleted, "the callback-triggering attach did not complete");
+        Assert.Null(triggerException);
+        Assert.Null(completionException);
+        Assert.Equal(0, Volatile.Read(ref nestedCallbackCount));
+        Assert.False(graph.IsOwned(child));
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public async Task WhenForeignContextCallbackCompletesScalarWriteDuringDeferredSweep_ThenOriginContextEventuallySweeps()
+    {
+        // Arrange
+        using var blocker = new BlockingScalarWriteInterceptor();
+        using var childDetached = new ManualResetEventSlim(false);
+        var firstContext = CreateContext()
+            .WithService(() => blocker, _ => false);
+        var firstGraph = GetGraph(firstContext);
+        var firstRoot = new Person(firstContext) { FirstName = "root" };
+        var child = new Person { FirstName = "child" };
+        firstRoot.Father = child;
+        var reservation = firstGraph.ReserveForStructuralWrite(
+            (InterceptorExecutor)((IInterceptorSubject)child).Executor);
+        firstRoot.Father = null;
+        firstContext.TryGetLifecycleInterceptor()!.SubjectDetaching += change =>
+        {
+            if (change.IsContextDetach && ReferenceEquals(change.Subject, child))
+            {
+                childDetached.Set();
+            }
+        };
+
+        Person? foreignTrigger = null;
+        var foreignHandler = new DelegateLifecycleHandler(change =>
+        {
+            if (change.IsContextAttach && ReferenceEquals(change.Subject, foreignTrigger))
+            {
+                child.FirstName = "updated";
+            }
+        });
+        var foreignContext = CreateContext()
+            .WithService(() => foreignHandler, _ => false);
+        foreignTrigger = new Person { FirstName = "trigger" };
+        blocker.Arm(child, nameof(Person.FirstName));
+        Exception? triggerException = null;
+        var triggerThread = new Thread(
+            () => triggerException = Record.Exception(() => foreignTrigger.AttachToContext(foreignContext)))
+        {
+            IsBackground = true
+        };
+
+        // Act
+        triggerThread.Start();
+        WaitFor(blocker.WriteEntered, "the foreign-context callback scalar write");
+        var completionException = Record.Exception(() => firstGraph.ReleaseUnusedReservation(reservation));
+        try
+        {
+            Assert.Same(firstContext, child.TryGetContext());
+        }
+        finally
+        {
+            blocker.ContinueWrite.Set();
+        }
+
+        var triggerCompleted = triggerThread.Join(WriteProtocolAcceptance.RendezvousTimeout);
+        WaitFor(childDetached, "the asynchronous foreign-context deferred sweep");
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => child.TryGetContext() is null,
+            timeout: WriteProtocolAcceptance.RendezvousTimeout,
+            message: "the foreign-context deferred sweep did not finalize the orphan");
+
+        // Assert
+        Assert.True(triggerCompleted, "the foreign callback-triggering attach did not complete");
+        Assert.Null(triggerException);
+        Assert.Null(completionException);
+        Assert.False(firstGraph.IsOwned(child));
     }
 
     [Fact]
@@ -803,34 +1184,6 @@ public class OwnershipReservationProtocolTests
         }
     }
 
-    [Fact]
-    public void WhenWithheldRecalculationAndTraceListenerThrow_ThenDiagnosticDrainDoesNotThrow()
-    {
-        // Arrange: this directly exercises the Task 6 compatibility drain. Its diagnostics are a
-        // no-throw boundary even when both the deferred recalculation and Trace infrastructure fail.
-        var context = CreateContext();
-        var lifecycle = context.TryGetLifecycleInterceptor()!;
-        var flags = BindingFlags.Instance | BindingFlags.NonPublic;
-        typeof(LifecycleInterceptor).GetField("_withheldRecalculations", flags)!.SetValue(
-            lifecycle,
-            new List<Action> { () => throw new InvalidOperationException("recalculation failed") });
-        var drain = typeof(LifecycleInterceptor).GetMethod("RunWithheldRecalculations", flags)!;
-        var listener = new ThrowingTraceListener();
-        Trace.Listeners.Add(listener);
-
-        try
-        {
-            // Act
-            var exception = Record.Exception(() => drain.Invoke(lifecycle, null));
-
-            // Assert
-            Assert.Null(exception);
-        }
-        finally
-        {
-            Trace.Listeners.Remove(listener);
-        }
-    }
 }
 
 [CollectionDefinition(Name, DisableParallelization = true)]

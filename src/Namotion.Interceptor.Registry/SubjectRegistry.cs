@@ -19,7 +19,8 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 {
     private sealed class ProjectionRevision
     {
-        internal long Value;
+        internal long Attachment;
+        internal long Parents;
     }
 
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects =
@@ -130,14 +131,39 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
         lock (_knownSubjects)
         {
             var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
-            if (TryAdvanceSubject(change.Subject, change.Revision))
+            if (registeredSubject is null &&
+                change.IsPropertyReferenceAdded &&
+                change.Context is not null &&
+                IsNewerThanSubjectProjection(change.Subject, change.Revision))
             {
+                registeredSubject = CreateProvisionalSubjectLocked(
+                    change.Subject,
+                    change.Context,
+                    properties,
+                    change.Parents,
+                    change.Revision);
+            }
+
+            var attachmentAdvanced = false;
+            if ((change.IsContextAttach || change.IsContextDetach) &&
+                TryAdvanceAttachment(change.Subject, change.Revision))
+            {
+                attachmentAdvanced = true;
                 if (change.IsContextAttach)
                 {
-                    registeredSubject = new RegisteredSubject(
-                        change.Subject, properties, change.Context, change.Revision);
-                    _knownSubjects[change.Subject] = registeredSubject;
-                    Volatile.Write(ref _knownSubjectsSnapshot, null);
+                    if (registeredSubject is { AttachmentRevision: 0 } &&
+                        ReferenceEquals(registeredSubject.Context, change.Context))
+                    {
+                        registeredSubject.CompleteAttachment(change.Revision);
+                    }
+                    else
+                    {
+                        registeredSubject = new RegisteredSubject(
+                            change.Subject, properties, change.Context, change.Revision);
+                        _knownSubjects[change.Subject] = registeredSubject;
+                        Volatile.Write(ref _knownSubjectsSnapshot, null);
+                    }
+
                     if (subjectId is not null &&
                         (!_subjectIdToSubject.TryGetValue(subjectId, out var existing) ||
                          ReferenceEquals(existing, change.Subject)))
@@ -159,11 +185,17 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                             _subjectIdToSubject.Remove(subjectId);
                         }
                     }
-                    else
-                    {
-                        registeredSubject.ApplyProjection(properties, ResolveParents(change.Parents));
-                    }
                 }
+            }
+
+            if ((!change.IsContextAttach && !change.IsContextDetach || attachmentAdvanced && !change.IsContextDetach) &&
+                registeredSubject is not null &&
+                ReferenceEquals(registeredSubject.Context, change.Context) &&
+                TryAdvanceParents(change.Subject, change.Revision))
+            {
+                registeredSubject.ApplyProjection(
+                    properties,
+                    ResolveParents(change.Parents, ignoreDetachedParents: change.IsPropertyReferenceRemoved));
             }
 
             if (change.Property is { } parentProperty &&
@@ -177,9 +209,35 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     void IPropertyLifecycleHandler.AttachProperty(SubjectPropertyLifecycleChange change)
     {
         var projection = RegisteredSubject.CaptureProperty(change.Metadata);
+        var needsProvisionalSubject = false;
+        lock (_knownSubjects)
+        {
+            needsProvisionalSubject = _knownSubjects.GetValueOrDefault(change.Subject) is null;
+        }
+
+        var provisionalProperties = needsProvisionalSubject
+            ? RegisteredSubject.CaptureProperties([.. change.Subject.Properties.Values])
+            : [];
+        var provisionalParents = needsProvisionalSubject
+            ? change.Subject.GetParents()
+            : [];
+
         RegisteredSubjectProperty? property;
         lock (_knownSubjects)
         {
+            if (_knownSubjects.GetValueOrDefault(change.Subject) is null &&
+                needsProvisionalSubject &&
+                change.Context is not null &&
+                IsNewerThanSubjectProjection(change.Subject, change.Revision))
+            {
+                CreateProvisionalSubjectLocked(
+                    change.Subject,
+                    change.Context,
+                    provisionalProperties,
+                    provisionalParents,
+                    change.Revision);
+            }
+
             property = ApplyPropertyProjection(change, projection);
         }
 
@@ -233,7 +291,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
             var child = _knownSubjects.GetValueOrDefault(childProjection.Subject);
             if (child is not null &&
                 ReferenceEquals(child.Context, change.Context) &&
-                TryAdvanceSubject(childProjection.Subject, change.Revision))
+                TryAdvanceParents(childProjection.Subject, change.Revision))
             {
                 child.ReplaceParents(ResolveParents(childProjection.Parents));
             }
@@ -285,19 +343,63 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
         }
     }
 
-    private bool TryAdvanceSubject(IInterceptorSubject subject, long revision)
+    private bool TryAdvanceAttachment(IInterceptorSubject subject, long revision)
     {
         var projection = _subjectRevisions.GetValue(subject, static _ => new ProjectionRevision());
-        if (revision <= projection.Value)
+        if (revision <= projection.Attachment)
         {
             return false;
         }
 
-        projection.Value = revision;
+        projection.Attachment = revision;
         return true;
     }
 
-    private ImmutableArray<SubjectPropertyParent> ResolveParents(ImmutableArray<SubjectParent> parents)
+    private RegisteredSubject CreateProvisionalSubjectLocked(
+        IInterceptorSubject subject,
+        IInterceptorSubjectContext context,
+        ImmutableArray<RegisteredSubject.PropertyProjection> properties,
+        ImmutableArray<SubjectParent> parents,
+        long revision)
+    {
+        var provisionalSubject = new RegisteredSubject(subject, properties, context, 0);
+        _knownSubjects[subject] = provisionalSubject;
+        Volatile.Write(ref _knownSubjectsSnapshot, null);
+        try
+        {
+            provisionalSubject.ApplyProjection(properties, ResolveParents(parents));
+            TryAdvanceParents(subject, revision);
+            return provisionalSubject;
+        }
+        catch
+        {
+            _knownSubjects.Remove(subject);
+            Volatile.Write(ref _knownSubjectsSnapshot, null);
+            throw;
+        }
+    }
+
+    private bool TryAdvanceParents(IInterceptorSubject subject, long revision)
+    {
+        var projection = _subjectRevisions.GetValue(subject, static _ => new ProjectionRevision());
+        if (revision <= projection.Parents)
+        {
+            return false;
+        }
+
+        projection.Parents = revision;
+        return true;
+    }
+
+    private bool IsNewerThanSubjectProjection(IInterceptorSubject subject, long revision)
+    {
+        var projection = _subjectRevisions.GetValue(subject, static _ => new ProjectionRevision());
+        return revision > projection.Attachment;
+    }
+
+    private ImmutableArray<SubjectPropertyParent> ResolveParents(
+        ImmutableArray<SubjectParent> parents,
+        bool ignoreDetachedParents = false)
     {
         if (parents.IsEmpty)
         {
@@ -307,12 +409,23 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
         var projection = ImmutableArray.CreateBuilder<SubjectPropertyParent>(parents.Length);
         foreach (var parent in parents)
         {
-            var property = TryGetRegisteredPropertyLocked(parent.Property) ??
+            var property = TryGetRegisteredPropertyLocked(parent.Property);
+            if (property is null)
+            {
+                if (ignoreDetachedParents && !_knownSubjects.ContainsKey(parent.Property.Subject))
+                {
+                    continue;
+                }
+
                 throw new InvalidOperationException($"Property '{parent.Property.Name}' is not registered.");
+            }
+
             projection.Add(new SubjectPropertyParent { Property = property, Index = parent.Index });
         }
 
-        return projection.MoveToImmutable();
+        return ignoreDetachedParents
+            ? projection.ToImmutable()
+            : projection.MoveToImmutable();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -223,6 +223,95 @@ public class TerminalBoundaryCoordinatorTests
     }
 
     [Fact]
+    public void WhenProjectionRevisionIsExhaustedDuringAdmission_ThenMetadataPublisherIsNotInvoked()
+    {
+        // Arrange
+        var revisionField = typeof(LifecycleNotifier).GetField(
+            "_projectionRevision", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var previousRevision = (long)revisionField.GetValue(null)!;
+        var context = CreateContext();
+        IInterceptorSubject subject = new Person(context);
+        var publisherCalls = 0;
+        var registration = new SubjectPropertyRegistration(
+            subject,
+            [new SubjectPropertyMetadata(
+                "Late", typeof(string), [], _ => "value", null,
+                isIntercepted: true, isDynamic: true)],
+            _ => publisherCalls++);
+        revisionField.SetValue(null, long.MaxValue);
+
+        try
+        {
+            // Act
+            var exception = Record.Exception(() => subject.Executor.AddProperties(registration));
+
+            // Assert
+            Assert.IsType<InvalidOperationException>(exception);
+            Assert.Equal(0, publisherCalls);
+        }
+        finally
+        {
+            revisionField.SetValue(null, previousRevision);
+        }
+    }
+
+    [Fact]
+    public void WhenChildAttachmentRevisionIsExhaustedDuringAdmission_ThenMetadataPublisherIsNotInvoked()
+    {
+        // Arrange
+        var context = CreateContext();
+        IInterceptorSubject subject = new Person(context);
+        IInterceptorSubject child = new Person();
+        var childExecutor = (InterceptorExecutor)child.Executor;
+        typeof(InterceptorExecutor).GetField("_attachment", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(childExecutor, new InterceptorExecutor.AttachmentState(
+                null, SubjectAttachmentAnchorKind.None, long.MaxValue, AttachmentPhase.Stable));
+        var publisherCalls = 0;
+        var registration = new SubjectPropertyRegistration(
+            subject,
+            [new SubjectPropertyMetadata(
+                "LateChild", typeof(IInterceptorSubject), [], _ => child, null,
+                isIntercepted: true, isDynamic: true)],
+            _ => publisherCalls++);
+
+        // Act
+        var exception = Record.Exception(() => subject.Executor.AddProperties(registration));
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.Equal(0, publisherCalls);
+        Assert.Null(child.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenRootAttachmentRevisionIsExhaustedDuringAdmission_ThenMetadataPublisherIsNotInvoked()
+    {
+        // Arrange
+        var context = CreateContext();
+        IInterceptorSubject subject = new Person(context);
+        var executor = (InterceptorExecutor)subject.Executor;
+        typeof(InterceptorExecutor).GetField("_attachment", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(executor, new InterceptorExecutor.AttachmentState(
+                (InterceptorSubjectContext)context, SubjectAttachmentAnchorKind.Explicit,
+                long.MaxValue, AttachmentPhase.Stable));
+        var publisherCalls = 0;
+        var registration = new SubjectPropertyRegistration(
+            subject,
+            [new SubjectPropertyMetadata(
+                "Late", typeof(string), [], _ => "value", null,
+                isIntercepted: true, isDynamic: true)],
+            _ => publisherCalls++);
+
+        // Act
+        var exception = Record.Exception(() => subject.Executor.AddProperties(registration));
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.Equal(0, publisherCalls);
+        Assert.Same(context, subject.TryGetContext());
+    }
+
+    [Fact]
     public void WhenDownstreamInterceptorThrowsAfterTerminal_ThenCommittedJournalStillDrains()
     {
         // Arrange

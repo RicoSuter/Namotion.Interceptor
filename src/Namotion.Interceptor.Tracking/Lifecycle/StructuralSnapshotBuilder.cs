@@ -148,7 +148,7 @@ internal static class StructuralSnapshotBuilder
         OwnershipGraph.GraphState graphState,
         HashSet<IInterceptorSubject> visited,
         Dictionary<PropertyReference, StructuralSnapshot> snapshots,
-        Dictionary<IInterceptorSubject, CapturedSubjectProperties> subjectProperties)
+        Dictionary<IInterceptorSubject, ImmutableArray<SubjectPropertyMetadata>> subjectProperties)
     {
         var pending = LifecycleScratch.RentSubjectStack();
         foreach (var occurrence in roots.Occurrences)
@@ -165,7 +165,7 @@ internal static class StructuralSnapshotBuilder
         OwnershipGraph.GraphState graphState,
         HashSet<IInterceptorSubject> visited,
         Dictionary<PropertyReference, StructuralSnapshot> snapshots,
-        Dictionary<IInterceptorSubject, CapturedSubjectProperties> subjectProperties)
+        Dictionary<IInterceptorSubject, ImmutableArray<SubjectPropertyMetadata>> subjectProperties)
     {
         var pending = LifecycleScratch.RentSubjectStack();
         pending.Push(root);
@@ -182,7 +182,9 @@ internal static class StructuralSnapshotBuilder
         var properties = subject.Properties;
         if (!executor.IsCaptureRevisionCurrent(captureRevision))
         {
-            throw LifecycleConflictException.Retryable(subject);
+            throw executor.IsTransientCaptureConflict()
+                ? LifecycleConflictException.TransientCapture(subject)
+                : LifecycleConflictException.Retryable(subject);
         }
 
         executor.TryGetAttachment(out var attachmentContext, out _, out var attachmentRevision);
@@ -197,7 +199,7 @@ internal static class StructuralSnapshotBuilder
         OwnershipGraph.GraphState graphState,
         HashSet<IInterceptorSubject> visited,
         Dictionary<PropertyReference, StructuralSnapshot> snapshots,
-        Dictionary<IInterceptorSubject, CapturedSubjectProperties> subjectProperties,
+        Dictionary<IInterceptorSubject, ImmutableArray<SubjectPropertyMetadata>> subjectProperties,
         Stack<IInterceptorSubject> pending)
     {
         var participants = ImmutableArray.CreateBuilder<CaptureParticipant>();
@@ -222,19 +224,14 @@ internal static class StructuralSnapshotBuilder
 
                 if (participant.Ownership is { } ownership)
                 {
-                    subjectProperties.TryAdd(subject,
-                        new CapturedSubjectProperties(
-                            ownership.PropertyNames, ownership.Properties,
-                            ownership.LifecycleHandler, ownership.PropertyHandler));
+                    subjectProperties.TryAdd(subject, ownership.Properties);
                     participants.Add(participant);
                     continue;
                 }
 
-                var names = ImmutableArray.CreateBuilder<string>(participant.Properties.Count);
                 var metadata = ImmutableArray.CreateBuilder<SubjectPropertyMetadata>(participant.Properties.Count);
                 foreach (var entry in participant.Properties)
                 {
-                    names.Add(entry.Key);
                     metadata.Add(entry.Value);
                     if (!OwnershipGraph.IsStructural(entry.Value))
                     {
@@ -251,12 +248,10 @@ internal static class StructuralSnapshotBuilder
 
                 if (participant.Executor.CurrentRevision != participant.Revision)
                 {
-                    throw LifecycleConflictException.Retryable(subject);
+                    throw LifecycleConflictException.TransientCapture(subject);
                 }
 
-                subjectProperties.Add(subject, new CapturedSubjectProperties(
-                    names.MoveToImmutable(), metadata.MoveToImmutable(),
-                    subject as ILifecycleHandler, subject as IPropertyLifecycleHandler));
+                subjectProperties.Add(subject, metadata.MoveToImmutable());
                 participants.Add(participant);
             }
 

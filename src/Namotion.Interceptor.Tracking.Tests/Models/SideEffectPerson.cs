@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Tracking.Tests.Models;
@@ -47,6 +48,10 @@ public partial class SideEffectPerson
         }
         catch (LifecycleContractViolationException)
         {
+        }
+        catch (LifecycleConflictException)
+        {
+            // Prompt conflict is allowed while another thread detaches or reattaches this subject.
         }
 
         return $"Hello, {Name}";

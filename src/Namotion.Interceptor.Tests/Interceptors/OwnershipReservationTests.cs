@@ -23,8 +23,7 @@ public class OwnershipReservationTests
 
         public OwnershipReservationToken AcquireOwnershipReservation(
             InterceptorExecutor executor,
-            ReservationMode mode,
-            bool joinExclusive) =>
+            ReservationMode mode) =>
             throw new NotSupportedException();
 
         public void CompleteOwnershipReservation(
@@ -179,55 +178,6 @@ public class OwnershipReservationTests
     }
 
     [Fact]
-    public void WhenExclusiveReservationOwnsAttachmentTransition_ThenItsTokenCanCommit()
-    {
-        // Arrange
-        var (_, executor) = CreateSubject();
-        var context = CreateContext();
-        using var reservation = executor.TryAcquireOwnershipReservation(context, ReservationMode.Exclusive);
-
-        // Act
-        var success = reservation.TryUpdateAttachment(
-            0,
-            context,
-            SubjectAttachmentAnchorKind.Explicit,
-            out var revision);
-
-        // Assert
-        Assert.True(success);
-        Assert.Equal(1, revision);
-        Assert.Same(context, executor.AttachedContext);
-        Assert.Equal(SubjectAttachmentAnchorKind.Explicit, executor.AttachmentAnchor);
-    }
-
-    [Fact]
-    public void WhenProvisionalAttachmentIsReservedExclusively_ThenItsTokenCanPromoteItToExplicit()
-    {
-        // Arrange
-        var (_, executor) = CreateSubject();
-        var context = CreateContext();
-        Assert.True(executor.TryUpdateAttachment(
-            0,
-            context,
-            SubjectAttachmentAnchorKind.Provisional,
-            out var provisionalRevision));
-        using var reservation = executor.TryAcquireOwnershipReservation(context, ReservationMode.Exclusive);
-
-        // Act
-        var success = reservation.TryUpdateAttachment(
-            provisionalRevision,
-            context,
-            SubjectAttachmentAnchorKind.Explicit,
-            out var explicitRevision);
-
-        // Assert
-        Assert.True(success);
-        Assert.Equal(provisionalRevision + 1, explicitRevision);
-        Assert.Same(context, executor.AttachedContext);
-        Assert.Equal(SubjectAttachmentAnchorKind.Explicit, executor.AttachmentAnchor);
-    }
-
-    [Fact]
     public void WhenDetachedSubjectIsReserved_ThenReservationContextRemainsInvisible()
     {
         // Arrange
@@ -244,31 +194,6 @@ public class OwnershipReservationTests
         Assert.Null(attachedContext);
         Assert.Equal(SubjectAttachmentAnchorKind.None, anchor);
         Assert.Equal(0, revision);
-    }
-
-    [Fact]
-    public void WhenSharedReservationCommitsAttachment_ThenParticipantDisposalDoesNotDetachIt()
-    {
-        // Arrange
-        var (_, executor) = CreateSubject();
-        var context = CreateContext();
-        var first = executor.TryAcquireOwnershipReservation(context, ReservationMode.Shared);
-        var second = executor.TryAcquireOwnershipReservation(context, ReservationMode.Shared);
-
-        // Act
-        Assert.True(first.TryUpdateAttachment(
-            0,
-            context,
-            SubjectAttachmentAnchorKind.None,
-            out var revision));
-        first.Dispose();
-        second.Dispose();
-
-        // Assert
-        Assert.Same(context, executor.AttachedContext);
-        Assert.Equal(SubjectAttachmentAnchorKind.None, executor.AttachmentAnchor);
-        Assert.Equal(1, revision);
-        Assert.Equal(0, first.Reservation.ParticipantCount);
     }
 
     [Fact]
@@ -301,8 +226,7 @@ public class OwnershipReservationTests
             context,
             SubjectAttachmentAnchorKind.None,
             long.MaxValue,
-            AttachmentPhase.Stable,
-            0));
+            AttachmentPhase.Stable));
         var reservation = executor.TryAcquireOwnershipReservation(context, ReservationMode.Shared);
 
         // Act
@@ -324,8 +248,7 @@ public class OwnershipReservationTests
             context,
             SubjectAttachmentAnchorKind.None,
             long.MaxValue - 1,
-            AttachmentPhase.Stable,
-            0));
+            AttachmentPhase.Stable));
 
         var cleanupException = Record.Exception(() =>
             reservation.Complete(retainCommittedOwnership: false));

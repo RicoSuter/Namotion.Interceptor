@@ -11,6 +11,14 @@ namespace Namotion.Interceptor.Interceptors;
 /// <summary>The built-in per-subject executor, terminal, revision owner, and attachment authority.</summary>
 public sealed class InterceptorExecutor : IInterceptorExecutor
 {
+    private enum CaptureMutationKind
+    {
+        None,
+        RawWrite,
+        MetadataPublication,
+        FinalDetachment
+    }
+
     [ThreadStatic]
     private static InterceptorSubjectContext? _logicalContext;
 
@@ -33,21 +41,45 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     {
         Debug.Assert(Monitor.IsEntered(SyncRoot));
         Debug.Assert(ReferenceEquals(context.Executor.Subject, context.Property.Subject));
-        var captureRevision = BeginCaptureMutation();
+        var captureRevision = BeginCaptureMutation(CaptureMutationKind.RawWrite);
+        var commitGuard = context.CommitGuard;
+        var guardEntered = false;
         try
         {
-            writeValue(_subject, value);
-            context.IsWritten = true;
-            context.IsTerminalCommitted = true;
-            context.Revision = ++Revision;
-            context.FinalizeOrigin();
-            var isFromSource = context.Origin.Kind == ChangeOriginKind.FromSource;
-            var timestamp = context.WriteTimestampRaw;
-            context.Property.SetWriteState(timestamp > 0 ? timestamp : 0, context.Revision, isFromSource);
+            if (commitGuard is not null)
+            {
+                if (!commitGuard.TryEnter())
+                {
+                    return;
+                }
+
+                guardEntered = true;
+            }
+
+            try
+            {
+                writeValue(_subject, value);
+                context.IsWritten = true;
+                context.IsTerminalCommitted = true;
+                context.Revision = ++Revision;
+                var isFromSource = context.Origin.Kind == ChangeOriginKind.FromSource;
+                context.FinalizeOrigin();
+                var timestamp = context.WriteTimestampRawForCommit;
+                context.Property.SetWriteState(timestamp > 0 ? timestamp : 0, context.Revision, isFromSource);
+            }
+            finally
+            {
+                if (guardEntered)
+                {
+                    commitGuard!.Exit();
+                }
+            }
         }
         finally
         {
-            CompleteCaptureMutation(captureRevision, context.StructuralLease is null ? Environment.CurrentManagedThreadId : 0);
+            CompleteCaptureMutation(
+                captureRevision,
+                context.StructuralLease is null ? Environment.CurrentManagedThreadId : 0);
         }
     }
 
@@ -56,6 +88,12 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         if (_logicalContext is null)
         {
             _logicalContext = context;
+        }
+        else if (!ReferenceEquals(_logicalContext, context))
+        {
+            context.TryGetService<ILogicalContextGuard>()?.ThrowIfOtherLogicalContext();
+            throw new InvalidOperationException(
+                "A thread runs topology work for at most one subject context at a time.");
         }
 
         _logicalContextDepth++;
@@ -77,6 +115,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     internal long Revision;
     internal long CurrentRevision => Volatile.Read(ref Revision);
     private long _captureRevision;
+    private int _captureMutationKind;
     private int _captureWriterThreadId;
     private long _captureWriterRunStart;
     internal ManualResetEventSlim? CaptureMutationBlocked { get; set; }
@@ -85,18 +124,34 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     internal bool IsCaptureRevisionCurrent(long revision) =>
         (revision & 1) == 0 && CaptureRevision == revision;
 
-    private long BeginCaptureMutation()
+    private long BeginCaptureMutation(CaptureMutationKind kind)
     {
         var spin = new SpinWait();
-        long revision;
-        while (((revision = CaptureRevision) & 1) != 0 ||
-               Interlocked.CompareExchange(ref _captureRevision, revision + 1, revision) != revision)
+        while (true)
         {
+            lock (_attachmentLock)
+            {
+                if (_ownershipReservation is { Mode: ReservationMode.Exclusive })
+                {
+                    throw LifecycleConflictException.Retryable(_subject);
+                }
+
+                var revision = CaptureRevision;
+                if ((revision & 1) == 0)
+                {
+                    Volatile.Write(ref _captureMutationKind, (int)kind);
+                    if (Interlocked.CompareExchange(ref _captureRevision, revision + 1, revision) == revision)
+                    {
+                        return revision;
+                    }
+
+                    Volatile.Write(ref _captureMutationKind, (int)CaptureMutationKind.None);
+                }
+            }
+
             CaptureMutationBlocked?.Set();
             spin.SpinOnce();
         }
-
-        return revision;
     }
 
     private void CompleteCaptureMutation(long revision, int writerThreadId)
@@ -107,15 +162,69 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             Volatile.Write(ref _captureWriterThreadId, writerThreadId);
         }
 
+        Volatile.Write(ref _captureMutationKind, (int)CaptureMutationKind.None);
         Volatile.Write(ref _captureRevision, revision + 2);
     }
 
-    internal bool TryBeginMetadataPublication(long revision) =>
-        (revision & 1) == 0 && Interlocked.CompareExchange(
-            ref _captureRevision, revision + 1, revision) == revision;
+    private bool TryBeginMetadataPublication(long revision)
+    {
+        if ((revision & 1) != 0 || CaptureRevision != revision)
+        {
+            return false;
+        }
+
+        Volatile.Write(ref _captureMutationKind, (int)CaptureMutationKind.MetadataPublication);
+        if (Interlocked.CompareExchange(ref _captureRevision, revision + 1, revision) == revision)
+        {
+            return true;
+        }
+
+        Volatile.Write(ref _captureMutationKind, (int)CaptureMutationKind.None);
+        return false;
+    }
+
+    internal bool IsTransientCaptureConflict()
+    {
+        var kind = (CaptureMutationKind)Volatile.Read(ref _captureMutationKind);
+        return kind is CaptureMutationKind.None or CaptureMutationKind.RawWrite ||
+            (CaptureRevision & 1) == 0;
+    }
 
     internal void CompleteMetadataPublication(long revision) =>
         CompleteCaptureMutation(revision, Environment.CurrentManagedThreadId);
+
+    internal bool TryBeginMetadataPublication(
+        long revision,
+        AttachmentState attachment)
+    {
+        lock (_attachmentLock)
+        {
+            if (!ReferenceEquals(_attachment, attachment) || _activeAttachmentTransition is not null)
+            {
+                return false;
+            }
+
+            if (_ownershipReservation is not null)
+            {
+                throw LifecycleConflictException.Retryable(_subject);
+            }
+
+            return TryBeginMetadataPublication(revision);
+        }
+    }
+
+    internal void CompleteReservedMetadataPublication(
+        long revision,
+        OwnershipReservationToken reservation)
+    {
+        lock (_attachmentLock)
+        {
+            Debug.Assert(reservation.IsActive(this));
+            Debug.Assert(ReferenceEquals(_ownershipReservation, reservation.Reservation));
+            Debug.Assert(CaptureRevision == revision);
+            CompleteCaptureMutation(revision, Environment.CurrentManagedThreadId);
+        }
+    }
 
     internal bool TryRefreshCapture(long revision, out long current)
     {
@@ -132,6 +241,11 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     private HashSet<StructuralWriteLease>? _activeStructuralLeases;
     private AttachmentTransition? _activeAttachmentTransition;
     private OwnershipReservation? _ownershipReservation;
+    private int _attachmentJournalThreadId;
+    private int _pendingAttachmentFinalizations;
+    private int _activeNonStructuralWrites;
+    private int _usesGeneratedStructuralAccess;
+    private List<IWriteCommitGuard>? _deferredWriteContinuations;
 
     /// <summary>Creates the executor for one subject; generated subjects use <see cref="GetOrCreate"/>.</summary>
     public InterceptorExecutor(IInterceptorSubject subject)
@@ -148,26 +262,57 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     /// <inheritdoc />
     public long AttachmentRevision => _attachment.Revision;
 
-    internal int StructuralLeaseCount => _attachment.StructuralLeaseCount;
+    internal int StructuralLeaseCount
+    {
+        get
+        {
+            lock (_attachmentLock)
+            {
+                return _activeStructuralLeases?.Count ?? 0;
+            }
+        }
+    }
 
     internal AttachmentPhase CurrentAttachmentPhase => _attachment.Phase;
 
+    internal bool SuppressGeneratedPrepublicationTimestamp =>
+        _attachment.Revision == 0 && Volatile.Read(ref _usesGeneratedStructuralAccess) != 0;
+
     /// <inheritdoc />
     public bool TryUpdateAttachment(long expectedRevision, IInterceptorSubjectContext? context, SubjectAttachmentAnchorKind anchor, out long currentRevision)
-        => TryUpdateAttachmentCore(null, expectedRevision, context, anchor, out currentRevision);
+    {
+        ValidateAttachment(context, anchor);
+        var phase = context is null ? AttachmentPhase.Detaching : AttachmentPhase.Attaching;
+        using var transition = TryAcquireAttachmentTransition(expectedRevision, phase, out currentRevision);
+        if (transition is null)
+        {
+            return false;
+        }
+
+        transition.Commit((InterceptorSubjectContext?)context, anchor, out currentRevision);
+        return true;
+    }
 
     internal OwnershipReservationToken TryAcquireOwnershipReservation(
         InterceptorSubjectContext context, ReservationMode mode,
-        ITopologyAdmissionCoordinator? coordinator = null,
-        bool joinExclusive = false)
+        ITopologyAdmissionCoordinator? coordinator = null)
     {
         lock (_attachmentLock)
         {
             var current = _attachment;
-            if (current.Phase != AttachmentPhase.Stable ||
+            if ((CaptureRevision & 1) != 0)
+            {
+                throw IsTransientCaptureConflict()
+                    ? LifecycleConflictException.TransientCapture(_subject)
+                    : LifecycleConflictException.Retryable(_subject);
+            }
+
+            var isAttachingOwner = current.Phase == AttachmentPhase.Attaching &&
+                _attachmentJournalThreadId == Environment.CurrentManagedThreadId;
+            if (current.Phase != AttachmentPhase.Stable && !isAttachingOwner ||
                 (current.Context is not null && !ReferenceEquals(current.Context, context)) ||
                 (mode == ReservationMode.Exclusive || current.Context is null) &&
-                current.StructuralLeaseCount != 0)
+                (_activeStructuralLeases is { Count: > 0 } || _activeNonStructuralWrites != 0))
             {
                 throw LifecycleConflictException.Retryable(_subject);
             }
@@ -181,7 +326,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 _ownershipReservation = reservation;
             }
             else if (!ReferenceEquals(reservation.Context, context) ||
-                     reservation.Mode == ReservationMode.Exclusive && !joinExclusive ||
+                     reservation.Mode == ReservationMode.Exclusive ||
                      mode == ReservationMode.Exclusive)
             {
                 throw LifecycleConflictException.Retryable(_subject);
@@ -216,7 +361,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             var current = _attachment;
             var clearsAttachment = reservation.ParticipantCount == 1 &&
                 detachIfLast && current.Phase == AttachmentPhase.Stable &&
-                current.StructuralLeaseCount == 0 &&
+                _activeStructuralLeases is not { Count: > 0 } &&
                 ReferenceEquals(current.Context, reservation.Context);
             var detachedRevision = clearsAttachment
                 ? GetNextAttachmentRevision(current.Revision)
@@ -231,9 +376,11 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                         null,
                         SubjectAttachmentAnchorKind.None,
                         detachedRevision,
-                        AttachmentPhase.Stable,
-                        0);
+                        AttachmentPhase.Stable);
                 }
+
+                reservation.Complete();
+                QueueDeferredWriteContinuationsLocked();
             }
 
             token.AcceptCompletion();
@@ -248,82 +395,29 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         }
     }
 
-    internal AttachmentState AttachmentSnapshot => _attachment;
-
-    internal bool TryUpdateAttachment(
-        OwnershipReservationToken reservation,
-        long expectedRevision,
+    internal bool IsAttachedToOrHasReservation(
         InterceptorSubjectContext context,
-        SubjectAttachmentAnchorKind anchor,
-        out long currentRevision)
-    {
-        if (!ReferenceEquals(reservation.Reservation.Context, context))
-        {
-            throw new InvalidOperationException("The attachment context does not match the ownership reservation.");
-        }
-
-        return TryUpdateAttachmentCore(reservation, expectedRevision, context, anchor, out currentRevision);
-    }
-
-    internal bool TryUpdateAttachmentAnchor(
-        OwnershipReservationToken? reservation,
-        long expectedRevision,
-        InterceptorSubjectContext context,
-        SubjectAttachmentAnchorKind anchor,
-        out long currentRevision)
+        out OwnershipReservation? reservation)
     {
         lock (_attachmentLock)
         {
-            var current = _attachment;
-            currentRevision = current.Revision;
-            if (current.Revision != expectedRevision)
+            var attachment = _attachment;
+            if (ReferenceEquals(attachment.Context, context))
             {
-                return false;
+                reservation = null;
+                return true;
             }
 
-            var reservationMatches = reservation is not null
-                ? reservation.IsActive(this) && ReferenceEquals(_ownershipReservation, reservation.Reservation)
-                : _ownershipReservation is null;
-            if (current.Phase != AttachmentPhase.Stable ||
-                !ReferenceEquals(current.Context, context) ||
-                !reservationMatches)
-            {
-                throw LifecycleConflictException.Retryable(_subject);
-            }
-
-            currentRevision = GetNextAttachmentRevision(currentRevision);
-            _attachment = new AttachmentState(
-                context,
-                anchor,
-                currentRevision,
-                AttachmentPhase.Stable,
-                current.StructuralLeaseCount);
-            return true;
-        }
-    }
-
-    private bool TryUpdateAttachmentCore(
-        OwnershipReservationToken? reservation,
-        long expectedRevision,
-        IInterceptorSubjectContext? context,
-        SubjectAttachmentAnchorKind anchor,
-        out long currentRevision)
-    {
-        ValidateAttachment(context, anchor);
-        var phase = context is null ? AttachmentPhase.Detaching : AttachmentPhase.Attaching;
-        using var transition = TryAcquireAttachmentTransition(
-            expectedRevision,
-            phase,
-            out currentRevision,
-            reservation);
-        if (transition is null)
-        {
+            reservation = attachment.Context is null &&
+                _ownershipReservation is { } candidate &&
+                ReferenceEquals(candidate.Context, context)
+                    ? candidate
+                    : null;
             return false;
         }
-
-        transition.Commit((InterceptorSubjectContext?)context, anchor, out currentRevision);
-        return true;
     }
+
+    internal AttachmentState AttachmentSnapshot => _attachment;
 
     private static void ValidateAttachment(
         IInterceptorSubjectContext? context,
@@ -369,7 +463,9 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 throw new AttachmentRouteChangedException();
             }
 
-            if (current.Phase != AttachmentPhase.Stable ||
+            var isAttachingOwner = current.Phase == AttachmentPhase.Attaching &&
+                _attachmentJournalThreadId == Environment.CurrentManagedThreadId;
+            if (current.Phase != AttachmentPhase.Stable && !isAttachingOwner ||
                 _ownershipReservation is { } reservation &&
                 (reservation.Mode == ReservationMode.Exclusive || current.Context is null))
             {
@@ -378,7 +474,6 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
 
             var lease = new StructuralWriteLease(this, current.Context, current.Revision, coordinator);
             (_activeStructuralLeases ??= []).Add(lease);
-            _attachment = current.WithStructuralLeaseCount(current.StructuralLeaseCount + 1);
             return lease;
         }
     }
@@ -391,7 +486,9 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         {
             var current = _attachment;
             return _activeStructuralLeases?.Contains(lease) == true &&
-                   current.Phase == AttachmentPhase.Stable &&
+                   (current.Phase == AttachmentPhase.Stable ||
+                    current.Phase == AttachmentPhase.Attaching &&
+                    _attachmentJournalThreadId == Environment.CurrentManagedThreadId) &&
                    ReferenceEquals(current.Context, context);
         }
     }
@@ -405,8 +502,6 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 return;
             }
 
-            var current = _attachment;
-            _attachment = current.WithStructuralLeaseCount(current.StructuralLeaseCount - 1);
         }
     }
 
@@ -422,8 +517,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     internal AttachmentTransition? TryAcquireAttachmentTransition(
         long expectedRevision,
         AttachmentPhase phase,
-        out long currentRevision,
-        OwnershipReservationToken? reservation = null)
+        out long currentRevision)
     {
         if (phase == AttachmentPhase.Stable)
         {
@@ -439,12 +533,10 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 return null;
             }
 
-            var reservationMatches = reservation is not null
-                ? reservation.IsActive(this) &&
-                  ReferenceEquals(_ownershipReservation, reservation.Reservation)
-                : _ownershipReservation is null;
-            if (current.Phase != AttachmentPhase.Stable || current.StructuralLeaseCount != 0 ||
-                !reservationMatches)
+            if (current.Phase != AttachmentPhase.Stable || _activeStructuralLeases is { Count: > 0 } ||
+                _activeNonStructuralWrites != 0 ||
+                (CaptureRevision & 1) != 0 ||
+                _ownershipReservation is not null)
             {
                 throw LifecycleConflictException.Retryable(_subject);
             }
@@ -474,12 +566,22 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             var reservationMatches = reservation is not null
                 ? reservation.IsActive(this) && ReferenceEquals(_ownershipReservation, reservation.Reservation)
                 : _ownershipReservation is null || removesAnchorUnderSharedReservation;
+            var isAttachingOwner = current.Phase == AttachmentPhase.Attaching &&
+                _attachmentJournalThreadId == Environment.CurrentManagedThreadId;
             if (!ReferenceEquals(current.Context, expectedContext) ||
-                current.Phase != AttachmentPhase.Stable ||
-                !isAnchorUpdate && current.StructuralLeaseCount != 0 ||
+                current.Phase != AttachmentPhase.Stable && !isAttachingOwner ||
+                _activeNonStructuralWrites != 0 ||
+                !isAnchorUpdate && _activeStructuralLeases is { Count: > 0 } ||
                 !reservationMatches)
             {
                 throw LifecycleConflictException.Retryable(_subject);
+            }
+
+            if ((CaptureRevision & 1) != 0)
+            {
+                throw IsTransientCaptureConflict()
+                    ? LifecycleConflictException.TransientCapture(_subject)
+                    : LifecycleConflictException.Retryable(_subject);
             }
 
             var isDetaching = context is null && current.Context is not null;
@@ -494,14 +596,12 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                     current.Context,
                     SubjectAttachmentAnchorKind.None,
                     preparedRevision,
-                    AttachmentPhase.Detaching,
-                    current.StructuralLeaseCount)
+                    AttachmentPhase.Detaching)
                 : new AttachmentState(
                     context,
                     anchor,
                     preparedRevision,
-                    AttachmentPhase.Stable,
-                    current.StructuralLeaseCount);
+                    AttachmentPhase.Attaching);
             var transition = new AttachmentTransition(this, current, preparedState, isDetaching);
             _activeAttachmentTransition = transition;
             _attachment = current.WithPhase(
@@ -514,6 +614,25 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         InterceptorSubjectContext context,
         long expectedRevision)
     {
+        var captureRevision = BeginFinalDetachmentCapture();
+        try
+        {
+            FinalizeDetachmentUnderCapture(context, expectedRevision, captureRevision);
+        }
+        finally
+        {
+            CompleteFinalDetachmentCapture(captureRevision);
+        }
+    }
+
+    internal long BeginFinalDetachmentCapture() => BeginCaptureMutation(CaptureMutationKind.FinalDetachment);
+
+    internal void FinalizeDetachmentUnderCapture(
+        InterceptorSubjectContext context,
+        long expectedRevision,
+        long captureRevision)
+    {
+        Debug.Assert(CaptureRevision == captureRevision + 1);
         lock (_attachmentLock)
         {
             var current = _attachment;
@@ -530,8 +649,49 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 null,
                 SubjectAttachmentAnchorKind.None,
                 GetNextAttachmentRevision(current.Revision),
-                AttachmentPhase.Stable,
-                0);
+                AttachmentPhase.Stable);
+            _attachmentJournalThreadId = 0;
+            _pendingAttachmentFinalizations = 0;
+            QueueDeferredWriteContinuationsLocked();
+        }
+    }
+
+    internal void CompleteFinalDetachmentCapture(long captureRevision) =>
+        CompleteCaptureMutation(captureRevision, 0);
+
+    internal void FinalizeAttachment(
+        InterceptorSubjectContext context,
+        long expectedRevision)
+    {
+        lock (_attachmentLock)
+        {
+            var current = _attachment;
+            if (expectedRevision <= current.Revision &&
+                current.Phase == AttachmentPhase.Attaching &&
+                ReferenceEquals(current.Context, context) &&
+                _activeAttachmentTransition is null &&
+                _pendingAttachmentFinalizations > 0)
+            {
+                _pendingAttachmentFinalizations--;
+                if (_pendingAttachmentFinalizations == 0)
+                {
+                    _attachment = current.WithPhase(AttachmentPhase.Stable);
+                    _attachmentJournalThreadId = 0;
+                    QueueDeferredWriteContinuationsLocked();
+                }
+            }
+        }
+    }
+
+    internal void PreflightPotentialAttachmentUpdate(bool forceTransition = false)
+    {
+        lock (_attachmentLock)
+        {
+            if (forceTransition ||
+                _attachment is { Context: null } or { Anchor: SubjectAttachmentAnchorKind.Provisional })
+            {
+                _ = GetNextAttachmentRevision(_attachment.Revision);
+            }
         }
     }
 
@@ -560,9 +720,11 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 context,
                 anchor,
                 currentRevision,
-                AttachmentPhase.Stable,
-                current.StructuralLeaseCount);
+                AttachmentPhase.Stable);
+            _attachmentJournalThreadId = 0;
+            _pendingAttachmentFinalizations = 0;
             _activeAttachmentTransition = null;
+            QueueDeferredWriteContinuationsLocked();
         }
     }
 
@@ -577,6 +739,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
 
             _activeAttachmentTransition = null;
             _attachment = transition.OriginalState;
+            QueueDeferredWriteContinuationsLocked();
         }
     }
 
@@ -585,6 +748,11 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         lock (_attachmentLock)
         {
             _attachment = transition.PreparedState!;
+            _attachmentJournalThreadId = Environment.CurrentManagedThreadId;
+            if (!transition.IsPreparedDetachment)
+            {
+                _pendingAttachmentFinalizations++;
+            }
             _activeAttachmentTransition = null;
         }
     }
@@ -652,6 +820,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         Func<IInterceptorSubject, TProperty> readValue,
         bool executeInterceptors = true)
     {
+        Volatile.Write(ref _usesGeneratedStructuralAccess, 1);
         if (!executeInterceptors)
         {
             lock (SyncRoot)
@@ -692,17 +861,8 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             currentValue,
             newValue);
 
-        var attachedContext = _attachment.Context;
-        if (attachedContext is null)
-        {
-            UninterceptedChain<TProperty>.Write(ref context, writeValue);
-        }
-        else
-        {
-            attachedContext.ExecuteInterceptedWrite(propertyTypeIndex, ref context, writeValue);
-        }
-
-        return context.IsTerminalCommitted;
+        return ExecuteNonStructuralWrite(
+            propertyTypeIndex, ref context, writeValue);
     }
 
     /// <summary>Writes a generated structural property through trusted raw delegates.</summary>
@@ -713,6 +873,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         Func<IInterceptorSubject, TProperty> readValue,
         Action<IInterceptorSubject, TProperty> writeValue)
     {
+        Volatile.Write(ref _usesGeneratedStructuralAccess, 1);
         var propertyTypeIndex = InterceptorSubjectContext.PropertyTypeIndex<TProperty>.Value;
         return SetStructuralPropertyValue(
             propertyName,
@@ -881,7 +1042,13 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, long rawTimestamp)
+    internal bool SetDeferredPropertyValue<TProperty>(
+        string propertyName,
+        TProperty newValue,
+        TProperty currentValue,
+        Action<IInterceptorSubject, TProperty> writeValue,
+        long rawTimestamp,
+        IWriteCommitGuard commitGuard)
     {
         var context = new PropertyWriteContext<TProperty>(
             this,
@@ -889,19 +1056,161 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             currentValue,
             newValue,
             rawTimestamp);
+        context.CommitGuard = commitGuard;
 
-        var attachedContext = _attachment.Context;
-        if (attachedContext is null)
+        if (!TryBeginDeferredNonStructuralWrite(commitGuard, out var attachedContext))
         {
-            UninterceptedChain<TProperty>.Write(ref context, writeValue);
+            return false;
         }
-        else
+
+        return ExecuteAdmittedNonStructuralWrite(
+            attachedContext,
+            InterceptorSubjectContext.PropertyTypeIndex<TProperty>.Value,
+            ref context,
+            writeValue);
+    }
+
+    private bool ExecuteNonStructuralWrite<TProperty>(
+        int propertyTypeIndex,
+        ref PropertyWriteContext<TProperty> context,
+        Action<IInterceptorSubject, TProperty> writeValue)
+    {
+        var attachedContext = BeginNonStructuralWrite();
+        return ExecuteAdmittedNonStructuralWrite(
+            attachedContext, propertyTypeIndex, ref context, writeValue);
+    }
+
+    private bool ExecuteAdmittedNonStructuralWrite<TProperty>(
+        InterceptorSubjectContext? attachedContext,
+        int propertyTypeIndex,
+        ref PropertyWriteContext<TProperty> context,
+        Action<IInterceptorSubject, TProperty> writeValue)
+    {
+        Exception? primaryException = null;
+        try
         {
-            attachedContext.ExecuteInterceptedWrite(
-                InterceptorSubjectContext.PropertyTypeIndex<TProperty>.Value, ref context, writeValue);
+            if (attachedContext is null)
+            {
+                UninterceptedChain<TProperty>.Write(ref context, writeValue);
+            }
+            else
+            {
+                attachedContext.ExecuteInterceptedWrite(propertyTypeIndex, ref context, writeValue);
+            }
+        }
+        catch (Exception exception)
+        {
+            primaryException = exception;
+        }
+        finally
+        {
+            EndNonStructuralWrite();
+        }
+
+        if (attachedContext?.TryGetService<INonStructuralWriteCompletionCoordinator>() is { } coordinator)
+        {
+            primaryException = coordinator.CompleteNonStructuralWrite(primaryException);
+        }
+
+        if (primaryException is not null)
+        {
+            ExceptionDispatchInfo.Capture(primaryException).Throw();
         }
 
         return context.IsTerminalCommitted;
+    }
+
+    private bool TryBeginDeferredNonStructuralWrite(
+        IWriteCommitGuard commitGuard,
+        out InterceptorSubjectContext? attachedContext)
+    {
+        lock (_attachmentLock)
+        {
+            var current = _attachment;
+            if ((current.Phase != AttachmentPhase.Stable &&
+                 _attachmentJournalThreadId != Environment.CurrentManagedThreadId) ||
+                _ownershipReservation is { Mode: ReservationMode.Exclusive })
+            {
+                if (commitGuard.TryDefer())
+                {
+                    (_deferredWriteContinuations ??= []).Add(commitGuard);
+                }
+
+                attachedContext = null;
+                return false;
+            }
+
+            _activeNonStructuralWrites++;
+            attachedContext = current.Context;
+            return true;
+        }
+    }
+
+    private InterceptorSubjectContext? BeginNonStructuralWrite()
+    {
+        lock (_attachmentLock)
+        {
+            var current = _attachment;
+            if (current.Phase != AttachmentPhase.Stable &&
+                _attachmentJournalThreadId != Environment.CurrentManagedThreadId ||
+                _ownershipReservation is { Mode: ReservationMode.Exclusive })
+            {
+                throw LifecycleConflictException.Retryable(_subject);
+            }
+
+            _activeNonStructuralWrites++;
+            return current.Context;
+        }
+    }
+
+    private void EndNonStructuralWrite()
+    {
+        lock (_attachmentLock)
+        {
+            Debug.Assert(_activeNonStructuralWrites > 0);
+            _activeNonStructuralWrites--;
+        }
+    }
+
+    private void QueueDeferredWriteContinuationsLocked()
+    {
+        Debug.Assert(Monitor.IsEntered(_attachmentLock));
+        if (_attachment.Phase != AttachmentPhase.Stable ||
+            _ownershipReservation is { Mode: ReservationMode.Exclusive })
+        {
+            return;
+        }
+
+        var continuations = _deferredWriteContinuations;
+        _deferredWriteContinuations = null;
+        if (continuations is null)
+        {
+            return;
+        }
+
+        ThreadPool.UnsafeQueueUserWorkItem(
+            static state =>
+            {
+                foreach (var deferredWrite in (List<IWriteCommitGuard>)state!)
+                {
+                    try
+                    {
+                        deferredWrite.Resume();
+                    }
+                    catch (Exception exception)
+                    {
+                        try
+                        {
+                            Trace.TraceError($"Completing a deferred property write failed: {exception}");
+                        }
+                        catch
+                        {
+                            // Deferred completion remains no-throw when diagnostics are misconfigured.
+                        }
+                    }
+                }
+            },
+            continuations);
     }
 
     /// <inheritdoc />
@@ -915,25 +1224,19 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
 
         while (true)
         {
-            var attachedContext = _attachment.Context;
+            var attachment = _attachment;
+            var attachedContext = attachment.Context;
             var lifecycle = attachedContext?.TryGetService<ILifecycleInterceptor>();
             if (lifecycle is null)
             {
                 try { registration.PreparePublication(this); }
-                catch (LifecycleConflictException) { continue; }
+                catch (LifecycleConflictException conflict) when (conflict.IsTransientCapture) { continue; }
 
-                lock (_attachmentLock)
+                if (!registration.TryPublishPrepared(this, attachment))
                 {
-                    if (ReferenceEquals(_attachment.Context, attachedContext))
-                    {
-                        if (attachedContext is null && _ownershipReservation is not null)
-                        {
-                            throw LifecycleConflictException.Retryable(_subject);
-                        }
-
-                        if (registration.PublishPrepared(this)) return;
-                    }
+                    continue;
                 }
+                return;
             }
             else if (lifecycle.TryAddProperties(registration))
             {
@@ -962,28 +1265,22 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             null,
             SubjectAttachmentAnchorKind.None,
             0,
-            AttachmentPhase.Stable,
-            0);
+            AttachmentPhase.Stable);
 
         internal AttachmentState(
             InterceptorSubjectContext? context,
             SubjectAttachmentAnchorKind anchor,
             long revision,
-            AttachmentPhase phase,
-            int structuralLeaseCount)
+            AttachmentPhase phase)
         {
             Context = context;
             Anchor = anchor;
             Revision = revision;
             Phase = phase;
-            StructuralLeaseCount = structuralLeaseCount;
         }
 
         internal AttachmentState WithPhase(AttachmentPhase phase) =>
-            new(Context, Anchor, Revision, phase, StructuralLeaseCount);
-
-        internal AttachmentState WithStructuralLeaseCount(int structuralLeaseCount) =>
-            new(Context, Anchor, Revision, Phase, structuralLeaseCount);
+            new(Context, Anchor, Revision, phase);
 
         internal readonly InterceptorSubjectContext? Context;
 
@@ -992,8 +1289,6 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         internal readonly long Revision;
 
         internal readonly AttachmentPhase Phase;
-
-        internal readonly int StructuralLeaseCount;
     }
 
     internal sealed class AttachmentTransition : IDisposable

@@ -259,7 +259,7 @@ public class AttachmentTransitionTests
         var field = typeof(InterceptorExecutor).GetField(
             "_attachment", BindingFlags.Instance | BindingFlags.NonPublic)!;
         field.SetValue(executor, new InterceptorExecutor.AttachmentState(
-            context, anchor, revision, phase, 0));
+            context, anchor, revision, phase));
     }
 
     private static void AssertDetaching(

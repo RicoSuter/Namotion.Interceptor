@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Tests.Models;
 using Namotion.Interceptor.Tracking;
@@ -9,13 +10,8 @@ namespace Namotion.Interceptor.Registry.Tests;
 /// Tests that verify no registry memory leaks occur during concurrent structural
 /// property writes in LifecycleInterceptor.WriteProperty.
 ///
-/// The concurrency model: a structural write enters the lifecycle's topology gate and the writing
-/// subject's attachment monitor before the chain is resolved and holds both through the terminal,
-/// then validates and claims every subject the proposed value reaches, calls next to commit the
-/// backing store, and reconciles the committed value against the property's baseline. Two
-/// structural writes on the same graph therefore serialize against each other, and a write racing
-/// an attachment transition of the writing subject orders against it instead of throwing, so
-/// every write below is expected to commit or reconcile cleanly; any exception is a defect.
+/// Structural writes use temporary leases and ownership reservations. A write that loses a race
+/// with a detaching epoch is rejected before its terminal and can be retried.
 /// </summary>
 public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
 {
@@ -51,7 +47,7 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 for (var iteration = 0; iteration < iterationsPerThread; iteration++)
                 {
                     var child = new Person { FirstName = $"T{Thread.CurrentThread.ManagedThreadId}_I{iteration}" };
-                    parent.Mother = child;
+                    RetryLifecycleConflict(() => parent.Mother = child);
                 }
             });
             threads[threadIndex].IsBackground = true;
@@ -117,11 +113,11 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 {
                     if (iteration % 2 == 0)
                     {
-                        parent.Mother = new Person { FirstName = $"T{Thread.CurrentThread.ManagedThreadId}_I{iteration}" };
+                        RetryLifecycleConflict(() => parent.Mother = new Person { FirstName = $"T{Thread.CurrentThread.ManagedThreadId}_I{iteration}" });
                     }
                     else
                     {
-                        parent.Mother = null;
+                        RetryLifecycleConflict(() => parent.Mother = null);
                     }
                 }
             });
@@ -194,8 +190,8 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 barrier.SignalAndWait();
                 for (var iteration = 0; iteration < iterationsPerThread; iteration++)
                 {
-                    grandparent.Mother = child;
-                    grandparent.Mother = null;
+                    RetryLifecycleConflict(() => grandparent.Mother = child);
+                    RetryLifecycleConflict(() => grandparent.Mother = null);
                 }
             });
             detachThread.IsBackground = true;
@@ -206,8 +202,8 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 for (var iteration = 0; iteration < iterationsPerThread; iteration++)
                 {
                     var grandchildName = $"Grandchild_{iteration}";
-                    child.Mother = new Person { FirstName = grandchildName };
-                    child.Mother = null;
+                    RetryLifecycleConflict(() => child.Mother = new Person { FirstName = grandchildName });
+                    RetryLifecycleConflict(() => child.Mother = null);
                 }
             });
             childWriteThread.IsBackground = true;
@@ -280,7 +276,7 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             barrier.SignalAndWait();
             for (var iteration = 0; iteration < iterationsPerThread; iteration++)
             {
-                parent.Mother = new Person { FirstName = $"Mother_{iteration}" };
+                RetryLifecycleConflict(() => parent.Mother = new Person { FirstName = $"Mother_{iteration}" });
             }
         });
         motherThread.IsBackground = true;
@@ -290,7 +286,7 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             barrier.SignalAndWait();
             for (var iteration = 0; iteration < iterationsPerThread; iteration++)
             {
-                parent.Father = new Person { FirstName = $"Father_{iteration}" };
+                RetryLifecycleConflict(() => parent.Father = new Person { FirstName = $"Father_{iteration}" });
             }
         });
         fatherThread.IsBackground = true;
@@ -365,8 +361,8 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 barrier.SignalAndWait();
                 for (var iteration = 0; iteration < iterationsPerThread; iteration++)
                 {
-                    grandparent.Mother = null;
-                    grandparent.Mother = child;
+                    RetryLifecycleConflict(() => grandparent.Mother = null);
+                    RetryLifecycleConflict(() => grandparent.Mother = child);
                 }
             });
             detachThread.IsBackground = true;
@@ -377,8 +373,8 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 for (var iteration = 0; iteration < iterationsPerThread; iteration++)
                 {
                     var greatGrandchildName = $"GreatGrandchild_{iteration}";
-                    grandchild.Mother = new Person { FirstName = greatGrandchildName };
-                    grandchild.Mother = null;
+                    RetryLifecycleConflict(() => grandchild.Mother = new Person { FirstName = greatGrandchildName });
+                    RetryLifecycleConflict(() => grandchild.Mother = null);
                 }
             });
             deepWriteThread.IsBackground = true;
@@ -453,11 +449,11 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                     var shared = new Person { FirstName = $"Shared_{iteration}" };
 
                     // Place in both Mother and Children[0]
-                    parent.Mother = shared;
-                    parent.Children = [shared];
+                    RetryLifecycleConflict(() => parent.Mother = shared);
+                    RetryLifecycleConflict(() => parent.Children = [shared]);
 
                     // Remove from Mother
-                    parent.Mother = null;
+                    RetryLifecycleConflict(() => parent.Mother = null);
                 }
             });
             motherThread.IsBackground = true;
@@ -470,11 +466,11 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                     var shared = new Person { FirstName = $"Shared_{iteration}" };
 
                     // Place in both Children and Mother
-                    parent.Children = [shared];
-                    parent.Mother = shared;
+                    RetryLifecycleConflict(() => parent.Children = [shared]);
+                    RetryLifecycleConflict(() => parent.Mother = shared);
 
                     // Remove from Children
-                    parent.Children = [];
+                    RetryLifecycleConflict(() => parent.Children = []);
                 }
             });
             childrenThread.IsBackground = true;
@@ -546,7 +542,7 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 {
                     var current = parent.Children;
                     var newChild = new Person { FirstName = $"Add_{iteration}" };
-                    parent.Children = [..current, newChild];
+                    RetryLifecycleConflict(() => parent.Children = [..current, newChild]);
                 }
             });
             addThread.IsBackground = true;
@@ -557,7 +553,7 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 for (var iteration = 0; iteration < iterationsPerThread; iteration++)
                 {
                     var replacement = new Person { FirstName = $"Replace_{iteration}" };
-                    parent.Children = [replacement];
+                    RetryLifecycleConflict(() => parent.Children = [replacement]);
                 }
             });
             replaceThread.IsBackground = true;
@@ -632,8 +628,8 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 barrier.SignalAndWait();
                 for (var iteration = 0; iteration < iterationsPerThread; iteration++)
                 {
-                    parent.Mother = reusedMother;
-                    parent.Mother = null;
+                    RetryLifecycleConflict(() => parent.Mother = reusedMother);
+                    RetryLifecycleConflict(() => parent.Mother = null);
                 }
             });
             motherThread.IsBackground = true;
@@ -643,8 +639,8 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 barrier.SignalAndWait();
                 for (var iteration = 0; iteration < iterationsPerThread; iteration++)
                 {
-                    parent.Father = reusedFather;
-                    parent.Father = null;
+                    RetryLifecycleConflict(() => parent.Father = reusedFather);
+                    RetryLifecycleConflict(() => parent.Father = null);
                 }
             });
             fatherThread.IsBackground = true;
@@ -719,7 +715,7 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 for (var i = 0; i < iterationsPerThread; i++)
                 {
                     var child = new Person { FirstName = $"Child_{i}" };
-                    parent.Mother = child;
+                    RetryLifecycleConflict(() => parent.Mother = child);
                 }
             });
             dictWriteThread.IsBackground = true;
@@ -730,8 +726,8 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 barrier.SignalAndWait();
                 for (var i = 0; i < iterationsPerThread; i++)
                 {
-                    grandparent.Mother = null;
-                    grandparent.Mother = parent;
+                    RetryLifecycleConflict(() => grandparent.Mother = null);
+                    RetryLifecycleConflict(() => grandparent.Mother = parent);
                 }
             });
             detachThread.IsBackground = true;
@@ -822,8 +818,8 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 barrier.SignalAndWait();
                 for (var i = 0; i < iterationsPerThread; i++)
                 {
-                    grandparent.Mother = child;
-                    grandparent.Mother = null;
+                    RetryLifecycleConflict(() => grandparent.Mother = child);
+                    RetryLifecycleConflict(() => grandparent.Mother = null);
                 }
             });
             detachThread.IsBackground = true;
@@ -835,8 +831,8 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 for (var i = 0; i < iterationsPerThread; i++)
                 {
                     var grandchildName = $"GrandchildM_{i}";
-                    child.Mother = new Person { FirstName = grandchildName };
-                    child.Mother = null;
+                    RetryLifecycleConflict(() => child.Mother = new Person { FirstName = grandchildName });
+                    RetryLifecycleConflict(() => child.Mother = null);
                 }
             });
             attachThread1.IsBackground = true;
@@ -849,8 +845,8 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
                 for (var i = 0; i < iterationsPerThread; i++)
                 {
                     var grandchildName = $"GrandchildF_{i}";
-                    child.Father = new Person { FirstName = grandchildName };
-                    child.Father = null;
+                    RetryLifecycleConflict(() => child.Father = new Person { FirstName = grandchildName });
+                    RetryLifecycleConflict(() => child.Father = null);
                 }
             });
             attachThread2.IsBackground = true;
@@ -889,5 +885,25 @@ public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
             $"This indicates the registry re-registers a parent subject via RegisterSubject " +
             $"after it was concurrently detached, leaving it in _knownSubjects with " +
             $"refCount=0 and no parent references.");
+    }
+
+    private static void RetryLifecycleConflict(Action write)
+    {
+        var spinner = new SpinWait();
+        for (var attempt = 0; attempt < 1000; attempt++)
+        {
+            try
+            {
+                write();
+                return;
+            }
+            catch (LifecycleConflictException)
+            {
+                // A concurrent attachment journal rejects the losing write before its terminal.
+                spinner.SpinOnce();
+            }
+        }
+
+        throw new TimeoutException("The structural write did not observe a stable attachment epoch.");
     }
 }

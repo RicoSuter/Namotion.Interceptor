@@ -129,4 +129,5 @@ public class OccurrenceProjectionTests
 
         Assert.Equal(1, light.GetReferenceCount());
     }
+
 }

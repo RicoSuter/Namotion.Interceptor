@@ -197,10 +197,10 @@ public class AddPropertiesLifecycleTests
     }
 
     [Fact]
-    public void WhenHandlerImplementsOnlyLegacyRefresh_ThenImmutableRefreshDoesNotSynthesizeLiveValue()
+    public void WhenACollectionIsReordered_ThenCompatibilityRefreshHookIsNotInvoked()
     {
         // Arrange
-        var handler = new LegacyRefreshHandler();
+        var handler = new CompatibilityRefreshHandler();
         var context = CreateContext().WithService<IPropertyLifecycleHandler>(() => handler, _ => false);
         var root = new Person(context) { FirstName = "root" };
         var first = new Person { FirstName = "first" };
@@ -212,7 +212,7 @@ public class AddPropertiesLifecycleTests
         root.Children = [second, first];
 
         // Assert
-        Assert.Equal(0, handler.RefreshCalls);
+        Assert.Equal(0, handler.LegacyRefreshCalls);
     }
 
     [Fact]
@@ -310,6 +310,41 @@ public class AddPropertiesLifecycleTests
         // Assert
         Assert.True(((IInterceptorSubject)root).Properties.ContainsKey("Extra"));
         Assert.Same(context, child.TryGetContext());
+        Assert.Equal(1, child.GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenNestedAdmissionConsumesProvisionalAnchor_ThenAllAttachmentFinalizersComplete()
+    {
+        // Arrange: the outer attach publishes a provisional fence for the child. Its callback
+        // admits an edge from an already owned parent, which consumes that provisional anchor and
+        // publishes a nested fence before the outer journal reaches either finalizer.
+        Person? child = null;
+        Person? parent = null;
+        var added = false;
+        var context = CreateContext()
+            .WithService(() => new DelegateLifecycleHandler(change =>
+            {
+                if (change.IsContextAttach && ReferenceEquals(change.Subject, child) && !added)
+                {
+                    added = true;
+                    ((IInterceptorSubject)parent!).AddProperties(
+                        CreateStructuralProperty("Adopted", _ => child));
+                }
+            }), _ => false);
+        parent = new Person(context) { FirstName = "parent" };
+        child = new Person { FirstName = "child" };
+        var executor = (InterceptorExecutor)((IInterceptorSubject)child).Executor;
+
+        // Act
+        ((IInterceptorSubject)child).AttachToContext(
+            context, SubjectAttachmentAnchorKind.Provisional);
+
+        // Assert
+        Assert.True(added);
+        Assert.Same(context, child.TryGetContext());
+        Assert.Equal(SubjectAttachmentAnchorKind.None, executor.AttachmentAnchor);
+        Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
         Assert.Equal(1, child.GetReferenceCount());
     }
 
@@ -473,9 +508,8 @@ public class AddPropertiesLifecycleTests
     [Fact]
     public void WhenAGetterAddsANonCollidingProperty_ThenBothBatchesPublish()
     {
-        // Arrange: a getter mutating metadata violates the admission contract, but the
-        // non-colliding shape settles deterministically (the nested batch publishes first) and is
-        // pinned because it is the shape the reentrant-duplicate rejection is defined against.
+        // Arrange: a getter mutating metadata violates the admission contract, but an idempotent
+        // non-colliding mutation can settle after the capture retries against the nested batch.
         var context = CreateContext();
         var root = new Person(context) { FirstName = "R" };
         var subject = (IInterceptorSubject)root;
@@ -484,7 +518,11 @@ public class AddPropertiesLifecycleTests
         // Act
         subject.AddProperties(CreateStructuralProperty("Outer", _ =>
         {
-            subject.AddProperties(CreateScalarProperty("Nested"));
+            if (!subject.Properties.ContainsKey("Nested"))
+            {
+                subject.AddProperties(CreateScalarProperty("Nested"));
+            }
+
             return child;
         }));
 
@@ -679,11 +717,14 @@ public class AddPropertiesLifecycleTests
         }
     }
 
-    private sealed class LegacyRefreshHandler : IPropertyLifecycleHandler
+    private sealed class CompatibilityRefreshHandler : IPropertyLifecycleHandler
     {
-        internal int RefreshCalls { get; private set; }
+        internal int LegacyRefreshCalls { get; private set; }
 
-        internal void Reset() => RefreshCalls = 0;
+        internal void Reset()
+        {
+            LegacyRefreshCalls = 0;
+        }
 
         public void AttachProperty(SubjectPropertyLifecycleChange change)
         {
@@ -695,8 +736,9 @@ public class AddPropertiesLifecycleTests
 
         public void RefreshCollectionProperty(PropertyReference property, object? value)
         {
-            RefreshCalls++;
+            LegacyRefreshCalls++;
         }
+
     }
 
     /// <summary>

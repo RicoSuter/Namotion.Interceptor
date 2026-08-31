@@ -38,6 +38,8 @@ internal sealed class LifecycleNotifier(
     private static JournalBuilder? _currentJournal;
 
     private static long _projectionRevision;
+    private static long _reservedProjectionRevisionCapacity;
+    private static readonly Lock ProjectionRevisionLock = new();
 
     // One-shot deterministic failure injection for the journal/publication atomicity tests.
     private Exception? _journalCompletionFailure;
@@ -115,29 +117,14 @@ internal sealed class LifecycleNotifier(
         };
     }
 
-    public void RaiseSubjectAttached(SubjectLifecycleChange change, InterceptorExecutor executor) =>
+    public void RaiseSubjectAttached(SubjectLifecycleChange change) =>
         RecordEvent(true, change);
 
     public void RaiseSubjectDetaching(SubjectLifecycleChange change) =>
         RecordEvent(false, change);
 
-    public void PublishEdgeRemoved(
-        IInterceptorSubject subject, ILifecycleHandler? subjectHandler, SubjectLifecycleChange change) =>
-        InvokeRemovedLifecycleHandlers(subject, subjectHandler, change);
-
-    public void InvokeAddedLifecycleHandlers(
-        IInterceptorSubject subject, ILifecycleHandler? subjectHandler,
-        InterceptorExecutor executor, SubjectLifecycleChange change) =>
-        InvokeAddedLifecycleHandlersCore(subject, subjectHandler, executor, change, null);
-
     internal void InvokePreparedAddedLifecycleHandlers(
-        IInterceptorSubject subject, ILifecycleHandler? subjectHandler,
-        InterceptorExecutor executor, SubjectLifecycleChange change, Action? prepareChildren) =>
-        InvokeAddedLifecycleHandlersCore(subject, subjectHandler, executor, change, prepareChildren);
-
-    private void InvokeAddedLifecycleHandlersCore(
-        IInterceptorSubject subject, ILifecycleHandler? subjectHandler, InterceptorExecutor executor,
-        SubjectLifecycleChange change, Action? prepareChildren)
+        ILifecycleHandler? subjectHandler, SubjectLifecycleChange change, Action? prepareChildren)
     {
         foreach (var handler in GetLifecycleHandlers())
         {
@@ -158,7 +145,7 @@ internal sealed class LifecycleNotifier(
     }
 
     public void InvokeRemovedLifecycleHandlers(
-        IInterceptorSubject subject, ILifecycleHandler? subjectHandler, SubjectLifecycleChange change)
+        ILifecycleHandler? subjectHandler, SubjectLifecycleChange change)
     {
         if (subjectHandler is not null)
         {
@@ -173,7 +160,7 @@ internal sealed class LifecycleNotifier(
 
     public void AttachSubjectProperties(
         IInterceptorSubject subject, IPropertyLifecycleHandler? subjectHandler,
-        InterceptorExecutor executor, IEnumerable<SubjectPropertyMetadata> properties,
+        IEnumerable<SubjectPropertyMetadata> properties,
         IReadOnlyDictionary<PropertyReference, StructuralSnapshot> snapshots,
         OwnershipGraph.GraphState state) =>
         RecordProperties(subject, subjectHandler, properties, snapshots, state, attach: true);
@@ -227,17 +214,23 @@ internal sealed class LifecycleNotifier(
     public void RefreshCollectionProperty(
         PropertyReference property, StructuralSnapshot snapshot, OwnershipGraph.GraphState state)
     {
+        var ownership = state.Owned[property.Subject];
         var change = new SubjectPropertyLifecycleChange(property.Subject, property)
         {
             Context = context,
             Revision = NextProjectionRevision(),
-            Metadata = state.Owned[property.Subject].Properties.First(metadata => metadata.Name == property.Name),
+            Metadata = ownership.Properties.First(metadata => metadata.Name == property.Name),
             Children = ToChildren(snapshot),
             ChildSubjects = ToSubjectProjections(snapshot, state)
         };
         foreach (var handler in GetPropertyHandlers())
         {
             Record(() => handler.RefreshCollectionProperty(change));
+        }
+
+        if (property.Subject is IPropertyLifecycleHandler subjectHandler)
+        {
+            Record(() => subjectHandler.RefreshCollectionProperty(change));
         }
     }
 
@@ -260,20 +253,70 @@ internal sealed class LifecycleNotifier(
 
     private static long NextProjectionRevision()
     {
-        while (true)
+        var builder = _currentJournal ?? throw new InvalidOperationException(
+            "Lifecycle projections must be prepared inside a journal.");
+        if (builder.TryTakeReservedRevision(out var reserved))
         {
-            var current = Volatile.Read(ref _projectionRevision);
-            if (current < 0 || current == long.MaxValue)
+            return reserved;
+        }
+
+        return AllocateProjectionRevisions(1);
+    }
+
+    private static long AllocateProjectionRevisions(long count)
+    {
+        lock (ProjectionRevisionLock)
+        {
+            ValidateProjectionRevisionCapacity(count);
+            var first = _projectionRevision + 1;
+            _projectionRevision += count;
+            return first;
+        }
+    }
+
+    private static void ReserveProjectionRevisionCapacity(long count)
+    {
+        lock (ProjectionRevisionLock)
+        {
+            ValidateProjectionRevisionCapacity(count);
+            _reservedProjectionRevisionCapacity += count;
+        }
+    }
+
+    private static long AllocateReservedProjectionRevisions(long count)
+    {
+        lock (ProjectionRevisionLock)
+        {
+            if (count < 0 || count > _reservedProjectionRevisionCapacity)
             {
-                throw new InvalidOperationException(
-                    "The lifecycle projection revision space is exhausted; publication cannot continue safely.");
+                throw new InvalidOperationException("The lifecycle journal exceeded its reserved revision capacity.");
             }
 
-            var next = current + 1;
-            if (Interlocked.CompareExchange(ref _projectionRevision, next, current) == current)
-            {
-                return next;
-            }
+            _reservedProjectionRevisionCapacity -= count;
+            var first = _projectionRevision + 1;
+            _projectionRevision += count;
+            return first;
+        }
+    }
+
+    private static void ReleaseProjectionRevisionCapacity(long count)
+    {
+        lock (ProjectionRevisionLock)
+        {
+            _reservedProjectionRevisionCapacity -= count;
+        }
+    }
+
+    private static void ValidateProjectionRevisionCapacity(long count)
+    {
+        var available = long.MaxValue - _projectionRevision;
+        if (_projectionRevision < 0 || count < 0 ||
+            _reservedProjectionRevisionCapacity < 0 ||
+            _reservedProjectionRevisionCapacity > available ||
+            count > available - _reservedProjectionRevisionCapacity)
+        {
+            throw new InvalidOperationException(
+                "The lifecycle projection revision space is exhausted; publication cannot continue safely.");
         }
     }
 
@@ -300,21 +343,21 @@ internal sealed class LifecycleNotifier(
         return projections.ToImmutable();
     }
 
-    private ImmutableArray<ILifecycleHandler> GetLifecycleHandlers() =>
-        CurrentBuilder?.LifecycleHandlers ?? context.GetServices<ILifecycleHandler>();
+    private ImmutableArray<ILifecycleHandler> GetLifecycleHandlers() => CurrentBuilder.LifecycleHandlers;
 
-    private ImmutableArray<IPropertyLifecycleHandler> GetPropertyHandlers() =>
-        CurrentBuilder?.PropertyHandlers ?? context.GetServices<IPropertyLifecycleHandler>();
+    private ImmutableArray<IPropertyLifecycleHandler> GetPropertyHandlers() => CurrentBuilder.PropertyHandlers;
 
-    private JournalBuilder? CurrentBuilder =>
-        _currentJournal is { Owner: var owner } builder && ReferenceEquals(owner, this) ? builder : null;
+    private JournalBuilder CurrentBuilder =>
+        _currentJournal is { Owner: var owner } builder && ReferenceEquals(owner, this)
+            ? builder
+            : throw new InvalidOperationException("Lifecycle callbacks must be prepared inside the originating journal.");
 
-    internal int JournalEntryCount => CurrentBuilder?.Entries.Count ?? -1;
+    internal int JournalEntryCount => CurrentBuilder.Entries.Count;
 
     internal List<Action>? DeferJournalEntriesFrom(int start)
     {
-        var entries = CurrentBuilder?.Entries;
-        if (entries is null || entries.Count == start)
+        var entries = CurrentBuilder.Entries;
+        if (entries.Count == start)
         {
             return null;
         }
@@ -328,25 +371,30 @@ internal sealed class LifecycleNotifier(
     {
         if (entries is not null)
         {
-            CurrentBuilder!.Entries.AddRange(entries);
+            CurrentBuilder.Entries.AddRange(entries);
         }
     }
 
-    internal void FinalizeDetachmentsAfterJournal(
+    internal void FinalizeAttachmentTransitionsAfterJournal(
+        ImmutableArray<OwnershipGraph.AttachmentPlan> attachments,
         ImmutableArray<OwnershipGraph.DetachmentPlan> detachments)
     {
-        if (!detachments.IsEmpty)
+        if (!attachments.IsEmpty || !detachments.IsEmpty)
         {
-            CurrentBuilder!.Entries.Add(
-                () => originatingLifecycle.CompleteDetachments(detachments));
+            CurrentBuilder.Entries.Add(
+                () =>
+                {
+                    originatingLifecycle.CompleteAttachments(attachments);
+                    originatingLifecycle.CompleteDetachments(detachments);
+                    originatingLifecycle.CompleteDeferredSweep();
+                });
         }
     }
 
     private void RecordEvent(bool attach, SubjectLifecycleChange change)
     {
-        var handlers = CurrentBuilder is { } builder
-            ? attach ? builder.SubjectAttachedHandlers : builder.SubjectDetachingHandlers
-            : GetEventHandlers(attach ? SubjectAttached : SubjectDetaching);
+        var builder = CurrentBuilder;
+        var handlers = attach ? builder.SubjectAttachedHandlers : builder.SubjectDetachingHandlers;
         foreach (var handler in handlers)
         {
             Record(() => handler(change));
@@ -367,14 +415,7 @@ internal sealed class LifecycleNotifier(
             action();
         }
 
-        if (CurrentBuilder is { } builder)
-        {
-            builder.Entries.Add(Invoke);
-        }
-        else
-        {
-            Invoke();
-        }
+        CurrentBuilder.Entries.Add(Invoke);
     }
 
     internal sealed record JournalBuilder(
@@ -384,26 +425,74 @@ internal sealed class LifecycleNotifier(
         ImmutableArray<Action<SubjectLifecycleChange>> SubjectAttachedHandlers,
         ImmutableArray<Action<SubjectLifecycleChange>> SubjectDetachingHandlers)
     {
+        private long _nextReservedRevision = -1;
+        private long _lastReservedRevision = -1;
+        private long _reservedRevisionCapacity;
+
         internal List<Action> Entries { get; } = [];
+
+        internal void ReserveRevisions(long count)
+        {
+            if (count == 0) return;
+            ReserveProjectionRevisionCapacity(count);
+            _reservedRevisionCapacity = count;
+        }
+
+        internal bool TryTakeReservedRevision(out long revision)
+        {
+            if (_nextReservedRevision < 0 && _reservedRevisionCapacity > 0)
+            {
+                _nextReservedRevision = AllocateReservedProjectionRevisions(_reservedRevisionCapacity);
+                _lastReservedRevision = _nextReservedRevision + _reservedRevisionCapacity - 1;
+                _reservedRevisionCapacity = 0;
+            }
+
+            revision = _nextReservedRevision;
+            if (revision < 0 || revision > _lastReservedRevision) return false;
+            _nextReservedRevision = revision + 1;
+            return true;
+        }
+
+        internal void ReleaseReservedRevisionCapacity()
+        {
+            if (_reservedRevisionCapacity > 0)
+            {
+                ReleaseProjectionRevisionCapacity(_reservedRevisionCapacity);
+                _reservedRevisionCapacity = 0;
+            }
+        }
     }
 
     internal readonly struct JournalCapture(JournalBuilder builder) : IDisposable
     {
-        internal LifecycleJournal Complete()
+        internal void PreflightCompletion(long projectionRevisionCapacity = 0)
         {
             if (Interlocked.Exchange(ref builder.Owner._journalCompletionFailure, null) is { } failure)
             {
                 throw failure;
             }
 
+            builder.ReserveRevisions(projectionRevisionCapacity);
+        }
+
+        internal LifecycleJournal CompleteAfterPreflight()
+        {
+            builder.ReleaseReservedRevisionCapacity();
             _currentJournal = null;
             return new LifecycleJournal(builder.Entries.ToImmutableArray());
+        }
+
+        internal LifecycleJournal Complete()
+        {
+            PreflightCompletion();
+            return CompleteAfterPreflight();
         }
 
         public void Dispose()
         {
             if (ReferenceEquals(_currentJournal, builder))
             {
+                builder.ReleaseReservedRevisionCapacity();
                 _currentJournal = null;
             }
         }

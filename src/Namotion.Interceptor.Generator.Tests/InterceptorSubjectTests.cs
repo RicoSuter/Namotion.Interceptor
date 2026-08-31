@@ -95,9 +95,59 @@ public class InterceptorSubjectTests
         var executor = Assert.IsType<InterceptorExecutor>(ExecutorField.GetValue(subject));
         Assert.Same(child, subject.Child);
         Assert.Equal(1L, Assert.IsType<long>(RevisionField.GetValue(executor)));
-        Assert.True(new PropertyReference(subject, nameof(DetachedGeneratedAccessSubject.Child))
-            .TryGetWriteState(true, out var revision, out _));
+        var property = new PropertyReference(subject, nameof(DetachedGeneratedAccessSubject.Child));
+        Assert.True(property.TryGetWriteState(true, out var revision, out _));
         Assert.Equal(1, revision);
+        Assert.Null(property.TryGetWriteTimestamp());
+    }
+
+    [Fact]
+    public void WhenPrepublicationStructuralWriteHasTimestampScope_ThenItRemainsUntimestamped()
+    {
+        // Arrange
+        var subject = new DetachedGeneratedAccessSubject();
+        var timestamp = new DateTimeOffset(2026, 8, 31, 12, 0, 0, TimeSpan.Zero);
+
+        // Act
+        using (SubjectChangeContext.WithChangedTimestamp(timestamp))
+        {
+            subject.Child = new DetachedGeneratedAccessSubject();
+        }
+
+        // Assert
+        var property = new PropertyReference(subject, nameof(DetachedGeneratedAccessSubject.Child));
+        Assert.Null(property.TryGetWriteTimestamp());
+    }
+
+    [Fact]
+    public void WhenDetachedStructuralAccessCreatesExecutor_ThenLaterLocalWriteRemainsUntimestamped()
+    {
+        // Arrange
+        var subject = new DetachedGeneratedAccessSubject();
+        subject.Child = new DetachedGeneratedAccessSubject();
+
+        // Act
+        subject.Count = 42;
+
+        // Assert
+        var property = new PropertyReference(subject, nameof(DetachedGeneratedAccessSubject.Count));
+        Assert.True(property.TryGetWriteState(true, out var revision, out _));
+        Assert.Equal(2, revision);
+        Assert.Null(property.TryGetWriteTimestamp());
+    }
+
+    [Fact]
+    public void WhenAttachedStructuralWriteHasNoTimestampScope_ThenItRecordsATimestamp()
+    {
+        // Arrange
+        var subject = new DetachedGeneratedAccessSubject(InterceptorSubjectContext.Create());
+
+        // Act
+        subject.Child = new DetachedGeneratedAccessSubject();
+
+        // Assert
+        var property = new PropertyReference(subject, nameof(DetachedGeneratedAccessSubject.Child));
+        Assert.NotNull(property.TryGetWriteTimestamp());
     }
 
     [Fact]

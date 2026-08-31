@@ -1,5 +1,6 @@
 using System.Collections;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Tests.Models;
 using Namotion.Interceptor.Tracking;
@@ -165,61 +166,6 @@ public class RegistryHandlerOrderTests
     }
 
     [Fact]
-    public void WhenAnOlderPropertyProjectionDrainsLast_ThenItCannotOverwriteTheNewerProjection()
-    {
-        // Arrange: both writes retain the same subjects, so no attachment-revision shortcut can
-        // suppress either callback. The first callback parks before Registry delivery, the second
-        // restores the original order and drains, then the older callback resumes last.
-        var blocker = new BlockingPropertyProjectionHandler();
-        var context = InterceptorSubjectContext.Create();
-        context.AddService<IPropertyLifecycleHandler>(blocker);
-        context.WithRegistry();
-        var root = new Person(context);
-        var first = new Person { FirstName = "first" };
-        var second = new Person { FirstName = "second" };
-        root.Children = [first, second];
-        blocker.Arm(root, nameof(Person.Children));
-
-        Exception? olderException = null;
-        var olderWriter = new Thread(() =>
-        {
-            olderException = Record.Exception(() => { root.Children = [second, first]; });
-        }) { IsBackground = true };
-
-        // Act
-        olderWriter.Start();
-        if (!blocker.Entered.Wait(TimeSpan.FromSeconds(10)))
-        {
-            blocker.Release.Set();
-            olderWriter.Join(TimeSpan.FromSeconds(10));
-            Assert.Fail($"the older property projection did not reach its callback park: {olderException}");
-        }
-        var newerException = Record.Exception(() => { root.Children = [first, second]; });
-        blocker.Release.Set();
-        Assert.True(olderWriter.Join(TimeSpan.FromSeconds(10)),
-            "the older property projection did not finish after release");
-
-        // Assert
-        Assert.Null(olderException);
-        Assert.Null(newerException);
-        var property = root.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.Children))!;
-        Assert.Collection(
-            property.Children,
-            child =>
-            {
-                Assert.Same(first, child.Subject);
-                Assert.Equal(0, child.Index);
-            },
-            child =>
-            {
-                Assert.Same(second, child.Subject);
-                Assert.Equal(1, child.Index);
-            });
-        Assert.Equal(0, Assert.Single(first.TryGetRegisteredSubject()!.Parents).Index);
-        Assert.Equal(1, Assert.Single(second.TryGetRegisteredSubject()!.Parents).Index);
-    }
-
-    [Fact]
     public void WhenARegistryInitializerWaitsForRegistryAccess_ThenTheWorkerCompletes()
     {
         // Arrange
@@ -263,6 +209,321 @@ public class RegistryHandlerOrderTests
         Assert.True(attributes.EnumerationCount >= 2);
     }
 
+    [Fact]
+    public async Task WhenAncestorAttachCallbacksArePending_ThenDescendantWriteRetriesAfterPublication()
+    {
+        // Arrange
+        using var blocker = new BlockingAttachHandler();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        context.AddService<ILifecycleHandler>(blocker);
+        var root = new OrderNode(context) { Name = "root" };
+        var parent = new OrderNode { Name = "parent" };
+        var child = new OrderNode { Name = "child" };
+        blocker.Arm(parent);
+
+        // Act
+        var ancestorAttach = Task.Run(() => Record.Exception(() => root.Child = parent));
+        Exception? conflictingWriteException;
+        try
+        {
+            Assert.True(
+                blocker.CallbackEntered.Wait(TimeSpan.FromSeconds(10)),
+                "ancestor attach callback did not reach the blocking handler");
+            conflictingWriteException = Record.Exception(() => parent.Child = child);
+        }
+        finally
+        {
+            blocker.ContinueCallback.Set();
+        }
+
+        var ancestorAttachException = await ancestorAttach.WaitAsync(TimeSpan.FromSeconds(10));
+        var retryException = Record.Exception(() => parent.Child = child);
+
+        // Assert
+        Assert.IsType<LifecycleConflictException>(conflictingWriteException);
+        Assert.Null(ancestorAttachException);
+        Assert.Null(retryException);
+        var registeredParent = parent.TryGetRegisteredSubject();
+        var registeredChild = child.TryGetRegisteredSubject();
+        Assert.NotNull(registeredParent);
+        Assert.NotNull(registeredChild);
+        var parentProperty = registeredParent.TryGetProperty(nameof(OrderNode.Child));
+        Assert.NotNull(parentProperty);
+        Assert.Same(child, Assert.Single(parentProperty.Children).Subject);
+        Assert.Same(parentProperty, Assert.Single(registeredChild.Parents).Property);
+    }
+
+    [Fact]
+    public async Task WhenRetainedChildCallbacksArePending_ThenExternalScalarWriteRetriesAfterPublication()
+    {
+        // Arrange
+        using var blocker = new BlockingRetainedEdgeHandler();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        context.AddService<ILifecycleHandler>(blocker);
+        var firstParent = new OrderNode(context) { Name = "first parent" };
+        var secondParent = new OrderNode(context) { Name = "second parent" };
+        var child = new OrderNode { Name = "child" };
+        firstParent.Child = child;
+        blocker.Arm(child, secondParent);
+
+        // Act
+        var edgeAddition = Task.Run(() => Record.Exception(() => secondParent.Child = child));
+        Exception? conflictingWriteException;
+        try
+        {
+            Assert.True(
+                blocker.CallbackEntered.Wait(TimeSpan.FromSeconds(10)),
+                "retained child callback did not reach the blocking handler");
+            conflictingWriteException = Record.Exception(() => child.Name = "external");
+        }
+        finally
+        {
+            blocker.ContinueCallback.Set();
+        }
+
+        var edgeAdditionException = await edgeAddition.WaitAsync(TimeSpan.FromSeconds(10));
+        var retryException = Record.Exception(() => child.Name = "after publication");
+
+        // Assert
+        Assert.IsType<LifecycleConflictException>(conflictingWriteException);
+        Assert.Null(edgeAdditionException);
+        Assert.Null(retryException);
+        Assert.Equal("after publication", child.Name);
+    }
+
+    [Fact]
+    public void WhenRetainedChildCallbackWritesScalar_ThenOwnerThreadWriteIsAllowed()
+    {
+        // Arrange
+        var handler = new RetainedEdgeScalarWriter();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        context.AddService<ILifecycleHandler>(handler);
+        var firstParent = new OrderNode(context) { Name = "first parent" };
+        var secondParent = new OrderNode(context) { Name = "second parent" };
+        var child = new OrderNode { Name = "child" };
+        firstParent.Child = child;
+        handler.Arm(child, secondParent);
+
+        // Act
+        var edgeAdditionException = Record.Exception(() => secondParent.Child = child);
+
+        // Assert
+        Assert.Null(edgeAdditionException);
+        Assert.True(handler.Written);
+        Assert.Null(handler.WriteException);
+        Assert.Equal("written from callback", child.Name);
+    }
+
+    [Fact]
+    public async Task WhenPropertyAttachCallbacksArePending_ThenItsStructuralWriteRetriesAfterPublication()
+    {
+        // Arrange
+        using var blocker = new BlockingPropertyAttachHandler();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        context.AddService<IPropertyLifecycleHandler>(blocker);
+        var root = new OrderNode(context) { Name = "root" };
+        var child = new OrderNode { Name = "child" };
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+        OrderNode? storedChild = null;
+        blocker.Arm(root, "DynamicChild");
+
+        // Act
+        var propertyAdmission = Task.Run(() => Record.Exception(() =>
+        {
+            registeredRoot.AddProperty<OrderNode?>(
+                "DynamicChild",
+                _ => Volatile.Read(ref storedChild),
+                (_, value) => Volatile.Write(ref storedChild, value));
+        }));
+        Exception? conflictingWriteException;
+        SubjectPropertyMetadata metadata;
+        try
+        {
+            Assert.True(
+                blocker.CallbackEntered.Wait(TimeSpan.FromSeconds(10)),
+                "property attach callback did not reach the blocking handler");
+            metadata = ((IInterceptorSubject)root).Properties["DynamicChild"];
+            conflictingWriteException = Record.Exception(() => metadata.SetValue!(root, child));
+        }
+        finally
+        {
+            blocker.ContinueCallback.Set();
+        }
+
+        var propertyAdmissionException = await propertyAdmission.WaitAsync(TimeSpan.FromSeconds(10));
+        var retryException = Record.Exception(() => metadata.SetValue!(root, child));
+
+        // Assert
+        Assert.IsType<LifecycleConflictException>(conflictingWriteException);
+        Assert.Null(propertyAdmissionException);
+        Assert.Null(retryException);
+        var registeredChild = child.TryGetRegisteredSubject();
+        var registeredProperty = root.TryGetRegisteredSubject()!.TryGetProperty("DynamicChild");
+        Assert.NotNull(registeredChild);
+        Assert.NotNull(registeredProperty);
+        Assert.Same(child, Assert.Single(registeredProperty.Children).Subject);
+        Assert.Same(registeredProperty, Assert.Single(registeredChild.Parents).Property);
+    }
+
+    [Fact]
+    public async Task WhenRetainedChildLosesOlderParentBeforeAdmittedPropertyCallbacks_ThenRegistrySettlesCausally()
+    {
+        // Arrange
+        using var blocker = new BlockingPropertyAttachHandler();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        context.AddService<IPropertyLifecycleHandler>(blocker);
+        var oldParent = new OrderNode(context) { Name = "old parent" };
+        var newParent = new OrderNode(context) { Name = "new parent" };
+        var child = new OrderNode { Name = "child" };
+        oldParent.Child = child;
+        OrderNode? storedChild = child;
+        blocker.Arm(newParent, "DynamicChild");
+
+        // Act
+        var propertyAdmission = Task.Run(() => Record.Exception(() =>
+        {
+            newParent.TryGetRegisteredSubject()!.AddProperty<OrderNode?>(
+                "DynamicChild",
+                _ => Volatile.Read(ref storedChild),
+                (_, value) => Volatile.Write(ref storedChild, value));
+        }));
+        Exception? removalException;
+        try
+        {
+            Assert.True(
+                blocker.CallbackEntered.Wait(TimeSpan.FromSeconds(10)),
+                "property attach callback did not reach the blocking handler");
+            removalException = Record.Exception(() => oldParent.Child = null);
+        }
+        finally
+        {
+            blocker.ContinueCallback.Set();
+        }
+
+        var propertyAdmissionException = await propertyAdmission.WaitAsync(TimeSpan.FromSeconds(10));
+        var retryException = Record.Exception(() => oldParent.Child = null);
+
+        // Assert
+        Assert.IsType<LifecycleConflictException>(removalException);
+        Assert.Null(propertyAdmissionException);
+        Assert.Null(retryException);
+        var registeredProperty = newParent.TryGetRegisteredSubject()!.TryGetProperty("DynamicChild");
+        var registeredChild = child.TryGetRegisteredSubject();
+        Assert.NotNull(registeredProperty);
+        Assert.NotNull(registeredChild);
+        Assert.Same(child, Assert.Single(registeredProperty.Children).Subject);
+        Assert.Same(registeredProperty, Assert.Single(registeredChild.Parents).Property);
+    }
+
+    [Fact]
+    public async Task WhenBeforeRegistryAttachCallbackAddsProperty_ThenOuterFenceCoversNestedAdmission()
+    {
+        // Arrange
+        using var handler = new NestedAdmissionBeforeRegistryHandler();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        context.AddService<ILifecycleHandler>(handler);
+        var child = new OrderNode { Name = "child" };
+
+        // Act
+        var rootAttach = Task.Run(() => Record.Exception(() => _ = new OrderNode(context)));
+        Exception? conflictingWriteException;
+        try
+        {
+            Assert.True(
+                handler.NestedAdmissionCompleted.Wait(TimeSpan.FromSeconds(10)),
+                "nested property admission did not complete before Registry attachment");
+            var root = Assert.IsType<OrderNode>(handler.Subject);
+            var metadata = ((IInterceptorSubject)root).Properties[NestedAdmissionBeforeRegistryHandler.PropertyName];
+            conflictingWriteException = Record.Exception(() => metadata.SetValue!(root, child));
+        }
+        finally
+        {
+            handler.ContinueOuterCallback.Set();
+        }
+
+        var rootAttachException = await rootAttach.WaitAsync(TimeSpan.FromSeconds(10));
+        var attachedRoot = Assert.IsType<OrderNode>(handler.Subject);
+
+        // Assert
+        Assert.IsType<LifecycleConflictException>(conflictingWriteException);
+        Assert.Null(rootAttachException);
+        Assert.NotNull(attachedRoot.TryGetRegisteredSubject()!
+            .TryGetProperty(NestedAdmissionBeforeRegistryHandler.PropertyName));
+    }
+
+    [Fact]
+    public void WhenNestedPropertyInitializerRunsBeforeOuterRegistryAttach_ThenFullProjectionIsVisible()
+    {
+        // Arrange: attaching the child publishes its graph parent before callbacks. A handler ahead
+        // of Registry admits a dynamic property, whose Registry callback and initializer therefore
+        // run before Registry receives the child's outer context-attach callback.
+        var handler = new NestedProjectionBeforeRegistryHandler();
+        var initializer = new NestedProjectionInitializer();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        context.AddService<ILifecycleHandler>(handler);
+        context.AddService<ISubjectPropertyInitializer>(initializer);
+        var root = new OrderNode(context) { Name = "root" };
+        var child = new OrderNode { Name = "child" };
+        handler.Arm(child);
+        initializer.Arm(child, root);
+
+        // Act
+        root.Child = child;
+
+        // Assert
+        Assert.True(handler.Admitted);
+        Assert.True(initializer.Invoked);
+        Assert.True(initializer.SiblingVisible);
+        Assert.True(initializer.RegistryParentVisible);
+    }
+
+    [Fact]
+    public void WhenNestedSelfEdgeAdvancesProjectionBeforeOuterRegistryAttach_ThenSubjectIdIsRegistered()
+    {
+        // Arrange: the property's callback creates the provisional Registry subject, then its
+        // self-edge callback advances that subject's projection revision before the older outer
+        // context-attach callback reaches Registry.
+        var handler = new NestedSelfEdgeBeforeRegistryHandler();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        context.AddService<ILifecycleHandler>(handler);
+        var subject = new OrderNode { Name = "subject" };
+        ((IInterceptorSubject)subject).SetSubjectId("nested-self-edge");
+        handler.Arm(subject);
+
+        // Act
+        ((IInterceptorSubject)subject).AttachToContext(context);
+
+        // Assert
+        Assert.True(handler.Admitted);
+        var registry = context.GetService<ISubjectIdRegistry>();
+        Assert.True(registry.TryGetSubjectById("nested-self-edge", out var registered));
+        Assert.Same(subject, registered);
+    }
+
+    [Fact]
+    public void WhenNestedParentEdgeAdvancesProjectionBeforeOuterRegistryAttach_ThenChildStillRegisters()
+    {
+        // Arrange: unlike the self-edge case, the nested property belongs to an already registered
+        // parent. Only its newer edge callback targets the provisionally attaching child before the
+        // child's older outer context-attach callback reaches Registry.
+        var handler = new NestedParentEdgeBeforeRegistryHandler();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        context.AddService<ILifecycleHandler>(handler);
+        var root = new OrderNode(context) { Name = "root" };
+        var child = new OrderNode { Name = "child" };
+        handler.Arm(root, child);
+
+        // Act
+        ((IInterceptorSubject)child).AttachToContext(
+            context, SubjectAttachmentAnchorKind.Provisional);
+
+        // Assert
+        Assert.True(handler.Admitted);
+        var registeredChild = child.TryGetRegisteredSubject();
+        Assert.NotNull(registeredChild);
+        Assert.Single(registeredChild.Parents);
+    }
+
     [RunsBefore(typeof(SubjectRegistry))]
     private sealed class FirstHandlerParentProbe : ILifecycleHandler
     {
@@ -274,46 +535,6 @@ public class RegistryHandlerOrderTests
             {
                 EdgeVisibleInParents.Add(change.Subject.GetParents()
                     .Any(parent => parent.Property.Equals(property) && Equals(parent.Index, change.Index)));
-            }
-        }
-    }
-
-    [RunsBefore(typeof(SubjectRegistry))]
-    private sealed class BlockingPropertyProjectionHandler : IPropertyLifecycleHandler
-    {
-        private IInterceptorSubject? _subject;
-        private string? _propertyName;
-        private int _blocked;
-
-        internal ManualResetEventSlim Entered { get; } = new(false);
-        internal ManualResetEventSlim Release { get; } = new(false);
-
-        internal void Arm(IInterceptorSubject subject, string propertyName)
-        {
-            _subject = subject;
-            _propertyName = propertyName;
-        }
-
-        public void AttachProperty(SubjectPropertyLifecycleChange change)
-        {
-        }
-
-        public void DetachProperty(SubjectPropertyLifecycleChange change)
-        {
-        }
-
-        public void RefreshCollectionProperty(SubjectPropertyLifecycleChange change)
-        {
-            if (!ReferenceEquals(change.Property.Subject, _subject) || change.Property.Name != _propertyName ||
-                Interlocked.Exchange(ref _blocked, 1) != 0)
-            {
-                return;
-            }
-
-            Entered.Set();
-            if (!Release.Wait(TimeSpan.FromSeconds(10)))
-            {
-                throw new TimeoutException("the older Registry projection was not released");
             }
         }
     }
@@ -387,6 +608,319 @@ public class RegistryHandlerOrderTests
         }
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    [RunsBefore(typeof(SubjectRegistry))]
+    private sealed class BlockingAttachHandler : ILifecycleHandler, IDisposable
+    {
+        private IInterceptorSubject? _target;
+
+        internal ManualResetEventSlim CallbackEntered { get; } = new(false);
+        internal ManualResetEventSlim ContinueCallback { get; } = new(false);
+
+        internal void Arm(IInterceptorSubject target) => _target = target;
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (!change.IsContextAttach || !ReferenceEquals(change.Subject, _target))
+            {
+                return;
+            }
+
+            CallbackEntered.Set();
+            if (!ContinueCallback.Wait(TimeSpan.FromSeconds(10)))
+            {
+                throw new TimeoutException("the test did not release the ancestor attach callback");
+            }
+        }
+
+        public void Dispose()
+        {
+            CallbackEntered.Dispose();
+            ContinueCallback.Dispose();
+        }
+    }
+
+    [RunsBefore(typeof(SubjectRegistry))]
+    private sealed class BlockingPropertyAttachHandler : IPropertyLifecycleHandler, IDisposable
+    {
+        private IInterceptorSubject? _target;
+        private string? _propertyName;
+
+        internal ManualResetEventSlim CallbackEntered { get; } = new(false);
+        internal ManualResetEventSlim ContinueCallback { get; } = new(false);
+
+        internal void Arm(IInterceptorSubject target, string propertyName)
+        {
+            _target = target;
+            _propertyName = propertyName;
+        }
+
+        public void AttachProperty(SubjectPropertyLifecycleChange change)
+        {
+            if (!ReferenceEquals(change.Subject, _target) || change.Property.Name != _propertyName)
+            {
+                return;
+            }
+
+            CallbackEntered.Set();
+            if (!ContinueCallback.Wait(TimeSpan.FromSeconds(10)))
+            {
+                throw new TimeoutException("the test did not release the property attach callback");
+            }
+        }
+
+        public void DetachProperty(SubjectPropertyLifecycleChange change)
+        {
+        }
+
+        public void Dispose()
+        {
+            CallbackEntered.Dispose();
+            ContinueCallback.Dispose();
+        }
+    }
+
+    [RunsBefore(typeof(SubjectRegistry))]
+    private sealed class BlockingRetainedEdgeHandler : ILifecycleHandler, IDisposable
+    {
+        private IInterceptorSubject? _target;
+        private IInterceptorSubject? _expectedParent;
+
+        internal ManualResetEventSlim CallbackEntered { get; } = new(false);
+        internal ManualResetEventSlim ContinueCallback { get; } = new(false);
+
+        internal void Arm(IInterceptorSubject target, IInterceptorSubject expectedParent)
+        {
+            _target = target;
+            _expectedParent = expectedParent;
+        }
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (!change.IsPropertyReferenceAdded || !ReferenceEquals(change.Subject, _target) ||
+                change.Property is not { } property ||
+                !ReferenceEquals(property.Subject, _expectedParent))
+            {
+                return;
+            }
+
+            CallbackEntered.Set();
+            if (!ContinueCallback.Wait(TimeSpan.FromSeconds(10)))
+            {
+                throw new TimeoutException("the test did not release the retained child callback");
+            }
+        }
+
+        public void Dispose()
+        {
+            CallbackEntered.Dispose();
+            ContinueCallback.Dispose();
+        }
+    }
+
+    [RunsBefore(typeof(SubjectRegistry))]
+    private sealed class RetainedEdgeScalarWriter : ILifecycleHandler
+    {
+        private OrderNode? _target;
+        private IInterceptorSubject? _expectedParent;
+
+        internal bool Written { get; private set; }
+        internal Exception? WriteException { get; private set; }
+
+        internal void Arm(OrderNode target, IInterceptorSubject expectedParent)
+        {
+            _target = target;
+            _expectedParent = expectedParent;
+        }
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (!change.IsPropertyReferenceAdded || !ReferenceEquals(change.Subject, _target) ||
+                change.Property is not { } property ||
+                !ReferenceEquals(property.Subject, _expectedParent))
+            {
+                return;
+            }
+
+            Written = true;
+            WriteException = Record.Exception(() => _target!.Name = "written from callback");
+        }
+    }
+
+    [RunsBefore(typeof(SubjectRegistry))]
+    private sealed class NestedAdmissionBeforeRegistryHandler : ILifecycleHandler, IDisposable
+    {
+        internal const string PropertyName = "NestedChild";
+
+        private OrderNode? _storedChild;
+        private int _handled;
+
+        internal IInterceptorSubject? Subject { get; private set; }
+        internal ManualResetEventSlim NestedAdmissionCompleted { get; } = new(false);
+        internal ManualResetEventSlim ContinueOuterCallback { get; } = new(false);
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (!change.IsContextAttach || Interlocked.Exchange(ref _handled, 1) != 0)
+            {
+                return;
+            }
+
+            Subject = change.Subject;
+            change.Subject.AddProperties(new SubjectPropertyMetadata(
+                PropertyName,
+                typeof(OrderNode),
+                [],
+                _ => Volatile.Read(ref _storedChild),
+                (subject, value) => ((InterceptorExecutor)subject.Executor).SetGeneratedPropertyValue(
+                    PropertyName,
+                    (OrderNode?)value,
+                    _ => Volatile.Read(ref _storedChild),
+                    (_, committed) => Volatile.Write(ref _storedChild, committed)),
+                isIntercepted: true,
+                isDynamic: true));
+
+            NestedAdmissionCompleted.Set();
+            if (!ContinueOuterCallback.Wait(TimeSpan.FromSeconds(10)))
+            {
+                throw new TimeoutException("the test did not release the outer attach callback");
+            }
+        }
+
+        public void Dispose()
+        {
+            NestedAdmissionCompleted.Dispose();
+            ContinueOuterCallback.Dispose();
+        }
+    }
+
+    [RunsBefore(typeof(SubjectRegistry))]
+    private sealed class NestedProjectionBeforeRegistryHandler : ILifecycleHandler
+    {
+        internal const string PropertyName = "NestedProjectionProbe";
+
+        private IInterceptorSubject? _target;
+        private int _handled;
+
+        internal bool Admitted { get; private set; }
+
+        internal void Arm(IInterceptorSubject target) => _target = target;
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (!change.IsContextAttach || !ReferenceEquals(change.Subject, _target) ||
+                Interlocked.Exchange(ref _handled, 1) != 0)
+            {
+                return;
+            }
+
+            change.Subject.AddProperties(new SubjectPropertyMetadata(
+                PropertyName,
+                typeof(string),
+                [],
+                _ => "probe",
+                null,
+                isIntercepted: true,
+                isDynamic: true));
+            Admitted = true;
+        }
+    }
+
+    private sealed class NestedProjectionInitializer : ISubjectPropertyInitializer
+    {
+        private IInterceptorSubject? _target;
+        private IInterceptorSubject? _expectedParent;
+
+        internal bool Invoked { get; private set; }
+        internal bool SiblingVisible { get; private set; }
+        internal bool RegistryParentVisible { get; private set; }
+
+        internal void Arm(IInterceptorSubject target, IInterceptorSubject expectedParent)
+        {
+            _target = target;
+            _expectedParent = expectedParent;
+        }
+
+        public void InitializeProperty(RegisteredSubjectProperty property)
+        {
+            if (!ReferenceEquals(property.Subject, _target) ||
+                property.Name != NestedProjectionBeforeRegistryHandler.PropertyName)
+            {
+                return;
+            }
+
+            Invoked = true;
+            SiblingVisible = property.Parent.TryGetProperty(nameof(OrderNode.Name)) is not null;
+            RegistryParentVisible = property.Parent.Parents.Any(parent =>
+                ReferenceEquals(parent.Property.Subject, _expectedParent) &&
+                parent.Property.Name == nameof(OrderNode.Child));
+        }
+    }
+
+    [RunsBefore(typeof(SubjectRegistry))]
+    private sealed class NestedSelfEdgeBeforeRegistryHandler : ILifecycleHandler
+    {
+        private IInterceptorSubject? _target;
+        private int _handled;
+
+        internal bool Admitted { get; private set; }
+
+        internal void Arm(IInterceptorSubject target) => _target = target;
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (!change.IsContextAttach || !ReferenceEquals(change.Subject, _target) ||
+                Interlocked.Exchange(ref _handled, 1) != 0)
+            {
+                return;
+            }
+
+            change.Subject.AddProperties(new SubjectPropertyMetadata(
+                "NestedSelf",
+                typeof(OrderNode),
+                [],
+                _ => change.Subject,
+                null,
+                isIntercepted: true,
+                isDynamic: true));
+            Admitted = true;
+        }
+    }
+
+    [RunsBefore(typeof(SubjectRegistry))]
+    private sealed class NestedParentEdgeBeforeRegistryHandler : ILifecycleHandler
+    {
+        private IInterceptorSubject? _parent;
+        private IInterceptorSubject? _target;
+        private int _handled;
+
+        internal bool Admitted { get; private set; }
+
+        internal void Arm(IInterceptorSubject parent, IInterceptorSubject target)
+        {
+            _parent = parent;
+            _target = target;
+        }
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (!change.IsContextAttach || !ReferenceEquals(change.Subject, _target) ||
+                Interlocked.Exchange(ref _handled, 1) != 0)
+            {
+                return;
+            }
+
+            _parent!.AddProperties(new SubjectPropertyMetadata(
+                "NestedChildEdge",
+                typeof(OrderNode),
+                [],
+                _ => _target,
+                null,
+                isIntercepted: true,
+                isDynamic: true));
+            Admitted = true;
+        }
     }
 }
 

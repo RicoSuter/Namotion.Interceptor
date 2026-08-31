@@ -1,12 +1,12 @@
 # Lifecycle and Structural Write Protocol Redesign
 
-**Status:** Proposed, pending maintainer review
+**Status:** Implemented and verified as a local comparison candidate, pending maintainer review and size decision
 
 **Pull request head:** `c5079c6f0cb3a06ea2bc395e2dba7b812b3fa88b`
 
-**Local protocol branch:** `23d4a54b928c5d1c62b8b152919361ef6854da73`
+**Local protocol branch:** `codex/pr-494-lifecycle-protocol-implementation`
 
-**Base:** `0418410c2da2ca5aa39fb25fb9d5fda3b53f429b`
+**Master comparison:** `082bb1cee82f2428fe8e94839294b5405138d79c`
 
 ## Decision
 
@@ -14,7 +14,21 @@ Keep the product contract of pull request #494 and implement it with five design
 
 The field store and its graph publication have one coordinated terminal boundary. Core owns the per-subject storage lock and invokes the existing raw reader and writer delegates there. Tracking owns the short per-context topology gate and publishes an already staged graph transaction. Interceptors, ordinary getters that enumerate user values, metadata publishers, and callbacks run outside framework locks. Contract-bound raw readers and writers are the narrow exception described below. The raw reader runs under the terminal lock, and the faithful raw writer runs inside the final terminal-lock plus topology-gate commit because that assignment is the write's linearization point.
 
-Active structural leases and ownership reservations are temporary reachability roots. Ordinary writes use an affected-component release calculation. Only a release deferred by active protectors may request an uncommon context-wide sweep. There are no pending-release closure groups, group merges, topology freezes, pending-terminal state machines, per-journal notification reference counts, or context-wide derived-transaction counters.
+Active structural leases and ownership reservations are temporary reachability roots. Ordinary writes use an affected-component release calculation. Only a release deferred by active protectors may request an uncommon context-wide sweep. There are no pending-release closure groups, group merges, topology freezes, pending-terminal state machines, per-journal notification reference counts, or context-wide derived-transaction counters. A narrowly scoped deferred synthetic-write continuation exists only to finish a derived notification whose target is temporarily unavailable after its source write has already committed.
+
+## Implemented reconciliation
+
+The local implementation preserves the architecture below, with seven correctness-driven refinements discovered by deterministic race tests:
+
+- Every intercepted scalar or structural write enters a short executor publication admission before its interceptor chain. A non-stable attachment phase or exclusive reservation rejects an ordinary write before interceptor side effects. Stable scalar writes retain the generated code and public routing shape, and a shared same-context reservation does not block them.
+- A cross-subject derived cascade cannot roll back its already committed source write when the derived target is temporarily `Attaching`, `Detaching`, or exclusively reserved. The target's internal synthetic notification write restores the last published value, coalesces later triggers and their latest timestamp, and queues one guarded continuation. It resumes only after the target becomes stable and the exclusive reservation leaves. It never replays the source interceptor chain, and a custom interceptor conflict after the synthetic terminal is not reclassified or swallowed.
+- Derived recalculation handoff is sequence checked. An ordinary pending retry acquires ownership only when attachment, recalculation sequence, and owner state are still exactly the captured state. A newer or active recalculation already covers the pending source state, so a stale retry cannot publish a duplicate value or older timestamp.
+- Registry collection refresh consumes a complete immutable child and parent projection with its own revision. The source-compatible `RefreshCollectionProperty` callback remains active because Registry needs it to publish retained collection reorders and rekeys without live enumeration.
+- Registry removal delivery ignores a missing parent only when that parent subject is already absent from the Registry. A still-registered parent whose property projection is missing remains a contract defect. This lets cyclic detach journals converge without masking corrupt retained projections.
+- Generated structural access opts its executor into prepublication timestamp compatibility. Before the first successful attachment, generated constructor and default writes still advance coordinated revisions but deliberately commit timestamp `0`, even inside an ambient timestamp scope. Hand-written and Dynamic subjects retain their explicit timestamp behavior, and all writes use normal timestamps after the first attachment revision.
+- Commit markers classify the attempted source before final origin resolution. An inbound write normalized to a final local origin is still source delivery for echo-suppression and ordering markers, while the published change retains its resolved final origin.
+
+These refinements add no generated member, change no generated property body, and add no public lifecycle coordinator. The concrete executor continues to expose the same hidden trusted raw reader/writer seam used by generated and advanced hand-written subjects.
 
 ## Normative contract and precedence
 
@@ -65,7 +79,7 @@ The PR's intentional removals remain removals. This redesign does not restore fa
 - A generated structural write publishes the exact predecessor reread under the terminal lock. Interceptor entry may have observed an earlier coherent snapshot, but unwind and property-change publication use the value actually replaced by that terminal revision.
 - Property-change and derived interceptors unwind only after the corresponding topology publication has committed.
 - An active write or same-context reservation continuously retains its protected subject and committed outgoing closure. A concurrent removal may commit without detaching that protected closure; final reachability is reconsidered when protectors leave.
-- Scalar property reads and writes retain their existing fast path.
+- Scalar property reads and writes retain their generated and public routing shape. When lifecycle is active, writes also cross the executor's short pre-chain publication admission so an exclusive or non-stable phase rejects before arbitrary interceptor side effects.
 
 ### Callbacks and consumers
 
@@ -151,7 +165,7 @@ A structural write follows one sequence:
 11. Tracking releases the topology gate, Core releases the terminal lock, finalizes committed reservations, stores the immutable journal on the per-call context, and returns to interceptor unwind.
 12. `LifecycleInterceptor` drains that journal outside locks after its downstream `next` returns, including from a `finally` path when downstream code throws after a committed terminal. The executor releases the parent lease and logical scope only after the entire interceptor chain exits. A flagged deferred sweep runs from that final short release path.
 
-The only nested framework lock order is:
+The primary nested framework lock order is:
 
 ```text
 subject terminal lock -> context topology gate -> one executor attachment monitor
@@ -165,6 +179,8 @@ context topology gate -> one executor attachment monitor
 
 No topology path acquires a terminal lock. No executor monitor is retained while requesting the topology gate. Enumeration, equality, interceptor code, metadata getters and publishers, lifecycle handlers, property handlers, Registry callbacks, and events run outside all framework locks. Final origin equality and lazy timestamp resolution are completed and cached before the terminal lock because they may call user equality or the configurable timestamp provider. Only cached primitive write-state data is stamped inside the commit.
 
+The derived synthetic-write guard adds one narrow admission order: executor attachment monitor, then one derived-property data monitor, only while deciding whether a pre-chain target write must be deferred. Raw commit begins its capture mutation before entering the derived-property guard and exits that guard before completing the capture mutation, so the raw path never nests derived-property data then attachment. The unavailable target phase cannot simultaneously contain an admitted notification owner for the same guard.
+
 Lease and reservation admission and disposal briefly share the context gate, then the executor monitor, and revalidate attachment. If admission enters first, reachability sees the protector. If topology publication enters first, admission observes the published state. No topology-freeze or rollback phase is needed.
 
 Explicit attach uses an exclusive reservation, captures the detached component outside locks, revalidates all capture revisions, and commits through the same graph engine. Explicit detach removes the explicit anchor and runs the same affected release. `AddProperties` materializes and captures outside locks, acquires an exclusive admission reservation, validates under the topology gate, releases the gate to invoke its existing contract-bound exception-free metadata publisher exactly once, reacquires the gate, and revalidates metadata, attachment, and reservation revisions before final graph publication. The exclusive token spans both gate sections, so no competing admission can pass between them. Detached subjects may publish metadata directly; a detaching subject may publish metadata but creates no new ownership edges.
@@ -177,7 +193,7 @@ A lightweight Core-owned thread-local logical scope retains the PR restrictions 
 
 Each affected subject and property projection carries only the monotonic revision and complete immutable state required for same-entity stale suppression. A context-global publication sequence and per-edge revisions are not added. Public lifecycle payloads gain only exact context, relevant entity revision, and the complete projection required by third-party consumers; no public coordinator or transaction API is introduced.
 
-Registry applies a complete subject or property projection only when its revision is newer than the stored revision. It does not replay a stale index-keyed delta or enumerate a live collection under Registry locks. The `IPropertyLifecycleHandler.RefreshCollectionProperty` default method remains source-compatible during this PR, but built-in Registry stops using it.
+Registry applies a complete subject or property projection only when its revision is newer than the stored revision. It does not replay a stale index-keyed delta or enumerate a live collection under Registry locks. The `IPropertyLifecycleHandler.RefreshCollectionProperty` default method remains source-compatible and built-in Registry consumes its complete immutable refresh projection for a retained collection whose occurrences or keys changed.
 
 Notifier dispatch continues after a callback exception so graph cleanup and later built-in handlers are not stranded. An ordinary operation throws the single exception or an `AggregateException` after its journal drains. Core completes the parent lease explicitly after the full chain and asks the topology admission coordinator to perform any deferred sweep and drain its journal outside locks. Sweep callback failures are aggregated with the captured chain exception, preserving that exception as primary. Internal reservation and lease `Dispose` remain no-throw safety fallbacks; if one must complete a sweep outside normal operation completion, it drains the journal and reports callback failures through `Trace` without replacing an exception already unwinding.
 
@@ -188,6 +204,8 @@ If downstream interceptor unwind throws after a committed terminal, the field an
 An intercepted generated or Dynamic structural read takes the terminal lock and cannot observe the faithful store before its graph publication. This removes the context-wide transaction counter, withheld list, pending-terminal registry, lost-wakeup continuations, and sticky derived topology fault.
 
 A getter that deliberately reads the backing field through an uninstrumented alias may observe the new subject during the few instructions between the faithful store and graph publication. Both occur while the writer holds the topology gate. When derived validation encounters an otherwise unowned subject, it requires an exact same-context reservation that explains the transient value, releases user/framework locks, crosses that context's topology gate as a barrier, and reevaluates the getter and ownership outside the gate. Acquiring the gate orders the recheck after that compliant store's publication or abandonment. Back-to-back writers may expose a different reserved value immediately afterward, so validation repeats the reservation test and barrier while the newly observed orphan has an exact explaining reservation. It reports the existing lifecycle contract violation only when an orphan has no such reservation. No reservation continuation, completion registration, retry queue, or context-wide quiescence inference is required.
+
+This alias-validation barrier is distinct from deferred derived notification publication. Validation never queues or replays a getter transaction. Deferral occurs only after a source terminal has committed and only when the separate target executor rejects the internal synthetic notification before its chain because target lifecycle publication is temporarily unavailable.
 
 ## Error handling
 
@@ -209,13 +227,13 @@ A getter that deliberately reads the backing field through an uninstrumented ali
 - Keep raw `TryUpdateAttachment` for alternative lifecycle implementations. The built-in lifecycle guards its own transitions with leases, reservations, and phases; alternative lifecycle implementations remain responsible for their synchronization.
 - Keep lifecycle payload additions minimal and limited to unlocked callback correctness.
 
-## Simplification requirements
+## Simplification outcome
 
 Production code means C# under `src`, excluding tests, benchmarks, samples, snapshots, and E2E projects.
 
 At local head `23d4a54b`, the five-project lifecycle scope is 444 production lines above PR head and 738 lines above the final `+2,800` ceiling relative to master. The revised implementation must remove at least 738 net production lines from this local head before completion.
 
-The final implementation must satisfy all of these gates:
+The original plan required all of these gates:
 
 - Net production lines are materially negative relative to PR head `c5079c6f`, not negative by a token amount.
 - Core plus Tracking are at most `+2,300` production lines relative to master.
@@ -226,6 +244,8 @@ The final implementation must satisfy all of these gates:
 - Focused types retain one responsibility even when the file-count ceiling discourages unnecessary new files.
 
 Expected deletions include the four recursive topology helpers, the whole-chain gate, old reconcile preparation, immediate-claim adapters after cutover, seeded and releasing compatibility branches, rejected-attach rollback, context-wide transaction deferral, raw collection refresh callers, and obsolete scratch pools. The callback guard is simplified into the logical notification scope rather than deleted as a behavior change.
+
+The local comparison candidate deletes the duplicate recursive topology helpers and retains one ownership graph, one journal, one terminal protocol, and one admission protocol. It does not meet the numerical size gates. Against latest PR branch `c5079c6f`, the five production projects are currently `+4,977/-3,384`, net `+1,593`; against current `origin/master` at `082bb1ce`, they are `+7,089/-2,394`, net `+4,695`. Core plus Tracking are net `+1,676` versus that PR branch and net `+4,261` versus master. The candidate therefore remains a correctness comparison branch, not a size-approved final PR. Independent reduction review found no further sizeable deletion that was clearly safe without removing a distinct admission, publication, reachability, callback, Registry, or derived-cascade invariant. The maintainer must choose whether the stronger contract justifies this size or whether requirements should be narrowed before further implementation.
 
 ## Verification requirements
 
@@ -240,6 +260,8 @@ Expected deletions include the four recursive topology helpers, the whole-chain 
 - Focused Core, Tracking, Generator, Dynamic, Registry, Connector, and Hosting suites pass before the full non-integration solution build, test, pack, public API, and repeated concurrency runs.
 - Production callout and lock-order audits find no user code under framework locks. Independent correctness and deletion reviews approve the final diff.
 - Benchmarks run only after the user reviews the local branch and approves the performance follow-up.
+
+Fresh verification on 2026-08-31 passed Core 196/196, Tracking 761/761, Registry 193/193, Generator 273/273, Dynamic 11/11, Connectors 738/738, and ConnectorTester 117/117. The complete non-integration solution test exited successfully. Debug and Release solution builds completed with zero warnings and zero errors. Release pack completed after the Release build, with only the expected warnings from projects that disable packaging. Benchmarks were not run because the plan requires separate user approval.
 
 ## Evidence
 
