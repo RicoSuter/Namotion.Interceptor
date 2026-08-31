@@ -222,9 +222,9 @@ See [Source Monitoring](connectors-monitoring.md) for waiting on synchronization
 
 When an inbound update fails to apply, the failure is logged and the update is dropped. There is no retry: writes to the local model are deterministic, so they either succeed or fail consistently and retrying would not help. This includes custom validation failures.
 
-Applying is per property rather than all-or-nothing, so a single bad property does not cost the rest of the update. [Applying Updates](connectors-subject-updates.md#when-a-property-fails-to-apply) describes what the applier guarantees and the two limits that come with it.
+`SubjectPropertyWriter` logs `Failed to apply subject update` once per update, not once per failed property. Beyond that each connector decides: the WebSocket server also answers the client with an error frame, and a source's initial state load lets the exception propagate so its reconnect and reload retry the whole snapshot.
 
-`SubjectPropertyWriter` logs `Failed to apply subject update` once per update, not once per failed property, so one log entry can carry an `AggregateException` covering several. Beyond that, what a connector does with the failure is its own decision: the WebSocket server also answers the client with an error frame, and a source's initial state load lets the exception propagate so its reconnect and reload retry the whole snapshot.
+Connectors applying a `SubjectUpdate` get per-property containment within one update, described in [When a Property Fails to Apply](connectors-subject-updates.md#when-a-property-fails-to-apply). One writing values property by property sets its own granularity instead, as the OPC UA and MQTT clients do by catching around each write.
 
 This differs from outbound changes (writing from local model to external system), which use a retry queue to handle transient failures.
 
