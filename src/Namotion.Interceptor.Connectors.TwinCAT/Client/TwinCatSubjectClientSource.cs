@@ -243,8 +243,12 @@ public sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDispos
         (RegisteredSubjectProperty Property, object? Value)[] values,
         CancellationToken cancellationToken)
     {
+        // Same shape as the polling fallback: sum commands cannot resolve these symbols, so the
+        // round trip count is fixed and only the number in flight is left to choose. Sequentially
+        // this pass is the startup stall, one round trip per symbol before the model is usable.
         var successCount = 0;
-        for (var index = 0; index < properties.Count; index++)
+
+        async Task ReadIntoAsync(int index)
         {
             try
             {
@@ -254,13 +258,35 @@ public sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDispos
                 {
                     values[index] = (properties[index].Property,
                         _configuration.ValueConverter.ConvertToPropertyValue(readResult.Value, properties[index].Property));
-                    successCount++;
+                    Interlocked.Increment(ref successCount);
                 }
             }
             catch (Exception exception)
             {
                 _logger.LogDebug(exception, "Failed to read symbol '{SymbolPath}'.", properties[index].Symbol.InstancePath);
             }
+        }
+
+        var maxConcurrentReads = _configuration.MaxConcurrentReads;
+        if (maxConcurrentReads > 0)
+        {
+            await Parallel.ForAsync(0, properties.Count,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = maxConcurrentReads,
+                    CancellationToken = cancellationToken,
+                },
+                async (index, _) => await ReadIntoAsync(index).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+        else
+        {
+            var reads = new Task[properties.Count];
+            for (var index = 0; index < properties.Count; index++)
+            {
+                reads[index] = ReadIntoAsync(index);
+            }
+
+            await Task.WhenAll(reads).ConfigureAwait(false);
         }
 
         _logger.LogInformation("Read {SuccessCount}/{TotalCount} ADS symbols individually from PLC.", successCount, properties.Count);
