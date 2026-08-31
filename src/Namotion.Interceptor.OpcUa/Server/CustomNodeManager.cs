@@ -38,7 +38,7 @@ internal class CustomNodeManager : CustomNodeManager2
         _configuration = configuration;
         _mapper = configuration.Mapper;
         _logger = logger;
-        _nodeFactory = new OpcUaNodeFactory(logger);
+        _nodeFactory = new OpcUaNodeFactory(logger, serverService);
     }
 
     // Expose protected members for OpcUaNodeFactory
@@ -130,17 +130,16 @@ internal class CustomNodeManager : CustomNodeManager2
 
     /// <summary>
     /// Removes nodes for a detached subject. Idempotent - safe to call multiple times.
-    /// Uses DeleteNode to properly cleanup nodes and event handlers, preventing memory leaks.
+    /// Uses DeleteNode so the SDK drops the node and its monitoring state, preventing memory leaks.
     /// </summary>
     public void RemoveSubjectNodes(IInterceptorSubject subject)
     {
         _structureLock.Wait();
         try
         {
-            // DeleteNode flushes whatever change masks are pending and takes no lock of its own, so
-            // without this it can flush a value the write loop has set but not yet flushed itself,
-            // from a thread the write loop's guard does not cover. DeleteNode already takes this lock
-            // internally, so the order is unchanged.
+            // Held across the whole removal rather than per node: DeleteNode takes this lock internally
+            // anyway, and the SDK's own services take it too, so one hold is what keeps a subject's nodes
+            // from being read or written half-removed.
             lock (Lock)
             {
                 var registeredSubject = subject.TryGetRegisteredSubject();
@@ -353,7 +352,7 @@ internal class CustomNodeManager : CustomNodeManager2
     }
 
     /// <summary>
-    /// Shared helper that configures a variable node with value, access levels, array dimensions, and state change handler.
+    /// Shared helper that configures a variable node with value, access levels and array dimensions.
     /// </summary>
     private BaseDataVariableState ConfigureVariableNode(
         RegisteredSubjectProperty property,
@@ -400,20 +399,10 @@ internal class CustomNodeManager : CustomNodeManager2
             variableNode.Timestamp = writeTimestamp.Value.UtcDateTime;
         }
 
-        // Assigning the value above leaves a pending change mask that nothing else clears, so the next
-        // flush of this node reports the creation value as if a client had written it. Cleared here,
-        // during CreateAddressSpace and before the handler is attached, so nothing observes it.
+        // Assigning the value above leaves a pending change mask nothing has cleared yet, which a later
+        // flush would dispatch to a subscriber as a change that never happened. Cleared here, during
+        // CreateAddressSpace, before the node can be monitored.
         variableNode.ClearChangeMasks(SystemContext, false);
-
-        variableNode.StateChanged += (_, _, changes) =>
-        {
-            if (changes.HasFlag(NodeStateChangeMasks.Value))
-            {
-                // Callers that reach here hold NodeManager.Lock; every value set must be flushed by
-                // the same actor under that same hold, or a later flush misattributes it as a client write.
-                _serverService.UpdateProperty(property.Reference, variableNode.Timestamp, variableNode.Value);
-            }
-        };
 
         return variableNode;
     }

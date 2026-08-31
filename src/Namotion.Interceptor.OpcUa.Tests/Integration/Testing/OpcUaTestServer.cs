@@ -23,11 +23,17 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
     private string _baseAddress = DefaultBaseAddress;
     private string _certificateStoreBasePath = "pki";
     private TimeSpan _bufferTime = TimeSpan.FromMilliseconds(100);
+    private OpcUaValueConverter? _valueConverter;
     private int _disposed;
 
     public TRoot? Root { get; private set; }
 
     public IOpcUaSubjectServer? Server { get; private set; }
+
+    /// <summary>
+    /// Gets the context the root was created in, so a test can observe what the interceptor chain publishes.
+    /// </summary>
+    public IInterceptorSubjectContext Context => _context ?? throw new InvalidOperationException("Server not started.");
 
     public OpcUaTestServer(TestLogger logger)
     {
@@ -39,13 +45,15 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         Action<IInterceptorSubjectContext, TRoot>? initializeDefaults = null,
         string? baseAddress = null,
         string? certificateStoreBasePath = null,
-        TimeSpan? bufferTime = null)
+        TimeSpan? bufferTime = null,
+        OpcUaValueConverter? valueConverter = null)
     {
         _createRoot = createRoot;
         _initializeDefaults = initializeDefaults;
         _baseAddress = baseAddress ?? DefaultBaseAddress;
         _certificateStoreBasePath = certificateStoreBasePath ?? "pki";
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(100);
+        _valueConverter = valueConverter;
 
         return StartInternalAsync();
     }
@@ -92,7 +100,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                 {
                     RootName = "Root",
                     BaseAddress = _baseAddress,
-                    ValueConverter = new OpcUaValueConverter(),
+                    ValueConverter = _valueConverter ?? new OpcUaValueConverter(),
                     TelemetryContext = telemetryContext,
                     CleanCertificateStore = false,
                     AutoAcceptUntrustedCertificates = true,

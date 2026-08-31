@@ -3,15 +3,15 @@ using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Testing;
+using Opc.Ua;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 
 /// <summary>
-/// The server must never apply its own node state back to the subject. Two paths reach the
-/// <c>StateChanged</c> handler that carries client writes: the flush loop's own <c>ClearChangeMasks</c>,
-/// and node removal flushing the value mask set at creation. Both are masked by the equality check until
-/// the subject has moved on, at which point they overwrite the newer commit with an older value.
+/// What the server counts and applies as inbound. Only a client's write is: it is applied inside the
+/// node's own write and counted there, once. Every other route onto a node, the flush loop's own
+/// assignment and the flush a node removal performs, must reach neither the subject nor the counter.
 /// </summary>
 [Trait("Category", "Integration")]
 public class OpcUaServerSelfWriteTests
@@ -54,8 +54,8 @@ public class OpcUaServerSelfWriteTests
     }
 
     /// <summary>
-    /// The value mask set when a variable node is created is never cleared, so removing the node ORs in
-    /// Deleted and flushes both, which reaches the same handler carrying the node's creation value.
+    /// Removing a node ORs in Deleted and flushes it, which is the one flush of a node the connector
+    /// performs without having anything to say about the property behind it.
     /// </summary>
     [Fact]
     public async Task WhenASubjectIsDetached_ThenNothingIsAppliedBackToTheSubject()
@@ -86,6 +86,22 @@ public class OpcUaServerSelfWriteTests
 
         // Assert
         Assert.Equal(0d, serverService.Diagnostics.Throughput.IncomingPerSecond);
+    }
+
+    [Fact]
+    public async Task WhenAClientWritesOnce_ThenTheIncomingCounterCountsItOnce()
+    {
+        // Arrange
+        await using var fixture = await WriteIntegrityFixture.StartAsync(_output);
+        var nodeId = fixture.NodeId(nameof(WriteIntegrityChild.Value));
+
+        // Act
+        var statusCode = await fixture.Session.WriteAsync(nodeId, "counted");
+
+        // Assert: one write is one unit of inbound traffic. A second path onto the same value inflates
+        // every rate the diagnostics report, and nothing else in the counter would show it.
+        Assert.True(StatusCode.IsGood(statusCode), $"The write must not be answered with '{statusCode}'.");
+        Assert.Equal(1d, fixture.Server.Diagnostics.Throughput.IncomingPerSecond!.Value * 60d, precision: 6);
     }
 }
 

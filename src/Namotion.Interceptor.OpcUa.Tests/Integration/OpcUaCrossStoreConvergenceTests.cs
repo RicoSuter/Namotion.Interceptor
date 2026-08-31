@@ -3,6 +3,7 @@ using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
+using Opc.Ua;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
@@ -51,13 +52,24 @@ public class OpcUaCrossStoreConvergenceTests
         var standardServer = (OpcUaStandardServer)serverService.CurrentServer!;
         var systemContext = standardServer.CurrentInstance.DefaultSystemContext;
 
-        // A client write, exactly as the SDK performs one: under the node manager lock, assigned and then
-        // flushed, which is the path that reaches the subject.
+        // A client write, exactly as the SDK performs one: WriteAttribute under the node manager lock,
+        // which is what its write service calls and the only path that reaches the subject.
+        ServiceResult writeResult;
         lock (standardServer.NodeManagerLock!)
         {
-            node!.Value = "from-client";
-            node.ClearChangeMasks(systemContext, false);
+            writeResult = node!.WriteAttribute(
+                systemContext,
+                Opc.Ua.Attributes.Value,
+                NumericRange.Empty,
+                new DataValue
+                {
+                    Value = "from-client",
+                    StatusCode = StatusCodes.Good,
+                    SourceTimestamp = DateTime.UtcNow
+                });
         }
+
+        Assert.True(ServiceResult.IsGood(writeResult), $"The client write must not be answered with '{writeResult}'.");
 
         await AsyncTestHelpers.WaitUntilAsync(
             () => child.Value == "from-client",
