@@ -220,12 +220,11 @@ See [Source Monitoring](connectors-monitoring.md) for waiting on synchronization
 
 ### Inbound Update Error Handling
 
-When applying inbound updates (writing data from the external system to the local subject model), if an individual update fails (the action throws an exception), the error is logged and **the update is dropped**. There is no retry mechanism for inbound updates.
+When an inbound update fails to apply, the failure is logged and the update is dropped. There is no retry: writes to the local model are deterministic, so they either succeed or fail consistently and retrying would not help. This includes custom validation failures.
 
-This is by design:
-- Individual update failures don't block other updates from being applied
-- Monitor logs for `Failed to apply subject update` errors to detect issues
-- Write failures to internal models are treated as non-transient because property writes are deterministic: they either succeed or fail consistently, so retrying would not help (this includes custom validation failures)
+`SubjectPropertyWriter` logs `Failed to apply subject update` once per update, not once per failed property. Beyond that each connector decides: the WebSocket server also answers the client with an error frame, and a source's initial state load lets the exception propagate so its reconnect and reload retry the whole snapshot.
+
+Connectors applying a `SubjectUpdate` get per-property containment within one update, described in [When a Property Fails to Apply](connectors-subject-updates.md#when-a-property-fails-to-apply). One writing values property by property sets its own granularity instead, as the OPC UA and MQTT clients do by catching around each write.
 
 This differs from outbound changes (writing from local model to external system), which use a retry queue to handle transient failures.
 
