@@ -41,6 +41,9 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// cycle. Dropped on a failed read to replace handles invalidated by a reconnect.</summary>
     private readonly ConcurrentDictionary<string, uint> _rawIntegerHandles = new();
 
+    /// <summary>What the individual-read poll passes record, surfaced on the client diagnostics.</summary>
+    internal AdsPollingMetrics PollingMetrics { get; } = new();
+
     // Polling snapshot — swapped atomically via volatile reference to avoid torn reads.
     // Only the polling thread mutates UseFallback; all other fields are set once during construction.
     private volatile PollingSnapshot _pollingSnapshot = PollingSnapshot.Empty;
@@ -487,8 +490,10 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             }
         }
 
+        var elapsed = Stopwatch.GetElapsedTime(passStarted).TotalMilliseconds;
+        PollingMetrics.RecordPass(snapshot.Symbols.Count, elapsed, failures);
         _logger.LogDebug("Poll pass: {Count} symbols in {Elapsed:N0} ms, {Failures} failed.",
-            snapshot.Symbols.Count, Stopwatch.GetElapsedTime(passStarted).TotalMilliseconds, failures);
+            snapshot.Symbols.Count, elapsed, failures);
     }
 
     /// <summary>

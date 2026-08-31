@@ -35,4 +35,23 @@ public class AdsClientDiagnosticsTests
         Assert.False(diagnostics.IsCircuitBreakerOpen);
         Assert.Equal(0, diagnostics.CircuitBreakerTripCount);
     }
+
+    [Fact]
+    public void Polling_BeforeAnyPass_ShouldReportZero()
+    {
+        // Arrange
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var subject = new TestPlcModel(context);
+        var source = new TwinCatSubjectClientSource(
+            subject, TestHelpers.CreateConfiguration(), new Mock<ILogger>().Object);
+
+        // Act
+        var polling = source.Diagnostics.Polling;
+
+        // Assert
+        Assert.Equal(0, polling.TotalPasses);
+        Assert.Equal(0, polling.TotalFailedReads);
+        Assert.Equal(0, polling.LastPassSymbolCount);
+        Assert.Equal(0, polling.LastPassDurationMilliseconds);
+    }
 }

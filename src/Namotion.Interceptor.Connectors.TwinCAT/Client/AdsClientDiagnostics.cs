@@ -23,6 +23,7 @@ public sealed class AdsClientDiagnostics : SourceDiagnostics
         : base(metrics)
     {
         _source = source;
+        Polling = new AdsPollingDiagnostics(source.SubscriptionManager.PollingMetrics);
     }
 
     /// <summary>
@@ -74,4 +75,35 @@ public sealed class AdsClientDiagnostics : SourceDiagnostics
     /// Gets the number of times the circuit breaker has tripped.
     /// </summary>
     public long CircuitBreakerTripCount => _source.ConnectionManager.CircuitBreakerTripCount;
+
+    /// <summary>
+    /// Gets what the individual-read poll passes recorded. Zero throughout when the polled symbols
+    /// resolve, because a sum read then serves the whole batch in one round trip.
+    /// </summary>
+    public AdsPollingDiagnostics Polling { get; }
+}
+
+/// <summary>
+/// What the individual-read polling fallback reports.
+/// </summary>
+public sealed class AdsPollingDiagnostics
+{
+    private readonly AdsPollingMetrics _metrics;
+
+    internal AdsPollingDiagnostics(AdsPollingMetrics metrics)
+    {
+        _metrics = metrics;
+    }
+
+    /// <summary>Gets the number of individual-read passes completed.</summary>
+    public long TotalPasses => _metrics.Passes;
+
+    /// <summary>Gets the reads that threw, across all passes.</summary>
+    public long TotalFailedReads => _metrics.FailedReads;
+
+    /// <summary>Gets how long the last pass took, in milliseconds.</summary>
+    public long LastPassDurationMilliseconds => _metrics.LastPassDurationMilliseconds;
+
+    /// <summary>Gets how many symbols the last pass read.</summary>
+    public long LastPassSymbolCount => _metrics.LastPassSymbolCount;
 }

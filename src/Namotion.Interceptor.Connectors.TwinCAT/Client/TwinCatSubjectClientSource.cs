@@ -49,8 +49,6 @@ public sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDispos
     {
         configuration.Validate();
 
-        Diagnostics = new AdsClientDiagnostics(this, Metrics);
-
         _subject = subject;
         _configuration = configuration;
         _logger = logger;
@@ -58,6 +56,9 @@ public sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDispos
         _connectionManager = new AdsConnectionManager(configuration, logger);
         _subscriptionManager = new AdsSubscriptionManager(configuration, logger);
         _subjectLoader = new AdsSubjectLoader(configuration.Mapper);
+
+        Metrics.RegisterResettable(_subscriptionManager.PollingMetrics);
+        Diagnostics = new AdsClientDiagnostics(this, Metrics);
 
         _ownership = new SourceOwnershipManager(
             this,
