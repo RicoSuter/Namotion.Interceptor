@@ -203,8 +203,12 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// <summary>
     /// Clears all caches, disposes subscriptions, and marks polling as dirty.
     /// </summary>
-    internal void ClearAll()
+    internal void ClearAll(IAdsConnection? connection = null)
     {
+        // Before the paths are forgotten: a rescan replaces the symbol set, and a handle the PLC
+        // still holds for a symbol nothing reads again is leaked for the life of the connection.
+        ReleaseRawIntegerHandles(connection);
+
         // Mark polling dirty and clear snapshot so in-flight polls stop immediately
         Interlocked.Increment(ref _pollingCollectionVersion);
         _pollingSnapshot = PollingSnapshot.Empty;
@@ -501,15 +505,15 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             try
             {
                 var readResult = await snapshot.SumRead.ReadAsync(cancellationToken).ConfigureAwait(false);
-                if (readResult.ErrorCode == AdsErrorCode.DeviceServiceNotSupported)
+                if (readResult.ErrorCode != AdsErrorCode.NoError || readResult.Values is null)
                 {
-                    _logger.LogDebug("SumSymbolRead not supported for polling, falling back to individual reads.");
+                    // Any sum-read failure falls back, as the initial state load already does.
+                    // Narrowing this to DeviceServiceNotSupported left every other failure repeating
+                    // forever, and put the raw-integer path, which lives behind the fallback, out of
+                    // reach of the enums it exists for.
+                    connectionManager.LogFirstOccurrence("BatchPoll", null,
+                        "Batch polling failed with {ErrorCode}, falling back to individual reads.", readResult.ErrorCode);
                     snapshot.UseFallback = true;
-                }
-                else if (readResult.ErrorCode != AdsErrorCode.NoError || readResult.Values is null)
-                {
-                    connectionManager.LogFirstOccurrence("BatchPoll", null, "Batch polling failed with error: {ErrorCode}", readResult.ErrorCode);
-                    return;
                 }
                 else
                 {
@@ -528,9 +532,12 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                     return;
                 }
             }
-            catch (AdsException exception) when (AdsErrorClassifier.GetErrorCode(exception) == AdsErrorCode.DeviceServiceNotSupported)
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                _logger.LogDebug("SumSymbolRead threw DeviceServiceNotSupported for polling, falling back to individual reads.");
+                // Includes the value-building throw for a symbol whose PLC type will not resolve,
+                // which is not an AdsException at all and previously escaped the whole poll loop.
+                connectionManager.LogFirstOccurrence("BatchPoll", exception,
+                    "Batch polling threw, falling back to individual reads.");
                 snapshot.UseFallback = true;
             }
         }
@@ -700,7 +707,14 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                     $"Failed to create ADS variable handle for '{symbolPath}': {errorCode}");
             }
 
-            _rawIntegerHandles[symbolPath] = handle;
+            // Two properties on the same path can race here. A blind assign would orphan the loser's
+            // handle in the PLC for the process lifetime, so keep whichever landed first.
+            var stored = _rawIntegerHandles.GetOrAdd(symbolPath, handle);
+            if (stored != handle)
+            {
+                connection.TryDeleteVariableHandle(handle);
+                handle = stored;
+            }
         }
 
         try
@@ -744,6 +758,30 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     private void DropHandle(string symbolPath)
     {
         _rawIntegerHandles.TryRemove(symbolPath, out _);
+    }
+
+    /// <summary>
+    /// Releases every cached raw-integer handle on the PLC. Handles do not survive a reconnect or a
+    /// download, and nothing else ever frees them, so without this each one is held for the life of
+    /// the process and leaked on shutdown.
+    /// </summary>
+    private void ReleaseRawIntegerHandles(IAdsConnection? connection)
+    {
+        foreach (var symbolPath in _rawIntegerHandles.Keys)
+        {
+            if (_rawIntegerHandles.TryRemove(symbolPath, out var handle) && connection is not null)
+            {
+                try
+                {
+                    connection.TryDeleteVariableHandle(handle);
+                }
+                catch (Exception exception)
+                {
+                    _logger.LogDebug(exception,
+                        "Failed to release the ADS handle for '{SymbolPath}'.", symbolPath);
+                }
+            }
+        }
     }
 
     private void RebuildPollingSnapshot(AdsConnectionManager connectionManager)
@@ -806,6 +844,9 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
+            // No connection to release against here; the PLC drops a session's handles when the
+            // connection closes, which is what happens next.
+            _rawIntegerHandles.Clear();
             _subscriptions.Dispose();
         }
 

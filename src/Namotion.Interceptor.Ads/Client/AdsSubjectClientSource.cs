@@ -114,7 +114,7 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
                 // ClearAll() keeps the underlying CompositeDisposable reusable for the next
                 // listen attempt; BackgroundTaskLifetime takes care of cancelling and awaiting
                 // the loop tasks before this cleanup runs.
-                _subscriptionManager.ClearAll();
+                _subscriptionManager.ClearAll(_connectionManager.Connection);
                 return ValueTask.CompletedTask;
             });
 
@@ -144,7 +144,19 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
             await linkedCts.CancelAsync().ConfigureAwait(false);
         }
 
-        await Task.WhenAll(rescanTask, pollingTask).ConfigureAwait(false);
+        try
+        {
+            await Task.WhenAll(rescanTask, pollingTask).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (!stoppingToken.IsCancellationRequested)
+        {
+            // Reported here rather than left on the task. Nothing awaits it until disposal, so
+            // without this both loops are gone, reads and rescans are dead, and the source keeps
+            // reporting healthy while writes still work.
+            Metrics.ReportError(exception);
+            _logger.LogError(exception, "ADS listen loops stopped. Reads and rescans are no longer running.");
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -661,9 +673,12 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
         _propertyWriter?.StartBuffering();
         Interlocked.Exchange(ref _lastRescanRequestedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
 
-        // Signal the loop; ignore if already signaled (SemaphoreSlim capped at 1)
+        // Reached from a TwinCAT event thread, which can still be dispatching an event raised before
+        // disposal unhooked the handlers, so the semaphore may already be gone. SemaphoreFullException
+        // means the loop is already signalled, which is equally harmless.
         try { _rescanSignal.Release(); }
         catch (SemaphoreFullException) { }
+        catch (ObjectDisposedException) { }
     }
 
     /// <summary>
@@ -684,7 +699,7 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
                 return false;
             }
 
-            _subscriptionManager.ClearAll();
+            _subscriptionManager.ClearAll(_connectionManager.Connection);
             await _connectionManager.RecreateSymbolLoaderAsync(cancellationToken).ConfigureAwait(false);
 
             // Load subject graph

@@ -180,6 +180,10 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
                         ? new AdsClient(routerConfiguration, null)
                         : new AdsClient();
 
+                    // Set before connecting, or the configured timeout does not apply to the connect
+                    // itself, which is the call most likely to hang against an unreachable PLC.
+                    client.Timeout = (int)_configuration.Timeout.TotalMilliseconds;
+
                     try
                     {
                         await client.ConnectAsync(amsNetId, _configuration.AmsPort, cancellationToken);
@@ -189,8 +193,6 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
                         client.Dispose();
                         throw;
                     }
-
-                    client.Timeout = (int)_configuration.Timeout.TotalMilliseconds;
 
                     // Wire events before publishing _client so that no caller can read
                     // Connection and find a client whose events are not yet subscribed.

@@ -200,6 +200,10 @@ public class AdsClientConfiguration
         if (PollingInterval <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(PollingInterval), "PollingInterval must be positive.");
 
+        if (MaxConcurrentReads < 0)
+            throw new ArgumentOutOfRangeException(nameof(MaxConcurrentReads),
+                "MaxConcurrentReads must be non-negative; 0 means no limit.");
+
         if (WriteRetryQueueSize < 0)
             throw new ArgumentOutOfRangeException(nameof(WriteRetryQueueSize), "WriteRetryQueueSize must be non-negative.");
 

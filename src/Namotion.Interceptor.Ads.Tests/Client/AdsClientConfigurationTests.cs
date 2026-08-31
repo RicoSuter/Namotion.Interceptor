@@ -170,6 +170,19 @@ public class AdsClientConfigurationTests
         Assert.Throws<ArgumentOutOfRangeException>(configuration.Validate);
     }
 
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(-100)]
+    public void Validate_WithNegativeMaxConcurrentReads_ThrowsArgumentOutOfRangeException(int maxConcurrentReads)
+    {
+        // Arrange - 0 means no limit, but a negative value silently meant the same thing
+        var configuration = CreateValidConfiguration();
+        configuration.MaxConcurrentReads = maxConcurrentReads;
+
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(configuration.Validate);
+    }
+
     [Fact]
     public void Validate_WithZeroMaxNotifications_Succeeds()
     {
