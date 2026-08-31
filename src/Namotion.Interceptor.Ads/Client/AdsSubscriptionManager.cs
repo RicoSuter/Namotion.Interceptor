@@ -456,6 +456,11 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         var byteSize = bitSize.ByteSize;
         var marshaler = new AnyTypeMarshaler();
 
+        // Resolved, because a PLC alias such as `TYPE T_MaxString : STRING(255)` presents as an
+        // AliasType that implements neither IStringType nor IArrayType. Matching on the unresolved
+        // type would drop every aliased string and array to polling. A no-op for everything else.
+        var dataType = symbol.DataType?.Resolve();
+
         try
         {
             if (marshalType == typeof(string))
@@ -463,7 +468,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                 // Single-byte strings only. A WSTRING holds two bytes per character, and the
                 // any-type path marshals with the target's single-byte value encoding, so it would
                 // decode the payload as one character and stop at the first NUL.
-                if (symbol.DataType is not IStringType stringType ||
+                if (dataType is not IStringType stringType ||
                     stringType.Length <= 0 ||
                     stringType.ByteSize != stringType.Length + 1)
                 {
@@ -475,7 +480,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             else if (marshalType.IsArray)
             {
                 // Validated against the PLC array type, not against a byte count that divides evenly.
-                if (symbol.DataType is not IArrayType { IsJagged: false } arrayType ||
+                if (dataType is not IArrayType { IsJagged: false } arrayType ||
                     arrayType.Dimensions.Count != 1)
                 {
                     return false;

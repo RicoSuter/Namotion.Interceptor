@@ -1,5 +1,7 @@
 using Moq;
 using Namotion.Interceptor.Ads.Client;
+using System.Text;
+using TwinCAT.Ads.TypeSystem;
 using TwinCAT.TypeSystem;
 using Xunit;
 
@@ -97,6 +99,41 @@ public class NotificationTypeResolutionTests
             typeof(string), CreateSymbol(81, CreateStringType(80, 81)), out var marshalType, out var args));
         Assert.Equal(typeof(string), marshalType);
         Assert.Equal([80], Assert.IsType<int[]>(args));
+    }
+
+    [Fact]
+    public void Resolve_ForAnAliasedString_UsesTheResolvedType()
+    {
+        // A PLC alias such as `TYPE T_MaxString : STRING(255)` presents as an AliasType, which
+        // implements neither IStringType nor IArrayType. Matching the unresolved type would drop
+        // every aliased string to polling.
+        var baseType = new StringType(80, Encoding.ASCII);
+        var alias = new AliasType("T_MaxString", baseType);
+
+        Assert.True(AdsSubscriptionManager.TryResolveNotificationType(
+            typeof(string), CreateSymbol(baseType.ByteSize, alias), out var marshalType, out var args));
+        Assert.Equal(typeof(string), marshalType);
+        Assert.Equal([80], Assert.IsType<int[]>(args));
+    }
+
+    [Fact]
+    public void Resolve_ForARealStringType_Succeeds()
+    {
+        // The same path with no alias, using the real TwinCAT type rather than a mock.
+        var stringType = new StringType(80, Encoding.ASCII);
+
+        Assert.True(AdsSubscriptionManager.TryResolveNotificationType(
+            typeof(string), CreateSymbol(stringType.ByteSize, stringType), out _, out var args));
+        Assert.Equal([80], Assert.IsType<int[]>(args));
+    }
+
+    [Fact]
+    public void Resolve_ForARealWideStringType_Fails()
+    {
+        var wideStringType = new StringType(80, Encoding.Unicode);
+
+        Assert.False(AdsSubscriptionManager.TryResolveNotificationType(
+            typeof(string), CreateSymbol(wideStringType.ByteSize, wideStringType), out _, out _));
     }
 
     [Fact]
