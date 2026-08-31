@@ -162,7 +162,9 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// <c>Acceptance.AcceptanceSubjects</c> exist because this branch's <c>ReorderingDevice</c>,
 /// <c>StoredValueClaimDevice</c> and <c>SubstitutingDevice</c> can no longer express the defect: the
 /// first two reach the untrusted shape and are refused before their terminal runs, and the third was
-/// rewritten to be faithful. All three are unreferenced by any test on this branch.
+/// rewritten to be faithful. <c>ReorderingDevice</c> is referenced by no test at all,
+/// <c>StoredValueClaimDevice</c> only through its value-typed model in a type-extension test and
+/// never as a subject, and <c>SubstitutingDevice</c> survives only in the defect 5 race half.
 ///
 /// Defect 8, attachment publication atomicity. <c>AttachmentStateCoherenceTests</c>. The attached
 /// context and the anchor must not be published as two stores, or a lock-free reader observes an
