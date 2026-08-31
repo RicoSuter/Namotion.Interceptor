@@ -170,8 +170,19 @@ public class AdsClientConfigurationTests
         Assert.Throws<ArgumentOutOfRangeException>(configuration.Validate);
     }
 
+    [Fact]
+    public void Validate_WithZeroMaxNotifications_Succeeds()
+    {
+        // Arrange — 0 leaves no notification budget for Auto properties, which is a valid choice;
+        // a property that asks for Notification explicitly still gets one.
+        var configuration = CreateValidConfiguration();
+        configuration.MaxNotifications = 0;
+
+        // Act & Assert
+        configuration.Validate();
+    }
+
     [Theory]
-    [InlineData(0)]
     [InlineData(-1)]
     [InlineData(-100)]
     public void Validate_WithInvalidMaxNotifications_ThrowsArgumentOutOfRangeException(int maxNotifications)

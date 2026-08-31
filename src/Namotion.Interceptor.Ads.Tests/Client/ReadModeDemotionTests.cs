@@ -28,6 +28,25 @@ public class ReadModeDemotionTests
     }
 
     [Fact]
+    public void AutoMode_ShouldAllBeDemoted_WhenLimitIsZero()
+    {
+        // Arrange
+        var context = TestHelpers.CreateContext();
+        var model = new AutoModeModel(context);
+        var loader = TestHelpers.CreateLoader();
+        var mappings = loader.LoadSubjectGraph(model);
+
+        // Act - a limit of 0 leaves no notification budget for Auto
+        var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
+            mappings, AdsReadMode.Auto, 100, maxNotifications: 0);
+
+        // Assert - this is what MaxNotifications = 0 is for: notifications only where asked for
+        // explicitly. Unlike DefaultReadMode = Polled, it also covers an explicit Auto property.
+        Assert.Single(result);
+        Assert.Equal(AdsReadMode.Polled, result[0].EffectiveMode);
+    }
+
+    [Fact]
     public void PolledMode_ShouldAlwaysRemainPolled_EvenWithPlentyOfSlots()
     {
         // Arrange

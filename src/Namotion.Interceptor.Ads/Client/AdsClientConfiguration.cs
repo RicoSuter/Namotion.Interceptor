@@ -81,6 +81,12 @@ public class AdsClientConfiguration
     /// <summary>
     /// Gets or sets the maximum number of concurrent ADS notifications before demotion.
     /// </summary>
+    /// <remarks>
+    /// Set to 0 to leave no notification budget for <see cref="AdsReadMode.Auto"/> properties, which
+    /// demotes all of them to polling. A property that asks for <see cref="AdsReadMode.Notification"/>
+    /// explicitly is never demoted and still gets one, so this is not the same as disabling
+    /// notifications outright.
+    /// </remarks>
     public int MaxNotifications { get; set; } = 500;
 
     /// <summary>
@@ -188,8 +194,8 @@ public class AdsClientConfiguration
         if (DefaultCycleTime <= 0)
             throw new ArgumentOutOfRangeException(nameof(DefaultCycleTime), "DefaultCycleTime must be positive.");
 
-        if (MaxNotifications <= 0)
-            throw new ArgumentOutOfRangeException(nameof(MaxNotifications), "MaxNotifications must be positive.");
+        if (MaxNotifications < 0)
+            throw new ArgumentOutOfRangeException(nameof(MaxNotifications), "MaxNotifications must be non-negative.");
 
         if (PollingInterval <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(PollingInterval), "PollingInterval must be positive.");
