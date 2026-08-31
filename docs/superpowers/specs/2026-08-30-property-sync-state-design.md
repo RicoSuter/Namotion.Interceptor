@@ -90,3 +90,43 @@ The generated `OnXChanging` hook runs between `PendingOrigin.Set` and `TryConsum
 - Benchmark gate covering the inbound path and, if outbound is included, the outbound batch path.
 - Connector suites locally: OPC UA, MQTT, WebSocket. CI path filters skip them for shared-library changes.
 - Both public API snapshots, `Tracking.Tests` and `Connectors.Tests`.
+
+## Documentation this will need
+
+Drafted during design and kept here because the "not covered" list is the part that stops the feature being misread. `docs/connectors-monitoring.md` needs four edits and one new section.
+
+**Edit 1, "Reading Per-Property State".** Its opening sentence says `GetSourceState()` is "derived from its owning source with no per-property storage". That stops being true and must be reworded. Append the `TryGetDivergence()` example and the rule that `Diverged` describes one property's relationship with its source rather than the source itself.
+
+**Edit 2, "The State Model".** Add `Diverged` to the enum block, and change "On a source itself, `Unclaimed` never occurs" to name both property-only members.
+
+**Edit 3, "The Event Stream" table.** Add a `PropertyStateChanged` row with `Property` set.
+
+**Edit 4, "Diagnostics and State answer different questions".** Note that `Diverged` sits on the `State` side even though a dropped outbound write can cause it, because it answers "can I trust this value" rather than "what is the transport doing". The distinction from outbound backlog is the same one already drawn there: a queued write is expected to arrive and says nothing, a dropped one never will.
+
+**New section, "What Diverged Does Not Cover".** The framing matters more than the list:
+
+> `Diverged` is a floor, not a ceiling. It reports disagreement the framework itself detected. Its absence means nothing was detected, not that the model and the source agree.
+
+Detected and reported:
+
+| Direction | Case |
+|---|---|
+| `Inbound` | A value the source sent that the model refused or failed to apply, including a validator rejecting it and a property setter throwing. |
+| `Inbound` | A value an `OnChanging` hook transformed on the way in, so what the model stored is not what the source sent. |
+| `Outbound` | A local write dropped from the retry queue, if the outbound direction is in scope at all. |
+
+Not reported:
+
+| Case | Why, and where it is tracked |
+|---|---|
+| A source changing a value without telling us | No read-back or periodic compare while connected, so nothing detects it. #342 question 4. |
+| A write the source rejects permanently | The retry queue keeps retrying rather than giving up, so the change is never dropped and never marked, although it never lands either. #342 row 3. |
+| A transaction commit whose source write fails and whose revert also fails | Repair designed but not built. #340. |
+| A write landing inside a transaction commit window | Silently overwritten, documented best effort. #338. |
+| An inbound update naming a property the model does not have | No property exists to mark. |
+| A value sent for a property with no setter | Deferred: a WebSocket welcome snapshot carries read-only and derived properties, so marking would report `Diverged` permanently in the default configuration. |
+| A property no source has claimed | Divergence is defined against an owning source. Reports `Unclaimed`. |
+
+One blind spot in reporting rather than detection: while the owning source is not `Synchronized`, its own state is reported instead, so a diverged property reads `Synchronizing` for the duration of a reconnect. The record survives and `TryGetDivergence()` still returns it, so a consumer wanting divergence during an outage reads that directly rather than going through `GetSourceState()`.
+
+Also needing edits outside that file: `docs/connectors.md`'s "Inbound Update Error Handling" should point at `Diverged` for how a dropped update becomes observable, and `docs/validation.md` should note that a rejected inbound value is now reported rather than only logged.
