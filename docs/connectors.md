@@ -220,16 +220,11 @@ See [Source Monitoring](connectors-monitoring.md) for waiting on synchronization
 
 ### Inbound Update Error Handling
 
-When applying inbound updates (writing data from the external system to the local subject model), a property that fails to apply is dropped and the rest of the update still applies. There is no retry of an individual property.
+When an inbound update fails to apply, the failure is logged and the update is dropped. There is no retry: writes to the local model are deterministic, so they either succeed or fail consistently and retrying would not help. This includes custom validation failures.
 
-This is by design:
-- A failed property does not block the other properties in the same update, including properties of nested subjects
-- Failures in separate updates are independent, so one failed update does not block the next
-- Write failures to internal models are treated as non-transient because property writes are deterministic: they either succeed or fail consistently, so retrying would not help (this includes custom validation failures)
+Applying is per property rather than all-or-nothing, so a single bad property does not cost the rest of the update. [Applying Updates](connectors-subject-updates.md#when-a-property-fails-to-apply) describes what the applier guarantees and the two limits that come with it.
 
-The update as a whole reports failure to its caller once every property has been attempted: a single failure is rethrown as itself, several are wrapped in an `AggregateException` naming the properties. Callers log that once per update rather than once per failed property, so monitor for `Failed to apply subject update` errors. Callers that retry the whole update, such as a source's initial state load, therefore still retry.
-
-Two limits are worth knowing. A collection or dictionary item whose own property fails is still inserted, carrying a default value for that property, so the parent ends up referencing a new item that is only partly populated. And a failure raised by the collection or dictionary machinery itself, such as an out-of-range index, still abandons the remaining items of that property.
+`SubjectPropertyWriter` logs `Failed to apply subject update` once per update, not once per failed property, so one log entry can carry an `AggregateException` covering several. Beyond that, what a connector does with the failure is its own decision: the WebSocket server also answers the client with an error frame, and a source's initial state load lets the exception propagate so its reconnect and reload retry the whole snapshot.
 
 This differs from outbound changes (writing from local model to external system), which use a retry queue to handle transient failures.
 
