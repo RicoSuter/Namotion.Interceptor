@@ -415,6 +415,35 @@ public class AdsIntegrationTests
 
     [Fact]
     [Trait("Category", "Integration")]
+    public async Task InitialState_WithOneUnassignableValue_StillLoadsTheOthersAndKeepsWriting()
+    {
+        // The apply action runs unguarded inside the property writer, so one value that cannot be
+        // assigned used to abort the whole apply, fail the listen attempt and take the source with
+        // it: no property held a value and no outbound write ever reached the PLC.
+        var model = new UnassignableValueIntegrationTestModel(CreateContext());
+
+        await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
+        {
+            // The healthy property is loaded even though its neighbour cannot be assigned.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientSource.Diagnostics.IsConnected && Math.Abs(model.Temperature - 25.0) < 0.001,
+                timeout: WaitTimeout,
+                message: "The assignable property should still receive its PLC value");
+
+            Assert.Equal(Guid.Empty, model.Identifier);
+
+            // And the source stays usable: the change queue processor exists, so writes flow.
+            model.Temperature = 44.25;
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => Math.Abs(Convert.ToDouble(_fixture.Server.GetSymbolValue("GVL.Temperature")) - 44.25) < 0.001,
+                timeout: WaitTimeout,
+                message: "An outbound write should still reach the PLC");
+        });
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
     public async Task BatchPolling_PolledProperty_ReceivesUpdates()
     {
         // Arrange

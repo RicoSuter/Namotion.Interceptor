@@ -31,11 +31,18 @@ public class AdsValueConverter
         // both signedness and nullability, so assigning a short to a ushort-backed enum, or any
         // integer to a nullable enum, throws where Enum.ToObject succeeds.
         var enumType = Nullable.GetUnderlyingType(targetType) ?? targetType;
-        if (enumType.IsEnum && adsValue.GetType().IsPrimitive)
+        if (enumType.IsEnum && IsIntegral(adsValue))
             return Enum.ToObject(enumType, adsValue);
 
         return adsValue;
     }
+
+    /// <summary>
+    /// True for the integer types <see cref="Enum.ToObject(Type, object)"/> accepts. It throws for a
+    /// floating-point value, and that throw would abort the rest of the polling pass.
+    /// </summary>
+    private static bool IsIntegral(object value) =>
+        value is byte or sbyte or short or ushort or int or uint or long or ulong;
 
     /// <summary>
     /// Converts a .NET property value to an ADS-compatible value for writing to the PLC.
@@ -48,6 +55,12 @@ public class AdsValueConverter
     {
         if (propertyValue is null)
             return null;
+
+        // Mirrors the read direction. The any-type path, used for a symbol whose PLC type will not
+        // resolve, cannot marshal an enum instance and rejects the write with DeviceInvalidSize, so
+        // it goes out as the underlying integer.
+        if (propertyValue.GetType().IsEnum)
+            return Convert.ChangeType(propertyValue, Enum.GetUnderlyingType(propertyValue.GetType()));
 
         // Handle DateTimeOffset -> DateTime for DATE_AND_TIME
         if (propertyValue is DateTimeOffset dateTimeOffset)

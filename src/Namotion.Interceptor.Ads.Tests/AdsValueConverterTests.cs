@@ -82,6 +82,30 @@ public class AdsValueConverterTests
     }
 
     [Fact]
+    public void ConvertToPropertyValue_WithFloatForEnumProperty_PassesItThrough()
+    {
+        // Enum.ToObject throws for a floating-point value, and the polling apply loop calls this
+        // outside any try, so the throw would abort the rest of the pass.
+        var property = GetProperty(nameof(TestPlcModel.Mode));
+
+        var result = _converter.ConvertToPropertyValue(1.5f, property);
+
+        Assert.Equal(1.5f, result);
+    }
+
+    [Fact]
+    public void ConvertToAdsValue_WithEnum_ReturnsTheUnderlyingInteger()
+    {
+        // The any-type write path, used for a symbol whose PLC type will not resolve, rejects an
+        // enum instance with DeviceInvalidSize and writes nothing.
+        var property = GetProperty(nameof(TestPlcModel.UnsignedMode));
+
+        var result = _converter.ConvertToAdsValue(TestUnsignedMode.Disabled, property);
+
+        Assert.Equal((ushort)40000, Assert.IsType<ushort>(result));
+    }
+
+    [Fact]
     public void ConvertToPropertyValue_WithDateTimeForDateTimeOffsetProperty_ReturnsDateTimeOffset()
     {
         // Arrange

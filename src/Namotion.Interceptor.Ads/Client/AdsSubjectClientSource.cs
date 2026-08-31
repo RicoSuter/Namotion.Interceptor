@@ -260,6 +260,10 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
                     // abort the whole apply, fail the listen attempt, and take the source with
                     // it. No property would hold a value and no write would ever reach the PLC.
                     failed++;
+
+                    // Reported to the metrics as well as logged: without it the source keeps
+                    // reporting healthy while the property holds its default value indefinitely.
+                    Metrics.ReportError(exception);
                     _logger.LogError(exception,
                         "Failed to apply the PLC value to property '{Property}'.", property.Name);
                 }
