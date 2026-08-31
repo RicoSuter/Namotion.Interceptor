@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors;
@@ -249,6 +250,76 @@ public class AdsIntegrationTests
 
             _output.WriteLine(
                 $"Temperature={model.Temperature}, Counter={model.Counter}, IsRunning={model.IsRunning}");
+        });
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task Notifications_SharingSettings_ShouldUseOneSubscriptionNotOnePerProperty()
+    {
+        // The reactive WhenNotification extension allocates a dedicated EventLoopScheduler, and so an
+        // OS thread, per call. Subscribing per property therefore cost one thread per property and
+        // recreated all of them on every rescan. This guards the batching that replaced it.
+        var model = new IntegrationTestModel(CreateContext());
+        var threadsBefore = Process.GetCurrentProcess().Threads.Count;
+
+        await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientSource.Diagnostics.IsConnected && clientSource.Diagnostics.NotificationVariableCount > 1,
+                timeout: WaitTimeout,
+                message: "Client should connect and register more than one notification");
+
+            var notificationCount = clientSource.Diagnostics.NotificationVariableCount;
+            var subscriptionCount = clientSource.SubscriptionManager.NotificationSubscriptionCount;
+            var threadGrowth = Process.GetCurrentProcess().Threads.Count - threadsBefore;
+
+            _output.WriteLine(
+                $"Notifications={notificationCount}, subscriptions={subscriptionCount}, thread growth={threadGrowth}");
+
+            // All properties share the default cycle time and max delay, so they form one settings
+            // group and must be served by a single subscription. Asserted on the subscription count
+            // rather than on threads, which are too noisy at this scale to discriminate.
+            Assert.True(notificationCount > 1, "Expected more than one notification property.");
+            Assert.Equal(1, subscriptionCount);
+
+            // Routing still has to work: every property is fed by the one shared subscription.
+            _fixture.Server.SetSymbolValue("GVL.Temperature", 77.25);
+            _fixture.Server.SetSymbolValue("GVL.Counter", 1234);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => Math.Abs(model.Temperature - 77.25) < 0.001 && model.Counter == 1234,
+                timeout: WaitTimeout,
+                message: "Both properties should update through the shared subscription");
+        });
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task Notifications_WithDifferentCycleTimes_ShouldNotShareASubscription()
+    {
+        // Grouping must key on the settings the PLC is actually given. Collapsing everything into
+        // one subscription would silently apply one property's cycle time to the others.
+        var model = new MixedCycleTimeIntegrationTestModel(CreateContext());
+
+        await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientSource.Diagnostics.IsConnected &&
+                      clientSource.Diagnostics.NotificationVariableCount == 3,
+                timeout: WaitTimeout,
+                message: "Client should register all three notifications");
+
+            // Two on the default cycle time, one on 500 ms.
+            Assert.Equal(2, clientSource.SubscriptionManager.NotificationSubscriptionCount);
+
+            _fixture.Server.SetSymbolValue("GVL.Temperature", 12.5);
+            _fixture.Server.SetSymbolValue("GVL.Counter", 4321);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => Math.Abs(model.Temperature - 12.5) < 0.001 && model.Counter == 4321,
+                timeout: WaitTimeout,
+                message: "Properties in both groups should update");
         });
     }
 
