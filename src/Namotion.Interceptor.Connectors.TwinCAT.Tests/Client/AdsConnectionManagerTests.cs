@@ -59,27 +59,27 @@ public class AdsConnectionManagerTests
     }
 
     [Fact]
-    public void RecreateSymbolLoader_WhenNoSession_ShouldNotThrow()
+    public async Task RecreateSymbolLoaderAsync_WhenNoSession_ShouldNotThrow()
     {
         // Arrange
         var manager = CreateManager();
 
         // Act
-        manager.RecreateSymbolLoader();
+        await manager.RecreateSymbolLoaderAsync(CancellationToken.None);
 
         // Assert
         Assert.Null(manager.SymbolLoader);
     }
 
     [Fact]
-    public void RecreateSymbolLoader_WhenNoSession_ShouldKeepSymbolLoaderNull()
+    public async Task RecreateSymbolLoaderAsync_WhenNoSession_ShouldKeepSymbolLoaderNull()
     {
         // Arrange
         var manager = CreateManager();
 
         // Act
-        manager.RecreateSymbolLoader();
-        manager.RecreateSymbolLoader();
+        await manager.RecreateSymbolLoaderAsync(CancellationToken.None);
+        await manager.RecreateSymbolLoaderAsync(CancellationToken.None);
 
         // Assert
         Assert.Null(manager.SymbolLoader);

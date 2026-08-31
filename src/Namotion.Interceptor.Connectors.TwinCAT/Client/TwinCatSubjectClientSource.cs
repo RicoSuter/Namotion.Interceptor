@@ -23,7 +23,7 @@ public sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDispos
     private readonly AdsConnectionManager _connectionManager;
     private readonly AdsSubscriptionManager _subscriptionManager;
     private readonly SemaphoreSlim _rescanSignal = new(0, 1);
-    private readonly Lock _rescanLock = new();
+    private readonly SemaphoreSlim _rescanLock = new(1, 1);
 
     private volatile SubjectPropertyWriter? _propertyWriter;
     private long _lastRescanRequestedAtTicks; // DateTimeOffset.UtcNow.UtcTicks, 0 = no pending request
@@ -120,7 +120,7 @@ public sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDispos
         try
         {
             await _connectionManager.ConnectWithRetryAsync(cancellationToken).ConfigureAwait(false);
-            FullRescan();
+            await FullRescanAsync(cancellationToken).ConfigureAwait(false);
             return lifetime;
         }
         catch
@@ -591,9 +591,10 @@ public sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDispos
     /// Synchronized via <see cref="_rescanLock"/> to prevent concurrent execution
     /// from the SBBS thread (StartListeningAsync) and the TwinCAT ExecuteAsync thread.
     /// </summary>
-    private bool FullRescan()
+    private async Task<bool> FullRescanAsync(CancellationToken cancellationToken)
     {
-        lock (_rescanLock)
+        await _rescanLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
             var connection = _connectionManager.Connection;
             if (connection is null)
@@ -603,7 +604,7 @@ public sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDispos
             }
 
             _subscriptionManager.ClearAll();
-            _connectionManager.RecreateSymbolLoader();
+            await _connectionManager.RecreateSymbolLoaderAsync(cancellationToken).ConfigureAwait(false);
 
             // Load subject graph
             var graphMappings = _subjectLoader.LoadSubjectGraph(_subject);
@@ -619,6 +620,10 @@ public sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDispos
                 _connectionManager);
 
             return true;
+        }
+        finally
+        {
+            _rescanLock.Release();
         }
     }
 
@@ -709,7 +714,7 @@ public sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDispos
         // Execute the rescan. Only clear the request after success so that
         // a transient failure (or missing connection) causes a retry on the next loop iteration.
         _logger.LogInformation("Executing debounced rescan.");
-        if (FullRescan())
+        if (await FullRescanAsync(stoppingToken).ConfigureAwait(false))
         {
             await (_propertyWriter?.LoadInitialStateAndResumeAsync(stoppingToken)
                 ?? Task.CompletedTask).ConfigureAwait(false);
@@ -744,6 +749,7 @@ public sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDispos
 
         Dispose();
 
+        _rescanLock.Dispose();
         await _subscriptionManager.DisposeAsync().ConfigureAwait(false);
         await _connectionManager.DisposeAsync().ConfigureAwait(false);
         _ownership.Dispose();

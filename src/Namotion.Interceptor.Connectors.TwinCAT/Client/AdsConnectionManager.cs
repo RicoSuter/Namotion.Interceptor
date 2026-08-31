@@ -226,15 +226,29 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     /// <summary>
     /// Creates a new symbol loader from the current connection.
     /// </summary>
-    internal void RecreateSymbolLoader()
+    internal async Task RecreateSymbolLoaderAsync(CancellationToken cancellationToken)
     {
         var client = Volatile.Read(ref _client);
-        if (client is not null)
+        if (client is null)
         {
-            _symbolLoader = SymbolLoaderFactory.Create(
-                client,
-                new SymbolLoaderSettings(SymbolsLoadMode.DynamicTree));
+            return;
         }
+
+        var symbolLoader = SymbolLoaderFactory.Create(
+            client,
+            new SymbolLoaderSettings(SymbolsLoadMode.DynamicTree));
+
+        // Pull the symbol table and the data types now. Both are otherwise fetched synchronously by
+        // the first access to Symbols, on whichever thread happens to touch it, and DynamicTree
+        // builds struct members, array elements and enum fields from the type information on the
+        // fly. Beckhoff documents the async pair as the one to prefer for the first call.
+        if (symbolLoader is ISymbolServer symbolServer)
+        {
+            await symbolServer.GetDataTypesAsync(cancellationToken).ConfigureAwait(false);
+            await symbolServer.GetSymbolsAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        _symbolLoader = symbolLoader;
     }
 
     internal void LogFirstOccurrence(string category, Exception? exception, string message, params object[] arguments)
