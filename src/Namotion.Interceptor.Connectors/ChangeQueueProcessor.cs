@@ -365,7 +365,8 @@ public class ChangeQueueProcessor : IDisposable
             //
             // Off this thread, because the token only bounds a handler that observes it and the OPC UA
             // server writes synchronously under the SDK's node manager lock. Awaiting inline would then
-            // bound nothing. What is abandoned still finishes on its own and cleans up after itself.
+            // bound nothing. What is abandoned is left to run: nothing cancels it, it may not have started
+            // yet, and nothing observes what it ends up doing.
             await Task
                 .Run(() => TryFlushAsync(teardownToken).AsTask())
                 .WaitAsync(TeardownFlushTimeout)
@@ -375,7 +376,8 @@ public class ChangeQueueProcessor : IDisposable
         {
             // The deadline, reached either by abandoning the flush or by a handler that took the hint.
             // An abandoned write can still reach the wire after the caller has begun tearing the
-            // transport down; every client here rejects a write once disposed, so that fails cleanly.
+            // transport down; the clients here reject a write once disposed, so that fails cleanly rather
+            // than reviving a connection.
             _logger.LogWarning(ex,
                 "Gave up waiting after {Timeout} for the remaining buffered changes to be written while " +
                 "stopping. A write handler that ignores cancellation may still complete it.",
