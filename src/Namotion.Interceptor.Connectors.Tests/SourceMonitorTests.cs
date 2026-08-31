@@ -303,11 +303,24 @@ public class SourceMonitorTests
         reachedStateRead.Reset();
         releaseStateRead.Reset();
 
-        var actTask = Task.Run(() => act(monitor, source));
+        // Both race participants park on locks and gates, so they run on dedicated threads rather than
+        // the pool: the full assembly runs its collections in parallel, and a queued work item can then
+        // wait seconds before it is ever scheduled. That starvation is what makes the State read time out
+        // below, and it also lets the blocked-Subscribe assertion pass for the wrong reason, since a
+        // Subscribe that was never scheduled has not completed either.
+        var actTask = RunOnDedicatedThread(() => act(monitor, source));
         Assert.True(reachedStateRead.Wait(TimeSpan.FromSeconds(10)),
             "The racing action should have reached the State read before the timeout.");
 
-        var subscribeTask = Task.Run(() => monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent)));
+        var subscribeEntered = new ManualResetEventSlim(false);
+        var subscribeTask = RunOnDedicatedThread(() =>
+        {
+            subscribeEntered.Set();
+            return monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent));
+        });
+
+        Assert.True(subscribeEntered.Wait(TimeSpan.FromSeconds(10)),
+            "The racing Subscribe should have started before the timeout.");
 
         // Subscribe must be BLOCKED here, on the lock the paused action still holds. Asserted
         // directly rather than by catching a timeout as the pass path: under load that catch fires
@@ -337,6 +350,41 @@ public class SourceMonitorTests
 
         return (wasInSnapshot, wasDelivered);
     }
+
+    /// <summary>
+    /// Runs <paramref name="body"/> on its own thread and surfaces it as a task. Race participants here
+    /// block on locks and gates for as long as the test holds them, so they must not be queued behind the
+    /// rest of the assembly on the thread pool.
+    /// </summary>
+    private static Task<T> RunOnDedicatedThread<T>(Func<T> body)
+    {
+        var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                completion.SetResult(body());
+            }
+            catch (Exception exception)
+            {
+                completion.SetException(exception);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "SourceMonitorTests race participant"
+        };
+
+        thread.Start();
+        return completion.Task;
+    }
+
+    private static Task RunOnDedicatedThread(Action body) =>
+        RunOnDedicatedThread<object?>(() =>
+        {
+            body();
+            return null;
+        });
 
     [Fact]
     public void WhenNoMonitorIsConfigured_ThenGetSourceMonitorThrowsWithGuidance()
