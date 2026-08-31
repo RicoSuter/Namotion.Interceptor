@@ -28,4 +28,11 @@ public interface IPropertyLifecycleHandler
     /// <param name="property">The collection property reference.</param>
     /// <param name="value">The current collection value.</param>
     void RefreshCollectionProperty(PropertyReference property, object? value) { }
+
+    /// <summary>
+    /// Called with the complete immutable property projection after collection indices change.
+    /// </summary>
+    /// <param name="change">The revisioned property projection.</param>
+    void RefreshCollectionProperty(SubjectPropertyLifecycleChange change) =>
+        RefreshCollectionProperty(change.Property, null);
 }

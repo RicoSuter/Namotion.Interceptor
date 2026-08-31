@@ -148,7 +148,7 @@ internal static class StructuralSnapshotBuilder
         OwnershipGraph.GraphState graphState,
         HashSet<IInterceptorSubject> visited,
         Dictionary<PropertyReference, StructuralSnapshot> snapshots,
-        Dictionary<IInterceptorSubject, ImmutableArray<string>> propertyNames)
+        Dictionary<IInterceptorSubject, CapturedSubjectProperties> subjectProperties)
     {
         var pending = LifecycleScratch.RentSubjectStack();
         foreach (var occurrence in roots.Occurrences)
@@ -156,7 +156,7 @@ internal static class StructuralSnapshotBuilder
             pending.Push(occurrence.Subject);
         }
 
-        return CapturePending(context, graphState, visited, snapshots, propertyNames, pending);
+        return CapturePending(context, graphState, visited, snapshots, subjectProperties, pending);
     }
 
     internal static ImmutableArray<CaptureParticipant> CaptureComponent(
@@ -165,11 +165,11 @@ internal static class StructuralSnapshotBuilder
         OwnershipGraph.GraphState graphState,
         HashSet<IInterceptorSubject> visited,
         Dictionary<PropertyReference, StructuralSnapshot> snapshots,
-        Dictionary<IInterceptorSubject, ImmutableArray<string>> propertyNames)
+        Dictionary<IInterceptorSubject, CapturedSubjectProperties> subjectProperties)
     {
         var pending = LifecycleScratch.RentSubjectStack();
         pending.Push(root);
-        return CapturePending(context, graphState, visited, snapshots, propertyNames, pending);
+        return CapturePending(context, graphState, visited, snapshots, subjectProperties, pending);
     }
 
     internal static CaptureParticipant CaptureParticipantState(
@@ -197,7 +197,7 @@ internal static class StructuralSnapshotBuilder
         OwnershipGraph.GraphState graphState,
         HashSet<IInterceptorSubject> visited,
         Dictionary<PropertyReference, StructuralSnapshot> snapshots,
-        Dictionary<IInterceptorSubject, ImmutableArray<string>> propertyNames,
+        Dictionary<IInterceptorSubject, CapturedSubjectProperties> subjectProperties,
         Stack<IInterceptorSubject> pending)
     {
         var participants = ImmutableArray.CreateBuilder<CaptureParticipant>();
@@ -222,15 +222,20 @@ internal static class StructuralSnapshotBuilder
 
                 if (participant.Ownership is { } ownership)
                 {
-                    propertyNames.TryAdd(subject, ownership.PropertyNames);
+                    subjectProperties.TryAdd(subject,
+                        new CapturedSubjectProperties(
+                            ownership.PropertyNames, ownership.Properties,
+                            ownership.LifecycleHandler, ownership.PropertyHandler));
                     participants.Add(participant);
                     continue;
                 }
 
                 var names = ImmutableArray.CreateBuilder<string>(participant.Properties.Count);
+                var metadata = ImmutableArray.CreateBuilder<SubjectPropertyMetadata>(participant.Properties.Count);
                 foreach (var entry in participant.Properties)
                 {
                     names.Add(entry.Key);
+                    metadata.Add(entry.Value);
                     if (!OwnershipGraph.IsStructural(entry.Value))
                     {
                         continue;
@@ -249,7 +254,9 @@ internal static class StructuralSnapshotBuilder
                     throw LifecycleConflictException.Retryable(subject);
                 }
 
-                propertyNames.Add(subject, names.MoveToImmutable());
+                subjectProperties.Add(subject, new CapturedSubjectProperties(
+                    names.MoveToImmutable(), metadata.MoveToImmutable(),
+                    subject as ILifecycleHandler, subject as IPropertyLifecycleHandler));
                 participants.Add(participant);
             }
 

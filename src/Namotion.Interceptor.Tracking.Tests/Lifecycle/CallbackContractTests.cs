@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -174,6 +175,173 @@ public class CallbackContractTests
         Assert.True(b.Join(TimeSpan.FromSeconds(10)), "thread b did not finish, the gates deadlocked");
     }
 
+    [Fact]
+    public void WhenAnOlderJournalDrainsAfterANewerCommit_ThenEachOperationReceivesItsOwnFailure()
+    {
+        // Arrange: parking downstream of the terminal leaves the first operation's committed
+        // journal undrained while the second operation publishes and drains a newer journal for
+        // the same property. Removing the older journal as "stale" loses its callbacks and its
+        // callback failure instead of isolating failures by originating operation.
+        var blocker = new BlockFirstCommittedWriteInterceptor();
+        var first = new Person { FirstName = "first" };
+        var second = new Person { FirstName = "second" };
+        var firstCallbacks = 0;
+        var secondCallbacks = 0;
+        var firstEvents = 0;
+        var secondEvents = 0;
+        var firstPropertyCallbacks = 0;
+        var secondPropertyCallbacks = 0;
+        var context = CreateContext()
+            .WithService(() => new DelegateLifecycleHandler(change =>
+            {
+                if (!change.IsContextAttach)
+                {
+                    return;
+                }
+
+                if (ReferenceEquals(change.Subject, first))
+                {
+                    firstCallbacks++;
+                    throw new InvalidOperationException("first journal");
+                }
+
+                if (ReferenceEquals(change.Subject, second))
+                {
+                    secondCallbacks++;
+                    throw new InvalidOperationException("second journal");
+                }
+            }), _ => false)
+            .WithService(() => new DelegatePropertyAttachHandler(change =>
+            {
+                if (change.Property.Name != nameof(Person.FirstName))
+                {
+                    return;
+                }
+
+                if (ReferenceEquals(change.Subject, first))
+                {
+                    firstPropertyCallbacks++;
+                }
+                else if (ReferenceEquals(change.Subject, second))
+                {
+                    secondPropertyCallbacks++;
+                }
+            }), _ => false);
+        context.TryGetLifecycleInterceptor()!.SubjectAttached += change =>
+        {
+            if (ReferenceEquals(change.Subject, first))
+            {
+                firstEvents++;
+            }
+            else if (ReferenceEquals(change.Subject, second))
+            {
+                secondEvents++;
+            }
+        };
+        context.AddService<IWriteInterceptor>(blocker);
+        var root = new Person(context);
+        blocker.Arm(root, nameof(Person.Father));
+
+        Exception? firstException = null;
+        var firstWriter = new Thread(() =>
+        {
+            firstException = Record.Exception(() => root.Father = first);
+        }) { IsBackground = true };
+
+        // Act
+        firstWriter.Start();
+        Assert.True(blocker.Committed.Wait(WriteProtocolAcceptance.RendezvousTimeout),
+            "the first write did not reach its post-terminal park");
+        var secondException = Record.Exception(() => root.Father = second);
+        blocker.Release.Set();
+        Assert.True(firstWriter.Join(WriteProtocolAcceptance.RendezvousTimeout),
+            "the first write did not finish after its journal was released");
+
+        // Assert
+        Assert.Equal("first journal", Assert.IsType<InvalidOperationException>(firstException).Message);
+        Assert.Equal("second journal", Assert.IsType<InvalidOperationException>(secondException).Message);
+        Assert.Equal(1, firstCallbacks);
+        Assert.Equal(1, secondCallbacks);
+        Assert.Equal(1, firstEvents);
+        Assert.Equal(1, secondEvents);
+        Assert.Equal(1, firstPropertyCallbacks);
+        Assert.Equal(1, secondPropertyCallbacks);
+    }
+
+    [Fact]
+    public void WhenALifecycleHandlerWaitsForSameContextTopology_ThenTheWorkerCompletes()
+    {
+        // Arrange
+        var callbackReached = false;
+        Exception? workerException = null;
+        var context = CreateContext();
+        var workerTarget = new Person(context);
+        var trigger = new Person { FirstName = "trigger" };
+        context.WithService(() => new DelegateLifecycleHandler(change =>
+        {
+            if (!change.IsContextAttach || !ReferenceEquals(change.Subject, trigger))
+            {
+                return;
+            }
+
+            callbackReached = true;
+            var worker = new Thread(() =>
+            {
+                workerException = Record.Exception(() => workerTarget.Father = new Person());
+            }) { IsBackground = true };
+            worker.Start();
+            if (!worker.Join(WriteProtocolAcceptance.RendezvousTimeout))
+            {
+                throw new TimeoutException("the lifecycle handler ran while the topology gate was held");
+            }
+        }), _ => false);
+
+        // Act
+        var exception = Record.Exception(() => trigger.AttachToContext(context));
+
+        // Assert
+        Assert.Null(exception);
+        Assert.True(callbackReached);
+        Assert.Null(workerException);
+    }
+
+    [Fact]
+    public void WhenAPropertyHandlerWaitsForSameContextTopology_ThenTheWorkerCompletes()
+    {
+        // Arrange
+        var callbackReached = false;
+        Exception? workerException = null;
+        var context = CreateContext();
+        var workerTarget = new Person(context);
+        var trigger = new Person { FirstName = "trigger" };
+        context.WithService(() => new DelegatePropertyAttachHandler(change =>
+        {
+            if (change.Property.Name != nameof(Person.FirstName) || !ReferenceEquals(change.Subject, trigger))
+            {
+                return;
+            }
+
+            callbackReached = true;
+            var worker = new Thread(() =>
+            {
+                workerException = Record.Exception(() => workerTarget.Mother = new Person());
+            }) { IsBackground = true };
+            worker.Start();
+            if (!worker.Join(WriteProtocolAcceptance.RendezvousTimeout))
+            {
+                throw new TimeoutException("the property handler ran while the topology gate was held");
+            }
+        }), _ => false);
+
+        // Act
+        var exception = Record.Exception(() => trigger.AttachToContext(context));
+
+        // Assert
+        Assert.Null(exception);
+        Assert.True(callbackReached);
+        Assert.Null(workerException);
+    }
+
     /// <summary>
     /// Derived getters are only evaluated when DerivedPropertyChangeHandler is registered, which
     /// WithLifecycle() alone does not do. Without this the tests below pass vacuously.
@@ -335,5 +503,41 @@ public class CallbackContractTests
         // Assert
         Assert.Null(child.TryGetContext());
         Assert.Equal(0, child.GetReferenceCount());
+    }
+
+    private sealed class BlockFirstCommittedWriteInterceptor : IWriteInterceptor
+    {
+        private IInterceptorSubject? _subject;
+        private string? _propertyName;
+        private int _blocked;
+
+        internal ManualResetEventSlim Committed { get; } = new(false);
+        internal ManualResetEventSlim Release { get; } = new(false);
+
+        internal void Arm(IInterceptorSubject subject, string propertyName)
+        {
+            _subject = subject;
+            _propertyName = propertyName;
+        }
+
+        public void WriteProperty<TProperty>(
+            ref PropertyWriteContext<TProperty> context,
+            WriteInterceptionDelegate<TProperty> next)
+        {
+            var block = ReferenceEquals(context.Property.Subject, _subject) &&
+                context.Property.Name == _propertyName &&
+                Interlocked.Exchange(ref _blocked, 1) == 0;
+            next(ref context);
+            if (!block)
+            {
+                return;
+            }
+
+            Committed.Set();
+            if (!Release.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+            {
+                throw new TimeoutException("the first committed write was not released");
+            }
+        }
     }
 }

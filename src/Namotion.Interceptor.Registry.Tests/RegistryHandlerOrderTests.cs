@@ -1,4 +1,6 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Tests.Models;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
@@ -138,6 +140,81 @@ public class RegistryHandlerOrderTests
         Assert.Empty(child.AncestorsVisibleDuringDetach);
     }
 
+    [Fact]
+    public void WhenAnOlderPropertyProjectionDrainsLast_ThenItCannotOverwriteTheNewerProjection()
+    {
+        // Arrange: both writes retain the same subjects, so no attachment-revision shortcut can
+        // suppress either callback. The first callback parks before Registry delivery, the second
+        // restores the original order and drains, then the older callback resumes last.
+        var blocker = new BlockingPropertyProjectionHandler();
+        var context = InterceptorSubjectContext.Create();
+        context.AddService<IPropertyLifecycleHandler>(blocker);
+        context.WithRegistry();
+        var root = new Person(context);
+        var first = new Person { FirstName = "first" };
+        var second = new Person { FirstName = "second" };
+        root.Children = [first, second];
+        blocker.Arm(root, nameof(Person.Children));
+
+        Exception? olderException = null;
+        var olderWriter = new Thread(() =>
+        {
+            olderException = Record.Exception(() => { root.Children = [second, first]; });
+        }) { IsBackground = true };
+
+        // Act
+        olderWriter.Start();
+        if (!blocker.Entered.Wait(TimeSpan.FromSeconds(10)))
+        {
+            blocker.Release.Set();
+            olderWriter.Join(TimeSpan.FromSeconds(10));
+            Assert.Fail($"the older property projection did not reach its callback park: {olderException}");
+        }
+        var newerException = Record.Exception(() => { root.Children = [first, second]; });
+        blocker.Release.Set();
+        Assert.True(olderWriter.Join(TimeSpan.FromSeconds(10)),
+            "the older property projection did not finish after release");
+
+        // Assert
+        Assert.Null(olderException);
+        Assert.Null(newerException);
+        var property = root.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.Children))!;
+        Assert.Collection(
+            property.Children,
+            child =>
+            {
+                Assert.Same(first, child.Subject);
+                Assert.Equal(0, child.Index);
+            },
+            child =>
+            {
+                Assert.Same(second, child.Subject);
+                Assert.Equal(1, child.Index);
+            });
+        Assert.Equal(0, Assert.Single(first.TryGetRegisteredSubject()!.Parents).Index);
+        Assert.Equal(1, Assert.Single(second.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
+    public void WhenARegistryInitializerWaitsForRegistryAccess_ThenTheWorkerCompletes()
+    {
+        // Arrange
+        var initializer = new RegistryLockProbeInitializer();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        context.AddService<ISubjectPropertyInitializer>(initializer);
+        var registry = context.GetService<ISubjectRegistry>();
+        var trigger = new Person { FirstName = "trigger" };
+        initializer.Arm(trigger, registry);
+
+        // Act
+        var exception = Record.Exception(() => trigger.AttachToContext(context));
+
+        // Assert
+        Assert.Null(exception);
+        Assert.True(initializer.CallbackReached);
+        Assert.Null(initializer.WorkerException);
+    }
+
     [RunsBefore(typeof(SubjectRegistry))]
     private sealed class FirstHandlerParentProbe : ILifecycleHandler
     {
@@ -149,6 +226,81 @@ public class RegistryHandlerOrderTests
             {
                 EdgeVisibleInParents.Add(change.Subject.GetParents()
                     .Any(parent => parent.Property.Equals(property) && Equals(parent.Index, change.Index)));
+            }
+        }
+    }
+
+    [RunsBefore(typeof(SubjectRegistry))]
+    private sealed class BlockingPropertyProjectionHandler : IPropertyLifecycleHandler
+    {
+        private IInterceptorSubject? _subject;
+        private string? _propertyName;
+        private int _blocked;
+
+        internal ManualResetEventSlim Entered { get; } = new(false);
+        internal ManualResetEventSlim Release { get; } = new(false);
+
+        internal void Arm(IInterceptorSubject subject, string propertyName)
+        {
+            _subject = subject;
+            _propertyName = propertyName;
+        }
+
+        public void AttachProperty(SubjectPropertyLifecycleChange change)
+        {
+        }
+
+        public void DetachProperty(SubjectPropertyLifecycleChange change)
+        {
+        }
+
+        public void RefreshCollectionProperty(SubjectPropertyLifecycleChange change)
+        {
+            if (!ReferenceEquals(change.Property.Subject, _subject) || change.Property.Name != _propertyName ||
+                Interlocked.Exchange(ref _blocked, 1) != 0)
+            {
+                return;
+            }
+
+            Entered.Set();
+            if (!Release.Wait(TimeSpan.FromSeconds(10)))
+            {
+                throw new TimeoutException("the older Registry projection was not released");
+            }
+        }
+    }
+
+    private sealed class RegistryLockProbeInitializer : ISubjectPropertyInitializer
+    {
+        private IInterceptorSubject? _subject;
+        private ISubjectRegistry? _registry;
+        private int _probed;
+
+        internal bool CallbackReached { get; private set; }
+        internal Exception? WorkerException { get; private set; }
+
+        internal void Arm(IInterceptorSubject subject, ISubjectRegistry registry)
+        {
+            _subject = subject;
+            _registry = registry;
+        }
+
+        public void InitializeProperty(RegisteredSubjectProperty property)
+        {
+            if (!ReferenceEquals(property.Subject, _subject) || Interlocked.Exchange(ref _probed, 1) != 0)
+            {
+                return;
+            }
+
+            CallbackReached = true;
+            var worker = new Thread(() =>
+            {
+                WorkerException = Record.Exception(() => { _registry!.TryGetRegisteredSubject(_subject!); });
+            }) { IsBackground = true };
+            worker.Start();
+            if (!worker.Join(TimeSpan.FromSeconds(10)))
+            {
+                throw new TimeoutException("the Registry initializer ran while the Registry lock was held");
             }
         }
     }

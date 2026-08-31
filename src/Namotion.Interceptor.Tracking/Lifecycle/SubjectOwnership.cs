@@ -11,16 +11,26 @@ internal readonly struct IncomingEdge(PropertyReference property, int subjectOrd
     public readonly object? Index = index;
 }
 
+internal readonly record struct CapturedSubjectProperties(
+    ImmutableArray<string> Names,
+    ImmutableArray<SubjectPropertyMetadata> Metadata,
+    ILifecycleHandler? LifecycleHandler,
+    IPropertyLifecycleHandler? PropertyHandler);
+
 internal sealed record SubjectOwnership(
     ImmutableArray<IncomingEdge> Edges,
     ImmutableArray<SubjectParent> Parents,
     ImmutableArray<string> PropertyNames,
+    ImmutableArray<SubjectPropertyMetadata> Properties,
+    ILifecycleHandler? LifecycleHandler,
+    IPropertyLifecycleHandler? PropertyHandler,
     InterceptorExecutor? Executor)
 {
-    internal SubjectOwnership() : this([], [], [], null) { }
+    internal SubjectOwnership() : this([], [], [], [], null, null, null) { }
 
-    internal SubjectOwnership(ImmutableArray<string> propertyNames, InterceptorExecutor executor) :
-        this([], [], propertyNames, executor) { }
+    internal SubjectOwnership(CapturedSubjectProperties properties, InterceptorExecutor executor) :
+        this([], [], properties.Names, properties.Metadata,
+            properties.LifecycleHandler, properties.PropertyHandler, executor) { }
 
     public int IncomingCount => Edges.Length;
 
@@ -91,6 +101,8 @@ internal sealed record SubjectOwnership(
             parents.Add(new SubjectParent(edge.Property, edge.Index));
         }
 
-        return new SubjectOwnership(edges, parents.MoveToImmutable(), PropertyNames, Executor);
+        return new SubjectOwnership(
+            edges, parents.MoveToImmutable(), PropertyNames, Properties,
+            LifecycleHandler, PropertyHandler, Executor);
     }
 }

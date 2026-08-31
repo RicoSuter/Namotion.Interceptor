@@ -147,6 +147,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
     {
         void AttachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
         void DetachProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
+        void RefreshCollectionProperty(Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange change);
         void RefreshCollectionProperty(Namotion.Interceptor.PropertyReference property, object? value);
     }
     public sealed class LifecycleContractViolationException : System.InvalidOperationException
@@ -175,19 +176,38 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
     }
     public readonly struct SubjectLifecycleChange
     {
+        public Namotion.Interceptor.IInterceptorSubjectContext? Context { get; init; }
         public object? Index { get; init; }
         public bool IsContextAttach { get; init; }
         public bool IsContextDetach { get; init; }
         public bool IsPropertyReferenceAdded { get; init; }
         public bool IsPropertyReferenceRemoved { get; init; }
+        public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Parent.SubjectParent> Parents { get; init; }
+        public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.SubjectPropertyMetadata> Properties { get; init; }
         public Namotion.Interceptor.PropertyReference? Property { get; init; }
+        [System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Subject",
+                "Index"})]
+        public System.Collections.Immutable.ImmutableArray<System.ValueTuple<Namotion.Interceptor.IInterceptorSubject, object?>> PropertyChildren { get; init; }
         public required int ReferenceCount { get; init; }
+        public long Revision { get; init; }
         public required Namotion.Interceptor.IInterceptorSubject Subject { get; init; }
     }
     public struct SubjectPropertyLifecycleChange : System.IEquatable<Namotion.Interceptor.Tracking.Lifecycle.SubjectPropertyLifecycleChange>
     {
         public SubjectPropertyLifecycleChange(Namotion.Interceptor.IInterceptorSubject Subject, Namotion.Interceptor.PropertyReference Property) { }
+        [System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Subject",
+                "Parents"})]
+        public System.Collections.Immutable.ImmutableArray<System.ValueTuple<Namotion.Interceptor.IInterceptorSubject, System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Parent.SubjectParent>>> ChildSubjects { get; init; }
+        [System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Subject",
+                "Index"})]
+        public System.Collections.Immutable.ImmutableArray<System.ValueTuple<Namotion.Interceptor.IInterceptorSubject, object?>> Children { get; init; }
+        public Namotion.Interceptor.IInterceptorSubjectContext? Context { get; init; }
+        public Namotion.Interceptor.SubjectPropertyMetadata Metadata { get; init; }
         public Namotion.Interceptor.PropertyReference Property { get; set; }
+        public long Revision { get; init; }
         public Namotion.Interceptor.IInterceptorSubject Subject { get; set; }
     }
 }

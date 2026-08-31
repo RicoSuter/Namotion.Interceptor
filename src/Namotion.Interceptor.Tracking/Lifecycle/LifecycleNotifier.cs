@@ -1,43 +1,43 @@
 using System.Collections.Immutable;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
-
-internal sealed record LifecycleJournal(
-    PropertyReference Property,
-    long Revision,
-    ImmutableArray<Action> Entries)
-{
-    internal Exception? Drain(Exception? primaryException)
-    {
-        List<Exception>? failures = primaryException is null ? null : [primaryException];
-        foreach (var entry in Entries)
-        {
-            try
-            {
-                entry();
-            }
-            catch (Exception exception)
-            {
-                (failures ??= []).Add(exception);
-            }
-        }
-
-        return failures switch
-        {
-            null => null,
-            { Count: 1 } => failures[0],
-            _ => new AggregateException(failures)
-        };
-    }
-}
 
 internal sealed class LifecycleNotifier(
     IInterceptorSubjectContext context,
     LifecycleInterceptor originatingLifecycle)
 {
+    internal sealed record LifecycleJournal(ImmutableArray<Action> Entries)
+    {
+        internal Exception? Drain(Exception? primaryException)
+        {
+            List<Exception>? failures = primaryException is null ? null : [primaryException];
+            foreach (var entry in Entries)
+            {
+                try
+                {
+                    entry();
+                }
+                catch (Exception exception)
+                {
+                    (failures ??= []).Add(exception);
+                }
+            }
+
+            return failures switch
+            {
+                null => null,
+                { Count: 1 } => failures[0],
+                _ => new AggregateException(failures)
+            };
+        }
+    }
+
     [ThreadStatic]
     private static JournalBuilder? _currentJournal;
+
+    private static long _projectionRevision;
 
     public event Action<SubjectLifecycleChange>? SubjectAttached;
     public event Action<SubjectLifecycleChange>? SubjectDetaching;
@@ -52,39 +52,80 @@ internal sealed class LifecycleNotifier(
         _currentJournal = new JournalBuilder(
             this,
             context.GetServices<ILifecycleHandler>(),
-            context.GetServices<IPropertyLifecycleHandler>());
+            context.GetServices<IPropertyLifecycleHandler>(),
+            GetEventHandlers(SubjectAttached),
+            GetEventHandlers(SubjectDetaching));
         return new JournalCapture(_currentJournal);
     }
 
+    internal static void ThrowIfTopologyChange(InterceptorSubjectContext context)
+    {
+        if (InterceptorExecutor.IsInsideLogicalCallback ||
+            !InterceptorExecutor.IsCurrentLogicalContext(context))
+        {
+            throw new LifecycleContractViolationException(
+                "A lifecycle callback must not change graph topology, and a thread runs topology " +
+                "work for at most one subject context at a time. Defer the operation until the " +
+                "current callback or operation completes.");
+        }
+    }
+
+    internal static void ThrowIfOtherContext(InterceptorSubjectContext context)
+    {
+        if (!InterceptorExecutor.IsCurrentLogicalContext(context))
+        {
+            throw new LifecycleContractViolationException(
+                "A thread runs topology work for at most one subject context at a time. Defer the " +
+                "second-context operation until the current operation completes.");
+        }
+    }
+
+    internal SubjectLifecycleChange CompleteChange(
+        SubjectLifecycleChange change,
+        ImmutableArray<SubjectPropertyMetadata> properties,
+        ImmutableArray<SubjectParent> parents,
+        StructuralSnapshot propertySnapshot)
+    {
+        return new SubjectLifecycleChange
+        {
+            Context = context,
+            Revision = Interlocked.Increment(ref _projectionRevision),
+            Subject = change.Subject,
+            Properties = properties,
+            Parents = parents,
+            Property = change.Property,
+            PropertyChildren = ToChildren(propertySnapshot),
+            Index = change.Index,
+            ReferenceCount = change.ReferenceCount,
+            IsContextAttach = change.IsContextAttach,
+            IsPropertyReferenceAdded = change.IsPropertyReferenceAdded,
+            IsPropertyReferenceRemoved = change.IsPropertyReferenceRemoved,
+            IsContextDetach = change.IsContextDetach
+        };
+    }
+
     public void RaiseSubjectAttached(SubjectLifecycleChange change, InterceptorExecutor executor) =>
-        RecordEvent(SubjectAttached, change, executor);
+        RecordEvent(true, change);
 
     public void RaiseSubjectDetaching(SubjectLifecycleChange change) =>
-        RecordEvent(SubjectDetaching, change);
+        RecordEvent(false, change);
 
     public void PublishEdgeRemoved(
-        IInterceptorSubject subject,
-        PropertyReference property,
-        object? index,
-        int referenceCount) =>
-        InvokeRemovedLifecycleHandlers(subject, new SubjectLifecycleChange
-        {
-            Subject = subject,
-            Property = property,
-            Index = index,
-            ReferenceCount = referenceCount,
-            IsPropertyReferenceRemoved = true
-        });
+        IInterceptorSubject subject, ILifecycleHandler? subjectHandler, SubjectLifecycleChange change) =>
+        InvokeRemovedLifecycleHandlers(subject, subjectHandler, change);
 
-    public void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, InterceptorExecutor executor, SubjectLifecycleChange change) =>
-        InvokeAddedLifecycleHandlersCore(subject, executor, change, null);
+    public void InvokeAddedLifecycleHandlers(
+        IInterceptorSubject subject, ILifecycleHandler? subjectHandler,
+        InterceptorExecutor executor, SubjectLifecycleChange change) =>
+        InvokeAddedLifecycleHandlersCore(subject, subjectHandler, executor, change, null);
 
     internal void InvokePreparedAddedLifecycleHandlers(
-        IInterceptorSubject subject, InterceptorExecutor executor, SubjectLifecycleChange change, Action? prepareChildren) =>
-        InvokeAddedLifecycleHandlersCore(subject, executor, change, prepareChildren);
+        IInterceptorSubject subject, ILifecycleHandler? subjectHandler,
+        InterceptorExecutor executor, SubjectLifecycleChange change, Action? prepareChildren) =>
+        InvokeAddedLifecycleHandlersCore(subject, subjectHandler, executor, change, prepareChildren);
 
     private void InvokeAddedLifecycleHandlersCore(
-        IInterceptorSubject subject, InterceptorExecutor executor,
+        IInterceptorSubject subject, ILifecycleHandler? subjectHandler, InterceptorExecutor executor,
         SubjectLifecycleChange change, Action? prepareChildren)
     {
         foreach (var handler in GetLifecycleHandlers())
@@ -95,21 +136,20 @@ internal sealed class LifecycleNotifier(
             }
             else
             {
-                Record(() => handler.HandleLifecycleChange(change),
-                    attachedExecutor: change.IsContextAttach ? executor : null);
+                Record(() => handler.HandleLifecycleChange(change));
             }
         }
 
-        if (subject is ILifecycleHandler subjectHandler)
+        if (subjectHandler is not null)
         {
-            Record(() => subjectHandler.HandleLifecycleChange(change),
-                attachedExecutor: change.IsContextAttach ? executor : null);
+            Record(() => subjectHandler.HandleLifecycleChange(change));
         }
     }
 
-    public void InvokeRemovedLifecycleHandlers(IInterceptorSubject subject, SubjectLifecycleChange change)
+    public void InvokeRemovedLifecycleHandlers(
+        IInterceptorSubject subject, ILifecycleHandler? subjectHandler, SubjectLifecycleChange change)
     {
-        if (subject is ILifecycleHandler subjectHandler)
+        if (subjectHandler is not null)
         {
             Record(() => subjectHandler.HandleLifecycleChange(change));
         }
@@ -120,32 +160,49 @@ internal sealed class LifecycleNotifier(
         }
     }
 
-    public void AttachSubjectProperties(IInterceptorSubject subject, InterceptorExecutor executor, IEnumerable<string> propertyNames) =>
-        RecordProperties(subject, executor, propertyNames, attach: true);
+    public void AttachSubjectProperties(
+        IInterceptorSubject subject, IPropertyLifecycleHandler? subjectHandler,
+        InterceptorExecutor executor, IEnumerable<SubjectPropertyMetadata> properties,
+        IReadOnlyDictionary<PropertyReference, StructuralSnapshot> snapshots,
+        OwnershipGraph.GraphState state) =>
+        RecordProperties(subject, subjectHandler, properties, snapshots, state, attach: true);
 
-    public void DetachSubjectProperties(IInterceptorSubject subject, IEnumerable<string> propertyNames) =>
-        RecordProperties(subject, null, propertyNames, attach: false);
+    public void DetachSubjectProperties(
+        IInterceptorSubject subject, IPropertyLifecycleHandler? subjectHandler,
+        IEnumerable<SubjectPropertyMetadata> properties) =>
+        RecordProperties(subject, subjectHandler, properties, null, null, attach: false);
 
     private void RecordProperties(
-        IInterceptorSubject subject, InterceptorExecutor? executor, IEnumerable<string> propertyNames, bool attach)
+        IInterceptorSubject subject,
+        IPropertyLifecycleHandler? subjectHandler,
+        IEnumerable<SubjectPropertyMetadata> properties,
+        IReadOnlyDictionary<PropertyReference, StructuralSnapshot>? snapshots,
+        OwnershipGraph.GraphState? state,
+        bool attach)
     {
-        foreach (var name in propertyNames)
+        foreach (var metadata in properties)
         {
-            var change = new SubjectPropertyLifecycleChange(subject, new PropertyReference(subject, name));
+            var property = new PropertyReference(subject, metadata.Name);
+            var change = new SubjectPropertyLifecycleChange(subject, property)
+            {
+                Context = context,
+                Revision = Interlocked.Increment(ref _projectionRevision),
+                Metadata = metadata,
+                Children = snapshots is not null && snapshots.TryGetValue(property, out var snapshot)
+                    ? ToChildren(snapshot)
+                    : [],
+                ChildSubjects = snapshots is not null && state is not null && snapshots.TryGetValue(property, out snapshot)
+                    ? ToSubjectProjections(snapshot, state)
+                    : []
+            };
             foreach (var handler in GetPropertyHandlers())
             {
-                Record(
-                    () => InvokeProperty(handler, change, attach),
-                    propertyCallback: true,
-                    attachedExecutor: attach ? executor : null);
+                Record(() => InvokeProperty(handler, change, attach));
             }
 
-            if (subject is IPropertyLifecycleHandler subjectHandler)
+            if (subjectHandler is not null)
             {
-                Record(
-                    () => InvokeProperty(subjectHandler, change, attach),
-                    propertyCallback: true,
-                    attachedExecutor: attach ? executor : null);
+                Record(() => InvokeProperty(subjectHandler, change, attach));
             }
         }
     }
@@ -156,12 +213,61 @@ internal sealed class LifecycleNotifier(
         bool attach) =>
         (attach ? (Action<SubjectPropertyLifecycleChange>)handler.AttachProperty : handler.DetachProperty)(change);
 
-    public void RefreshCollectionProperty(PropertyReference property, object? value)
+    public void RefreshCollectionProperty(
+        PropertyReference property, StructuralSnapshot snapshot, OwnershipGraph.GraphState state)
     {
+        var change = new SubjectPropertyLifecycleChange(property.Subject, property)
+        {
+            Context = context,
+            Revision = Interlocked.Increment(ref _projectionRevision),
+            Metadata = state.Owned[property.Subject].Properties.First(metadata => metadata.Name == property.Name),
+            Children = ToChildren(snapshot),
+            ChildSubjects = ToSubjectProjections(snapshot, state)
+        };
         foreach (var handler in GetPropertyHandlers())
         {
-            Record(() => handler.RefreshCollectionProperty(property, value));
+            Record(() => handler.RefreshCollectionProperty(change));
         }
+    }
+
+    private static ImmutableArray<(IInterceptorSubject Subject, object? Index)> ToChildren(
+        StructuralSnapshot snapshot)
+    {
+        if (snapshot.Occurrences.IsEmpty)
+        {
+            return [];
+        }
+
+        var children = ImmutableArray.CreateBuilder<(IInterceptorSubject, object?)>(snapshot.Occurrences.Length);
+        foreach (var occurrence in snapshot.Occurrences)
+        {
+            children.Add((occurrence.Subject, occurrence.Index));
+        }
+
+        return children.MoveToImmutable();
+    }
+
+    private static ImmutableArray<(IInterceptorSubject Subject, ImmutableArray<SubjectParent> Parents)> ToSubjectProjections(
+        StructuralSnapshot snapshot, OwnershipGraph.GraphState state)
+    {
+        if (snapshot.Occurrences.IsEmpty)
+        {
+            return [];
+        }
+
+        var seen = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
+        var projections = ImmutableArray.CreateBuilder<(
+            IInterceptorSubject Subject, ImmutableArray<SubjectParent> Parents)>();
+        foreach (var occurrence in snapshot.Occurrences)
+        {
+            if (seen.Add(occurrence.Subject) &&
+                state.Owned.TryGetValue(occurrence.Subject, out var ownership))
+            {
+                projections.Add((occurrence.Subject, ownership.Parents));
+            }
+        }
+
+        return projections.ToImmutable();
     }
 
     private ImmutableArray<ILifecycleHandler> GetLifecycleHandlers() =>
@@ -196,49 +302,29 @@ internal sealed class LifecycleNotifier(
         }
     }
 
-    private void RecordEvent(
-        Action<SubjectLifecycleChange>? handlers, SubjectLifecycleChange change,
-        InterceptorExecutor? attachedExecutor = null)
+    private void RecordEvent(bool attach, SubjectLifecycleChange change)
     {
-        if (handlers is not null)
+        var handlers = CurrentBuilder is { } builder
+            ? attach ? builder.SubjectAttachedHandlers : builder.SubjectDetachingHandlers
+            : GetEventHandlers(attach ? SubjectAttached : SubjectDetaching);
+        foreach (var handler in handlers)
         {
-            foreach (Action<SubjectLifecycleChange> handler in handlers.GetInvocationList())
-            {
-                Record(() => handler(change), attachedExecutor: attachedExecutor);
-            }
+            Record(() => handler(change));
         }
     }
 
-    private void Record(
-        Action action, bool propertyCallback = false, InterceptorExecutor? attachedExecutor = null)
-    {
-        var expectedRevision = attachedExecutor?.AttachmentRevision +
-            (attachedExecutor?.AttachedContext is null ? 1 : 0);
-        bool IsCurrentAttachment() => attachedExecutor?.AttachmentRevision == expectedRevision;
+    private static ImmutableArray<Action<SubjectLifecycleChange>> GetEventHandlers(
+        Action<SubjectLifecycleChange>? handlers) =>
+        handlers is null
+            ? []
+            : [.. handlers.GetInvocationList().Cast<Action<SubjectLifecycleChange>>()];
 
+    private void Record(Action action)
+    {
         void Invoke()
         {
-            if (attachedExecutor is not null && !IsCurrentAttachment())
-            {
-                return;
-            }
-
-            try
-            {
-                if (propertyCallback)
-                {
-                    using var scope = CallbackReentrancyGuard.EnterPropertyCallbackScope();
-                    action();
-                }
-                else
-                {
-                    using var scope = CallbackReentrancyGuard.EnterScope();
-                    action();
-                }
-            }
-            catch when (attachedExecutor is not null && !IsCurrentAttachment())
-            {
-            }
+            using var scope = InterceptorExecutor.EnterLogicalCallback((InterceptorSubjectContext)context);
+            action();
         }
 
         if (CurrentBuilder is { } builder)
@@ -254,17 +340,19 @@ internal sealed class LifecycleNotifier(
     internal sealed record JournalBuilder(
         LifecycleNotifier Owner,
         ImmutableArray<ILifecycleHandler> LifecycleHandlers,
-        ImmutableArray<IPropertyLifecycleHandler> PropertyHandlers)
+        ImmutableArray<IPropertyLifecycleHandler> PropertyHandlers,
+        ImmutableArray<Action<SubjectLifecycleChange>> SubjectAttachedHandlers,
+        ImmutableArray<Action<SubjectLifecycleChange>> SubjectDetachingHandlers)
     {
         internal List<Action> Entries { get; } = [];
     }
 
     internal readonly struct JournalCapture(JournalBuilder builder) : IDisposable
     {
-        internal LifecycleJournal Complete(PropertyReference property, long revision)
+        internal LifecycleJournal Complete()
         {
             _currentJournal = null;
-            return new LifecycleJournal(property, revision, builder.Entries.ToImmutableArray());
+            return new LifecycleJournal(builder.Entries.ToImmutableArray());
         }
 
         public void Dispose()

@@ -20,7 +20,7 @@ internal sealed class OwnershipGraph
     private readonly ITopologyAdmissionCoordinator _coordinator;
     private volatile GraphState _state;
     private Dictionary<IInterceptorSubject, PreparedAttachmentTarget>? _preparedAttachments;
-    private Dictionary<IInterceptorSubject, ImmutableArray<string>>? _preparedPropertyNames;
+    private Dictionary<IInterceptorSubject, CapturedSubjectProperties>? _preparedSubjectProperties;
     public IInterceptorSubjectContext Context { get; }
     internal GraphState State => _state;
     internal OwnershipGraph(IInterceptorSubjectContext context, ITopologyAdmissionCoordinator coordinator)
@@ -57,10 +57,10 @@ internal sealed class OwnershipGraph
 
     private SubjectOwnership AddOwnership(
         IInterceptorSubject subject,
-        ImmutableArray<string> propertyNames,
+        CapturedSubjectProperties properties,
         InterceptorExecutor executor)
     {
-        var ownership = new SubjectOwnership(propertyNames, executor);
+        var ownership = new SubjectOwnership(properties, executor);
         var state = _state;
         _state = new GraphState(state.Owned.SetItem(subject, ownership), state.Snapshots, state.DeferredSweep);
         return ownership;
@@ -134,14 +134,14 @@ internal sealed class OwnershipGraph
         StructuralSnapshot capturedSnapshot,
         long revision,
         Dictionary<PropertyReference, StructuralSnapshot> seededSnapshots,
-        Dictionary<IInterceptorSubject, ImmutableArray<string>> seededPropertyNames,
+        Dictionary<IInterceptorSubject, CapturedSubjectProperties> seededSubjectProperties,
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
         LifecycleNotifier notifier)
         => PrepareReconcile(
             property,
             capturedSnapshot with { SourceRevision = revision },
             seededSnapshots,
-            seededPropertyNames,
+            seededSubjectProperties,
             reservations,
             notifier);
 
@@ -173,7 +173,7 @@ internal sealed class OwnershipGraph
         PropertyReference property,
         StructuralSnapshot snapshot,
         Dictionary<PropertyReference, StructuralSnapshot> seededSnapshots,
-        Dictionary<IInterceptorSubject, ImmutableArray<string>> seededPropertyNames,
+        Dictionary<IInterceptorSubject, CapturedSubjectProperties> seededSubjectProperties,
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
         LifecycleNotifier notifier)
     {
@@ -183,7 +183,7 @@ internal sealed class OwnershipGraph
             throw LifecycleConflictException.Retryable(property.Subject);
         }
 
-        var prepared = new OwnershipGraph(this) { _preparedPropertyNames = seededPropertyNames };
+        var prepared = new OwnershipGraph(this) { _preparedSubjectProperties = seededSubjectProperties };
         foreach (var entry in seededSnapshots)
         {
             prepared.SetSnapshot(entry.Key, entry.Value);
@@ -196,6 +196,10 @@ internal sealed class OwnershipGraph
             snapshot.Occurrences,
             reservations,
             notifier);
+        if (refreshCollection)
+        {
+            notifier.RefreshCollectionProperty(property, prepared.GetSnapshot(property), prepared._state);
+        }
 
         return new PreparedTopologyChange(
             this,
@@ -208,7 +212,7 @@ internal sealed class OwnershipGraph
         IInterceptorSubject subject,
         ImmutableArray<PropertyReference> structuralProperties,
         Dictionary<PropertyReference, StructuralSnapshot> capturedSnapshots,
-        Dictionary<IInterceptorSubject, ImmutableArray<string>> capturedPropertyNames,
+        Dictionary<IInterceptorSubject, CapturedSubjectProperties> capturedSubjectProperties,
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
         LifecycleNotifier notifier)
     {
@@ -217,13 +221,20 @@ internal sealed class OwnershipGraph
             throw LifecycleConflictException.Retryable(subject);
         }
 
-        var prepared = new OwnershipGraph(this) { _preparedPropertyNames = capturedPropertyNames };
+        var prepared = new OwnershipGraph(this) { _preparedSubjectProperties = capturedSubjectProperties };
         foreach (var entry in capturedSnapshots)
         {
             prepared.SetSnapshot(entry.Key, entry.Value);
         }
 
-        prepared.SetOwnership(subject, ownership with { PropertyNames = capturedPropertyNames[subject] });
+        var properties = capturedSubjectProperties[subject];
+        prepared.SetOwnership(subject, ownership with
+        {
+            PropertyNames = properties.Names,
+            Properties = properties.Metadata,
+            LifecycleHandler = properties.LifecycleHandler,
+            PropertyHandler = properties.PropertyHandler
+        });
         foreach (var property in structuralProperties)
         {
             prepared.ReconcilePrepared(
@@ -244,11 +255,11 @@ internal sealed class OwnershipGraph
         IInterceptorSubject root,
         SubjectAttachmentAnchorKind anchor,
         Dictionary<PropertyReference, StructuralSnapshot> capturedSnapshots,
-        Dictionary<IInterceptorSubject, ImmutableArray<string>> capturedPropertyNames,
+        Dictionary<IInterceptorSubject, CapturedSubjectProperties> capturedSubjectProperties,
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
         LifecycleNotifier notifier)
     {
-        var prepared = new OwnershipGraph(this) { _preparedPropertyNames = capturedPropertyNames };
+        var prepared = new OwnershipGraph(this) { _preparedSubjectProperties = capturedSubjectProperties };
         foreach (var entry in capturedSnapshots)
         {
             prepared.SetSnapshot(entry.Key, entry.Value);
@@ -345,10 +356,11 @@ internal sealed class OwnershipGraph
             ReferenceCount = 0,
             IsContextAttach = true
         };
-        var properties = ownership.PropertyNames;
-        notifier.InvokeAddedLifecycleHandlers(subject, executor, change);
+        change = notifier.CompleteChange(change, ownership.Properties, ownership.Parents, StructuralSnapshot.Empty);
+        notifier.InvokeAddedLifecycleHandlers(subject, ownership.LifecycleHandler, executor, change);
         notifier.RaiseSubjectAttached(change, executor);
-        notifier.AttachSubjectProperties(subject, executor, properties);
+        notifier.AttachSubjectProperties(
+            subject, ownership.PropertyHandler, executor, ownership.Properties, _state.Snapshots, _state);
     }
 
     private ImmutableArray<InterceptorExecutor.AttachmentTransition> PrepareAttachmentUpdates(
@@ -535,10 +547,12 @@ internal sealed class OwnershipGraph
             IsContextAttach = isContextAttach,
             IsPropertyReferenceAdded = true
         };
+        change = notifier.CompleteChange(
+            change, ownership.Properties, ownership.Parents, GetSnapshot(property));
 
-        var properties = ownership.PropertyNames;
         notifier.InvokePreparedAddedLifecycleHandlers(
             subject,
+            ownership.LifecycleHandler,
             executor,
             change,
             isContextAttach
@@ -547,12 +561,13 @@ internal sealed class OwnershipGraph
         if (isContextAttach)
         {
             notifier.RaiseSubjectAttached(change, executor);
-            notifier.AttachSubjectProperties(subject, executor, properties);
+            notifier.AttachSubjectProperties(
+                subject, ownership.PropertyHandler, executor, ownership.Properties, _state.Snapshots, _state);
         }
     }
 
     private SubjectOwnership AddPreparedOwnership(IInterceptorSubject subject, InterceptorExecutor executor) =>
-        AddOwnership(subject, _preparedPropertyNames![subject], executor);
+        AddOwnership(subject, _preparedSubjectProperties![subject], executor);
 
     private void ConsumePreparedAnchor(
         IInterceptorSubject subject, PropertyReference property, InterceptorExecutor executor,
@@ -587,7 +602,15 @@ internal sealed class OwnershipGraph
 
         if (IsPreparedSubjectHeld(subject))
         {
-            notifier.PublishEdgeRemoved(subject, property, index, ownership.IncomingCount);
+            var change = notifier.CompleteChange(new SubjectLifecycleChange
+            {
+                Subject = subject,
+                Property = property,
+                Index = index,
+                ReferenceCount = ownership.IncomingCount,
+                IsPropertyReferenceRemoved = true
+            }, ownership.Properties, ownership.Parents, GetSnapshot(property));
+            notifier.PublishEdgeRemoved(subject, ownership.LifecycleHandler, change);
         }
         else
         {
@@ -624,7 +647,7 @@ internal sealed class OwnershipGraph
             CollectStructuralChildren(subject, children);
             RemoveOwnership(subject);
             RemoveSnapshots(subject);
-            notifier.DetachSubjectProperties(subject, ownership.PropertyNames);
+            notifier.DetachSubjectProperties(subject, ownership.PropertyHandler, ownership.Properties);
             DrainPreparedEdges(subject, ownership, notifier);
 
             var change = new SubjectLifecycleChange
@@ -636,8 +659,11 @@ internal sealed class OwnershipGraph
                 IsPropertyReferenceRemoved = property.HasValue,
                 IsContextDetach = true
             };
+            change = notifier.CompleteChange(
+                change, ownership.Properties, [],
+                property is { } parentProperty ? GetSnapshot(parentProperty) : StructuralSnapshot.Empty);
             notifier.RaiseSubjectDetaching(change);
-            notifier.InvokeRemovedLifecycleHandlers(subject, change);
+            notifier.InvokeRemovedLifecycleHandlers(subject, ownership.LifecycleHandler, change);
             ReleaseClaim(subject, ownership.Executor!);
 
             foreach (var (childProperty, occurrence) in children)
@@ -656,7 +682,7 @@ internal sealed class OwnershipGraph
         }
     }
 
-    private static void DrainPreparedEdges(
+    private void DrainPreparedEdges(
         IInterceptorSubject subject,
         SubjectOwnership ownership,
         LifecycleNotifier notifier)
@@ -664,7 +690,15 @@ internal sealed class OwnershipGraph
         var referenceCount = ownership.IncomingCount;
         foreach (var edge in ownership.Edges)
         {
-            notifier.PublishEdgeRemoved(subject, edge.Property, edge.Index, --referenceCount);
+            var change = notifier.CompleteChange(new SubjectLifecycleChange
+            {
+                Subject = subject,
+                Property = edge.Property,
+                Index = edge.Index,
+                ReferenceCount = --referenceCount,
+                IsPropertyReferenceRemoved = true
+            }, ownership.Properties, [], GetSnapshot(edge.Property));
+            notifier.PublishEdgeRemoved(subject, ownership.LifecycleHandler, change);
         }
     }
 

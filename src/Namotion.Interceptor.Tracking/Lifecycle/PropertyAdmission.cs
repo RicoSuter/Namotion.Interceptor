@@ -11,7 +11,7 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
         ImmutableArray<string> AddedPropertyNames,
         ImmutableArray<PropertyReference> StructuralProperties,
         Dictionary<PropertyReference, StructuralSnapshot> Snapshots,
-        Dictionary<IInterceptorSubject, ImmutableArray<string>> PropertyNames,
+        Dictionary<IInterceptorSubject, CapturedSubjectProperties> PropertyNames,
         ImmutableArray<StructuralSnapshotBuilder.CaptureParticipant> Participants);
 
     internal Capture CaptureBatch(SubjectPropertyRegistration registration)
@@ -21,7 +21,7 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
         var rootParticipant = StructuralSnapshotBuilder.CaptureParticipantState(subject, graphState);
         var batch = registration.GetProperties();
         var snapshots = new Dictionary<PropertyReference, StructuralSnapshot>(PropertyReference.Comparer);
-        var propertyNames = new Dictionary<IInterceptorSubject, ImmutableArray<string>>(
+        var propertyNames = new Dictionary<IInterceptorSubject, CapturedSubjectProperties>(
             ReferenceEqualityComparer.Instance);
         var addedNames = ImmutableArray.CreateBuilder<string>(batch.Count);
         var structuralProperties = ImmutableArray.CreateBuilder<PropertyReference>();
@@ -54,7 +54,17 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
                 participants[0] = currentRoot;
             }
 
-            propertyNames[subject] = registration.PreparedProperties.Keys.ToImmutableArray();
+            var names = ImmutableArray.CreateBuilder<string>(registration.PreparedProperties.Count);
+            var preparedMetadata = ImmutableArray.CreateBuilder<SubjectPropertyMetadata>(registration.PreparedProperties.Count);
+            foreach (var property in registration.PreparedProperties)
+            {
+                names.Add(property.Key);
+                preparedMetadata.Add(property.Value);
+            }
+
+            propertyNames[subject] = new CapturedSubjectProperties(
+                names.MoveToImmutable(), preparedMetadata.MoveToImmutable(),
+                subject as ILifecycleHandler, subject as IPropertyLifecycleHandler);
             return new Capture(
                 registration,
                 addedNames.MoveToImmutable(),
@@ -73,10 +83,14 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
         Capture capture,
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations)
     {
+        var properties = capture.PropertyNames[capture.Registration.Subject];
         notifier.AttachSubjectProperties(
             capture.Registration.Subject,
+            properties.PropertyHandler,
             capture.Participants[0].Executor,
-            capture.AddedPropertyNames);
+            properties.Metadata.Where(metadata => capture.AddedPropertyNames.Contains(metadata.Name)),
+            capture.Snapshots,
+            graph.State);
         return graph.PrepareAdmission(
             capture.Registration.Subject,
             capture.StructuralProperties,

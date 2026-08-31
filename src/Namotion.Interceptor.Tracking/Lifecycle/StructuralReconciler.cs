@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 internal sealed class StructuralReconciler(LifecycleNotifier notifier, OwnershipGraph graph) {
     public OwnershipGraph.PreparedTopologyChange Prepare(
         PropertyReference property, StructuralSnapshot snapshot,
-        Dictionary<PropertyReference, StructuralSnapshot> seededSnapshots, Dictionary<IInterceptorSubject, ImmutableArray<string>> seededPropertyNames,
+        Dictionary<PropertyReference, StructuralSnapshot> seededSnapshots, Dictionary<IInterceptorSubject, CapturedSubjectProperties> seededPropertyNames,
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations) =>
         graph.PrepareReconcile(property, snapshot, seededSnapshots, seededPropertyNames, reservations, notifier);
 }

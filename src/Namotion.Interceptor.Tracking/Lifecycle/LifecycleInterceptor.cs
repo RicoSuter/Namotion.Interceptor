@@ -111,7 +111,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             return;
         }
 
-        CallbackReentrancyGuard.ThrowIfInsideCallback();
+        LifecycleNotifier.ThrowIfTopologyChange((InterceptorSubjectContext)_context);
 
         var subject = property.Subject;
         if (!ReferenceEquals(context.Executor.AttachedContext, _context))
@@ -131,8 +131,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             primaryException = exception;
         }
 
-        if (context.CommittedLifecycleJournal is LifecycleJournal journal &&
-            _graph.GetSnapshot(journal.Property).SourceRevision == journal.Revision)
+        if (context.CommittedLifecycleJournal is LifecycleNotifier.LifecycleJournal journal)
         {
             primaryException = journal.Drain(primaryException);
         }
@@ -157,7 +156,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var snapshot = StructuralSnapshotBuilder.Build(context.Property.Metadata.Type, value, 0);
         var reservations = LifecycleScratch.RentOwnershipReservations();
         var seededSnapshots = new Dictionary<PropertyReference, StructuralSnapshot>(PropertyReference.Comparer);
-        var seededPropertyNames = new Dictionary<IInterceptorSubject, ImmutableArray<string>>(ReferenceEqualityComparer.Instance);
+        var seededPropertyNames = new Dictionary<IInterceptorSubject, CapturedSubjectProperties>(ReferenceEqualityComparer.Instance);
         try
         {
             while (true)
@@ -173,6 +172,12 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                         lock (context.Executor.SyncRoot)
                         {
                             context.SetTerminalPredecessor(readValue(context.Property.Subject));
+                            if (context.SuppressIfTerminalValueUnchanged &&
+                                EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, value))
+                            {
+                                break;
+                            }
+
                             var gate = EnterGate();
                             try
                             {
@@ -198,14 +203,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                                         seededPropertyNames,
                                         reservations,
                                         _notifier);
-                                    if (change.RefreshCollection)
-                                    {
-                                        _notifier.RefreshCollectionProperty(context.Property, value);
-                                    }
-
-                                    var journal = journalCapture.Complete(
-                                        context.Property,
-                                        context.Executor.Revision + 1);
+                                    var journal = journalCapture.Complete();
                                     context.Executor.CommitRawWriteLocked(ref context, value, writeValue);
                                     _graph.Publish(change);
                                     context.CommittedLifecycleJournal = journal;
@@ -246,7 +244,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         StructuralSnapshot snapshot,
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
         Dictionary<PropertyReference, StructuralSnapshot> seededSnapshots,
-        Dictionary<IInterceptorSubject, ImmutableArray<string>> seededPropertyNames)
+        Dictionary<IInterceptorSubject, CapturedSubjectProperties> seededPropertyNames)
     {
         var visited = LifecycleScratch.RentSubjectSet();
         try
@@ -276,7 +274,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     private void ResetCaptureAttempt(
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
         Dictionary<PropertyReference, StructuralSnapshot> snapshots,
-        Dictionary<IInterceptorSubject, ImmutableArray<string>> propertyNames)
+        Dictionary<IInterceptorSubject, CapturedSubjectProperties> propertyNames)
     {
         _graph.ReleaseUnusedReservations(reservations);
         snapshots.Clear();
@@ -318,7 +316,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             }
         }
 
-        return capture.Complete(default, 0).Drain(primaryException);
+        return capture.Complete().Drain(primaryException);
     }
 
     OwnershipReservationToken ITopologyAdmissionCoordinator.AcquireOwnershipReservation(
@@ -367,17 +365,8 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// <inheritdoc />
     public bool TryAddProperties(SubjectPropertyRegistration registration)
     {
-        InterceptorExecutor.LogicalContextScope logicalScope;
-        try
-        {
-            logicalScope = InterceptorExecutor.EnterLogicalContext((InterceptorSubjectContext)_context);
-        }
-        catch (InvalidOperationException exception)
-        {
-            throw new LifecycleContractViolationException(exception.Message);
-        }
-
-        using var logicalContextScope = logicalScope;
+        LifecycleNotifier.ThrowIfOtherContext((InterceptorSubjectContext)_context);
+        using var logicalContextScope = InterceptorExecutor.EnterLogicalContext((InterceptorSubjectContext)_context);
         var reservations = LifecycleScratch.RentOwnershipReservations();
         try
         {
@@ -405,7 +394,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                         "Another context claimed a subject of the admitted graph while this call was validating it.");
                 }
 
-                LifecycleJournal? journal = null;
+                LifecycleNotifier.LifecycleJournal? journal = null;
                 var retryCapture = false;
                 var runWithheld = false;
                 try
@@ -446,7 +435,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                                 {
                                     try
                                     {
-                                        journal = journalCapture.Complete(default, 0);
+                                        journal = journalCapture.Complete();
                                         registration.PublishClaimed();
                                         registration.BeforeTopologyPublication?.Invoke();
                                         _graph.Publish(change);
@@ -478,6 +467,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                     continue;
                 }
 
+                _graph.ReleaseUnusedReservations(reservations);
                 if (journal!.Drain(null) is { } exception)
                 {
                     System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception).Throw();
@@ -500,7 +490,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// <inheritdoc />
     public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor)
     {
-        CallbackReentrancyGuard.ThrowIfInsideCallback();
+        LifecycleNotifier.ThrowIfTopologyChange((InterceptorSubjectContext)_context);
 
         if (!ReferenceEquals(context, _context))
         {
@@ -544,7 +534,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var visited = LifecycleScratch.RentSubjectSet();
         var reservations = LifecycleScratch.RentOwnershipReservations();
         var snapshots = new Dictionary<PropertyReference, StructuralSnapshot>(PropertyReference.Comparer);
-        var propertyNames = new Dictionary<IInterceptorSubject, ImmutableArray<string>>(ReferenceEqualityComparer.Instance);
+        var propertyNames = new Dictionary<IInterceptorSubject, CapturedSubjectProperties>(ReferenceEqualityComparer.Instance);
         try
         {
             while (true)
@@ -557,7 +547,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                         "Another context claimed a subject of this graph while the attach was validating it.");
                 }
 
-                LifecycleJournal? journal = null;
+                LifecycleNotifier.LifecycleJournal? journal = null;
                 var retryCapture = false;
                 using (var journalCapture = _notifier.BeginJournal())
                 {
@@ -580,7 +570,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                                 attachedContext, currentAnchor, context, anchor);
                             using var change = _attach.Prepare(
                                 subject, anchor, snapshots, propertyNames, reservations);
-                            journal = journalCapture.Complete(default, 0);
+                            journal = journalCapture.Complete();
                             _graph.Publish(change);
                         }
                     }
@@ -593,6 +583,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                     continue;
                 }
 
+                _graph.ReleaseUnusedReservations(reservations);
                 if (journal!.Drain(null) is { } exception)
                 {
                     System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception).Throw();
@@ -612,7 +603,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// <inheritdoc />
     public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
-        CallbackReentrancyGuard.ThrowIfInsideCallback();
+        LifecycleNotifier.ThrowIfTopologyChange((InterceptorSubjectContext)_context);
 
         if (!ReferenceEquals(context, _context))
         {
@@ -622,13 +613,13 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         using var logicalScope = InterceptorExecutor.EnterLogicalContext((InterceptorSubjectContext)_context);
         var executor = (InterceptorExecutor)subject.Executor;
         using var journalCapture = _notifier.BeginJournal();
-        LifecycleJournal journal;
+        LifecycleNotifier.LifecycleJournal journal;
         using (EnterGate())
         {
             executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
             InterceptorSubjectExtensions.ValidateDetach(attachedContext, anchor, context);
             using var change = _release.Prepare(subject, executor);
-            journal = journalCapture.Complete(default, 0);
+            journal = journalCapture.Complete();
             _graph.Publish(change);
         }
 

@@ -494,6 +494,44 @@ public class LifecycleEventsTests
         Assert.Equal(0, child.GetReferenceCount());
     }
 
+    [Fact]
+    public void WhenASubjectEventWaitsForSameContextTopology_ThenTheWorkerCompletes()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var workerTarget = new Person(context);
+        var trigger = new Person { FirstName = "trigger" };
+        var callbackReached = false;
+        Exception? workerException = null;
+        lifecycle.SubjectAttached += change =>
+        {
+            if (!ReferenceEquals(change.Subject, trigger))
+            {
+                return;
+            }
+
+            callbackReached = true;
+            var worker = new Thread(() =>
+            {
+                workerException = Record.Exception(() => workerTarget.Father = new Person());
+            }) { IsBackground = true };
+            worker.Start();
+            if (!worker.Join(WriteProtocolAcceptance.RendezvousTimeout))
+            {
+                throw new TimeoutException("the subject event ran while the topology gate was held");
+            }
+        };
+
+        // Act
+        var exception = Record.Exception(() => trigger.AttachToContext(context));
+
+        // Assert
+        Assert.Null(exception);
+        Assert.True(callbackReached);
+        Assert.Null(workerException);
+    }
+
     private class EventOrderTracker : ILifecycleHandler
     {
         private readonly List<(string source, string eventType, IInterceptorSubject subject)> _events;

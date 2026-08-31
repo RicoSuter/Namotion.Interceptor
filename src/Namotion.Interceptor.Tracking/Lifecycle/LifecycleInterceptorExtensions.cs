@@ -34,10 +34,16 @@ public static class LifecycleInterceptorExtensions
     /// </summary>
     public static void AttachSubjectProperty(this IInterceptorSubject subject, PropertyReference property)
     {
-        using var scope = CallbackReentrancyGuard.EnterPropertyCallbackScope();
-        var change = new SubjectPropertyLifecycleChange(subject, property);
+        var context = subject.GetContext();
+        using var scope = Interceptors.InterceptorExecutor.EnterLogicalCallback(
+            (InterceptorSubjectContext)context);
+        var change = new SubjectPropertyLifecycleChange(subject, property)
+        {
+            Context = context,
+            Metadata = property.Metadata
+        };
 
-        foreach (var handler in subject.GetContext().GetServices<IPropertyLifecycleHandler>())
+        foreach (var handler in context.GetServices<IPropertyLifecycleHandler>())
         {
             handler.AttachProperty(change);
         }
@@ -54,10 +60,16 @@ public static class LifecycleInterceptorExtensions
     /// </summary>
     public static void DetachSubjectProperty(this IInterceptorSubject subject, PropertyReference property)
     {
-        using var scope = CallbackReentrancyGuard.EnterPropertyCallbackScope();
-        var change = new SubjectPropertyLifecycleChange(subject, property);
+        var context = subject.GetContext();
+        using var scope = Interceptors.InterceptorExecutor.EnterLogicalCallback(
+            (InterceptorSubjectContext)context);
+        var change = new SubjectPropertyLifecycleChange(subject, property)
+        {
+            Context = context,
+            Metadata = property.Metadata
+        };
 
-        foreach (var handler in subject.GetContext().GetServices<IPropertyLifecycleHandler>())
+        foreach (var handler in context.GetServices<IPropertyLifecycleHandler>())
         {
             handler.DetachProperty(change);
         }

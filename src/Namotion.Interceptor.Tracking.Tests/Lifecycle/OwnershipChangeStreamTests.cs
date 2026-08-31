@@ -242,25 +242,16 @@ public class OwnershipChangeStreamTests
     }
 
     /// <summary>
-    /// Records existing behavior for the walk's second caller, anchor adoption, which reaches the
-    /// same stale-edge window only through a nested operation. An outer reconcile is midway through
-    /// its removal pass, so the collection's snapshot no longer lists the host but the host's
-    /// incoming record still exists. A detach callback fired by an earlier removal adds a dynamic
-    /// property to that host, which is the supported dynamic-property-initializer case: the thread
-    /// already holds the topology gate, so the admission is admitted rather than rejected. The
-    /// admission attaches an edge to a subject that carries a provisional anchor, and adoption then
-    /// walks up from the host through its dead incoming edge.
-    ///
-    /// Unlike the release-side cases above, the predicate decides more than the announcement order
-    /// here: if that dead edge counted as support, the provisional anchor would be consumed, and the
-    /// subject would then be released when the host is released a moment later instead of surviving
-    /// as an anchored root.
+    /// A detach callback is drained only after the outer graph and attachment publication. A nested
+    /// admission therefore cannot observe the former stale-edge window. Adding metadata to the now
+    /// detached host remains supported, but it cannot publish an edge or consume the referenced
+    /// subject's provisional anchor.
     /// </summary>
     [Fact]
-    public void WhenANestedAdmissionAdoptsAProvisionalRootUnderAStaleAncestorEdge_ThenTheAnchorSurvives()
+    public void WhenANestedAdmissionRunsAfterPublication_ThenNoStaleAncestorCanAdoptTheRoot()
     {
-        // Arrange: the host sits at the lower index so the sibling is released first and its detach
-        // callback runs while the host is still owned through an edge the snapshot has already dropped.
+        // Arrange: the sibling callback runs before the host's journal entry, but after the complete
+        // outer graph has already been published.
         var recorder = new LifecycleChangeStreamRecorder();
         var context = CreateContext(recorder);
         var root = new Person { FirstName = "R" };
@@ -296,19 +287,14 @@ public class OwnershipChangeStreamTests
         // Act
         root.Children = [];
 
-        // Assert: the nested admission really ran, was accepted, and ran inside the window it needs.
-        // The window is the disagreement itself: the host still carries the incoming edge that the
-        // committed value has already stopped listing. Both halves are asserted, because the whole
-        // shape depends on the host being released after the sibling rather than before it.
+        // Assert: the nested admission ran and was accepted against the already detached host.
         Assert.True(admissionRan, "the detach callback for the released sibling never ran");
         Assert.Null(admissionException);
-        Assert.Equal(1, hostReferenceCountAtAdmission);
+        Assert.Equal(0, hostReferenceCountAtAdmission);
         Assert.Empty(Assert.IsType<StructuralSnapshot>(childrenSnapshotAtAdmission).Occurrences);
+        Assert.True(((IInterceptorSubject)host).Properties.ContainsKey("Adopted"));
 
-        // Asserted ahead of the stream because it is the sharper consequence: the adopted subject
-        // keeps the anchor it arrived with, so losing its only edge a moment later leaves it an
-        // anchored root instead of releasing it. A dead ancestor edge counting as support would
-        // change the committed graph, not only the order in which changes are announced.
+        // No edge was published from the detached host, so the provisional root keeps its anchor.
         Assert.True(((IInterceptorSubject)provisionalRoot).Executor.AttachmentAnchor != SubjectAttachmentAnchorKind.None,
             "the provisional anchor was consumed by an ancestor edge the committed value no longer holds");
         Assert.Same(context, ((IInterceptorSubject)provisionalRoot).TryGetContext());
@@ -317,9 +303,7 @@ public class OwnershipChangeStreamTests
         Assert.Equal(
         [
             "S edge removed, detached Children[1] references=0",
-            "D edge added Adopted[-] references=1",
-            "H edge removed, detached Children[0] references=0",
-            "D edge removed Adopted[-] references=0"
+            "H edge removed, detached Children[0] references=0"
         ], recorder.Changes);
     }
 

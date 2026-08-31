@@ -17,6 +17,9 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     [ThreadStatic]
     private static int _logicalContextDepth;
 
+    [ThreadStatic]
+    private static int _logicalCallbackDepth;
+
     private readonly IInterceptorSubject _subject;
 
     internal IInterceptorSubject Subject => _subject;
@@ -50,16 +53,26 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
 
     internal static LogicalContextScope EnterLogicalContext(InterceptorSubjectContext context)
     {
-        if (_logicalContext is not null && !ReferenceEquals(_logicalContext, context))
+        if (_logicalContext is null)
         {
-            throw new InvalidOperationException(
-                "A thread runs topology work for at most one subject context at a time. Defer the second-context operation until the current operation completes.");
+            _logicalContext = context;
         }
 
-        _logicalContext = context;
         _logicalContextDepth++;
         return new LogicalContextScope(true);
     }
+
+    internal static LogicalContextScope EnterLogicalCallback(InterceptorSubjectContext context)
+    {
+        EnterLogicalContext(context);
+        _logicalCallbackDepth++;
+        return new LogicalContextScope(true, true);
+    }
+
+    internal static bool IsInsideLogicalCallback => _logicalCallbackDepth > 0;
+
+    internal static bool IsCurrentLogicalContext(InterceptorSubjectContext context) =>
+        _logicalContext is null || ReferenceEquals(_logicalContext, context);
 
     internal long Revision;
     internal long CurrentRevision => Volatile.Read(ref Revision);
@@ -954,10 +967,15 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         }
     }
 
-    internal readonly struct LogicalContextScope(bool isActive) : IDisposable
+    internal readonly struct LogicalContextScope(bool isActive, bool isCallback = false) : IDisposable
     {
         public void Dispose()
         {
+            if (isCallback)
+            {
+                _logicalCallbackDepth--;
+            }
+
             if (isActive && --_logicalContextDepth == 0)
             {
                 _logicalContext = null;

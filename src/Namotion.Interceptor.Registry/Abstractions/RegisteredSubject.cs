@@ -16,18 +16,13 @@ public class RegisteredSubject
 
     private volatile FrozenDictionary<string, RegisteredSubjectProperty> _properties;
 
-    // Most subjects have exactly one parent, so the first is stored inline and the
-    // overflow list is allocated only on the second. Empty sentinel:
-    // _firstParent.Property is null (a real entry never has a null Property).
-    private SubjectPropertyParent _firstParent;
-    private List<SubjectPropertyParent>? _additionalParents;
-
-    // Raw array instead of ImmutableArray because the struct can't be read atomically;
-    // the Volatile.Write publish (under _lock) pairs with the lock-free Volatile.Read
-    // in the getter so readers see fully built contents.
-    private SubjectPropertyParent[]? _parentsSnapshot;
+    private SubjectPropertyParent[] _parentsSnapshot = [];
 
     [JsonIgnore] public IInterceptorSubject Subject { get; }
+
+    internal IInterceptorSubjectContext? Context { get; }
+
+    internal long AttachmentRevision { get; }
 
     /// <summary>
     /// Gets the current reference count (number of parent references), or 0 when the subject is
@@ -42,47 +37,8 @@ public class RegisteredSubject
     public ImmutableArray<SubjectPropertyParent> Parents
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get
-        {
-            var snapshot = Volatile.Read(ref _parentsSnapshot);
-            return snapshot is not null
-                ? ImmutableCollectionsMarshal.AsImmutableArray(snapshot)
-                : GetParentsSlow();
-        }
+        get => ImmutableCollectionsMarshal.AsImmutableArray(Volatile.Read(ref _parentsSnapshot));
     }
-
-    private ImmutableArray<SubjectPropertyParent> GetParentsSlow()
-    {
-        lock (_lock)
-        {
-            var snapshot = _parentsSnapshot;
-            if (snapshot is null)
-            {
-                snapshot = BuildParentsSnapshot();
-                Volatile.Write(ref _parentsSnapshot, snapshot);
-            }
-            return ImmutableCollectionsMarshal.AsImmutableArray(snapshot);
-        }
-    }
-
-    // Must be called under _lock. Published snapshots are never mutated in place because
-    // lock-free readers rely on it: mutators invalidate and the next reader rebuilds.
-    private SubjectPropertyParent[] BuildParentsSnapshot()
-    {
-        if (_firstParent.Property is null)
-            return [];
-
-        if (_additionalParents is null || _additionalParents.Count == 0)
-            return [_firstParent];
-
-        var array = new SubjectPropertyParent[1 + _additionalParents.Count];
-        array[0] = _firstParent;
-        _additionalParents.CopyTo(array, 1);
-        return array;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void InvalidateParentsSnapshot() => Volatile.Write(ref _parentsSnapshot, null);
 
     /// <summary>
     /// Gets all registered properties.
@@ -134,127 +90,56 @@ public class RegisteredSubject
         return _properties.GetValueOrDefault(propertyName);
     }
 
-    public RegisteredSubject(IInterceptorSubject subject)
+    public RegisteredSubject(IInterceptorSubject subject) : this(subject, [.. subject.Properties.Values], null, 0)
+    {
+    }
+
+    internal RegisteredSubject(
+        IInterceptorSubject subject,
+        ImmutableArray<SubjectPropertyMetadata> properties,
+        IInterceptorSubjectContext? context,
+        long attachmentRevision)
     {
         Subject = subject;
-        _properties = subject
-            .Properties
+        Context = context;
+        AttachmentRevision = attachmentRevision;
+        _properties = properties
             .ToFrozenDictionary(
-                p => p.Key,
-                p => new RegisteredSubjectProperty(
-                    this, p.Key, p.Value.Type, p.Value.Attributes));
+                metadata => metadata.Name,
+                metadata => new RegisteredSubjectProperty(
+                    this, metadata.Name, metadata.Type, metadata.Attributes));
     }
 
-    internal void AddParent(RegisteredSubjectProperty parent, object? index)
+    internal void ApplyProjection(
+        ImmutableArray<SubjectPropertyMetadata> properties,
+        ImmutableArray<SubjectPropertyParent> parents)
     {
         lock (_lock)
         {
-            var entry = new SubjectPropertyParent { Property = parent, Index = index };
-            if (_firstParent.Property is null)
+            var projections = _properties.ToDictionary();
+            foreach (var metadata in properties)
             {
-                _firstParent = entry;
-            }
-            else
-            {
-                _additionalParents ??= [];
-                _additionalParents.Add(entry);
-            }
-            InvalidateParentsSnapshot();
-        }
-    }
-
-    internal void RemoveParent(RegisteredSubjectProperty parent, object? index)
-    {
-        lock (_lock)
-        {
-            var entry = new SubjectPropertyParent { Property = parent, Index = index };
-            if (_firstParent.Property is not null && _firstParent.Equals(entry))
-            {
-                PromoteFirstParentFromAdditional();
-                return;
-            }
-
-            if (_additionalParents is not null)
-            {
-                var indexInList = _additionalParents.IndexOf(entry);
-                if (indexInList >= 0)
+                if (!projections.ContainsKey(metadata.Name))
                 {
-                    _additionalParents.RemoveAt(indexInList);
-                    InvalidateParentsSnapshot();
+                    projections.Add(metadata.Name, new RegisteredSubjectProperty(
+                        this, metadata.Name, metadata.Type, metadata.Attributes));
                 }
             }
+            _properties = projections.ToFrozenDictionary();
+            foreach (var property in _properties.Values)
+            {
+                property.AttributesCache = null;
+            }
+            Volatile.Write(ref _parentsSnapshot, parents.ToArray());
         }
     }
 
-    internal void RemoveParentsByProperty(RegisteredSubjectProperty parent)
+    internal void ReplaceParents(ImmutableArray<SubjectPropertyParent> parents)
     {
         lock (_lock)
         {
-            var changed = false;
-
-            if (_additionalParents is not null && _additionalParents.Count > 0)
-            {
-                for (var i = _additionalParents.Count - 1; i >= 0; i--)
-                {
-                    if (_additionalParents[i].Property == parent)
-                    {
-                        _additionalParents.RemoveAt(i);
-                        changed = true;
-                    }
-                }
-            }
-
-            if (_firstParent.Property == parent)
-            {
-                PromoteFirstParentFromAdditional();
-                changed = true;
-            }
-
-            if (changed)
-            {
-                InvalidateParentsSnapshot();
-            }
+            Volatile.Write(ref _parentsSnapshot, parents.ToArray());
         }
-    }
-
-    internal void UpdateParentIndex(RegisteredSubjectProperty property, object? oldIndex, object? newIndex)
-    {
-        lock (_lock)
-        {
-            var oldEntry = new SubjectPropertyParent { Property = property, Index = oldIndex };
-            if (_firstParent.Property is not null && _firstParent.Equals(oldEntry))
-            {
-                _firstParent = new SubjectPropertyParent { Property = property, Index = newIndex };
-                InvalidateParentsSnapshot();
-                return;
-            }
-
-            if (_additionalParents is not null)
-            {
-                var indexInList = _additionalParents.IndexOf(oldEntry);
-                if (indexInList >= 0)
-                {
-                    _additionalParents[indexInList] = new SubjectPropertyParent { Property = property, Index = newIndex };
-                    InvalidateParentsSnapshot();
-                }
-            }
-        }
-    }
-
-    // Promotes the head (not the tail) of the overflow list so the surviving parents
-    // keep their insertion order. Caller must hold _lock.
-    private void PromoteFirstParentFromAdditional()
-    {
-        if (_additionalParents is not null && _additionalParents.Count > 0)
-        {
-            _firstParent = _additionalParents[0];
-            _additionalParents.RemoveAt(0);
-        }
-        else
-        {
-            _firstParent = default;
-        }
-        InvalidateParentsSnapshot();
     }
 
     /// <summary>
