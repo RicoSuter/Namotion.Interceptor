@@ -160,8 +160,8 @@ public class CrossContextGateDeadlockTests
             "probable ABBA deadlock on two lifecycle gates: the first attach " +
             $"{(firstCompleted ? "completed" : "did not complete")} and the second attach " +
             $"{(secondCompleted ? "completed" : "did not complete")} within {WriteProtocolAcceptance.JoinTimeout.TotalSeconds:F0} seconds");
-        Assert.IsAssignableFrom<InvalidOperationException>(firstCrossWriteException);
-        Assert.IsAssignableFrom<InvalidOperationException>(secondCrossWriteException);
+        Assert.IsType<LifecycleContractViolationException>(firstCrossWriteException);
+        Assert.IsType<LifecycleContractViolationException>(secondCrossWriteException);
     }
 
     /// <summary>
@@ -446,7 +446,7 @@ public class CrossContextGateDeadlockTests
             $"{(firstCompleted ? "completed" : "did not complete")} and the second structural write " +
             $"{(secondCompleted ? "completed" : "did not complete")} within {WriteProtocolAcceptance.JoinTimeout.TotalSeconds:F0} seconds");
 
-        Assert.IsAssignableFrom<InvalidOperationException>(firstInterceptor.CrossContextWriteException);
-        Assert.IsAssignableFrom<InvalidOperationException>(secondInterceptor.CrossContextWriteException);
+        Assert.IsType<LifecycleContractViolationException>(firstInterceptor.CrossContextWriteException);
+        Assert.IsType<LifecycleContractViolationException>(secondInterceptor.CrossContextWriteException);
     }
 }
