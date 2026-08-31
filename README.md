@@ -356,7 +356,7 @@ sensor.Temperature = 25.5m;
 // Inbound MQTT messages update the property and trigger change notifications
 ```
 
-The same pattern applies to [OPC UA](docs/connectors-opcua.md) (industrial automation, dynamic property discovery, companion specifications), [TwinCAT ADS](docs/twincat.md) (Beckhoff PLC integration with notification-to-polling demotion and write retry queues), and [WebSocket](docs/connectors-websocket.md) (digital twin synchronization with sequence numbers and heartbeats). Implementation details for sources, servers, ownership, and write retry are in [Connectors](docs/connectors.md). The wire format used for partial state synchronization is documented in [Subject Updates](docs/connectors-subject-updates.md).
+The same pattern applies to [OPC UA](docs/connectors-opcua.md) (industrial automation, dynamic property discovery, companion specifications), [TwinCAT ADS](docs/ads.md) (Beckhoff PLC integration with notification-to-polling demotion and write retry queues), and [WebSocket](docs/connectors-websocket.md) (digital twin synchronization with sequence numbers and heartbeats). Implementation details for sources, servers, ownership, and write retry are in [Connectors](docs/connectors.md). The wire format used for partial state synchronization is documented in [Subject Updates](docs/connectors-subject-updates.md).
 
 ## Integrations
 
@@ -403,7 +403,7 @@ Integrations expose subjects through .NET host frameworks. They reuse the tracki
 | **Namotion.Interceptor.Connectors** | Base infrastructure for external system integration | [Connectors](docs/connectors.md) |
 | **Namotion.Interceptor.Mqtt** | Bidirectional MQTT synchronization | [MQTT](docs/connectors-mqtt.md) |
 | **Namotion.Interceptor.OpcUa** | OPC UA client and server integration | [OPC UA](docs/connectors-opcua.md) |
-| **Namotion.Interceptor.Connectors.TwinCAT** | TwinCAT ADS client integration for Beckhoff PLCs | [TwinCAT ADS](docs/twincat.md) |
+| **Namotion.Interceptor.Ads** | ADS client integration for Beckhoff TwinCAT PLCs | [ADS](docs/ads.md) |
 | **Namotion.Interceptor.WebSocket** | Real-time WebSocket synchronization | [WebSocket](docs/connectors-websocket.md) |
 | **Connector Tester** | Chaos and load testing for connector verification | [Connector Tester](docs/connector-tester.md) |
 
