@@ -8,7 +8,7 @@ The `Namotion.Interceptor.Ads` package provides integration between Namotion.Int
 - Attribute-based mapping with `[AdsVariable]` for direct symbol path control
 - Code-based fluent mapping (`AdsFluentMapperBuilder`) as a complete alternative to attributes
 - Automatic notification-to-polling demotion when notification limits are exceeded
-- Batch read/write operations via `SumSymbolRead`/`SumSymbolWrite` with individual fallback
+- Batch reads via `SumSymbolRead` with concurrent individual fallback (writes are always per symbol)
 - Debounced rescan on connection restore, PLC state change, and symbol version change
 - Circuit breaker pattern for connection resilience
 - Write retry queue for buffering during disconnection
@@ -163,7 +163,7 @@ Once the PLC has a route to the client net id and IP and the firewall allows por
 | `DefaultReadMode` | AdsReadMode | Auto | Default read mode for variables without explicit config |
 | `DefaultCycleTime` | int | 100 | Default notification cycle time in ms |
 | `DefaultMaxDelay` | int | 0 | Default max delay for notification batching in ms |
-| `MaxNotifications` | int | 500 | Max concurrent ADS notifications before demotion |
+| `MaxNotifications` | int | 500 | Max concurrent ADS notifications before demotion; 0 leaves no budget for `Auto` |
 | `PollingInterval` | TimeSpan | 100ms | Polling timer interval for polled/demoted variables |
 | `MaxConcurrentReads` | int | 0 | Reads in flight at once when sum commands cannot resolve the symbols; 0 is no limit, 1 is sequential |
 | `PrefetchSymbols` | bool | true | Fetch the symbol table and data types when the loader is created, rather than on first symbol access |
@@ -339,6 +339,8 @@ When the total number of notification-mode variables exceeds `MaxNotifications`,
 
 **Example**: With `MaxNotifications = 500` and 600 Auto-mode variables, the 100 variables with the highest Priority (then slowest CycleTime) are demoted to polling.
 
+Setting `MaxNotifications = 0` leaves no notification budget for Auto-mode variables, demoting all of them to polling. A variable that asks for `Notification` explicitly is never demoted and still gets one, so this is not the same as turning notifications off. It is also not the same as `DefaultReadMode = Polled`, which only covers variables that do not state a read mode.
+
 ## Read and Write Operations
 
 ### Batch reads
@@ -360,17 +362,23 @@ If `SumSymbolRead` returns `DeviceServiceNotSupported`, or the symbols cannot be
 
 The TwinCAT type system cannot resolve a PLC enum whose definition was not loaded. Such a symbol is read as its underlying integer, picked by byte size, and written through the any-type path, which marshals from the .NET runtime type. The first failure is remembered per symbol path, so the doomed typed read happens once rather than every cycle, and handles are cached and dropped on a failed read, since a handle does not survive a reconnect or a download.
 
-### Error Classification
+### Error classification
 
-Write failures are classified as **transient** (retry-safe) or **permanent** (don't retry):
+Write failures are classified as **transient** or **permanent**:
 
-| Classification | Error Codes | Behavior |
-|---------------|-------------|----------|
-| **Permanent** | SymbolNotFound, InvalidSize, InvalidData, ServiceNotSupported, InvalidAccess, InvalidOffset | Logged and dropped |
-| **Transient** | PortNotFound, MachineNotFound, ClientPortNotOpen, DeviceError, Timeout, Busy | Retried via write queue |
-| **Unknown** | All other codes | Treated as transient (safer) |
+| Classification | Error codes |
+|---------------|-------------|
+| **Permanent** | SymbolNotFound, InvalidSize, InvalidData, ServiceNotSupported, InvalidAccess, InvalidOffset |
+| **Transient** | PortNotFound, MachineNotFound, ClientPortNotOpen, DeviceError, Timeout, Busy |
+| **Unknown** | All other codes, treated as transient because that is the safer way to be wrong |
 
-Only transient failures are returned to the retry queue. Permanent failures are logged at Warning level and excluded from retry, preventing indefinite retry loops for invalid writes. A failed any-type write, used for the unresolvable types above, is reported to the caller rather than dropped, so a write that never reached the PLC is not counted as successful.
+Classification decides only the `TransientCount` and `PermanentCount` carried on `AdsWriteException`. It does not decide what is reported: **every change that did not reach the PLC is returned in `WriteResult.FailedChanges`**, permanent ones included. `FailedChanges` has to stay complete or the write retry queue and the source transaction writer both treat an unlisted change as written, which is what makes `TransactionFailureHandling.Rollback` able to fire at all. The OPC UA connector reports failures the same way.
+
+That covers a permanently rejected symbol write, a property that is no longer registered, a value converter that throws, and a failed any-type write for the unresolvable types above. Unbounded retrying is prevented by `WriteRetryQueueSize` rather than by dropping: the queue is a ring buffer that evicts oldest and counts the evictions.
+
+The one change that is deliberately **not** reported is a null property value. ADS has no null, so there is nothing to write, retrying could only produce the same outcome, and a later non-null assignment arrives as its own change. It is logged at Debug level.
+
+The ADS error code is read from `AdsErrorException.ErrorCode`, never from `Exception.HResult`: `HResult` carries the generic managed `0x80131500` for every ADS error, so classifying on it would put every error in the same bucket.
 
 ## Type Conversions
 
