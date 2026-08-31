@@ -40,6 +40,10 @@ internal readonly record struct OversizePlaceholder(
 /// </summary>
 internal static class SqliteValueRouting
 {
+    // A JSON string rather than a bare NaN, which is not valid JSON. Same token System.Text.Json writes
+    // under JsonNumberHandling.AllowNamedFloatingPointLiterals, so a later reader can parse it as one.
+    private const string NotANumberJson = "\"NaN\"";
+
     // Routes a value into a row exactly like InMemoryHistoryStore.CreateSample, but serializes the JSON
     // column to its raw text representation for storage. Returns whether the value was oversized so the
     // engine can increment its own oversize counter (this helper never mutates engine state).
@@ -53,12 +57,23 @@ internal static class SqliteValueRouting
         switch (column)
         {
             case ValueColumn.Double:
+                var number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
+                if (double.IsNaN(number))
+                {
+                    // SQLite binds NaN into a REAL column as SQL NULL, and a row with all three value
+                    // columns null is exactly how an explicitly recorded null is stored, so the two would
+                    // be indistinguishable on disk with no way to tell them apart afterwards. The named
+                    // literal in value_json keeps them separate. Infinities need none of this: they
+                    // round-trip through REAL unchanged.
+                    return new RoutedRow(new Row(null, null, NotANumberJson), false);
+                }
+
                 // A decimal routes here so the chart/MCP/aggregations read value_double, but its exact text is
                 // also archived in value_json so the original precision is recoverable later. ToPoint reads
                 // value_double first, so the archive never affects query results. A real double has no exact
                 // decimal text to preserve, so it leaves value_json empty.
                 var archive = value is decimal decimalValue ? JsonSerializer.Serialize(decimalValue) : null;
-                return new RoutedRow(new Row(null, Convert.ToDouble(value, CultureInfo.InvariantCulture), archive), false);
+                return new RoutedRow(new Row(null, number, archive), false);
 
             case ValueColumn.Long:
                 if (isUlong && value is ulong unsigned && unsigned > long.MaxValue)

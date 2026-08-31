@@ -22,12 +22,16 @@ internal readonly record struct ColumnMeta(ValueColumn Column, bool IsUlong);
 internal readonly struct SqliteReadContext(
     string databaseDirectory,
     string metadataKey,
-    Func<string, SqliteConnection> openPartition,
+    Func<string, SqliteConnection?> openPartition,
     Func<SqliteConnection> openMetadata)
 {
     public string MetadataKey => metadataKey;
 
-    public SqliteConnection OpenPartition(string key) => openPartition(key);
+    /// <summary>
+    /// The partition's connection, or null when this build cannot read that file. Callers skip a null
+    /// instead of failing, so an unreadable partition costs its own data rather than the whole query.
+    /// </summary>
+    public SqliteConnection? OpenPartition(string key) => openPartition(key);
 
     public SqliteConnection OpenMetadata() => openMetadata();
 
@@ -118,9 +122,9 @@ internal static class SqliteHistoryReader
                 }
 
                 var connection = context.OpenPartition(key);
-                if (ResolvePathId(connection, leg.Path) is not { } pathId)
+                if (connection is null || ResolvePathId(connection, leg.Path) is not { } pathId)
                 {
-                    continue; // this partition never saw the path
+                    continue; // unreadable partition, or one that never saw the path
                 }
 
                 using var command = connection.CreateCommand();
@@ -236,9 +240,9 @@ internal static class SqliteHistoryReader
             }
 
             var connection = context.OpenPartition(key);
-            if (ResolvePathId(connection, path) is not { } pathId)
+            if (connection is null || ResolvePathId(connection, path) is not { } pathId)
             {
-                continue; // this partition never saw the path
+                continue; // unreadable partition, or one that never saw the path
             }
 
             using var command = connection.CreateCommand();
@@ -282,6 +286,11 @@ internal static class SqliteHistoryReader
         foreach (var key in context.EnumeratePartitionFileKeys().OrderByDescending(key => key, StringComparer.Ordinal))
         {
             var connection = context.OpenPartition(key);
+            if (connection is null)
+            {
+                continue;
+            }
+
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT value_column, is_ulong FROM paths WHERE path = @path;";
             command.Parameters.AddWithValue("@path", propertyPath);

@@ -81,6 +81,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
 
     private readonly object _connectionLock = new();
     private readonly Dictionary<string, SqliteConnection> _connections = new(StringComparer.Ordinal);
+
+    // Partitions this build refused to open, so a read skips them without retrying and logging per query.
+    private readonly HashSet<string> _unreadablePartitions = new(StringComparer.Ordinal);
+
     private readonly SqliteCoverageStore _coverageStore;
 
     // The read/partition-layout context handed to SqliteHistoryReader. It captures this engine's
@@ -121,7 +125,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         _getUtcNow = getUtcNow;
         _logger = logger;
         _readContext = new SqliteReadContext(
-            _databaseDirectory, MetadataKey, OpenPartition, OpenMetadata);
+            _databaseDirectory, MetadataKey, TryOpenPartition, OpenMetadata);
         _coverageStore = new SqliteCoverageStore(OpenMetadata);
 
         // After the coverage store exists: publishing the watermark compares against its snapshot.
@@ -781,6 +785,49 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         if (File.Exists(path))
         {
             File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Opens a partition for reading, or returns null when this build cannot read it.
+    /// </summary>
+    /// <remarks>
+    /// A partition written by another schema version, or a foreign database sitting under a
+    /// partition-shaped name, is refused by <see cref="InitializeDatabase"/>. A read must not turn that
+    /// into a failed query: the sweep deletes by age and never by version, so one such file would
+    /// otherwise break every history query for as long as retention keeps it, a year by default. The key
+    /// is remembered so the refusal is logged once rather than on every query. The write path keeps
+    /// throwing on the same file, because silently dropping samples is the worse outcome there.
+    /// </remarks>
+    private SqliteConnection? TryOpenPartition(string key)
+    {
+        lock (_connectionLock)
+        {
+            if (_unreadablePartitions.Contains(key))
+            {
+                return null;
+            }
+        }
+
+        try
+        {
+            return OpenPartition(key);
+        }
+        catch (Exception exception)
+        {
+            lock (_connectionLock)
+            {
+                _unreadablePartitions.Add(key);
+            }
+
+            // Also on LastError, not only in the log: a query that quietly returns less than it was asked
+            // for is its own hazard, and this is the store's one channel that reaches the UI.
+            _lastError = exception.Message;
+
+            _logger?.LogWarning(exception,
+                "History partition '{PartitionKey}' cannot be read by this build and is skipped; " +
+                "queries covering it return what the other partitions hold.", key);
+            return null;
         }
     }
 

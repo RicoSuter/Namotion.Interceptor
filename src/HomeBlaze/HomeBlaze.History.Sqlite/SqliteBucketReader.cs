@@ -70,9 +70,9 @@ internal static class SqliteBucketReader
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var connection = context.OpenPartition(segment.PartitionKey);
-                if (SqliteHistoryReader.ResolvePathId(connection, segment.Path) is not { } pathId)
+                if (connection is null || SqliteHistoryReader.ResolvePathId(connection, segment.Path) is not { } pathId)
                 {
-                    continue; // this partition never saw the path
+                    continue; // unreadable partition, or one that never saw the path
                 }
 
                 foreach (var partial in ReadPartials(connection, pathId, aggregation, isUlong,
@@ -204,9 +204,9 @@ internal static class SqliteBucketReader
         {
             cancellationToken.ThrowIfCancellationRequested();
             var connection = context.OpenPartition(segment.PartitionKey);
-            if (SqliteHistoryReader.ResolvePathId(connection, segment.Path) is not { } pathId)
+            if (connection is null || SqliteHistoryReader.ResolvePathId(connection, segment.Path) is not { } pathId)
             {
-                continue; // this partition never saw the path
+                continue; // unreadable partition, or one that never saw the path
             }
 
             using var command = connection.CreateCommand();

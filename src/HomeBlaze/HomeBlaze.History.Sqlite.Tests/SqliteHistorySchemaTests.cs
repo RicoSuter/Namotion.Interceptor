@@ -231,11 +231,41 @@ public sealed class SqliteHistorySchemaTests : IDisposable
             command.ExecuteNonQuery();
         }
 
-        // Act & Assert
+        // Act - a read spanning that file must not fail on it. The sweep deletes by age and never by
+        // version, so a partition this build cannot read would otherwise break every query for as long as
+        // retention keeps it.
         using var core = NewCore(Base.AddSeconds(60));
-        var exception = Assert.Throws<InvalidOperationException>(
-            () => core.Query(new HistoryQuery("/a/Value", Base, Base.AddSeconds(10))));
-        Assert.Contains("Delete the history directory", exception.Message);
+        var series = core.Query(new HistoryQuery("/a/Value", Base, Base.AddSeconds(10)));
+
+        // Assert - skipped, reported, and above all not adopted: still the foreign file's own version and
+        // tables, with none of this store's written into it.
+        Assert.Empty(series.Points);
+        Assert.Contains("Delete the history directory", core.LastError);
+        Assert.Equal(7L, Scalar(foreign, "PRAGMA user_version;"));
+        Assert.Equal(1L, Scalar(foreign, "SELECT COUNT(*) FROM sqlite_schema WHERE name = 'something_else';"));
+        Assert.Equal(0L, Scalar(foreign, "SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('history', 'paths');"));
+    }
+
+    [Fact]
+    public async Task WhenADoubleIsNotANumber_ThenItStaysDistinguishableFromARecordedNull()
+    {
+        // Arrange - SQLite binds NaN into a REAL column as SQL NULL, and a row whose three value columns
+        // are all null is exactly how an explicitly recorded null is stored. Written that way the two are
+        // the same bytes on disk, so nothing afterwards could ever tell them apart.
+        using var core = NewCore(Base.AddSeconds(60));
+        core.Record("/a/Value", Base, double.NaN, typeof(double));
+        core.Record("/a/Value", Base.AddSeconds(1), null, typeof(double));
+
+        // Act
+        await core.FlushAsync(CancellationToken.None);
+
+        // Assert
+        var partition = Directory.EnumerateFiles(_directory, "*.db")
+            .Single(file => Path.GetFileName(file) != "metadata.db");
+        Assert.Equal(1L, Scalar(partition,
+            "SELECT COUNT(*) FROM history WHERE value_json = '\"NaN\"' AND value_double IS NULL;"));
+        Assert.Equal(1L, Scalar(partition,
+            "SELECT COUNT(*) FROM history WHERE value_long IS NULL AND value_double IS NULL AND value_json IS NULL;"));
     }
 
     [Fact]
