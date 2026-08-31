@@ -7,8 +7,8 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 using TwinCAT;
+using System.Text;
 using TwinCAT.Ads;
-using TwinCAT.Ads.Reactive;
 using TwinCAT.Ads.SumCommand;
 using TwinCAT.TypeSystem;
 
@@ -170,8 +170,17 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
 
             if (effectiveMode == AdsReadMode.Notification)
             {
+                var symbol = TryGetSymbol(symbolLoader, symbolPath);
+                if (symbol is null)
+                {
+                    // Polling cannot read it either, so registering it as polled would only hide it.
+                    connectionManager.LogFirstOccurrence("SymbolNotFound", null,
+                        "Symbol '{SymbolPath}' not found in PLC. Skipping.", symbolPath);
+                    continue;
+                }
+
                 var mapping = mappingByReference[property.Reference];
-                if (!TryRegisterNotification(property, symbolPath, mapping, connection, connectionManager))
+                if (!TryRegisterNotification(property, symbolPath, symbol, mapping, connection, connectionManager))
                 {
                     // Keeps updating rather than silently freezing at its last value.
                     _polledProperties[property.Reference] = symbolPath;
@@ -265,10 +274,9 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// </summary>
     internal void OnPropertyReleasing(PropertyReference property)
     {
-        // 1. Stop treating this property as notification-backed. The subscription itself is shared
-        // with the rest of its settings group, so it is not disposed here; a notification that still
-        // arrives is dropped by OnValueReceived, which finds no registered property.
-        _notificationProperties.TryRemove(property, out _);
+        // 1. Release this property's device notification. Nothing else deletes it, so leaving it
+        // registered keeps the PLC delivering a value nothing consumes until the next re-scan.
+        ReleaseNotificationFor(property);
 
         // 2. Remove from batch polling collection
         if (_polledProperties.TryRemove(property, out _))
@@ -350,36 +358,33 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Registers one batched notification subscription for a group of symbols sharing the same
-    /// notification settings.
+    /// Registers one device notification and records its handle. Returns false when the value cannot
+    /// be marshalled or the PLC refuses it, so the caller can fall the property back to polling.
     /// </summary>
     /// <remarks>
-    /// One subscription per group rather than per property: the reactive extension allocates a
-    /// dedicated <c>EventLoopScheduler</c>, and therefore an OS thread, for every
-    /// <c>WhenNotification</c> call, so subscribing per property costs one thread per property and
-    /// recreates them all on every rescan. Notifications are routed back to their property by the
-    /// instance path of the very symbols handed to the call.
-    /// </remarks>
-    /// <summary>
-    /// Registers one device notification and records its handle. Returns false when the PLC refuses
-    /// it, so the caller can fall the property back to polling.
-    /// </summary>
-    /// <remarks>
-    /// Registered through the raw ADS API rather than the reactive <c>WhenNotification</c> extension,
-    /// for two reasons. That extension allocates a dedicated <c>EventLoopScheduler</c>, and therefore
-    /// an OS thread, per call, and disposing a batched subscription does not send
-    /// <c>DeleteDeviceNotification</c>, so every re-scan would leave the previous registrations
-    /// standing on the controller until it hit its own notification limit. Holding the handle makes
-    /// the release explicit, and a single <see cref="IAdsNotifications.AdsNotificationEx"/> handler
-    /// serves every symbol.
+    /// Registered through the raw ADS API rather than the reactive extension, for two reasons. That
+    /// extension allocates a dedicated <c>EventLoopScheduler</c>, and therefore an OS thread, per
+    /// call, and disposing a batched subscription does not send <c>DeleteDeviceNotification</c>, so
+    /// every re-scan would leave the previous registrations standing on the controller. Holding the
+    /// handle makes the release explicit, and a single
+    /// <see cref="IAdsNotifications.AdsNotificationEx"/> handler serves every symbol.
     /// </remarks>
     private bool TryRegisterNotification(
         RegisteredSubjectProperty property,
         string symbolPath,
+        ISymbol symbol,
         AdsPropertyMapping mapping,
         IAdsConnection connection,
         AdsConnectionManager connectionManager)
     {
+        if (!TryResolveNotificationType(property.Type, symbol, out var marshalType, out var marshalArgs))
+        {
+            connectionManager.LogFirstOccurrence("NotificationMarshalling", null,
+                "Cannot marshal '{PropertyType}' for symbol '{SymbolPath}' as an ADS notification. Polling it instead.",
+                property.Type.Name, symbolPath);
+            return false;
+        }
+
         var notificationSettings = new NotificationSettings(
             AdsTransMode.OnChange,
             mapping.CycleTime ?? _configuration.DefaultCycleTime,
@@ -388,12 +393,12 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         try
         {
             var errorCode = connection.TryAddDeviceNotificationEx(
-                symbolPath, notificationSettings, null, property.Type, null, out var handle);
+                symbolPath, notificationSettings, null, marshalType, marshalArgs, out var handle);
 
             if (errorCode != AdsErrorCode.NoError)
             {
                 connectionManager.LogFirstOccurrence("NotificationRegistration", null,
-                    "The PLC refused a notification for '{SymbolPath}': {ErrorCode}. Falling back to polling.",
+                    "The PLC refused a notification for '{SymbolPath}': {ErrorCode}. Polling it instead.",
                     symbolPath, errorCode);
                 return false;
             }
@@ -405,7 +410,70 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         catch (Exception exception)
         {
             connectionManager.LogFirstOccurrence("NotificationRegistration", exception,
-                "Failed to register a notification for '{SymbolPath}'. Falling back to polling.", symbolPath);
+                "Failed to register a notification for '{SymbolPath}'. Polling it instead.", symbolPath);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the type and dimensions the ADS any-type marshaller needs for a property, and
+    /// confirms they describe the same number of bytes the PLC holds.
+    /// </summary>
+    /// <remarks>
+    /// The property's own type is not usable as-is. An enum and a nullable are rejected outright by
+    /// the marshaller, and a string or an array needs its length supplied separately, which only the
+    /// PLC symbol knows. The size check is the important half: a .NET type narrower than the PLC
+    /// variable is refused by the controller, but a wider one is accepted and reads whatever follows
+    /// the variable, so a mismatch has to fall back to polling rather than register.
+    /// </remarks>
+    internal static bool TryResolveNotificationType(
+        Type propertyType, ISymbol symbol, out Type marshalType, out int[]? marshalArgs)
+    {
+        marshalArgs = null;
+        marshalType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+        if (marshalType.IsEnum)
+        {
+            marshalType = Enum.GetUnderlyingType(marshalType);
+        }
+
+        if (symbol is not IBitSize { ByteSize: > 0 } bitSize)
+        {
+            return false;
+        }
+
+        var byteSize = bitSize.ByteSize;
+        var marshaler = new AnyTypeMarshaler();
+
+        try
+        {
+            if (marshalType == typeof(string))
+            {
+                // A PLC STRING(n) occupies n + 1 bytes, and the marshaller wants n.
+                marshalArgs = [byteSize - 1];
+            }
+            else if (marshalType.IsArray)
+            {
+                var elementType = marshalType.GetElementType();
+                if (elementType is null || !marshaler.CanMarshal(elementType, null, Encoding.UTF8))
+                {
+                    return false;
+                }
+
+                var elementSize = marshaler.MarshalSize(elementType, null, Encoding.UTF8);
+                if (elementSize <= 0 || byteSize % elementSize != 0)
+                {
+                    return false;
+                }
+
+                marshalArgs = [byteSize / elementSize];
+            }
+
+            return marshaler.CanMarshal(marshalType, marshalArgs, Encoding.UTF8)
+                   && marshaler.MarshalSize(marshalType, marshalArgs, Encoding.UTF8) == byteSize;
+        }
+        catch (Exception)
+        {
+            // The marshaller reports an unusable type by throwing as readily as by returning false.
             return false;
         }
     }
@@ -431,6 +499,37 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         {
             _connectionManager?.LogFirstOccurrence("NotificationCallback", exception,
                 "Failed to process notification for symbol '{SymbolPath}'.", route.SymbolPath);
+        }
+    }
+
+    /// <summary>
+    /// Releases the device notification held for one property, if it has one.
+    /// </summary>
+    private void ReleaseNotificationFor(PropertyReference property)
+    {
+        if (!_notificationProperties.TryRemove(property, out _))
+        {
+            return;
+        }
+
+        foreach (var (handle, route) in _notificationHandles)
+        {
+            if (!route.Reference.Equals(property) || !_notificationHandles.TryRemove(handle, out _))
+            {
+                continue;
+            }
+
+            try
+            {
+                _notificationConnection?.TryDeleteDeviceNotification(handle);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogDebug(exception,
+                    "Failed to release the notification for '{SymbolPath}'.", route.SymbolPath);
+            }
+
+            return;
         }
     }
 

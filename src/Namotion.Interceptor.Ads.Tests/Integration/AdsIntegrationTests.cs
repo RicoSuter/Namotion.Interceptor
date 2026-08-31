@@ -282,7 +282,11 @@ public class AdsIntegrationTests
             // scheduler thread per registration.
             // Thread growth is logged rather than asserted: at this scale the harness's own thread
             // pool churn swamps the signal. The handle count is the structural invariant.
-            Assert.True(notificationCount > 1, "Expected more than one notification property.");
+            // Every property of the model, including the string one, must be notification-backed.
+            // A type the marshaller cannot handle falls back to polling, which is a silent latency
+            // regression rather than a failure, so it is asserted here rather than left to chance.
+            Assert.Equal(4, notificationCount);
+            Assert.Equal(0, clientSource.Diagnostics.PolledVariableCount);
             Assert.Equal(notificationCount, handleCount);
 
             // Routing still has to work: every property is fed by the one shared subscription.

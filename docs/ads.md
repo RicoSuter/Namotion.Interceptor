@@ -366,7 +366,9 @@ A notification is registered per property through the raw ADS API, and the conne
 
 Holding the handles is what makes the release explicit. Nothing else deletes a device notification, so a re-scan that only forgot them would leave the previous registrations standing on the controller. With re-scans firing on connection restore, PLC state change and symbol version change, a long-lived connection would accumulate them until the PLC hit its own notification limit.
 
-A registration the PLC refuses falls that property back to polling on its own, so one symbol that cannot carry a notification does not affect any other.
+A property is registered only when its .NET type marshals to exactly the number of bytes the PLC symbol holds. An enum registers as its underlying integer and a nullable as its underlying type, while a string and an array take their length from the symbol. A type that cannot be marshalled, or one whose width disagrees with the PLC, falls back to polling rather than registering: a narrower type is refused by the controller anyway, and a wider one would be accepted and read past the variable.
+
+A registration the PLC refuses also falls that property back to polling on its own, so one symbol that cannot carry a notification does not affect any other.
 
 ### Symbols whose PLC type will not resolve
 

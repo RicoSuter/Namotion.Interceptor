@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -119,8 +120,16 @@ internal static class AdsEmbeddedRouter
 
         public void AddRoute(Route route)
         {
-            // The bool is the only signal: a refused route throws nothing, and the failure would
-            // otherwise surface much later as a connect that never succeeds, pointing nowhere.
+            // The bool is the only signal a refused route gives, and the failure would otherwise
+            // surface much later as a connect that never succeeds, pointing nowhere. It is also
+            // returned for a route that is simply already present, which is the normal case when a
+            // second source acquires the shared router, so that is checked first rather than
+            // treated as a refusal.
+            if (_router.Routes.Any(existing => existing.NetId == route.NetId))
+            {
+                return;
+            }
+
             if (!_router.TryAddRoute(route))
             {
                 throw new InvalidOperationException(

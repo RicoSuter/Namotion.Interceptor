@@ -14,7 +14,6 @@
 
   <ItemGroup>
     <PackageReference Include="Beckhoff.TwinCAT.Ads" Version="7.0.317" />
-    <PackageReference Include="Beckhoff.TwinCAT.Ads.Reactive" Version="7.0.317" />
     <PackageReference Include="Beckhoff.TwinCAT.Ads.TcpRouter" Version="7.0.317" />
   </ItemGroup>
 

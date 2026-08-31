@@ -166,7 +166,10 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
                     {
                         _embeddedLease ??= AdsEmbeddedRouter.Shared.Acquire(
                             _configuration.LocalAmsNetId ?? AdsEmbeddedRouter.DefaultLocalNetId(),
-                            new Route("plc", amsNetId, _configuration.Host!));
+                            // Named per target: the router is process-wide and rejects a duplicate
+                            // name as readily as a duplicate net id, so a fixed name would make a
+                            // second source pointing at a different PLC unroutable.
+                            new Route($"plc-{amsNetId}", amsNetId, _configuration.Host!));
 
                         routerConfiguration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
                         {
