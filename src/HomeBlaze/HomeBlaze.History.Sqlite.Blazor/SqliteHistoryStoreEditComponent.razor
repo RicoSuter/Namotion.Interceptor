@@ -48,6 +48,7 @@
                      Label="Flush Interval (seconds)"
                      HelperText="Interval between flushes of the pending sample batch to the partition files."
                      Min="1"
+                     Max="@MaxFlushIntervalSeconds"
                      Class="mt-4" />
 
     <MudNumericField @bind-Value="_bufferTimeMilliseconds"
@@ -92,9 +93,14 @@
     private int _originalBufferTimeMilliseconds;
     private int _originalMaxJsonSize;
 
+    // Matches the clamp the store applies, so the form rejects a value rather than accepting one that is
+    // silently changed on the way in.
+    private const int MaxFlushIntervalSeconds = 24 * 60 * 60;
+
     public bool IsValid => _priority >= 0 &&
                            _maxAgeDays > 0 &&
                            _flushIntervalSeconds > 0 &&
+                           _flushIntervalSeconds <= MaxFlushIntervalSeconds &&
                            _bufferTimeMilliseconds >= 0 &&
                            _maxJsonSize > 0;
 

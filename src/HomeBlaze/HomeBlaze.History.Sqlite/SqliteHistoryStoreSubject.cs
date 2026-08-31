@@ -335,7 +335,7 @@ public partial class SqliteHistoryStoreSubject :
 
                 RefreshMetrics(engine);
 
-                await Task.Delay(TimeSpan.FromSeconds(FlushIntervalSeconds), stoppingToken).ConfigureAwait(false);
+                await Task.Delay(EffectiveFlushInterval, stoppingToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -347,7 +347,31 @@ public partial class SqliteHistoryStoreSubject :
         }
     }
 
+    /// <summary>
+    /// The flush interval actually used, clamped into a range <see cref="Task.Delay(TimeSpan, CancellationToken)"/>
+    /// accepts. The configured value reaches here from a settings form and from a hand-editable file, and
+    /// anything past <see cref="int.MaxValue"/> milliseconds throws out of the flush loop, which faults the
+    /// task that <c>ExecuteAsync</c> awaits in its finally and stops the whole host.
+    /// </summary>
+    private TimeSpan EffectiveFlushInterval =>
+        TimeSpan.FromSeconds(Math.Clamp(FlushIntervalSeconds, 1, (int)TimeSpan.FromDays(1).TotalSeconds));
+
     private void RefreshMetrics(SqliteHistoryStore engine)
+    {
+        try
+        {
+            RefreshMetricsCore(engine);
+        }
+        catch (Exception exception)
+        {
+            // Diagnostics only, and one of them walks the database directory, so a permissions change
+            // under it must not take down a loop that is otherwise recording correctly. Two of the three
+            // call sites are inside a finally, where a throw would also replace the real outcome.
+            _logger.LogDebug(exception, "Could not refresh history diagnostics.");
+        }
+    }
+
+    private void RefreshMetricsCore(SqliteHistoryStore engine)
     {
         RecordedCount = engine.RecordedCount;
         OversizeCount = engine.OversizeCount;
