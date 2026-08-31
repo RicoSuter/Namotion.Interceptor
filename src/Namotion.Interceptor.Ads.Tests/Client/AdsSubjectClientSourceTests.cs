@@ -700,6 +700,46 @@ public class AdsSubjectClientSourceTests
         Assert.Single(result.FailedChanges);
     }
 
+    [Fact]
+    public async Task WriteChangesAsyncCore_WhenTheSymbolWriteIsRejectedWithoutThrowing_ShouldReportTheChange()
+    {
+        // Arrange - Beckhoff documents WriteValueAsync as reporting the error on the returned
+        // ResultWriteAccess rather than throwing, so a connector that only catches exceptions
+        // reports a rejected write as a successful one. This is the regression guard for that.
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var model = new TestPlcModel(context);
+        var source = CreateSource(subject: model);
+
+        var propertyReference = new PropertyReference(model, nameof(TestPlcModel.Temperature));
+        source.SubscriptionManager.SetSymbolPath(propertyReference, "GVL.Temperature");
+        source.ConnectionManager.SetSymbolLoader(
+            CreateMockSymbolLoader("GVL.Temperature", CreateRejectingValueSymbol(AdsErrorCode.DeviceInvalidAccess)));
+
+        var changes = new[] { CreateChange(model, nameof(TestPlcModel.Temperature)) };
+
+        // Act
+        var result = await source.WriteChangesAsyncCore(MockConnection, changes.AsMemory(), CancellationToken.None);
+
+        // Assert
+        Assert.False(result.IsFullySuccessful);
+        Assert.Single(result.FailedChanges);
+        Assert.Equal(1, Assert.IsType<AdsWriteException>(result.Error).PermanentCount);
+    }
+
+    /// <summary>
+    /// Creates a value symbol whose write is rejected the way the real API rejects one: by
+    /// returning a failed <c>ResultWriteAccess</c>, without throwing.
+    /// </summary>
+    private static ISymbol CreateRejectingValueSymbol(AdsErrorCode errorCode)
+    {
+        var mockSymbol = new Mock<ISymbol>();
+        mockSymbol.As<IValueSymbol>()
+            .Setup(v => v.WriteValueAsync(It.IsAny<object>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult(new TwinCAT.ValueAccess.ResultWriteAccess((int)errorCode, 0)));
+        mockSymbol.Setup(sy => sy.DataType).Returns(Mock.Of<IDataType>());
+        return mockSymbol.Object;
+    }
+
     /// <summary>
     /// Creates a value symbol whose data type resolves (so the typed write path is taken) and whose
     /// write fails with the given ADS error.

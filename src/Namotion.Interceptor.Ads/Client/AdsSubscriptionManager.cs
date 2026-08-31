@@ -517,15 +517,31 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// Reads one polled symbol, typed where the type system allows it and as a raw integer where it
     /// does not. Returns null when nothing should be published. Safe to call concurrently.
     /// </summary>
-    private async Task<object?> ReadPolledValueAsync(
+    private Task<object?> ReadPolledValueAsync(
         AdsConnectionManager connectionManager,
         PollingSnapshot snapshot,
         int index,
         CancellationToken cancellationToken)
     {
-        var symbol = snapshot.Symbols[index];
-        var symbolPath = snapshot.Entries[index].SymbolPath;
+        return ReadSymbolValueAsync(
+            connectionManager.Connection!,
+            snapshot.Symbols[index],
+            snapshot.Entries[index].SymbolPath,
+            cancellationToken);
+    }
 
+    /// <summary>
+    /// Reads one symbol, typed where the type system allows it and as a raw integer where it does
+    /// not. Shared by the initial state load and by every polling pass, so a symbol whose PLC type
+    /// will not resolve behaves the same at startup as it does later. Returns null when nothing
+    /// should be published. Safe to call concurrently.
+    /// </summary>
+    internal async Task<object?> ReadSymbolValueAsync(
+        IAdsConnection connection,
+        ISymbol symbol,
+        string symbolPath,
+        CancellationToken cancellationToken)
+    {
         // An enum throws while the value is built, not while its DataType is inspected, so it can
         // only be recognised by trying. Remembered on first failure so the doomed typed read
         // happens once, not every cycle.
@@ -535,9 +551,18 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             {
                 var readResult = await ((IValueSymbol)symbol)
                     .ReadValueAsync(cancellationToken).ConfigureAwait(false);
-                return (AdsErrorCode)readResult.ErrorCode == AdsErrorCode.NoError
-                    ? readResult.Value
-                    : null;
+
+                var readErrorCode = (AdsErrorCode)readResult.ErrorCode;
+                if (readErrorCode != AdsErrorCode.NoError)
+                {
+                    // Surfaced rather than returned as null: a null is indistinguishable from
+                    // "nothing to publish", so the caller would count a wholly failing poll pass
+                    // as a clean one and report zero failed reads.
+                    throw new AdsErrorException(
+                        $"Failed to read ADS symbol '{symbolPath}'.", readErrorCode);
+                }
+
+                return readResult.Value;
             }
             catch (CannotResolveDataTypeException)
             {
@@ -552,7 +577,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
 
         // Underlying integer, as the notification side does; the converter rebuilds the enum.
         return await ReadRawIntegerAsync(
-            connectionManager.Connection!, symbolPath,
+            connection, symbolPath,
             ((IBitSize)symbol).ByteSize, cancellationToken).ConfigureAwait(false);
     }
 
@@ -585,24 +610,43 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         {
             // ReadAnyAsync returns ResultValue<T>; unwrap it or the converter sees a non-integer
             // and passes it through untouched.
-            return byteSize switch
+            var (value, errorCode) = byteSize switch
             {
                 1 => Unwrap(await connection.ReadAnyAsync<byte>(handle, cancellationToken).ConfigureAwait(false)),
                 2 => Unwrap(await connection.ReadAnyAsync<short>(handle, cancellationToken).ConfigureAwait(false)),
                 4 => Unwrap(await connection.ReadAnyAsync<int>(handle, cancellationToken).ConfigureAwait(false)),
                 8 => Unwrap(await connection.ReadAnyAsync<long>(handle, cancellationToken).ConfigureAwait(false)),
-                _ => null,
+                _ => (null, AdsErrorCode.NoError),
             };
 
-            static object? Unwrap<T>(ResultValue<T> result) =>
-                result.ErrorCode == AdsErrorCode.NoError ? result.Value : null;
+            if (errorCode != AdsErrorCode.NoError)
+            {
+                // The error arrives on the result, not as a throw, so this cannot be left to the
+                // catch below. A handle does not survive a reconnect or a download, and a stale one
+                // fails every cycle forever, so drop it and let the next pass create a new one.
+                DropHandle(symbolPath);
+                throw new AdsErrorException(
+                    $"Failed to read ADS symbol '{symbolPath}' as a raw integer.", errorCode);
+            }
+
+            return value;
+
+            static (object? Value, AdsErrorCode ErrorCode) Unwrap<T>(ResultValue<T> result) =>
+                (result.ErrorCode == AdsErrorCode.NoError ? result.Value : null, result.ErrorCode);
         }
         catch
         {
-            // Handles do not survive a reconnect or download; drop it so the next cycle recreates it.
-            _rawIntegerHandles.TryRemove(symbolPath, out _);
+            DropHandle(symbolPath);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Forgets a cached raw-integer handle so the next read creates a fresh one.
+    /// </summary>
+    private void DropHandle(string symbolPath)
+    {
+        _rawIntegerHandles.TryRemove(symbolPath, out _);
     }
 
     private void RebuildPollingSnapshot(AdsConnectionManager connectionManager)

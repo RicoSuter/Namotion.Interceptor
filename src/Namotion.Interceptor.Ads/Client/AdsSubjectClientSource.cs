@@ -156,7 +156,7 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
             return null;
         }
 
-        var properties = new List<(RegisteredSubjectProperty Property, ISymbol Symbol)>();
+        var properties = new List<(RegisteredSubjectProperty Property, ISymbol Symbol, string SymbolPath)>();
         var symbols = new List<ISymbol>();
 
         foreach (var propertyReference in _ownership.Properties)
@@ -176,7 +176,7 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
             var symbol = AdsSubscriptionManager.TryGetSymbol(_connectionManager.SymbolLoader, symbolPath);
             if (symbol is not null)
             {
-                properties.Add((registeredProperty, symbol));
+                properties.Add((registeredProperty, symbol, symbolPath));
                 symbols.Add(symbol);
             }
         }
@@ -215,13 +215,13 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
             else
             {
                 _logger.LogDebug("SumSymbolRead not supported (Error: {ErrorCode}), falling back to individual reads.", readResult.ErrorCode);
-                await ReadIndividualValuesAsync(properties, values, cancellationToken).ConfigureAwait(false);
+                await ReadIndividualValuesAsync(connection, properties, values, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (Exception exception)
         {
             _logger.LogDebug(exception, "SumSymbolRead failed, falling back to individual reads.");
-            await ReadIndividualValuesAsync(properties, values, cancellationToken).ConfigureAwait(false);
+            await ReadIndividualValuesAsync(connection, properties, values, cancellationToken).ConfigureAwait(false);
         }
 
         return () =>
@@ -240,7 +240,8 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
     }
 
     private async Task ReadIndividualValuesAsync(
-        List<(RegisteredSubjectProperty Property, ISymbol Symbol)> properties,
+        IAdsConnection connection,
+        List<(RegisteredSubjectProperty Property, ISymbol Symbol, string SymbolPath)> properties,
         (RegisteredSubjectProperty Property, object? Value)[] values,
         CancellationToken cancellationToken)
     {
@@ -253,18 +254,22 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
         {
             try
             {
-                var readResult = await ((IValueSymbol)properties[index].Symbol)
-                    .ReadValueAsync(cancellationToken).ConfigureAwait(false);
-                if ((AdsErrorCode)readResult.ErrorCode == AdsErrorCode.NoError)
+                // Same method the polling passes use, so a symbol whose PLC type will not resolve
+                // is present in the model from startup rather than only after the first poll.
+                var value = await _subscriptionManager.ReadSymbolValueAsync(
+                    connection, properties[index].Symbol, properties[index].SymbolPath, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (value is not null)
                 {
                     values[index] = (properties[index].Property,
-                        _configuration.ValueConverter.ConvertToPropertyValue(readResult.Value, properties[index].Property));
+                        _configuration.ValueConverter.ConvertToPropertyValue(value, properties[index].Property));
                     Interlocked.Increment(ref successCount);
                 }
             }
             catch (Exception exception)
             {
-                _logger.LogDebug(exception, "Failed to read symbol '{SymbolPath}'.", properties[index].Symbol.InstancePath);
+                _logger.LogDebug(exception, "Failed to read symbol '{SymbolPath}'.", properties[index].SymbolPath);
             }
         }
 
@@ -476,7 +481,16 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
 
             try
             {
-                await connection.WriteAnyAsync(handle, value, cancellationToken).ConfigureAwait(false);
+                // As with WriteValueAsync, the error arrives on the result rather than as a throw.
+                var writeResult = await connection.WriteAnyAsync(handle, value, cancellationToken).ConfigureAwait(false);
+                if (writeResult.ErrorCode != AdsErrorCode.NoError)
+                {
+                    _logger.LogWarning(
+                        "Failed to write ADS symbol '{SymbolPath}' through the any-type path: {ErrorCode}.",
+                        symbolPath, writeResult.ErrorCode);
+                    return false;
+                }
+
                 return true;
             }
             finally
@@ -507,18 +521,21 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
         {
             try
             {
-                await ((IValueSymbol)symbols[index]).WriteValueAsync(writeValues[index], cancellationToken).ConfigureAwait(false);
+                // The result carries the error, it is not thrown: Beckhoff documents WriteValueAsync
+                // as returning ResultWriteAccess with the ErrorCode on it. Discarding the result
+                // reports a rejected write as a successful one.
+                var writeResult = await ((IValueSymbol)symbols[index])
+                    .WriteValueAsync(writeValues[index], cancellationToken).ConfigureAwait(false);
+
+                var resultCode = (AdsErrorCode)writeResult.ErrorCode;
+                if (resultCode != AdsErrorCode.NoError)
+                {
+                    Bucket(resultCode, index);
+                }
             }
             catch (AdsException exception)
             {
-                if (AdsErrorClassifier.IsTransientError(AdsErrorClassifier.GetErrorCode(exception)))
-                {
-                    (transientFailures ??= []).Add(validChanges[index]);
-                }
-                else
-                {
-                    (permanentWriteFailures ??= []).Add(validChanges[index]);
-                }
+                Bucket(AdsErrorClassifier.GetErrorCode(exception), index);
             }
             catch (Exception)
             {
@@ -528,6 +545,18 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
 
         return BuildWriteResult(
             transientFailures, permanentWriteFailures, unresolvedChanges, permanentFailures, validChanges.Count);
+
+        void Bucket(AdsErrorCode errorCode, int index)
+        {
+            if (AdsErrorClassifier.IsTransientError(errorCode))
+            {
+                (transientFailures ??= []).Add(validChanges[index]);
+            }
+            else
+            {
+                (permanentWriteFailures ??= []).Add(validChanges[index]);
+            }
+        }
     }
 
     /// <summary>
@@ -759,7 +788,9 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
             await (_propertyWriter?.LoadInitialStateAndResumeAsync(stoppingToken)
                 ?? Task.CompletedTask).ConfigureAwait(false);
 
-            Interlocked.Exchange(ref _lastRescanRequestedAtTicks, 0);
+            // Compared, not overwritten: a request that arrived while this pass was running carries
+            // a newer stamp, and zeroing it unconditionally drops that request on the floor.
+            Interlocked.CompareExchange(ref _lastRescanRequestedAtTicks, 0, requestedAtTicks);
         }
     }
 
