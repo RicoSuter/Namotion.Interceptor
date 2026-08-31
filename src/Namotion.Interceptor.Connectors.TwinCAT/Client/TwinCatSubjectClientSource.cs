@@ -13,7 +13,7 @@ namespace Namotion.Interceptor.Connectors.TwinCAT.Client;
 /// Connects a subject graph to a Beckhoff TwinCAT PLC via ADS protocol.
 /// Thin orchestrator composing <see cref="AdsConnectionManager"/> and <see cref="AdsSubscriptionManager"/>.
 /// </summary>
-internal sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDisposable
+public sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDisposable
 {
     private readonly IInterceptorSubject _subject;
     private readonly AdsClientConfiguration _configuration;

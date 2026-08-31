@@ -24,7 +24,7 @@
             <PrivateAssets>all</PrivateAssets>
         </PackageReference>
         <PackageReference Include="Beckhoff.TwinCAT.Ads.SymbolicServer" Version="7.0.123" />
-        <PackageReference Include="Beckhoff.TwinCAT.Ads.TcpRouter" Version="7.0.172" />
+        <PackageReference Include="Beckhoff.TwinCAT.Ads.TcpRouter" Version="7.0.317" />
     </ItemGroup>
 
     <ItemGroup>

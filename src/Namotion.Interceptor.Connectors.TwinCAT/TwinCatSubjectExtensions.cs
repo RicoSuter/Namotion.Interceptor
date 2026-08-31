@@ -73,7 +73,8 @@ public static class TwinCatSubjectExtensions
 
     /// <summary>
     /// Registers a TwinCAT ADS client source with full configuration control.
-    /// Uses the keyed-services pattern to support multiple registrations in the same container.
+    /// Uses the keyed-services pattern to support multiple registrations in the same container,
+    /// and also exposes each registration as an unkeyed <see cref="TwinCatSubjectClientSource"/> alias.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="subjectSelector">A factory that resolves the root subject from the service provider.</param>
@@ -96,6 +97,8 @@ public static class TwinCatSubjectExtensions
                     serviceProvider.GetRequiredKeyedService<AdsClientConfiguration>(key),
                     serviceProvider.GetRequiredService<ILogger<TwinCatSubjectClientSource>>());
             })
+            .AddSingleton(serviceProvider =>
+                serviceProvider.GetRequiredKeyedService<TwinCatSubjectClientSource>(key))
             .AddSingleton<IHostedService>(serviceProvider =>
                 serviceProvider.GetRequiredKeyedService<TwinCatSubjectClientSource>(key));
     }
