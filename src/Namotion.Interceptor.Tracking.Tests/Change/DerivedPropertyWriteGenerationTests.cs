@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
 namespace Namotion.Interceptor.Tracking.Tests.Change;
@@ -21,7 +22,8 @@ public class DerivedPropertyWriteGenerationTests
         var vetoedSubject = new Person(vetoContext);
 
         // Act
-        var trigger = Task.Run(() => subject.First = 1);
+        // The write parks in the derived getter, so it must not wait for a pool thread.
+        var trigger = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => { subject.First = 1; });
         try
         {
             Assert.True(

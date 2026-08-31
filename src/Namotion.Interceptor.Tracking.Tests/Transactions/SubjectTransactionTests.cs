@@ -2,6 +2,7 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
@@ -442,7 +443,9 @@ public class SubjectTransactionTests
         var task2Waiting = new ManualResetEventSlim(false);
 
         // Act
-        var task1 = Task.Run(async () =>
+        // Both sides block until the other reaches its gate, and the waits below are unbounded, so a
+        // participant left in the pool queue would hang the run rather than fail it.
+        var task1 = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(async () =>
         {
             using (var t = await context.BeginTransactionAsync(
                 TransactionFailureHandling.BestEffort,
@@ -456,7 +459,7 @@ public class SubjectTransactionTests
         });
 
         task2Waiting.Wait();
-        var task2 = Task.Run(async () =>
+        var task2 = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(async () =>
         {
             task1CanCommit.Set();
             using (var t = await context.BeginTransactionAsync(
@@ -482,7 +485,8 @@ public class SubjectTransactionTests
         var bothStarted = new CountdownEvent(2);
 
         // Act
-        var task1 = Task.Run(async () =>
+        // Neither side can reach the countdown unless both are actually running.
+        var task1 = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(async () =>
         {
             using (var t = await context.BeginTransactionAsync(
                 TransactionFailureHandling.BestEffort,
@@ -495,7 +499,7 @@ public class SubjectTransactionTests
             }
         });
 
-        var task2 = Task.Run(async () =>
+        var task2 = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(async () =>
         {
             using (var t = await context.BeginTransactionAsync(
                 TransactionFailureHandling.BestEffort,

@@ -308,12 +308,12 @@ public class SourceMonitorTests
         // wait seconds before it is ever scheduled. That starvation is what makes the State read time out
         // below, and it also lets the blocked-Subscribe assertion pass for the wrong reason, since a
         // Subscribe that was never scheduled has not completed either.
-        var actTask = RunOnDedicatedThread(() => act(monitor, source));
+        var actTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => act(monitor, source));
         Assert.True(reachedStateRead.Wait(TimeSpan.FromSeconds(10)),
             "The racing action should have reached the State read before the timeout.");
 
         var subscribeEntered = new ManualResetEventSlim(false);
-        var subscribeTask = RunOnDedicatedThread(() =>
+        var subscribeTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
         {
             subscribeEntered.Set();
             return monitor.Subscribe(sourceEvent => received.Enqueue(sourceEvent));
@@ -350,41 +350,6 @@ public class SourceMonitorTests
 
         return (wasInSnapshot, wasDelivered);
     }
-
-    /// <summary>
-    /// Runs <paramref name="body"/> on its own thread and surfaces it as a task. Race participants here
-    /// block on locks and gates for as long as the test holds them, so they must not be queued behind the
-    /// rest of the assembly on the thread pool.
-    /// </summary>
-    private static Task<T> RunOnDedicatedThread<T>(Func<T> body)
-    {
-        var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                completion.SetResult(body());
-            }
-            catch (Exception exception)
-            {
-                completion.SetException(exception);
-            }
-        })
-        {
-            IsBackground = true,
-            Name = "SourceMonitorTests race participant"
-        };
-
-        thread.Start();
-        return completion.Task;
-    }
-
-    private static Task RunOnDedicatedThread(Action body) =>
-        RunOnDedicatedThread<object?>(() =>
-        {
-            body();
-            return null;
-        });
 
     [Fact]
     public void WhenNoMonitorIsConfigured_ThenGetSourceMonitorThrowsWithGuidance()
@@ -444,7 +409,8 @@ public class SourceMonitorTests
         // Act - pause StartAsync exactly where it reads RootSubject to resolve which monitors to
         // register with, so Dispose can run to completion (transitioning to Stopped and finding
         // nothing yet in _registeredMonitors to unregister) before StartAsync ever registers.
-        var startTask = Task.Run(() => source.StartAsync(CancellationToken.None));
+        var startTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(
+            () => source.StartAsync(CancellationToken.None));
         Assert.True(reachedRootRead.Wait(TimeSpan.FromSeconds(10)));
 
         source.Dispose();
@@ -480,12 +446,14 @@ public class SourceMonitorTests
             var source = new TestStateSource(new Person(context));
 
             using var bothReady = new Barrier(2);
-            var startTask = Task.Run(() =>
+            // A Barrier both sides must reach, so a participant the pool never schedules hangs the
+            // test outright rather than failing it.
+            var startTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
             {
                 bothReady.SignalAndWait();
                 return source.StartAsync(CancellationToken.None);
             });
-            var disposeTask = Task.Run(() =>
+            var disposeTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
             {
                 bothReady.SignalAndWait();
                 source.Dispose();
@@ -522,11 +490,11 @@ public class SourceMonitorTests
         // Act - Register attaches the StateChanged forwarder BEFORE it publishes SourceRegistered,
         // and is pinned here on the State read it performs to build that event, still holding the
         // monitor lock.
-        var register = Task.Run(() => monitor.Register(source));
+        var register = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => monitor.Register(source));
         Assert.True(reachedStateRead.Wait(TimeSpan.FromSeconds(10)));
 
         using var transitionStarted = new ManualResetEventSlim(false);
-        var transition = Task.Run(() =>
+        var transition = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
         {
             transitionStarted.Set();
             source.RaiseStateChanged(SourceState.Synchronizing, SourceState.Synchronized);
