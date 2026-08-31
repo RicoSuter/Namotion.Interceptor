@@ -39,6 +39,17 @@ internal sealed class LifecycleNotifier(
 
     private static long _projectionRevision;
 
+    // One-shot deterministic failure injection for the journal/publication atomicity tests.
+    private Exception? _journalCompletionFailure;
+
+    internal void FailNextJournalCompletionForTests(Exception failure)
+    {
+        if (Interlocked.CompareExchange(ref _journalCompletionFailure, failure, null) is not null)
+        {
+            throw new InvalidOperationException("A journal completion failure is already armed.");
+        }
+    }
+
     public event Action<SubjectLifecycleChange>? SubjectAttached;
     public event Action<SubjectLifecycleChange>? SubjectDetaching;
 
@@ -89,7 +100,7 @@ internal sealed class LifecycleNotifier(
         return new SubjectLifecycleChange
         {
             Context = context,
-            Revision = Interlocked.Increment(ref _projectionRevision),
+            Revision = NextProjectionRevision(),
             Subject = change.Subject,
             Properties = properties,
             Parents = parents,
@@ -186,7 +197,7 @@ internal sealed class LifecycleNotifier(
             var change = new SubjectPropertyLifecycleChange(subject, property)
             {
                 Context = context,
-                Revision = Interlocked.Increment(ref _projectionRevision),
+                Revision = NextProjectionRevision(),
                 Metadata = metadata,
                 Children = snapshots is not null && snapshots.TryGetValue(property, out var snapshot)
                     ? ToChildren(snapshot)
@@ -219,7 +230,7 @@ internal sealed class LifecycleNotifier(
         var change = new SubjectPropertyLifecycleChange(property.Subject, property)
         {
             Context = context,
-            Revision = Interlocked.Increment(ref _projectionRevision),
+            Revision = NextProjectionRevision(),
             Metadata = state.Owned[property.Subject].Properties.First(metadata => metadata.Name == property.Name),
             Children = ToChildren(snapshot),
             ChildSubjects = ToSubjectProjections(snapshot, state)
@@ -245,6 +256,25 @@ internal sealed class LifecycleNotifier(
         }
 
         return children.MoveToImmutable();
+    }
+
+    private static long NextProjectionRevision()
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _projectionRevision);
+            if (current < 0 || current == long.MaxValue)
+            {
+                throw new InvalidOperationException(
+                    "The lifecycle projection revision space is exhausted; publication cannot continue safely.");
+            }
+
+            var next = current + 1;
+            if (Interlocked.CompareExchange(ref _projectionRevision, next, current) == current)
+            {
+                return next;
+            }
+        }
     }
 
     private static ImmutableArray<(IInterceptorSubject Subject, ImmutableArray<SubjectParent> Parents)> ToSubjectProjections(
@@ -351,6 +381,11 @@ internal sealed class LifecycleNotifier(
     {
         internal LifecycleJournal Complete()
         {
+            if (Interlocked.Exchange(ref builder.Owner._journalCompletionFailure, null) is { } failure)
+            {
+                throw failure;
+            }
+
             _currentJournal = null;
             return new LifecycleJournal(builder.Entries.ToImmutableArray());
         }

@@ -21,18 +21,21 @@ public interface IPropertyLifecycleHandler
     public void DetachProperty(SubjectPropertyLifecycleChange change);
 
     /// <summary>
-    /// Called after a collection property write has been fully reconciled
-    /// (all detach/attach events processed). Allows handlers to refresh
-    /// child index metadata from the live collection value.
+    /// Legacy source-compatibility hook for callers that explicitly provide a live collection
+    /// value. The built-in lifecycle does not invoke this overload because doing so after
+    /// publication would require retaining or re-enumerating mutable user state. Implement
+    /// <see cref="RefreshCollectionProperty(SubjectPropertyLifecycleChange)"/> to observe built-in
+    /// collection refreshes through their complete immutable projection.
     /// </summary>
     /// <param name="property">The collection property reference.</param>
-    /// <param name="value">The current collection value.</param>
+    /// <param name="value">The collection value supplied by the explicit caller.</param>
     void RefreshCollectionProperty(PropertyReference property, object? value) { }
 
     /// <summary>
     /// Called with the complete immutable property projection after collection indices change.
+    /// The default is a no-op so implementations of the legacy overload remain source compatible
+    /// without receiving a synthesized or stale live value.
     /// </summary>
     /// <param name="change">The revisioned property projection.</param>
-    void RefreshCollectionProperty(SubjectPropertyLifecycleChange change) =>
-        RefreshCollectionProperty(change.Property, null);
+    void RefreshCollectionProperty(SubjectPropertyLifecycleChange change) { }
 }

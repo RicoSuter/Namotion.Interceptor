@@ -12,6 +12,11 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubject
 {
+    internal readonly record struct PropertyProjection(
+        string Name,
+        Type Type,
+        ImmutableArray<Attribute> Attributes);
+
     private readonly Lock _lock = new();
 
     private volatile FrozenDictionary<string, RegisteredSubjectProperty> _properties;
@@ -90,13 +95,14 @@ public class RegisteredSubject
         return _properties.GetValueOrDefault(propertyName);
     }
 
-    public RegisteredSubject(IInterceptorSubject subject) : this(subject, [.. subject.Properties.Values], null, 0)
+    public RegisteredSubject(IInterceptorSubject subject) : this(
+        subject, CaptureProperties([.. subject.Properties.Values]), null, 0)
     {
     }
 
     internal RegisteredSubject(
         IInterceptorSubject subject,
-        ImmutableArray<SubjectPropertyMetadata> properties,
+        ImmutableArray<PropertyProjection> properties,
         IInterceptorSubjectContext? context,
         long attachmentRevision)
     {
@@ -110,26 +116,52 @@ public class RegisteredSubject
                     this, metadata.Name, metadata.Type, metadata.Attributes));
     }
 
+    internal static ImmutableArray<PropertyProjection> CaptureProperties(
+        ImmutableArray<SubjectPropertyMetadata> properties)
+    {
+        var projection = ImmutableArray.CreateBuilder<PropertyProjection>(properties.Length);
+        foreach (var metadata in properties)
+        {
+            projection.Add(CaptureProperty(metadata));
+        }
+
+        return projection.MoveToImmutable();
+    }
+
+    internal static PropertyProjection CaptureProperty(SubjectPropertyMetadata metadata) =>
+        new(metadata.Name, metadata.Type, [.. metadata.Attributes]);
+
     internal void ApplyProjection(
-        ImmutableArray<SubjectPropertyMetadata> properties,
+        ImmutableArray<PropertyProjection> properties,
         ImmutableArray<SubjectPropertyParent> parents)
     {
         lock (_lock)
         {
-            var projections = _properties.ToDictionary();
+            List<PropertyProjection>? missing = null;
             foreach (var metadata in properties)
             {
-                if (!projections.ContainsKey(metadata.Name))
+                if (!_properties.ContainsKey(metadata.Name))
+                {
+                    (missing ??= []).Add(metadata);
+                }
+            }
+
+            if (missing is not null)
+            {
+                var projections = _properties.ToDictionary();
+                foreach (var metadata in missing)
                 {
                     projections.Add(metadata.Name, new RegisteredSubjectProperty(
                         this, metadata.Name, metadata.Type, metadata.Attributes));
                 }
+
+                _properties = projections.ToFrozenDictionary();
+                foreach (var property in _properties.Values)
+                {
+                    property.AttributesCache = null;
+                }
             }
-            _properties = projections.ToFrozenDictionary();
-            foreach (var property in _properties.Values)
-            {
-                property.AttributesCache = null;
-            }
+
             Volatile.Write(ref _parentsSnapshot, parents.ToArray());
         }
     }

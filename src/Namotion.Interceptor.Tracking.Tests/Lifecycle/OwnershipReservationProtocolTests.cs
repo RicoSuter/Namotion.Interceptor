@@ -492,6 +492,35 @@ public class OwnershipReservationProtocolTests
     }
 
     [Fact]
+    public void WhenDeferredSweepJournalCompletionFails_ThenPreparedReleaseDoesNotPublish()
+    {
+        // Arrange
+        var context = CreateContext();
+        var lifecycle = (LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!;
+        var root = new Person(context) { FirstName = "root" };
+        var first = new Person { FirstName = "first" };
+        var second = new Person { FirstName = "second" };
+        root.Father = first;
+        first.Father = second;
+        second.Father = first;
+        var lease = ((ITopologyAdmissionCoordinator)lifecycle).AcquireStructuralWriteLease(
+            (InterceptorExecutor)((IInterceptorSubject)first).Executor);
+        root.Father = null;
+        var completionFailure = new InvalidOperationException("journal completion failed");
+        lifecycle.FailNextJournalCompletionForTests(completionFailure);
+
+        // Act
+        var exception = Record.Exception(() => lease.Complete(null));
+
+        // Assert
+        Assert.Same(completionFailure, exception);
+        Assert.Same(context, first.TryGetContext());
+        Assert.Same(context, second.TryGetContext());
+        Assert.Equal(1, first.GetReferenceCount());
+        Assert.Equal(1, second.GetReferenceCount());
+    }
+
+    [Fact]
     public void WhenDeferredSweepCallbackFailsDuringFallbackDisposal_ThenFailureIsTracedWithoutThrowing()
     {
         // Arrange

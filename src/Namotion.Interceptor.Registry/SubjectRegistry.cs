@@ -123,6 +123,9 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
         var subjectId = change.IsContextAttach || change.IsContextDetach
             ? change.Subject.TryGetSubjectId()
             : null;
+        var properties = change.IsContextDetach
+            ? ImmutableArray<RegisteredSubject.PropertyProjection>.Empty
+            : RegisteredSubject.CaptureProperties(change.Properties);
 
         lock (_knownSubjects)
         {
@@ -132,7 +135,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                 if (change.IsContextAttach)
                 {
                     registeredSubject = new RegisteredSubject(
-                        change.Subject, change.Properties, change.Context, change.Revision);
+                        change.Subject, properties, change.Context, change.Revision);
                     _knownSubjects[change.Subject] = registeredSubject;
                     Volatile.Write(ref _knownSubjectsSnapshot, null);
                     if (subjectId is not null &&
@@ -158,7 +161,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                     }
                     else
                     {
-                        registeredSubject.ApplyProjection(change.Properties, ResolveParents(change.Parents));
+                        registeredSubject.ApplyProjection(properties, ResolveParents(change.Parents));
                     }
                 }
             }
@@ -173,10 +176,11 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 
     void IPropertyLifecycleHandler.AttachProperty(SubjectPropertyLifecycleChange change)
     {
+        var projection = RegisteredSubject.CaptureProperty(change.Metadata);
         RegisteredSubjectProperty? property;
         lock (_knownSubjects)
         {
-            property = ApplyPropertyProjection(change);
+            property = ApplyPropertyProjection(change, projection);
         }
 
         if (property is not null)
@@ -187,21 +191,25 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 
     void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change)
     {
+        var projection = RegisteredSubject.CaptureProperty(change.Metadata);
         lock (_knownSubjects)
         {
-            ApplyPropertyProjection(change);
+            ApplyPropertyProjection(change, projection);
         }
     }
 
     void IPropertyLifecycleHandler.RefreshCollectionProperty(SubjectPropertyLifecycleChange change)
     {
+        var projection = RegisteredSubject.CaptureProperty(change.Metadata);
         lock (_knownSubjects)
         {
-            ApplyPropertyProjection(change);
+            ApplyPropertyProjection(change, projection);
         }
     }
 
-    private RegisteredSubjectProperty? ApplyPropertyProjection(SubjectPropertyLifecycleChange change)
+    private RegisteredSubjectProperty? ApplyPropertyProjection(
+        SubjectPropertyLifecycleChange change,
+        RegisteredSubject.PropertyProjection projection)
     {
         var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
         if (registeredSubject is null ||
@@ -212,7 +220,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
         }
 
         var property = registeredSubject.GetOrAddPropertyProjection(
-            change.Metadata.Name, change.Metadata.Type, change.Metadata.Attributes);
+            projection.Name, projection.Type, projection.Attributes);
         if (change.Revision == 0)
         {
             return property;

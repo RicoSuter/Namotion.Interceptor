@@ -173,6 +173,49 @@ public class AddPropertiesLifecycleTests
     }
 
     [Fact]
+    public void WhenStructuralPropertyIsAdmitted_ThenItsCallbackCarriesTheCompletedChildProjection()
+    {
+        // Arrange
+        var recorder = new RecordingPropertyHandler();
+        var context = CreateContext().WithService(() => recorder, _ => false);
+        var root = new Person(context) { FirstName = "root" };
+        var child = new Person { FirstName = "child" };
+        recorder.Target = root;
+
+        // Act
+        ((IInterceptorSubject)root).AddProperties(CreateStructuralProperty("Extra", _ => child));
+
+        // Assert
+        var change = Assert.Single(recorder.AttachedChanges, change => change.Property.Name == "Extra");
+        Assert.Same(child, Assert.Single(change.Children).Subject);
+        var childProjection = Assert.Single(change.ChildSubjects);
+        Assert.Same(child, childProjection.Subject);
+        var parent = Assert.Single(childProjection.Parents);
+        Assert.Same(root, parent.Property.Subject);
+        Assert.Equal("Extra", parent.Property.Name);
+        Assert.Null(parent.Index);
+    }
+
+    [Fact]
+    public void WhenHandlerImplementsOnlyLegacyRefresh_ThenImmutableRefreshDoesNotSynthesizeLiveValue()
+    {
+        // Arrange
+        var handler = new LegacyRefreshHandler();
+        var context = CreateContext().WithService<IPropertyLifecycleHandler>(() => handler, _ => false);
+        var root = new Person(context) { FirstName = "root" };
+        var first = new Person { FirstName = "first" };
+        var second = new Person { FirstName = "second" };
+        root.Children = [first, second];
+        handler.Reset();
+
+        // Act
+        root.Children = [second, first];
+
+        // Assert
+        Assert.Equal(0, handler.RefreshCalls);
+    }
+
+    [Fact]
     public void WhenACapturedValueContainsAForeignSubject_ThenNothingIsPublished()
     {
         // Arrange
@@ -620,16 +663,39 @@ public class AddPropertiesLifecycleTests
 
         public List<string> AttachedProperties { get; } = [];
 
+        public List<SubjectPropertyLifecycleChange> AttachedChanges { get; } = [];
+
         public void AttachProperty(SubjectPropertyLifecycleChange change)
         {
             if (ReferenceEquals(change.Subject, Target))
             {
                 AttachedProperties.Add(change.Property.Name);
+                AttachedChanges.Add(change);
             }
         }
 
         public void DetachProperty(SubjectPropertyLifecycleChange change)
         {
+        }
+    }
+
+    private sealed class LegacyRefreshHandler : IPropertyLifecycleHandler
+    {
+        internal int RefreshCalls { get; private set; }
+
+        internal void Reset() => RefreshCalls = 0;
+
+        public void AttachProperty(SubjectPropertyLifecycleChange change)
+        {
+        }
+
+        public void DetachProperty(SubjectPropertyLifecycleChange change)
+        {
+        }
+
+        public void RefreshCollectionProperty(PropertyReference property, object? value)
+        {
+            RefreshCalls++;
         }
     }
 

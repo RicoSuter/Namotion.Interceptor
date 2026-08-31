@@ -106,6 +106,8 @@ internal sealed class OwnershipGraph
 
         internal bool RefreshCollection { get; } = refreshCollection;
 
+        internal GraphState Publication => publication;
+
         internal void Publish()
         {
             owner._state = publication;
@@ -279,11 +281,7 @@ internal sealed class OwnershipGraph
 
         if (!prepared.IsOwned(root))
         {
-            prepared.SeedPreparedChildren(root, reservations, notifier);
-            if (!prepared.IsOwned(root))
-            {
-                prepared.AttachPreparedRoot(root, reservations[root].Executor, notifier);
-            }
+            prepared.AttachPreparedRoot(root, reservations[root].Executor, reservations, notifier);
         }
         else
         {
@@ -347,7 +345,10 @@ internal sealed class OwnershipGraph
     }
 
     private void AttachPreparedRoot(
-        IInterceptorSubject subject, InterceptorExecutor executor, LifecycleNotifier notifier)
+        IInterceptorSubject subject,
+        InterceptorExecutor executor,
+        Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
+        LifecycleNotifier notifier)
     {
         var ownership = AddPreparedOwnership(subject, executor);
         var change = new SubjectLifecycleChange
@@ -357,7 +358,12 @@ internal sealed class OwnershipGraph
             IsContextAttach = true
         };
         change = notifier.CompleteChange(change, ownership.Properties, ownership.Parents, StructuralSnapshot.Empty);
-        notifier.InvokeAddedLifecycleHandlers(subject, ownership.LifecycleHandler, executor, change);
+        notifier.InvokePreparedAddedLifecycleHandlers(
+            subject,
+            ownership.LifecycleHandler,
+            executor,
+            change,
+            () => SeedPreparedChildren(subject, reservations, notifier));
         notifier.RaiseSubjectAttached(change, executor);
         notifier.AttachSubjectProperties(
             subject, ownership.PropertyHandler, executor, ownership.Properties, _state.Snapshots, _state);

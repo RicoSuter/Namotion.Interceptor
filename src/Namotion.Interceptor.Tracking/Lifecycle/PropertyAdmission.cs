@@ -84,20 +84,36 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations)
     {
         var properties = capture.PropertyNames[capture.Registration.Subject];
-        notifier.AttachSubjectProperties(
-            capture.Registration.Subject,
-            properties.PropertyHandler,
-            capture.Participants[0].Executor,
-            properties.Metadata.Where(metadata => capture.AddedPropertyNames.Contains(metadata.Name)),
-            capture.Snapshots,
-            graph.State);
-        return graph.PrepareAdmission(
+        var graphEntryStart = notifier.JournalEntryCount;
+        var change = graph.PrepareAdmission(
             capture.Registration.Subject,
             capture.StructuralProperties,
             capture.Snapshots,
             capture.PropertyNames,
             reservations,
             notifier);
+        // The completed graph is needed for the property payload, while callbacks still publish
+        // the newly registered parent property before any of its initial child edges.
+        var graphEntries = notifier.DeferJournalEntriesFrom(graphEntryStart);
+        try
+        {
+            var publication = change.Publication;
+            notifier.AttachSubjectProperties(
+                capture.Registration.Subject,
+                properties.PropertyHandler,
+                capture.Participants[0].Executor,
+                properties.Metadata.Where(metadata => capture.AddedPropertyNames.Contains(metadata.Name)),
+                publication.Snapshots,
+                publication);
+            notifier.AppendJournalEntries(graphEntries);
+            return change;
+        }
+        catch
+        {
+            notifier.AppendJournalEntries(graphEntries);
+            change.Dispose();
+            throw;
+        }
     }
 
 }

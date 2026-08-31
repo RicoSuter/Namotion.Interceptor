@@ -1,3 +1,4 @@
+using System.Collections;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Tests.Models;
@@ -77,6 +78,29 @@ public class RegistryHandlerOrderTests
         // Assert: the registry runs ahead of the descent at every level, so when the child's own
         // handler runs, every ancestor up to the root is already registered.
         Assert.Equal(["middle", "top", "root"], child.AncestorsVisibleDuringAttach);
+    }
+
+    [Fact]
+    public void WhenAPrepopulatedRootIsAttached_ThenRegistryResolvesItsChildThroughTheRootProjection()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var child = new Person { FirstName = "child" };
+        var root = new Person { FirstName = "root", Father = child };
+
+        // Act
+        var exception = Record.Exception(() => ((IInterceptorSubject)root).AttachToContext(context));
+
+        // Assert
+        Assert.Null(exception);
+        var registeredRoot = root.TryGetRegisteredSubject();
+        var registeredChild = child.TryGetRegisteredSubject();
+        Assert.NotNull(registeredRoot);
+        Assert.NotNull(registeredChild);
+        var father = registeredRoot.TryGetProperty(nameof(Person.Father));
+        Assert.NotNull(father);
+        Assert.Same(child, Assert.Single(father.Children).Subject);
+        Assert.Same(father, Assert.Single(registeredChild.Parents).Property);
     }
 
     [Fact]
@@ -215,6 +239,30 @@ public class RegistryHandlerOrderTests
         Assert.Null(initializer.WorkerException);
     }
 
+    [Fact]
+    public void WhenAttributeMetadataEnumeratesAgainDuringAttach_ThenItRunsOutsideTheRegistryLock()
+    {
+        // Arrange: SubjectPropertyMetadata consumes the first enumeration while it determines
+        // whether the property is derived. The second enumeration is the Registry projection.
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var registry = context.GetService<ISubjectRegistry>();
+        var subject = new Person { FirstName = "subject" };
+        var attributes = new RegistryLockProbeAttributes(registry, subject);
+        ((IInterceptorSubject)subject).AddProperties(new SubjectPropertyMetadata(
+            "Probe", typeof(string), attributes, _ => "value", null,
+            isIntercepted: true, isDynamic: true));
+
+        // Act
+        var exception = Record.Exception(() => ((IInterceptorSubject)subject).AttachToContext(context));
+
+        // Assert
+        Assert.Null(exception);
+        Assert.True(attributes.WorkerCompleted,
+            "attribute metadata was enumerated while the Registry lock excluded its worker");
+        Assert.Null(attributes.WorkerException);
+        Assert.True(attributes.EnumerationCount >= 2);
+    }
+
     [RunsBefore(typeof(SubjectRegistry))]
     private sealed class FirstHandlerParentProbe : ILifecycleHandler
     {
@@ -303,6 +351,42 @@ public class RegistryHandlerOrderTests
                 throw new TimeoutException("the Registry initializer ran while the Registry lock was held");
             }
         }
+    }
+
+    private sealed class RegistryLockProbeAttributes(
+        ISubjectRegistry registry,
+        IInterceptorSubject subject) : IReadOnlyCollection<Attribute>
+    {
+        private int _enumerationCount;
+
+        public int Count => 0;
+
+        internal int EnumerationCount => Volatile.Read(ref _enumerationCount);
+
+        internal bool WorkerCompleted { get; private set; }
+
+        internal Exception? WorkerException { get; private set; }
+
+        public IEnumerator<Attribute> GetEnumerator()
+        {
+            if (Interlocked.Increment(ref _enumerationCount) == 2)
+            {
+                var worker = new Thread(() =>
+                {
+                    WorkerException = Record.Exception(() => registry.TryGetRegisteredSubject(subject));
+                }) { IsBackground = true };
+                worker.Start();
+                WorkerCompleted = worker.Join(TimeSpan.FromSeconds(5));
+                if (!WorkerCompleted)
+                {
+                    throw new TimeoutException("attribute metadata was enumerated under the Registry lock");
+                }
+            }
+
+            return Array.Empty<Attribute>().AsEnumerable().GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }
 

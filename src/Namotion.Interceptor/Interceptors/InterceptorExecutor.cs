@@ -786,6 +786,14 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         int propertyTypeIndex,
         StructuralWriteLease lease)
     {
+        if (readValue is not null)
+        {
+            lock (SyncRoot)
+            {
+                currentValue = readValue(_subject);
+            }
+        }
+
         if (attachedContext is null || contextState is null)
         {
             var writeContext = new PropertyWriteContext<TProperty>(

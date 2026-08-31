@@ -46,8 +46,6 @@ public struct PropertyWriteContext<TProperty>
 
     internal Func<IInterceptorSubject, TProperty>? ReadValue;
 
-    internal bool SuppressIfTerminalValueUnchanged;
-
     internal IWriteTerminalCoordinator? TerminalCoordinator;
 
     internal StructuralWriteLease? StructuralLease;

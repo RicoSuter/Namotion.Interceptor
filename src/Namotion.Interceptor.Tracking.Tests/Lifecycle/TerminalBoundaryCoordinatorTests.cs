@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
@@ -127,6 +128,98 @@ public class TerminalBoundaryCoordinatorTests
         Assert.True(interceptor.WorkerCompleted,
             "the downstream interceptor held the whole-chain topology gate while waiting for a worker that needed it");
         Assert.Null(interceptor.WorkerException);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenGeneratedStructuralValueIsUnchanged_ThenEqualityVetoesBeforeDownstreamInterceptors(
+        bool withLifecycle)
+    {
+        // Arrange
+        var downstream = new CountingDownstreamInterceptor();
+        var context = InterceptorSubjectContext.Create().WithEqualityCheck();
+        if (withLifecycle)
+        {
+            context.WithLifecycle();
+        }
+        context.AddService<IWriteInterceptor>(downstream);
+        var parent = new Person(context);
+        var child = new Person { FirstName = "child" };
+        parent.Father = child;
+        downstream.Arm(parent, nameof(Person.Father));
+
+        // Act
+        parent.Father = child;
+
+        // Assert
+        Assert.Equal(0, downstream.Entries);
+        Assert.Same(child, parent.Father);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenStructuralEqualityWaitsForTheTerminalReader_ThenItRunsOutsideExecutorSyncRoot()
+    {
+        // Arrange
+        var context = CreateContext().WithEqualityCheck();
+        var parent = new Person(context);
+        var workers = new List<Thread>();
+        var equalityReaderCompleted = false;
+
+        bool RunReader()
+        {
+            var worker = new Thread(() => _ = parent.Father) { IsBackground = true };
+            workers.Add(worker);
+            worker.Start();
+            return worker.Join(LockProbeTimeout);
+        }
+
+        var current = new BlockingEqualsPerson(() => equalityReaderCompleted = RunReader());
+        parent.Father = current;
+
+        try
+        {
+            // Act
+            parent.Father = new Person { FirstName = "replacement" };
+        }
+        finally
+        {
+            foreach (var worker in workers)
+            {
+                worker.Join(WriteProtocolAcceptance.JoinTimeout);
+            }
+        }
+
+        // Assert
+        Assert.True(equalityReaderCompleted, "property equality ran while Executor.SyncRoot was held");
+    }
+
+    [Fact]
+    public void WhenProjectionRevisionIsExhausted_ThenPublicationFailsBeforeGraphCommit()
+    {
+        // Arrange
+        var revisionField = typeof(LifecycleNotifier).GetField(
+            "_projectionRevision", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var previousRevision = (long)revisionField.GetValue(null)!;
+        revisionField.SetValue(null, long.MaxValue);
+        var context = CreateContext();
+        var subject = new Person { FirstName = "subject" };
+
+        try
+        {
+            // Act
+            var exception = Record.Exception(() => ((IInterceptorSubject)subject).AttachToContext(context));
+
+            // Assert
+            Assert.IsType<InvalidOperationException>(exception);
+            Assert.Null(subject.TryGetContext());
+            Assert.Equal(long.MaxValue, revisionField.GetValue(null));
+        }
+        finally
+        {
+            revisionField.SetValue(null, previousRevision);
+        }
     }
 
     [Fact]
@@ -343,6 +436,32 @@ public class TerminalBoundaryCoordinatorTests
                 var worker = new Thread(() => WorkerException = Record.Exception(_workerWrite!)) { IsBackground = true };
                 worker.Start();
                 WorkerCompleted = worker.Join(WriteProtocolAcceptance.JoinTimeout);
+            }
+
+            next(ref context);
+        }
+    }
+
+    private sealed class CountingDownstreamInterceptor : IWriteInterceptor
+    {
+        private IInterceptorSubject? _subject;
+        private string? _propertyName;
+
+        internal int Entries { get; private set; }
+
+        internal void Arm(IInterceptorSubject subject, string propertyName)
+        {
+            _subject = subject;
+            _propertyName = propertyName;
+        }
+
+        public void WriteProperty<TProperty>(
+            ref PropertyWriteContext<TProperty> context,
+            WriteInterceptionDelegate<TProperty> next)
+        {
+            if (ReferenceEquals(context.Property.Subject, _subject) && context.Property.Name == _propertyName)
+            {
+                Entries++;
             }
 
             next(ref context);

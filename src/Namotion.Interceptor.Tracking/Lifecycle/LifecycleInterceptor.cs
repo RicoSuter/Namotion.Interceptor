@@ -172,12 +172,6 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                         lock (context.Executor.SyncRoot)
                         {
                             context.SetTerminalPredecessor(readValue(context.Property.Subject));
-                            if (context.SuppressIfTerminalValueUnchanged &&
-                                EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, value))
-                            {
-                                break;
-                            }
-
                             var gate = EnterGate();
                             try
                             {
@@ -307,16 +301,18 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     private Exception? DrainDeferredSweep(Exception? primaryException)
     {
         using var capture = _notifier.BeginJournal();
+        LifecycleNotifier.LifecycleJournal journal;
         using (EnterGate())
         {
             using var change = _graph.PrepareDeferredSweep(_notifier);
+            journal = capture.Complete();
             if (change is not null)
             {
                 _graph.Publish(change);
             }
         }
 
-        return capture.Complete().Drain(primaryException);
+        return journal.Drain(primaryException);
     }
 
     OwnershipReservationToken ITopologyAdmissionCoordinator.AcquireOwnershipReservation(
@@ -630,6 +626,9 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     }
 
     internal OwnershipGraph Graph => _graph;
+
+    internal void FailNextJournalCompletionForTests(Exception failure) =>
+        _notifier.FailNextJournalCompletionForTests(failure);
 
     internal bool TryRunWhenTransactionEnds(Action? recalculation)
     {

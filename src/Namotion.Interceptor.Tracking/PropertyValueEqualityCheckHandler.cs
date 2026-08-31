@@ -14,13 +14,6 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor,
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        if (context.ReadValue is not null)
-        {
-            context.SuppressIfTerminalValueUnchanged = true;
-            next(ref context);
-            return;
-        }
-
         if (!EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue))
         {
             next(ref context);
