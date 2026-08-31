@@ -8,17 +8,18 @@ status: Partial
 
 ## Overview
 
-HomeBlaze has a solid resilience foundation: external devices are the source of truth, live state is not persisted (recovered on restart), and the active-standby HA pattern uses fencing checks to prevent false promotion. This document captures known gaps and open questions for future hardening.
+HomeBlaze has a partial resilience foundation. On the reflection plane it is solid: external devices (or a database) are the source of truth, reflected live state is not persisted (recovered on restart), and the WebSocket connector already provides per-connection sequence numbers, gap detection, state digests, and resync (see the WebSocket connector documentation). On the control plane it is not: active-standby HA and its fencing check are not built, and fencing alone does not guarantee a single device-writer. This document captures known gaps and open questions for future hardening. See the reflection-plane vs control-plane framing in the [Architecture Overview](../overview.md).
 
 ## What's Already Covered [Implemented]
 
 | Mechanism | Status | Description |
 |-----------|--------|-------------|
 | Recovery from source of truth | Implemented | Satellites reconnect to devices, central receives Welcome snapshots — no stale state |
-| Fencing check | Planned (with HA) | Standby verifies device reachability before promoting, preventing false promotion during network partitions |
+| Fencing check | Planned (with HA) | Standby verifies device reachability before promoting, reducing false promotion during network partitions. Does not guarantee a single device-writer (see section 3) |
+| Sequence, gap detection, digests, resync | Implemented | The WebSocket connector numbers updates per connection, detects gaps, compares state digests, and resyncs on divergence. Reconnect recovery is not a naive re-send. See the WebSocket connector documentation |
 | Source tagging | Implemented | Prevents feedback loops in bidirectional connector sync |
 | Write retry queue | Implemented | Per-source ring buffer for outbound writes during disconnection |
-| Per-connector independence | Implemented | Each connector has its own `ChangeQueueProcessor` with independent buffering and deduplication — a slow or failed connector does not block others |
+| Per-connector independence | Implemented | Each connector has its own `ChangeQueueProcessor` with independent buffering and deduplication, so a slow or failed connector does not block others |
 
 ## Open Areas [Planned]
 
@@ -37,20 +38,23 @@ See [Methods and Operations — Idempotency](methods.md#idempotency) for the ful
 
 ### 3. Split-Brain Beyond Fencing
 
-The fencing check prevents false promotion when the standby cannot reach devices. But additional split-brain scenarios exist:
-- Primary is alive but partitioned from central — both primary and standby can still reach devices
+**Invariant required:** exactly one node writes to a given device (or holds write authority over a given subject) at a time. This is a control-plane guarantee. It does not follow from the reflection-plane rule that devices are the source of truth: last-writer-wins is safe for reflecting a device's state, but two primaries issuing conflicting setpoints or commands drive real, ordered physical action, and re-reading the device afterward does not undo it.
+
+**Interim constraint (until an arbiter exists):** a single primary, with no automatic failover, using manual or operator-gated promotion. Automatic active-standby failover must not be enabled until single-writer mutual exclusion is guaranteed.
+
+The fencing check reduces false promotion when the standby cannot reach devices, but additional split-brain scenarios remain:
+- Primary is alive but partitioned from central; both primary and standby can still reach devices
 - No leader election protocol or external arbiter is described
 - If both nodes believe they are primary, both write to devices simultaneously
+
+**Candidate arbiters (mechanism deferred, not yet chosen):**
+- Device-side exclusivity where the protocol supports it. Note that OPC UA session exclusivity is not sufficient: most OPC UA servers allow multiple writing sessions.
+- A lease/lock on shared storage: the primary periodically renews a lease, and the standby only promotes if the lease has expired. A mild coordination primitive, not full consensus.
+- An external arbiter (a lease/lock service such as etcd, a shared database row lock, or a cloud-native equivalent).
 
 **Failover detection:**
 - How does the standby decide the primary is truly dead vs. a transient network blip? (heartbeat timeout? miss count? external health check?)
 - What is the detection latency vs. false-positive trade-off? Too fast = false promotion, too slow = extended downtime
-
-**Preventing dual-primary:**
-- OPC UA session exclusivity is not sufficient — most OPC UA servers allow multiple connections
-- An external arbiter (lease/lock service, e.g., etcd, a shared database row lock, or a cloud-native equivalent) may be needed for reliable consensus
-- Without an arbiter, both nodes may write to devices simultaneously — is last-writer-wins acceptable given that devices are the source of truth?
-- Could a simpler approach work? E.g., primary periodically renews a lease on shared storage; standby only promotes if the lease expires
 
 **Consumer redirection after failover:**
 - When the standby becomes primary, how do consumers (satellites, central, operator UIs, AI agents) discover the new endpoint?
