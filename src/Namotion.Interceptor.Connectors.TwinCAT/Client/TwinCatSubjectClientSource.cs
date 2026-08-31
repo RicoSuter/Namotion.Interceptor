@@ -360,46 +360,11 @@ internal sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDisp
             // Trim writeValues to exact count only if some changes were skipped
             var writeArray = writeCount == capacity ? writeValues : writeValues[..writeCount];
 
-            // Try batch write via SumSymbolWrite, fall back to individual writes
-            try
-            {
-                var sumWrite = new SumSymbolWrite(connection, symbols);
-                var sumResult = await sumWrite.WriteAsync(writeArray, cancellationToken).ConfigureAwait(false);
-
-                if (sumResult.ErrorCode == AdsErrorCode.DeviceServiceNotSupported)
-                {
-                    _logger.LogDebug("SumSymbolWrite not supported, falling back to individual writes.");
-                    return await WriteIndividualValuesAsync(symbols, writeArray, validChanges, unresolvedChanges, cancellationToken).ConfigureAwait(false);
-                }
-
-                if (sumResult.ErrorCode != AdsErrorCode.NoError)
-                {
-                    if (AdsErrorClassifier.IsTransientError(sumResult.ErrorCode))
-                    {
-                        // Transient batch error -- all changes (valid + unresolved) should be retried
-                        var allFailed = MergeRetryChanges(validChanges, unresolvedChanges) ?? [];
-                        var error = new AdsWriteException(allFailed.Length, 0, allFailed.Length);
-                        return WriteResult.Failure(allFailed, error);
-                    }
-
-                    _logger.LogWarning("Permanent ADS batch write error: {ErrorCode}. Dropping {Count} writes.",
-                        sumResult.ErrorCode, validChanges.Count);
-                    return BuildWriteResult(null, 0, validChanges.Count, unresolvedChanges);
-                }
-
-                // Batch succeeded -- classify per-symbol errors if present
-                if (sumResult.SubErrors is not null)
-                {
-                    return ClassifyWriteErrors(sumResult.SubErrors, validChanges, unresolvedChanges);
-                }
-
-                return BuildWriteResult(null, 0, validChanges.Count, unresolvedChanges);
-            }
-            catch (AdsException exception) when ((AdsErrorCode)exception.HResult == AdsErrorCode.DeviceServiceNotSupported)
-            {
-                _logger.LogDebug("SumSymbolWrite threw DeviceServiceNotSupported, falling back to individual writes.");
-                return await WriteIndividualValuesAsync(symbols, writeArray, validChanges, unresolvedChanges, cancellationToken).ConfigureAwait(false);
-            }
+            // Never SumSymbolWrite: it addresses by index group/offset, which a
+            // {attribute 'monitoring' := 'call'} property does not have. It then writes raw bytes
+            // past the variable and faults the PLC, without reporting an error. The per-symbol
+            // value API calls the setter instead.
+            return await WriteIndividualValuesAsync(symbols, writeArray, validChanges, unresolvedChanges, cancellationToken).ConfigureAwait(false);
         }
         catch (AdsException exception)
         {
@@ -423,39 +388,6 @@ internal sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDisp
         {
             return WriteResult.Failure(changes, exception);
         }
-    }
-
-    /// <summary>
-    /// Classifies per-symbol write errors from a batch result.
-    /// Transient failures and unresolved changes are returned for retry.
-    /// Permanent failures are logged and dropped.
-    /// </summary>
-    internal WriteResult ClassifyWriteErrors(
-        AdsErrorCode[] errorCodes,
-        List<SubjectPropertyChange> validChanges,
-        List<SubjectPropertyChange>? unresolvedChanges)
-    {
-        List<SubjectPropertyChange>? transientFailures = null;
-        var permanentCount = 0;
-
-        for (var index = 0; index < errorCodes.Length && index < validChanges.Count; index++)
-        {
-            if (errorCodes[index] == AdsErrorCode.NoError)
-            {
-                continue;
-            }
-
-            if (AdsErrorClassifier.IsTransientError(errorCodes[index]))
-            {
-                (transientFailures ??= []).Add(validChanges[index]);
-            }
-            else
-            {
-                permanentCount++;
-            }
-        }
-
-        return BuildWriteResult(transientFailures, permanentCount, validChanges.Count, unresolvedChanges);
     }
 
     private async ValueTask<WriteResult> WriteIndividualValuesAsync(
