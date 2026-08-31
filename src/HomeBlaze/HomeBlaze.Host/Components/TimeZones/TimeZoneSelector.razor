@@ -1,10 +1,13 @@
 @using HomeBlaze.Host.TimeZones
 @using MudBlazor
+@using Microsoft.JSInterop
+@using Microsoft.Extensions.Logging
 @using HomeBlaze.Components.Abstractions.TimeZones
 @implements IDisposable
 
 @inject ITimeZoneDisplay TimeZone
 @inject TimeZoneInterop Interop
+@inject ILogger<TimeZoneSelector> Logger
 
 <MudMenu @ref="_menu" Icon="@Icons.Material.Filled.Schedule" Color="Color.Inherit"
          title="@CurrentLabel" AriaLabel="Select timezone" MaxHeight="500">
@@ -91,24 +94,55 @@
 
     private async Task SelectAutomaticAsync()
     {
-        // Detection can come back empty, and resolving that pins UTC. Keeping the previous zone matches
-        // what the initializer already does with the same input.
-        var browserZone = await Interop.GetBrowserTimeZoneAsync();
-        if (!string.IsNullOrWhiteSpace(browserZone))
+        try
         {
-            TimeZone.SetResolved(TimeZonePreference.Automatic, TimeZoneResolver.Resolve(browserZone));
-            await Interop.SetPreferenceCookieAsync(TimeZonePreference.Automatic.ToCookieValue());
-        }
+            // Detection can come back empty, and resolving that pins UTC. Keeping the previous zone
+            // matches what the initializer already does with the same input.
+            var browserZone = await Interop.GetBrowserTimeZoneAsync();
+            if (!string.IsNullOrWhiteSpace(browserZone))
+            {
+                TimeZone.SetResolved(TimeZonePreference.Automatic, TimeZoneResolver.Resolve(browserZone));
+                await Interop.SetPreferenceCookieAsync(TimeZonePreference.Automatic.ToCookieValue());
+            }
 
-        await CloseMenuAsync();
+            await CloseMenuAsync();
+        }
+        catch (Exception exception) when (IsInteropFailure(exception))
+        {
+            LogInteropFailure(exception);
+        }
     }
 
     private async Task SelectZoneAsync(string id)
     {
-        var preference = TimeZonePreference.Specific(id);
-        TimeZone.SetResolved(preference, TimeZoneResolver.Resolve(id));
-        await Interop.SetPreferenceCookieAsync(preference.ToCookieValue());
-        await CloseMenuAsync();
+        try
+        {
+            // Applied before it is persisted, so a failed cookie write still leaves the picked zone in
+            // effect for this session rather than discarding the choice entirely.
+            var preference = TimeZonePreference.Specific(id);
+            TimeZone.SetResolved(preference, TimeZoneResolver.Resolve(id));
+            await Interop.SetPreferenceCookieAsync(preference.ToCookieValue());
+            await CloseMenuAsync();
+        }
+        catch (Exception exception) when (IsInteropFailure(exception))
+        {
+            LogInteropFailure(exception);
+        }
+    }
+
+    // The same reasoning as TimeZoneInitializer: a time zone that did not persist is cosmetic, while an
+    // exception out of a click handler tears the circuit down and replaces the application with an error
+    // page. OperationCanceledException is in the set because that is how the interop call timeout
+    // surfaces; it derives from neither JSException nor JSDisconnectedException.
+    private static bool IsInteropFailure(Exception exception) =>
+        exception is JSDisconnectedException or OperationCanceledException or JSException;
+
+    private void LogInteropFailure(Exception exception)
+    {
+        if (exception is JSException)
+        {
+            Logger.LogWarning(exception, "Could not persist the selected time zone.");
+        }
     }
 
     private async Task CloseMenuAsync()

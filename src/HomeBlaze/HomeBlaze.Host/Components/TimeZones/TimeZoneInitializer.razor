@@ -79,6 +79,11 @@
             {
                 // The circuit went away mid-detection; nothing to resolve for.
             }
+            catch (OperationCanceledException)
+            {
+                // How the interop call timeout surfaces, and it derives from neither exception either
+                // side of it. A backgrounded or throttled tab reaches this on first render.
+            }
             catch (JSException exception)
             {
                 Logger.LogWarning(exception, "Could not detect the browser time zone; falling back to UTC.");
