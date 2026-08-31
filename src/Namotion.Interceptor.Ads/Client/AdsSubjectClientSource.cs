@@ -63,8 +63,7 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
 
         _ownership = new SourceOwnershipManager(
             this,
-            onReleasing: _subscriptionManager.OnPropertyReleasing,
-            onSubjectDetaching: _subscriptionManager.OnSubjectDetaching);
+            onReleasing: _subscriptionManager.OnPropertyReleasing);
 
         // Wire connection events to request debounced rescan via ExecuteAsync loop
         _connectionManager.ConnectionRestored += () => RequestRescan("ADS connection restored.");

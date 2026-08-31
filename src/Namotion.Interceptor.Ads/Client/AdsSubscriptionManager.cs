@@ -25,7 +25,6 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     private readonly ILogger _logger;
 
     // Caches keyed by PropertyReference (stable) not RegisteredSubjectProperty (can become stale)
-    private readonly ConcurrentDictionary<string, PropertyReference?> _symbolToProperty = new();
     private readonly ConcurrentDictionary<PropertyReference, string> _propertyToSymbol
         = new(PropertyReference.Comparer);
     /// <summary>Properties served by a notification, mapped to their symbol path. Holds no
@@ -150,7 +149,6 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             }
 
             // Register in bidirectional symbol-to-property lookups
-            _symbolToProperty[symbolPath] = property.Reference;
             _propertyToSymbol[property.Reference] = symbolPath;
 
             if (effectiveMode == AdsReadMode.Notification)
@@ -215,7 +213,6 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
 
         // Dispose existing subscriptions (CompositeDisposable.Clear disposes contained items)
         _subscriptions.Clear();
-        _symbolToProperty.Clear();
         _propertyToSymbol.Clear();
         _notificationProperties.Clear();
         Volatile.Write(ref _notificationSubscriptionCount, 0);
@@ -279,30 +276,8 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             Interlocked.Increment(ref _pollingCollectionVersion);
         }
 
-        // 3. Remove from symbol-to-property lookups
-        if (_propertyToSymbol.TryRemove(property, out var removedSymbolPath))
-        {
-            _symbolToProperty.TryRemove(removedSymbolPath, out _);
-        }
-    }
-
-    /// <summary>
-    /// Cleanup callback for when a subject is being detached from the graph.
-    /// Called by SourceOwnershipManager before OnPropertyReleasing for each property.
-    /// This eagerly removes _symbolToProperty entries; OnPropertyReleasing handles
-    /// the remaining dictionaries (_notificationProperties, _polledProperties, _propertyToSymbol).
-    /// </summary>
-    internal void OnSubjectDetaching(IInterceptorSubject subject)
-    {
-        // TODO(perf): Consider a reverse lookup (subject → symbolPaths) to avoid O(n) scan
-        // for large symbol sets. Currently acceptable because subject detachment is rare.
-        foreach (var kvp in _symbolToProperty)
-        {
-            if (kvp.Value is { } reference && reference.Subject == subject)
-            {
-                _symbolToProperty.TryRemove(kvp.Key, out _);
-            }
-        }
+        // 3. Remove from the symbol path lookup
+        _propertyToSymbol.TryRemove(property, out _);
     }
 
     /// <summary>
@@ -382,8 +357,8 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// One subscription per group rather than per property: the reactive extension allocates a
     /// dedicated <c>EventLoopScheduler</c>, and therefore an OS thread, for every
     /// <c>WhenNotification</c> call, so subscribing per property costs one thread per property and
-    /// recreates them all on every rescan. Notifications are routed back to their property by symbol
-    /// path, which is why <see cref="_symbolToProperty"/> is maintained.
+    /// recreates them all on every rescan. Notifications are routed back to their property by the
+    /// instance path of the very symbols handed to the call.
     /// </remarks>
     private void RegisterNotificationGroup(
         List<(PropertyReference Reference, string SymbolPath, ISymbol Symbol)> group,
@@ -469,10 +444,6 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         Interlocked.Increment(ref _pollingCollectionVersion);
     }
 
-    /// <summary>
-    /// Performs a single polling cycle: reads all polled properties via batch or individual reads.
-    /// Called periodically by the orchestrator's PeriodicTimer loop.
-    /// </summary>
     /// <summary>
     /// Performs a single polling cycle: reads all polled properties via batch or individual reads.
     /// Called periodically by the orchestrator's PeriodicTimer loop.

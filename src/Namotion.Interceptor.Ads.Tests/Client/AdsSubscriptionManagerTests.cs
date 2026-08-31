@@ -228,45 +228,6 @@ public class AdsSubscriptionManagerTests
     }
 
     [Fact]
-    public void OnSubjectDetaching_UnknownSubject_DoesNotThrow()
-    {
-        // Arrange
-        var manager = CreateManager();
-        var context = TestHelpers.CreateContext();
-        var model = new TestPlcModel(context);
-
-        // Act & Assert
-        manager.OnSubjectDetaching(model);
-    }
-
-    [Fact]
-    public void OnSubjectDetaching_CalledTwice_DoesNotThrow()
-    {
-        // Arrange
-        var manager = CreateManager();
-        var context = TestHelpers.CreateContext();
-        var model = new TestPlcModel(context);
-
-        // Act & Assert
-        manager.OnSubjectDetaching(model);
-        manager.OnSubjectDetaching(model);
-    }
-
-    [Fact]
-    public void OnSubjectDetaching_DifferentSubjects_DoesNotThrow()
-    {
-        // Arrange
-        var manager = CreateManager();
-        var context = TestHelpers.CreateContext();
-        var model1 = new TestPlcModel(context);
-        var model2 = new TestPlcModel(context);
-
-        // Act & Assert
-        manager.OnSubjectDetaching(model1);
-        manager.OnSubjectDetaching(model2);
-    }
-
-    [Fact]
     public async Task DisposeAsync_ShouldComplete()
     {
         // Arrange

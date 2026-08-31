@@ -91,7 +91,7 @@ builder.Services.AddAdsSubjectClientSource(
 
         // Performance tuning
         BufferTime = TimeSpan.FromMilliseconds(8),
-        RetryTime = TimeSpan.FromSeconds(1),
+        RetryTime = TimeSpan.FromSeconds(10),
 
         // Type conversion
         ValueConverter = new AdsValueConverter()
@@ -171,7 +171,7 @@ Once the PLC has a route to the client net id and IP and the firewall allows por
 | `HealthCheckInterval` | TimeSpan | 5s | Connection monitoring interval |
 | `RescanDebounceTime` | TimeSpan | 1s | Coalesce rapid rescan requests |
 | `BufferTime` | TimeSpan | 8ms | Batch inbound updates |
-| `RetryTime` | TimeSpan | 1s | Failed write retry delay |
+| `RetryTime` | TimeSpan | 10s | Failed write retry delay |
 | `CircuitBreakerFailureThreshold` | int | 5 | Failures before circuit opens |
 | `CircuitBreakerCooldown` | TimeSpan | 60s | Circuit breaker recovery period |
 | `ValueConverter` | AdsValueConverter | new() | Type conversion handler |
@@ -339,7 +339,7 @@ When the total number of notification-mode variables exceeds `MaxNotifications`,
 
 **Example**: With `MaxNotifications = 500` and 600 Auto-mode variables, the 100 variables with the highest Priority (then slowest CycleTime) are demoted to polling.
 
-Setting `MaxNotifications = 0` leaves no notification budget for Auto-mode variables, demoting all of them to polling. A variable that asks for `Notification` explicitly is never demoted and still gets one, so this is not the same as turning notifications off. It is also not the same as `DefaultReadMode = Polled`, which only covers variables that do not state a read mode.
+Setting `MaxNotifications = 0` leaves no notification budget for Auto-mode variables, demoting all of them to polling. A variable that asks for `Notification` explicitly is never demoted and still gets one, so this is not the same as turning notifications off. It differs from `DefaultReadMode = Polled` only for the fluent mapper: the attribute mapper treats `Auto` as "unset", so an explicit `[AdsVariable(ReadMode = AdsReadMode.Auto)]` is already covered by `DefaultReadMode`, whereas `WithReadMode(AdsReadMode.Auto)` on the fluent builder is not.
 
 ## Read and Write Operations
 
@@ -428,14 +428,14 @@ new AdsClientConfiguration
 ```
 
 **Behavior:**
-- Connection attempts use `ConnectWithRetryAsync` with exponential backoff
+- Connection attempts use `ConnectWithRetryAsync`, retrying on a fixed `HealthCheckInterval` delay. There is no exponential backoff, so size that value for the outage you expect to ride out
 - After `CircuitBreakerFailureThreshold` consecutive failures, the circuit breaker opens
 - While open, connection attempts are skipped until the cooldown period expires
 - Successful connection resets the circuit breaker
 
 ### Write Retry Queue
 
-The client automatically queues write operations when the connection is lost. Queued writes are flushed in FIFO order when the connection is restored. This is provided by the `SubjectSourceBackgroundService`.
+The client automatically queues write operations when the connection is lost. Queued writes are flushed in FIFO order when the connection is restored. This is provided by `SubjectSourceBase`.
 
 ```csharp
 new AdsClientConfiguration
@@ -452,11 +452,11 @@ new AdsClientConfiguration
 
 When a rescan is in progress (triggered by connection restore, PLC state change, or symbol version change), the symbol path cache is temporarily cleared. Writes that arrive during this window are handled as follows:
 
-- **Unresolved symbol paths** (cache temporarily cleared): Treated as transient failures and queued for retry. After the rescan completes and the symbol cache is rebuilt, the retry succeeds.
-- **Transient ADS errors** (timeout, busy, port not found): Queued for retry via the write retry queue.
-- **Permanent ADS errors** (symbol not found, invalid size/data): Logged at Warning level and dropped, not retried. This prevents indefinite retry of writes for symbols that no longer exist on the PLC (e.g., after a PLC program update).
+- **Unresolved symbol paths** (cache temporarily cleared): reported as failures and queued for retry. Once the rescan completes and the symbol cache is rebuilt, the retry succeeds.
+- **Transient ADS errors** (timeout, busy, port not found): queued for retry via the write retry queue.
+- **Permanent ADS errors** (symbol not found, invalid size/data): also reported and queued, per [Error classification](#error-classification). They are not dropped; `WriteRetryQueueSize` bounds how long they are retried, and the queue evicts oldest and counts the evictions.
 
-This ensures that configuration changes and command triggers are not silently lost during brief rescan windows, while writes to permanently removed symbols are cleaned up automatically.
+This ensures configuration changes and command triggers are not silently lost during a rescan window.
 
 ### Debounced Rescan
 
@@ -550,7 +550,7 @@ Property updates from ADS notifications and polling callbacks are applied via `S
 
 ## Lifecycle Management
 
-The TwinCAT connector hooks into the interceptor lifecycle system (see [Subject Lifecycle Tracking](../tracking.md#subject-lifecycle-tracking)) to clean up resources when subjects are detached via `SourceOwnershipManager`.
+The TwinCAT connector hooks into the interceptor lifecycle system (see [Subject Lifecycle Tracking](tracking.md#subject-lifecycle-tracking)) to clean up resources when subjects are detached via `SourceOwnershipManager`.
 
 ### Automatic Cleanup on Subject Detach
 
@@ -607,7 +607,7 @@ When an individual property is released:
 3. `LoadInitialStateAsync()` batch-reads all property values from the PLC
 4. The `ExecuteAsync` background loop handles health checks and debounced rescans
 5. Inbound notifications and polling updates are applied via `SubjectPropertyWriter`
-6. Outbound property changes are written via `WriteChangesAsync()` with batch operations
+6. Outbound property changes are written via `WriteChangesAsync()`, one symbol at a time
 
 ## Known Limitations
 
@@ -615,11 +615,7 @@ The following items are known limitations of the current implementation. They ar
 
 ### No active health probing
 
-The connector relies on the `AdsClient`'s internal connection state machine for reconnection. If the `AdsClient` instance itself becomes unresponsive (e.g., due to a Beckhoff SDK bug or ADS router restart), no `ConnectionStateChanged` event fires and the system stays disconnected. The `ExecuteAsync` loop of the `BackgroundService` already runs periodically on the `HealthCheckInterval` and would be the natural place to add active health probing (e.g., periodic `ReadStateAsync` calls to detect a dead `AdsClient` and recreate it).
-
-### Subject detach performance
-
-When a subject is detached from the object graph, `OnSubjectDetaching` iterates all entries in the symbol-to-property cache (`O(n)` scan) to find and remove entries belonging to the detached subject. For very large symbol sets (thousands of variables) with frequent detach operations, this could become a bottleneck. A reverse lookup (subject to symbol paths) would improve this to `O(1)` per subject.
+The connector relies on the `AdsClient`'s internal connection state machine for reconnection. If the `AdsClient` instance itself becomes unresponsive (e.g., due to a Beckhoff SDK bug or ADS router restart), no `ConnectionStateChanged` event fires and the system stays disconnected. `RunRescanLoopAsync` already wakes on the `HealthCheckInterval` and would be the natural place to add active health probing, for example a periodic `ReadStateAsync` to detect a dead `AdsClient` and recreate it.
 
 ### Null value write behavior
 
