@@ -15,5 +15,9 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     
     <Version>0.1.0</Version>
+
+    <!-- Opt-in trace instrumentation for TLA+ trace validation (docs/formal). Off by default;
+         a shipping build never defines MODELTRACE, so the [Conditional] calls compile out. -->
+    <DefineConstants Condition="'$(EnableModelTrace)' == 'true'">$(DefineConstants);MODELTRACE</DefineConstants>
   </PropertyGroup>
 </Project>
