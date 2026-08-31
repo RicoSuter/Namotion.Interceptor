@@ -29,7 +29,7 @@ public class WebSocketServerDiagnosticsTests
         var diagnostics = server.Diagnostics;
 
         // Assert
-        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.IsOperational);
         Assert.Null(diagnostics.OperationalChangeTime);
         Assert.Null(diagnostics.StartTime);
         Assert.Null(diagnostics.LastError);
