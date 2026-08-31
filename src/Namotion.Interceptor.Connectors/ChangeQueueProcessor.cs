@@ -42,6 +42,7 @@ public class ChangeQueueProcessor : IDisposable
     private int _deliveryState;
     private int _processingActive;
     private int _mergerDisposed;
+    private int _terminalHandlerInvoked;
     private int _flushGate; // 0 = free, 1 = flushing
     private int _disposed; // 0 = not disposed, 1 = disposed (use Interlocked for thread-safe check)
 
@@ -283,7 +284,7 @@ public class ChangeQueueProcessor : IDisposable
             {
                 teardownCancellationTask = teardownTokenSource.CancelAsync();
                 CountTimedOutDelivery(CloseDeliveryAndDrain());
-                _terminalHandler?.Invoke();
+                InvokeTerminalHandlerOnce();
             }
             finally
             {
@@ -307,96 +308,96 @@ public class ChangeQueueProcessor : IDisposable
 
     private async Task ProcessCoreAsync(CancellationToken processingToken, CancellationToken teardownToken)
     {
-        // Connect-window staleness is positional: changes arriving after this snapshot are steady state.
-        var queuedBeforeStart = _subscription.Count;
-        using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
-
-        var flushTask = periodicTimer is not null
-            ? Task.Run(async () =>
-            {
-                try
-                {
-                    while (await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
-                    {
-                        await TryFlushAsync(processingToken).ConfigureAwait(false);
-                    }
-                }
-                catch (Exception exception)
-                {
-                    if (exception is not OperationCanceledException)
-                    {
-                        _logger.LogError(exception, "Failed to flush changes.");
-                    }
-                }
-            })
-            : Task.CompletedTask;
-
-        if (periodicTimer is null)
-        {
-            _logger.LogWarning(
-                "Change queue processor is running without buffering (bufferTime <= 0). " +
-                "Each property change will be processed individually without merging, " +
-                "which can cause high CPU usage under load. " +
-                "Consider setting a bufferTime (e.g., 8-50ms) to enable batching and merging.");
-        }
-
         try
         {
-            while (_subscription.TryDequeue(out var change, processingToken))
-            {
-                var wasQueuedBeforeStart = queuedBeforeStart > 0;
-                if (wasQueuedBeforeStart)
-                {
-                    queuedBeforeStart--;
-                }
+            // Connect-window staleness is positional: changes arriving after this snapshot are steady state.
+            var queuedBeforeStart = _subscription.Count;
+            using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
 
-                if (ReferenceEquals(change.Origin.Source, _source) && !ChangeDeliveryFilter.NeedsWriteBack(in change))
+            var flushTask = periodicTimer is not null
+                ? Task.Run(async () =>
                 {
-                    continue;
-                }
-
-                if (!_propertyFilter(change.Property))
-                {
-                    continue;
-                }
-
-                if (wasQueuedBeforeStart && !ChangeDeliveryFilter.IsCurrent(in change, _deliveryRule))
-                {
-                    continue;
-                }
-
-                if (periodicTimer is null)
-                {
-                    // Client changes preserve every intermediate value without a merge. Servers must
-                    // still avoid serving a value that their subject has already superseded.
-                    if (_deliveryRule == ChangeDeliveryRule.SourceValuesAreSettled)
+                    try
                     {
-                        if (!ChangeDeliveryFilter.TryAcceptForDelivery(in change, _deliveryRule))
+                        while (await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
                         {
-                            continue;
+                            await TryFlushAsync(processingToken).ConfigureAwait(false);
                         }
+                    }
+                    catch (Exception exception)
+                    {
+                        if (exception is not OperationCanceledException)
+                        {
+                            _logger.LogError(exception, "Failed to flush changes.");
+                        }
+                    }
+                })
+                : Task.CompletedTask;
+
+            if (periodicTimer is null)
+            {
+                _logger.LogWarning(
+                    "Change queue processor is running without buffering (bufferTime <= 0). " +
+                    "Each property change will be processed individually without merging, " +
+                    "which can cause high CPU usage under load. " +
+                    "Consider setting a bufferTime (e.g., 8-50ms) to enable batching and merging.");
+            }
+
+            try
+            {
+                while (_subscription.TryDequeue(out var change, processingToken))
+                {
+                    var wasQueuedBeforeStart = queuedBeforeStart > 0;
+                    if (wasQueuedBeforeStart)
+                    {
+                        queuedBeforeStart--;
+                    }
+
+                    if (ReferenceEquals(change.Origin.Source, _source) && !ChangeDeliveryFilter.NeedsWriteBack(in change))
+                    {
+                        continue;
+                    }
+
+                    if (!_propertyFilter(change.Property))
+                    {
+                        continue;
+                    }
+
+                    if (wasQueuedBeforeStart && !ChangeDeliveryFilter.IsCurrent(in change, _deliveryRule))
+                    {
+                        continue;
+                    }
+
+                    if (periodicTimer is null)
+                    {
+                        // Client changes preserve every intermediate value without a merge. Servers must
+                        // still avoid serving a value that their subject has already superseded.
+                        if (_deliveryRule == ChangeDeliveryRule.SourceValuesAreSettled)
+                        {
+                            if (!ChangeDeliveryFilter.TryAcceptForDelivery(in change, _deliveryRule))
+                            {
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            ChangeDeliveryFilter.MarkPropertyAsPublishedToSource(in change);
+                        }
+
+                        _immediateBuffer[0] = change;
+                        await DeliverAsync(_immediateBuffer, processingToken).ConfigureAwait(false);
                     }
                     else
                     {
-                        ChangeDeliveryFilter.MarkPropertyAsPublishedToSource(in change);
-                    }
-
-                    _immediateBuffer[0] = change;
-                    await DeliverAsync(_immediateBuffer, processingToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    _changes.Enqueue(change);
-                    if (_maxQueueDepth is int maxQueueDepth && _changes.Count > maxQueueDepth)
-                    {
-                        DropOverflow(maxQueueDepth);
+                        _changes.Enqueue(change);
+                        if (_maxQueueDepth is int maxQueueDepth && _changes.Count > maxQueueDepth)
+                        {
+                            DropOverflow(maxQueueDepth);
+                        }
                     }
                 }
             }
-        }
-        finally
-        {
-            try
+            finally
             {
                 periodicTimer?.Dispose();
                 await flushTask.ConfigureAwait(false);
@@ -412,13 +413,13 @@ public class ChangeQueueProcessor : IDisposable
                     }
                 }
             }
-            finally
+        }
+        finally
+        {
+            Volatile.Write(ref _processingActive, 0);
+            if (Volatile.Read(ref _disposed) != 0)
             {
-                Volatile.Write(ref _processingActive, 0);
-                if (Volatile.Read(ref _disposed) != 0)
-                {
-                    DisposeMergerOnce();
-                }
+                DisposeMergerOnce();
             }
         }
     }
@@ -456,8 +457,8 @@ public class ChangeQueueProcessor : IDisposable
 
     private int CloseDeliveryAndDrain()
     {
-        // Cancellation settlement must not expose an empty delivery state before its survivors enter
-        // the queue, or close could miss ownership between those two operations.
+        // Cancellation requeue and failure accounting must settle before close observes the delivery
+        // state and queue together, or close could miss their ownership transition.
         lock (_changes)
         {
             var count = CloseDelivery();
@@ -514,6 +515,15 @@ public class ChangeQueueProcessor : IDisposable
             return;
         }
 
+        await DeliverAdmittedAsync(changes, cancellationToken).ConfigureAwait(false);
+    }
+
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
+    private async ValueTask DeliverAdmittedAsync(
+        ReadOnlyMemory<SubjectPropertyChange> changes,
+        CancellationToken cancellationToken)
+    {
+        var count = changes.Length;
         try
         {
             await _writeHandler(changes, cancellationToken).ConfigureAwait(false);
@@ -536,9 +546,18 @@ public class ChangeQueueProcessor : IDisposable
         }
         catch (Exception exception)
         {
-            if (TryCompleteDelivery(count))
+            var counted = false;
+            lock (_changes)
             {
-                Interlocked.Add(ref _dropCount, count);
+                if (TryCompleteDelivery(count))
+                {
+                    Interlocked.Add(ref _dropCount, count);
+                    counted = true;
+                }
+            }
+
+            if (counted)
+            {
                 _dropHandler?.Invoke(count);
                 _logger.LogError(exception, "Failed to write changes.");
             }
@@ -577,9 +596,16 @@ public class ChangeQueueProcessor : IDisposable
         // Whether the merger was handed a batch, which decides whether it has one to release below. Set
         // before the call rather than after, so a throw part-way through a merge still releases it.
         var merged = false;
+        var ownershipLockTaken = false;
 
         try
         {
+            if (!_writeHandlerOwnsChanges)
+            {
+                Monitor.Enter(_changes);
+                ownershipLockTaken = true;
+            }
+
             // Drain the concurrent queue into the scratch buffer under exclusive flush
             _flushChanges.Clear();
             while (_changes.TryDequeue(out var change))
@@ -594,14 +620,39 @@ public class ChangeQueueProcessor : IDisposable
 
             merged = true;
             var mergedChanges = _changeMerger.Merge(CollectionsMarshal.AsSpan(_flushChanges), _deliveryRule);
+            var admitted = _writeHandlerOwnsChanges ||
+                mergedChanges.Length == 0 ||
+                TryAdmitDelivery(mergedChanges.Length);
+
+            if (ownershipLockTaken)
+            {
+                Monitor.Exit(_changes);
+                ownershipLockTaken = false;
+            }
 
             if (mergedChanges.Length > 0)
             {
-                await DeliverAsync(mergedChanges, cancellationToken).ConfigureAwait(false);
+                if (_writeHandlerOwnsChanges)
+                {
+                    await _writeHandler(mergedChanges, cancellationToken).ConfigureAwait(false);
+                }
+                else if (admitted)
+                {
+                    await DeliverAdmittedAsync(mergedChanges, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    CountTimedOutDelivery(mergedChanges.Length);
+                }
             }
         }
         finally
         {
+            if (ownershipLockTaken)
+            {
+                Monitor.Exit(_changes);
+            }
+
             try
             {
                 // Clear buffers to allow GC of SubjectPropertyChange objects
@@ -643,9 +694,18 @@ public class ChangeQueueProcessor : IDisposable
         }
 
         CountTimedOutDelivery(CloseDeliveryAndDrain());
+        InvokeTerminalHandlerOnce();
         if (Volatile.Read(ref _processingActive) == 0)
         {
             DisposeMergerOnce();
+        }
+    }
+
+    private void InvokeTerminalHandlerOnce()
+    {
+        if (Interlocked.Exchange(ref _terminalHandlerInvoked, 1) == 0)
+        {
+            _terminalHandler?.Invoke();
         }
     }
 

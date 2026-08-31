@@ -1043,6 +1043,7 @@ public class ChangeQueueProcessorTests
         var subject = new Person(context);
         var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writeFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         using var processor = new ChangeQueueProcessor(
             source: new object(),
@@ -1052,6 +1053,7 @@ public class ChangeQueueProcessorTests
             {
                 writeEntered.TrySetResult();
                 await releaseWrite.Task.ConfigureAwait(false);
+                writeFinished.TrySetResult();
             },
             bufferTime: TimeSpan.Zero,
             maxQueueDepth: null,
@@ -1080,7 +1082,9 @@ public class ChangeQueueProcessorTests
             releaseWrite.TrySetResult();
         }
 
-        await processing.WaitAsync(TestTimeout);
+        await writeFinished.Task.WaitAsync(TestTimeout);
+
+        // Assert
         Assert.Equal(1, processor.DropCount);
     }
 
@@ -1149,6 +1153,96 @@ public class ChangeQueueProcessorTests
         {
             releaseFilter.TrySetResult();
         }
+    }
+
+    [Fact]
+    public async Task WhenAHandlerOwnedProcessorIsDisposedWhileFiltering_ThenTheDelegatedOwnerRetiresBeforeLateHandoff()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var filterEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFilter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completionReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ownerRetired = false;
+        var lateHandoffAdmitted = false;
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            subscription: subscription,
+            propertyFilter: _ =>
+            {
+                filterEntered.TrySetResult();
+                releaseFilter.Task.GetAwaiter().GetResult();
+                return true;
+            },
+            writeHandler: (_, _) =>
+            {
+                lateHandoffAdmitted = !Volatile.Read(ref ownerRetired);
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            writeHandlerOwnsChanges: true,
+            terminalHandler: () => Volatile.Write(ref ownerRetired, true),
+            completionHandler: _ =>
+            {
+                completionReached.TrySetResult();
+                return ValueTask.CompletedTask;
+            });
+
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() => releaseFilter.TrySetResult());
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        subject.FirstName = "buffered";
+        await filterEntered.Task.WaitAsync(TestTimeout);
+
+        try
+        {
+            // Act
+            processor.Dispose();
+            var ownerRetiredBeforeDisposeReturned = Volatile.Read(ref ownerRetired);
+            var cancelling = cancellation.CancelAsync();
+            releaseFilter.TrySetResult();
+            await Task.WhenAll(cancelling, processing).WaitAsync(TestTimeout);
+            await completionReached.Task.WaitAsync(TestTimeout);
+
+            // Assert
+            Assert.True(ownerRetiredBeforeDisposeReturned);
+            Assert.False(lateHandoffAdmitted);
+        }
+        finally
+        {
+            releaseFilter.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task WhenCoreSetupThrows_ThenASecondProcessingLifetimeCanStart()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: new ThrowingOnceWarningLogger(),
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<CoreSetupException>(() => processor.ProcessAsync(CancellationToken.None));
+        await processor.ProcessAsync(new CancellationToken(canceled: true)).WaitAsync(TestTimeout);
     }
 
     [Fact]
@@ -1267,6 +1361,57 @@ public class ChangeQueueProcessorTests
     }
 
     [Fact]
+    public async Task WhenAWriteFailureSettlesWhileTerminalCloseRuns_ThenItIsCountedOnce()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        var dropCallbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDropCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => ValueTask.FromException(new InvalidOperationException("write failed")),
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            dropHandler: count =>
+            {
+                if (count > 0)
+                {
+                    dropCallbackEntered.TrySetResult();
+                    releaseDropCallback.Task.GetAwaiter().GetResult();
+                }
+            });
+
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() => releaseDropCallback.TrySetResult());
+        var processing = processor.ProcessAsync(CancellationToken.None);
+        subject.FirstName = "failing";
+        await dropCallbackEntered.Task.WaitAsync(TestTimeout);
+
+        try
+        {
+            // Act
+            processor.Dispose();
+            releaseDropCallback.TrySetResult();
+            await processing.WaitAsync(TestTimeout);
+
+            // Assert
+            Assert.Equal(1, processor.DropCount);
+        }
+        finally
+        {
+            releaseDropCallback.TrySetResult();
+            processor.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task WhenMergedCancellationSettlesAfterTerminalClose_ThenSurvivorsAreCountedOnce()
     {
         // Arrange
@@ -1283,6 +1428,7 @@ public class ChangeQueueProcessorTests
         var cancellationObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseCancellation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var completionReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var terminalInvocationCount = 0;
 
         using var processor = new ChangeQueueProcessor(
             source: new object(),
@@ -1306,7 +1452,11 @@ public class ChangeQueueProcessorTests
             maxQueueDepth: null,
             logger: NullLogger.Instance,
             deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
-            terminalHandler: () => releaseCancellation.TrySetResult(),
+            terminalHandler: () =>
+            {
+                Interlocked.Increment(ref terminalInvocationCount);
+                releaseCancellation.TrySetResult();
+            },
             completionHandler: _ =>
             {
                 completionReached.TrySetResult();
@@ -1330,10 +1480,12 @@ public class ChangeQueueProcessorTests
         await cancellationObserved.Task.WaitAsync(TeardownWaitTimeout);
         await processing.WaitAsync(TeardownWaitTimeout);
         await completionReached.Task.WaitAsync(TestTimeout);
+        processor.Dispose();
 
         // Assert
         Assert.Equal(2, processor.DropCount);
         Assert.Equal(0, processor.QueueDepth);
+        Assert.Equal(1, terminalInvocationCount);
     }
 
     [Fact]
@@ -1601,4 +1753,28 @@ public class ChangeQueueProcessorTests
             }
         }
     }
+
+    private sealed class ThrowingOnceWarningLogger : ILogger
+    {
+        private int _warningCount;
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning && Interlocked.Increment(ref _warningCount) == 1)
+            {
+                throw new CoreSetupException();
+            }
+        }
+    }
+
+    private sealed class CoreSetupException : Exception;
 }
