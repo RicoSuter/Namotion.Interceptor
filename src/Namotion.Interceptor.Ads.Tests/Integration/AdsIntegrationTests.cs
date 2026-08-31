@@ -265,10 +265,14 @@ public class AdsIntegrationTests
 
         await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
         {
+            // Waits for the exact split the assertions below require. Waiting for merely "more than
+            // one" lets the test proceed mid-registration and fail on a slower machine.
             await AsyncTestHelpers.WaitUntilAsync(
-                () => clientSource.Diagnostics.IsConnected && clientSource.Diagnostics.NotificationVariableCount > 1,
+                () => clientSource.Diagnostics.IsConnected &&
+                      clientSource.Diagnostics.NotificationVariableCount == 3 &&
+                      clientSource.Diagnostics.PolledVariableCount == 1,
                 timeout: WaitTimeout,
-                message: "Client should connect and register more than one notification");
+                message: "Client should register three notifications and poll the WSTRING property");
 
             var notificationCount = clientSource.Diagnostics.NotificationVariableCount;
             var handleCount = clientSource.SubscriptionManager.NotificationHandleCount;
@@ -277,14 +281,10 @@ public class AdsIntegrationTests
             _output.WriteLine(
                 $"Notifications={notificationCount}, handles={handleCount}, thread growth={threadGrowth}");
 
-            // One device notification handle per property, all delivered through a single event on
-            // the client's receive thread. The reactive extension would instead allocate a dedicated
-            // scheduler thread per registration.
-            // Thread growth is logged rather than asserted: at this scale the harness's own thread
-            // pool churn swamps the signal. The handle count is the structural invariant.
             // One handle per notification-backed property, all delivered through a single event on
             // the client's receive thread. The reactive extension would instead allocate a dedicated
-            // scheduler thread per registration.
+            // scheduler thread per registration. Thread growth is logged rather than asserted: at
+            // this scale the harness's own thread pool churn swamps the signal.
             //
             // Not every property is notification-backed: the harness's string symbol is a WSTRING,
             // which the any-type path cannot marshal, so it is polled. That split is asserted
