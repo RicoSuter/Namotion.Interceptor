@@ -36,13 +36,17 @@ internal sealed class OwnershipReservationToken : IDisposable
 
     internal ITopologyAdmissionCoordinator? Coordinator { get; }
 
-    private InterceptorExecutor Executor => Volatile.Read(ref _executor)
+    internal InterceptorExecutor Executor => Volatile.Read(ref _executor)
         ?? throw new ObjectDisposedException(nameof(OwnershipReservationToken));
 
     internal bool IsActive(InterceptorExecutor executor)
     {
         return ReferenceEquals(Volatile.Read(ref _executor), executor);
     }
+
+    internal bool IsActive(InterceptorSubjectContext context) =>
+        Volatile.Read(ref _executor) is { } executor &&
+        executor.IsOwnershipReservationActive(this, context);
 
     internal bool TryUpdateAttachment(
         long expectedRevision,

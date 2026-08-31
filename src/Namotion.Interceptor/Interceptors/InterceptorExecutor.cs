@@ -30,14 +30,22 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     {
         Debug.Assert(Monitor.IsEntered(SyncRoot));
         Debug.Assert(ReferenceEquals(context.Executor.Subject, context.Property.Subject));
-        writeValue(_subject, value);
-        context.IsWritten = true;
-        context.IsTerminalCommitted = true;
-        context.Revision = ++Revision;
-        context.FinalizeOrigin();
-        var isFromSource = context.Origin.Kind == ChangeOriginKind.FromSource;
-        var timestamp = context.WriteTimestampRaw;
-        context.Property.SetWriteState(timestamp > 0 ? timestamp : 0, context.Revision, isFromSource);
+        var captureRevision = BeginCaptureMutation();
+        try
+        {
+            writeValue(_subject, value);
+            context.IsWritten = true;
+            context.IsTerminalCommitted = true;
+            context.Revision = ++Revision;
+            context.FinalizeOrigin();
+            var isFromSource = context.Origin.Kind == ChangeOriginKind.FromSource;
+            var timestamp = context.WriteTimestampRaw;
+            context.Property.SetWriteState(timestamp > 0 ? timestamp : 0, context.Revision, isFromSource);
+        }
+        finally
+        {
+            CompleteCaptureMutation(captureRevision, context.StructuralLease is null ? Environment.CurrentManagedThreadId : 0);
+        }
     }
 
     internal static LogicalContextScope EnterLogicalContext(InterceptorSubjectContext context)
@@ -55,6 +63,53 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
 
     internal long Revision;
     internal long CurrentRevision => Volatile.Read(ref Revision);
+    private long _captureRevision;
+    private int _captureWriterThreadId;
+    private long _captureWriterRunStart;
+    internal long CaptureRevision => Volatile.Read(ref _captureRevision);
+
+    internal bool IsCaptureRevisionCurrent(long revision) =>
+        (revision & 1) == 0 && CaptureRevision == revision;
+
+    private long BeginCaptureMutation()
+    {
+        var spin = new SpinWait();
+        long revision;
+        while (((revision = CaptureRevision) & 1) != 0 ||
+               Interlocked.CompareExchange(ref _captureRevision, revision + 1, revision) != revision)
+        {
+            spin.SpinOnce();
+        }
+
+        return revision;
+    }
+
+    private void CompleteCaptureMutation(long revision, int writerThreadId)
+    {
+        if (Volatile.Read(ref _captureWriterThreadId) != writerThreadId)
+        {
+            Volatile.Write(ref _captureWriterRunStart, revision + 2);
+            Volatile.Write(ref _captureWriterThreadId, writerThreadId);
+        }
+
+        Volatile.Write(ref _captureRevision, revision + 2);
+    }
+
+    internal bool TryBeginMetadataPublication(long revision) =>
+        (revision & 1) == 0 && Interlocked.CompareExchange(
+            ref _captureRevision, revision + 1, revision) == revision;
+
+    internal void CompleteMetadataPublication(long revision) =>
+        CompleteCaptureMutation(revision, Environment.CurrentManagedThreadId);
+
+    internal bool TryRefreshCapture(long revision, out long current)
+    {
+        current = CaptureRevision;
+        return current == revision ||
+               (current & 1) == 0 &&
+               Volatile.Read(ref _captureWriterThreadId) == Environment.CurrentManagedThreadId &&
+               Volatile.Read(ref _captureWriterRunStart) <= revision + 2 && CaptureRevision == current;
+    }
 
     private readonly object _attachmentLock = new();
     private volatile AttachmentState _attachment = AttachmentState.Unattached;
@@ -86,9 +141,9 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         => TryUpdateAttachmentCore(null, expectedRevision, context, anchor, out currentRevision);
 
     internal OwnershipReservationToken TryAcquireOwnershipReservation(
-        InterceptorSubjectContext context,
-        ReservationMode mode,
-        ITopologyAdmissionCoordinator? coordinator = null)
+        InterceptorSubjectContext context, ReservationMode mode,
+        ITopologyAdmissionCoordinator? coordinator = null,
+        bool joinExclusive = false)
     {
         lock (_attachmentLock)
         {
@@ -110,7 +165,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 _ownershipReservation = reservation;
             }
             else if (!ReferenceEquals(reservation.Context, context) ||
-                     reservation.Mode == ReservationMode.Exclusive ||
+                     reservation.Mode == ReservationMode.Exclusive && !joinExclusive ||
                      mode == ReservationMode.Exclusive)
             {
                 throw LifecycleConflictException.Retryable(_subject);
@@ -787,7 +842,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                             throw LifecycleConflictException.Retryable(_subject);
                         }
 
-                        registration.Publish();
+                        registration.Publish(this);
                         return;
                     }
                 }

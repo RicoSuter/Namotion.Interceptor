@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -117,6 +118,99 @@ public class CaptureValidationTests
 
     [Fact]
     [Trait("Category", "Concurrency")]
+    public void WhenAdmissionRootChangesWhileANewGetterIsCaptured_ThenAdmissionRecapturesTheCurrentValue()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new Person(context) { FirstName = "old" };
+        var staleChild = new Person { FirstName = "stale" };
+        var replacementChild = new Person { FirstName = "replacement" };
+        var getterReached = new ManualResetEventSlim(false);
+        var resumeGetter = new ManualResetEventSlim(false);
+        var getterReads = 0;
+        var metadata = new SubjectPropertyMetadata(
+            "ProjectedChild",
+            typeof(Person),
+            [],
+            subject =>
+            {
+                var captured = ((Person)subject).FirstName == "old" ? staleChild : replacementChild;
+                if (Interlocked.Increment(ref getterReads) == 1)
+                {
+                    getterReached.Set();
+                    if (!resumeGetter.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+                    {
+                        throw new TimeoutException("Timed out waiting for the admission-root mutation.");
+                    }
+                }
+
+                return captured;
+            },
+            null,
+            isIntercepted: true,
+            isDynamic: true);
+
+        Exception? mutationException = null;
+        var mutator = new Thread(() =>
+        {
+            if (!getterReached.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+            {
+                mutationException = new TimeoutException("The new structural getter was never reached.");
+                return;
+            }
+
+            mutationException = Record.Exception(() => root.FirstName = "new");
+            resumeGetter.Set();
+        }) { IsBackground = true };
+
+        // Act
+        mutator.Start();
+        var admissionException = Record.Exception(() =>
+            ((IInterceptorSubject)root).AddProperties(metadata));
+        var mutationCompleted = mutator.Join(WriteProtocolAcceptance.RendezvousTimeout);
+
+        // Assert
+        Assert.True(mutationCompleted, "the admission-root mutator never completed");
+        Assert.Null(mutationException);
+        Assert.Null(admissionException);
+        Assert.Equal("new", root.FirstName);
+        Assert.Null(staleChild.TryGetContext());
+        Assert.Same(context, replacementChild.TryGetContext());
+        Assert.Equal(2, getterReads);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WhenAdmissionValidatesAHandWrittenRoot_ThenItDoesNotReenterInterfaceAccessors(
+        bool throwFromExecutor)
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new GatedAccessorSubject();
+        ((IInterceptorSubject)root).AttachToContext(context);
+        root.Arm(throwFromExecutor);
+        var metadata = new SubjectPropertyMetadata(
+            "DynamicChild",
+            typeof(IInterceptorSubject),
+            [],
+            _ => null,
+            null,
+            isIntercepted: true,
+            isDynamic: true);
+
+        // Act
+        var exception = Record.Exception(() =>
+            ((IInterceptorSubject)root).AddProperties(metadata));
+        root.Disarm();
+
+        // Assert
+        Assert.Null(exception);
+        Assert.True(((IInterceptorSubject)root).Properties.ContainsKey("DynamicChild"));
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
     public void WhenUnrelatedGraphChangesAfterCapture_ThenAttachDoesNotRecaptureParticipants()
     {
         // Arrange
@@ -141,7 +235,18 @@ public class CaptureValidationTests
         var mutator = new Thread(() =>
         {
             barrier.WaitUntilReached();
-            mutationException = Record.Exception(() => unrelated.Father = unrelatedChild);
+            mutationException = Record.Exception(() =>
+            {
+                unrelated.Father = unrelatedChild;
+                ((IInterceptorSubject)unrelated).AddProperties(new SubjectPropertyMetadata(
+                    "UnrelatedMarker",
+                    typeof(int),
+                    [],
+                    _ => 1,
+                    null,
+                    isIntercepted: true,
+                    isDynamic: true));
+            });
             barrier.Resume();
         }) { IsBackground = true };
 
@@ -159,6 +264,7 @@ public class CaptureValidationTests
         Assert.Same(context, root.TryGetContext());
         Assert.Same(context, descendant.TryGetContext());
         Assert.Same(context, unrelatedChild.TryGetContext());
+        Assert.True(((IInterceptorSubject)unrelated).Properties.ContainsKey("UnrelatedMarker"));
         Assert.Equal(1, barrier.ReadCount);
         Assert.Equal(1, descendantScans);
     }
@@ -242,5 +348,64 @@ public class CaptureValidationTests
 
             next(ref context);
         }
+    }
+
+    private sealed class GatedAccessorSubject : IInterceptorSubject
+    {
+        private IInterceptorExecutor? _executor;
+        private IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties =
+            new Dictionary<string, SubjectPropertyMetadata>();
+        private int _executorReads;
+        private int _propertyReads;
+        private int _armed;
+        private bool _throwFromExecutor;
+
+        public IInterceptorExecutor Executor
+        {
+            get
+            {
+                if (Volatile.Read(ref _armed) != 0 &&
+                    Interlocked.Increment(ref _executorReads) > 3 &&
+                    _throwFromExecutor)
+                {
+                    throw new InvalidOperationException("The executor accessor was reentered during admission.");
+                }
+
+                return InterceptorExecutor.GetOrCreate(ref _executor, this);
+            }
+        }
+
+        public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
+
+        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties
+        {
+            get
+            {
+                if (Volatile.Read(ref _armed) != 0 &&
+                    Interlocked.Increment(ref _propertyReads) > 3 &&
+                    !_throwFromExecutor)
+                {
+                    throw new InvalidOperationException("The properties accessor was reentered during admission.");
+                }
+
+                return _properties;
+            }
+        }
+
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) =>
+            Executor.AddProperties(new SubjectPropertyRegistration(
+                this,
+                properties,
+                published => _properties = published));
+
+        internal void Arm(bool throwFromExecutor)
+        {
+            _throwFromExecutor = throwFromExecutor;
+            Volatile.Write(ref _executorReads, 0);
+            Volatile.Write(ref _propertyReads, 0);
+            Volatile.Write(ref _armed, 1);
+        }
+
+        internal void Disarm() => Volatile.Write(ref _armed, 0);
     }
 }

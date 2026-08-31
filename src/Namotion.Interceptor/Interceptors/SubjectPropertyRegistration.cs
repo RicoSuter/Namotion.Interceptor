@@ -23,8 +23,9 @@ public sealed class SubjectPropertyRegistration
     private readonly IEnumerable<SubjectPropertyMetadata> _properties;
     private readonly Action<IReadOnlyDictionary<string, SubjectPropertyMetadata>> _publishProperties;
     private SubjectPropertyMetadata[]? _materialized;
-    private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _preparedFrom;
     private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _preparedProperties;
+    private InterceptorExecutor? _preparedExecutor;
+    private long _preparedCaptureRevision;
     private bool _published;
 
     /// <summary>
@@ -87,13 +88,20 @@ public sealed class SubjectPropertyRegistration
     /// </summary>
     /// <exception cref="InvalidOperationException">The batch is invalid (see
     /// <see cref="GetProperties"/>) or was already published.</exception>
-    public void Publish()
+    public void Publish() => Publish((InterceptorExecutor)Subject.Executor);
+
+    internal void Publish(InterceptorExecutor executor)
     {
-        PreparePublication();
-        PublishPrepared();
+        PreparePublication(executor);
+        if (!PublishPrepared(executor))
+        {
+            throw new InvalidOperationException(
+                $"The properties of subject '{Subject.GetType().Name}' changed while this batch was being admitted. " +
+                "The batch was not published.");
+        }
     }
 
-    internal void PreparePublication()
+    internal void PreparePublication(InterceptorExecutor executor)
     {
         var batch = GetProperties();
         if (batch.Count == 0)
@@ -107,6 +115,7 @@ public sealed class SubjectPropertyRegistration
                 "The property batch was already published; the publication continuation is invoked at most once.");
         }
 
+        var captureRevision = executor.CaptureRevision;
         var existingProperties = Subject.Properties;
         var merged = new Dictionary<string, SubjectPropertyMetadata>(existingProperties.Count + batch.Count);
         foreach (var pair in existingProperties)
@@ -132,18 +141,24 @@ public sealed class SubjectPropertyRegistration
             merged.Add(metadata.Name, metadata);
         }
 
-        _preparedFrom = existingProperties;
+        if (!executor.IsCaptureRevisionCurrent(captureRevision))
+        {
+            throw LifecycleConflictException.Retryable(Subject);
+        }
+
+        _preparedExecutor = executor;
+        _preparedCaptureRevision = captureRevision;
         _preparedProperties = merged.ToFrozenDictionary();
     }
 
     internal IReadOnlyDictionary<string, SubjectPropertyMetadata> PreparedProperties =>
         _preparedProperties ?? Subject.Properties;
 
-    internal void PublishPrepared()
+    internal bool PublishPrepared(InterceptorExecutor executor)
     {
         if (_materialized is not { Length: > 0 })
         {
-            return;
+            return true;
         }
 
         if (_published)
@@ -152,14 +167,28 @@ public sealed class SubjectPropertyRegistration
                 "The property batch was already published; the publication continuation is invoked at most once.");
         }
 
-        if (_preparedProperties is null || !ReferenceEquals(Subject.Properties, _preparedFrom))
+        if (_preparedProperties is null || !ReferenceEquals(executor, _preparedExecutor))
         {
             throw new InvalidOperationException(
                 $"The properties of subject '{Subject.GetType().Name}' changed while this batch was being admitted. " +
                 "The batch was not published.");
         }
 
+        if (!executor.TryBeginMetadataPublication(_preparedCaptureRevision))
+        {
+            return false;
+        }
+
         _published = true;
-        _publishProperties(_preparedProperties);
+        try
+        {
+            _publishProperties(_preparedProperties);
+        }
+        finally
+        {
+            executor.CompleteMetadataPublication(_preparedCaptureRevision);
+        }
+
+        return true;
     }
 }

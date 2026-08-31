@@ -180,9 +180,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                                 if (!context.Executor.IsStructuralWriteLeaseActive(
                                         lease, (InterceptorSubjectContext)_context) ||
                                     reservations.Values.Any(reservation =>
-                                        !((InterceptorExecutor)reservation.Subject.Executor)
-                                            .IsOwnershipReservationActive(
-                                                reservation, (InterceptorSubjectContext)_context)))
+                                        !reservation.IsActive((InterceptorSubjectContext)_context)))
                                 {
                                     throw LifecycleConflictException.Retryable(context.Property.Subject);
                                 }
@@ -330,12 +328,13 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     }
 
     OwnershipReservationToken ITopologyAdmissionCoordinator.AcquireOwnershipReservation(
-        InterceptorExecutor executor,
-        ReservationMode mode)
+        InterceptorExecutor executor, ReservationMode mode,
+        bool joinExclusive)
     {
         using (EnterGate())
         {
-            return executor.TryAcquireOwnershipReservation((InterceptorSubjectContext)_context, mode, this);
+            return executor.TryAcquireOwnershipReservation(
+                (InterceptorSubjectContext)_context, mode, this, joinExclusive);
         }
     }
 
@@ -391,13 +390,24 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         {
             while (true)
             {
-                var capture = _admission.CaptureBatch(registration, discovered);
+                PropertyAdmission.Capture capture;
+                try { capture = _admission.CaptureBatch(registration, discovered); }
+                catch (LifecycleConflictException) { discovered.Clear(); continue; }
+                if (!_graph.IsCaptureCurrent(capture.Participants))
+                {
+                    discovered.Clear();
+                    continue;
+                }
+
                 if (capture.AddedPropertyNames.IsEmpty)
                 {
                     return true;
                 }
 
-                if (!_graph.TryReserveDiscovered(discovered, reservations))
+                var rootExecutor = capture.Participants[0].Executor;
+
+                if (!_graph.TryReserveDiscovered(
+                        discovered, reservations, joinExclusiveRoot: registration.Subject))
                 {
                     throw new InvalidOperationException(
                         "Another context claimed a subject of the admitted graph while this call was validating it.");
@@ -415,31 +425,29 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                         {
                             var subject = registration.Subject;
                             if (reservations.Values.Any(reservation =>
-                                    !((InterceptorExecutor)reservation.Subject.Executor)
-                                        .IsOwnershipReservationActive(
-                                            reservation, (InterceptorSubjectContext)_context)))
+                                    !reservation.IsActive((InterceptorSubjectContext)_context)))
                             {
                                 throw LifecycleConflictException.Retryable(subject);
                             }
 
-                            if (!_admission.IsCaptureCurrent(capture))
+                            if (!_graph.IsCaptureCurrent(capture.Participants))
                             {
                                 retryCapture = true;
                             }
-                            else if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
+                            else if (!ReferenceEquals(rootExecutor.AttachedContext, _context))
                             {
                                 return false;
                             }
                             else if (!_graph.IsOwned(subject))
                             {
-                                registration.PublishPrepared();
-                                return true;
+                                if (registration.PublishPrepared(rootExecutor)) return true;
+                                retryCapture = true;
                             }
                             else
                             {
                                 using var change = _admission.Prepare(capture, reservations);
                                 journal = journalCapture.Complete(default, 0);
-                                _admission.Publish(capture, change);
+                                retryCapture = !_admission.Publish(capture, change);
                             }
                         }
                         finally
@@ -514,7 +522,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                     if (anchor != SubjectAttachmentAnchorKind.Provisional)
                     {
                         using var change = _attach.Prepare(subject, anchor, [], [], []);
-                        _attach.Publish(change);
+                        _graph.Publish(change);
                     }
 
                     anchorUpdated = true;
@@ -551,14 +559,12 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                     using (EnterGate())
                     {
                         if (reservations.Values.Any(reservation =>
-                                !((InterceptorExecutor)reservation.Subject.Executor)
-                                    .IsOwnershipReservationActive(
-                                        reservation, (InterceptorSubjectContext)_context)))
+                                !reservation.IsActive((InterceptorSubjectContext)_context)))
                         {
                             throw LifecycleConflictException.Retryable(subject);
                         }
 
-                        if (!_attach.IsCaptureCurrent(participants))
+                        if (!_graph.IsCaptureCurrent(participants))
                         {
                             retryCapture = true;
                         }
@@ -570,7 +576,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                             using var change = _attach.Prepare(
                                 subject, anchor, snapshots, propertyNames, reservations);
                             journal = journalCapture.Complete(default, 0);
-                            _attach.Publish(change);
+                            _graph.Publish(change);
                         }
                     }
                 }
@@ -619,7 +625,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             InterceptorSubjectExtensions.ValidateDetach(attachedContext, anchor, context);
             using var change = _release.Prepare(subject);
             journal = journalCapture.Complete(default, 0);
-            _release.Publish(change);
+            _graph.Publish(change);
         }
 
         if (journal.Drain(null) is { } exception)

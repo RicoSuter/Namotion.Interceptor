@@ -262,7 +262,8 @@ public class CrossContextGateDeadlockTests
 
         OwnershipReservationToken ITopologyAdmissionCoordinator.AcquireOwnershipReservation(
             InterceptorExecutor executor,
-            ReservationMode mode) =>
+            ReservationMode mode,
+            bool joinExclusive) =>
             throw new InvalidOperationException("The foreign topology coordinator must not reserve ownership.");
 
         void ITopologyAdmissionCoordinator.CompleteOwnershipReservation(
@@ -346,8 +347,9 @@ public class CrossContextGateDeadlockTests
 
         OwnershipReservationToken ITopologyAdmissionCoordinator.AcquireOwnershipReservation(
             InterceptorExecutor executor,
-            ReservationMode mode) =>
-            executor.TryAcquireOwnershipReservation(_context!, mode, this);
+            ReservationMode mode,
+            bool joinExclusive) =>
+            executor.TryAcquireOwnershipReservation(_context!, mode, this, joinExclusive);
 
         void ITopologyAdmissionCoordinator.CompleteOwnershipReservation(
             InterceptorExecutor executor,

@@ -7,34 +7,42 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// <summary>Materializes the subject occurrences exposed by one structural property value.</summary>
 internal static class StructuralSnapshotBuilder
 {
-    internal readonly struct CaptureParticipant(
-        IInterceptorSubject subject,
-        long revision,
-        IReadOnlyDictionary<string, SubjectPropertyMetadata> properties,
-        IInterceptorSubjectContext? attachmentContext,
-        long attachmentRevision,
-        SubjectOwnership? ownership)
+    internal readonly record struct CaptureParticipant(
+        IInterceptorSubject Subject, InterceptorExecutor Executor, long Revision, long CaptureRevision,
+        IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties,
+        IInterceptorSubjectContext? AttachmentContext, long AttachmentRevision,
+        SubjectOwnership? Ownership)
     {
-        internal IInterceptorSubject Subject { get; } = subject;
-        internal long Revision { get; } = revision;
-        internal IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties { get; } = properties;
-        internal IInterceptorSubjectContext? AttachmentContext { get; } = attachmentContext;
-        internal long AttachmentRevision { get; } = attachmentRevision;
-        internal SubjectOwnership? Ownership { get; } = ownership;
-
-        internal bool HasCurrentRevision() =>
-            ((InterceptorExecutor)Subject.Executor).CurrentRevision == Revision;
-
         internal bool IsLocallyCurrent()
         {
-            var executor = (InterceptorExecutor)Subject.Executor;
-            if (executor.CurrentRevision != Revision || !ReferenceEquals(Subject.Properties, Properties))
+            Executor.TryGetAttachment(out var context, out _, out var attachmentRevision);
+            return Executor.CurrentRevision == Revision &&
+                   Executor.IsCaptureRevisionCurrent(CaptureRevision) &&
+                   ReferenceEquals(context, AttachmentContext) && attachmentRevision == AttachmentRevision;
+        }
+
+        internal bool TryRefreshAfterCapture(OwnershipGraph.GraphState state, out CaptureParticipant current)
+        {
+            current = this;
+            Executor.TryGetAttachment(out var context, out _, out var attachmentRevision);
+            if (!ReferenceEquals(context, AttachmentContext) || attachmentRevision != AttachmentRevision ||
+                !Executor.TryRefreshCapture(CaptureRevision, out var captureRevision))
             {
                 return false;
             }
 
-            executor.TryGetAttachment(out var context, out _, out var attachmentRevision);
-            return ReferenceEquals(context, AttachmentContext) && attachmentRevision == AttachmentRevision;
+            var revision = Executor.CurrentRevision;
+            state.Owned.TryGetValue(Subject, out var ownership);
+            if (!ReferenceEquals(ownership, Ownership) &&
+                (ownership is null || Ownership is null || ownership.Edges != Ownership.Edges))
+            {
+                return false;
+            }
+
+            current = new CaptureParticipant(
+                Subject, Executor, revision, captureRevision, Properties,
+                AttachmentContext, AttachmentRevision, ownership);
+            return true;
         }
     }
 
@@ -174,11 +182,18 @@ internal static class StructuralSnapshotBuilder
     {
         var executor = (InterceptorExecutor)subject.Executor;
         var revision = executor.CurrentRevision;
+        var captureRevision = executor.CaptureRevision;
         var properties = subject.Properties;
+        if (!executor.IsCaptureRevisionCurrent(captureRevision))
+        {
+            throw LifecycleConflictException.Retryable(subject);
+        }
+
         executor.TryGetAttachment(out var attachmentContext, out _, out var attachmentRevision);
         graphState.Owned.TryGetValue(subject, out var ownership);
         return new CaptureParticipant(
-            subject, revision, properties, attachmentContext, attachmentRevision, ownership);
+            subject, executor, revision, captureRevision, properties,
+            attachmentContext, attachmentRevision, ownership);
     }
 
     private static ImmutableArray<CaptureParticipant> CapturePending(
@@ -240,7 +255,7 @@ internal static class StructuralSnapshotBuilder
                     }
                 }
 
-                if (!participant.HasCurrentRevision())
+                if (participant.Executor.CurrentRevision != participant.Revision)
                 {
                     throw LifecycleConflictException.Retryable(subject);
                 }

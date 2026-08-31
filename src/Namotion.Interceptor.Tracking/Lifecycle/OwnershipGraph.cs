@@ -867,12 +867,8 @@ internal sealed class OwnershipGraph
         _state = new GraphState(state.Owned, snapshots.ToImmutable(), state.DeferredSweep);
     }
 
-    internal IDisposable ReserveForStructuralWrite(
-        IInterceptorSubject subject,
-        ReservationMode mode = ReservationMode.Shared)
-    {
-        return _coordinator.AcquireOwnershipReservation((InterceptorExecutor)subject.Executor, mode);
-    }
+    internal IDisposable ReserveForStructuralWrite(IInterceptorSubject subject, ReservationMode mode = ReservationMode.Shared) =>
+        _coordinator.AcquireOwnershipReservation((InterceptorExecutor)subject.Executor, mode, false);
 
     internal bool HasReservation(IInterceptorSubject subject)
     {
@@ -979,7 +975,7 @@ internal sealed class OwnershipGraph
     {
         var reservation = (OwnershipReservationToken)participant;
         var subject = reservation.Subject;
-        subject.Executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
+        reservation.Executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
         reservation.Complete(IsOwned(subject) ||
             (anchor != SubjectAttachmentAnchorKind.None && ReferenceEquals(attachedContext, Context)));
     }
@@ -1040,7 +1036,8 @@ internal sealed class OwnershipGraph
     public bool TryReserveDiscovered(
         List<IInterceptorSubject> unattached,
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
-        IInterceptorSubject? exclusiveRoot = null)
+        IInterceptorSubject? exclusiveRoot = null,
+        IInterceptorSubject? joinExclusiveRoot = null)
     {
         for (var i = 0; i < unattached.Count; i++)
         {
@@ -1052,9 +1049,13 @@ internal sealed class OwnershipGraph
 
             try
             {
-                var reservation = (OwnershipReservationToken)ReserveForStructuralWrite(
-                    subject,
-                    ReferenceEquals(subject, exclusiveRoot) ? ReservationMode.Exclusive : ReservationMode.Shared);
+                var mode = ReferenceEquals(subject, exclusiveRoot)
+                    ? ReservationMode.Exclusive
+                    : ReservationMode.Shared;
+                var reservation = _coordinator.AcquireOwnershipReservation(
+                    (InterceptorExecutor)subject.Executor,
+                    mode,
+                    ReferenceEquals(subject, joinExclusiveRoot));
                 reservations.Add(subject, reservation);
             }
             catch (LifecycleConflictException)

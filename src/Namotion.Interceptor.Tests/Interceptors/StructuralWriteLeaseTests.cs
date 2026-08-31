@@ -25,7 +25,8 @@ public class StructuralWriteLeaseTests
 
         public OwnershipReservationToken AcquireOwnershipReservation(
             InterceptorExecutor executor,
-            ReservationMode mode) =>
+            ReservationMode mode,
+            bool joinExclusive) =>
             throw new NotSupportedException();
 
         public void CompleteOwnershipReservation(
