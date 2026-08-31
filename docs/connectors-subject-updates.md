@@ -116,7 +116,7 @@ subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.
 
 A property that throws is skipped and the rest of the update still applies, including the properties of nested subjects, for every update kind. Applying is not all-or-nothing.
 
-The call still reports failure once every property has been attempted. A single failure is rethrown as itself, keeping its original type and stack, so a caller catching a specific exception type is unaffected. Several failures are wrapped in an `AggregateException` whose message names the properties. An `OperationCanceledException` propagates immediately instead of being collected, so a cancelled apply is not reported as a property failure.
+The call still reports failure once every property has been attempted. A single failure is rethrown as itself, keeping its original type and stack, so a caller catching a specific exception type is unaffected. Several failures are wrapped in an `AggregateException` whose message names the properties.
 
 Two limits follow from applying in place rather than staging:
 
