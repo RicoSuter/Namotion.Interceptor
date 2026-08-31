@@ -291,14 +291,17 @@ internal sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDisp
     {
         try
         {
-            var capacity = changes.Length;
+            // Materialized rather than iterated as a span: the unresolvable-type path below awaits,
+            // and a span cannot be preserved across an await.
+            var changesArray = changes.ToArray();
+            var capacity = changesArray.Length;
             var symbols = new List<ISymbol>(capacity);
             var writeValues = new object[capacity];
             var writeCount = 0;
             var validChanges = new List<SubjectPropertyChange>(capacity);
             List<SubjectPropertyChange>? unresolvedChanges = null;
 
-            foreach (var change in changes.Span)
+            foreach (var change in changesArray)
             {
                 var registeredProperty = change.Property.TryGetRegisteredProperty();
                 if (registeredProperty is null)
@@ -337,6 +340,22 @@ internal sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDisp
                 if (convertedValue is null)
                 {
                     _logger.LogDebug("Skipping write of null value to ADS symbol '{SymbolPath}'.", symbolPath);
+                    continue;
+                }
+
+                // A symbol whose PLC type the TwinCAT type system cannot resolve (an enum) cannot
+                // be marshalled by the typed value API. Write it through the any-type path, which
+                // marshals from the .NET runtime type instead.
+                if (!AdsSubscriptionManager.IsDataTypeResolvable(symbol))
+                {
+                    if (await WriteUnresolvedValueAsync(connection, symbolPath, convertedValue, cancellationToken).ConfigureAwait(false))
+                    {
+                        continue;
+                    }
+
+                    // Reported rather than dropped: a caller that never learns a write failed
+                    // cannot roll back or retry it.
+                    (unresolvedChanges ??= []).Add(change);
                     continue;
                 }
 
@@ -387,6 +406,44 @@ internal sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDisp
         catch (Exception exception)
         {
             return WriteResult.Failure(changes, exception);
+        }
+    }
+
+    /// <summary>
+    /// Writes one value through the any-type path, for a symbol whose PLC data type will not
+    /// resolve. Returns false when the write failed, so the caller can report it.
+    /// </summary>
+    private async ValueTask<bool> WriteUnresolvedValueAsync(
+        IAdsConnection connection,
+        string symbolPath,
+        object value,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var errorCode = connection.TryCreateVariableHandle(symbolPath, out var handle);
+            if (errorCode != AdsErrorCode.NoError)
+            {
+                _logger.LogWarning(
+                    "Failed to create ADS variable handle for '{SymbolPath}': {ErrorCode}.", symbolPath, errorCode);
+                return false;
+            }
+
+            try
+            {
+                await connection.WriteAnyAsync(handle, value, cancellationToken).ConfigureAwait(false);
+                return true;
+            }
+            finally
+            {
+                connection.TryDeleteVariableHandle(handle);
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception,
+                "Failed to write to ADS symbol '{SymbolPath}' through the any-type path.", symbolPath);
+            return false;
         }
     }
 

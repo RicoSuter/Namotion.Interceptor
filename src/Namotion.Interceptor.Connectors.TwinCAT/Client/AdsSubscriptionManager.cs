@@ -32,6 +32,14 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         = new(PropertyReference.Comparer);
     private volatile bool _pollingCollectionDirty;
 
+    /// <summary>Symbol paths whose PLC type will not resolve (enums), learned on first failed read.
+    /// Keyed by path so a rescan keeps what was learned. Concurrent: polling reads in parallel.</summary>
+    private readonly ConcurrentDictionary<string, byte> _rawIntegerSymbols = new();
+
+    /// <summary>Handles for <see cref="_rawIntegerSymbols"/>, so polling does not create one per
+    /// cycle. Dropped on a failed read to replace handles invalidated by a reconnect.</summary>
+    private readonly ConcurrentDictionary<string, uint> _rawIntegerHandles = new();
+
     // Polling snapshot — swapped atomically via volatile reference to avoid torn reads.
     // Only the polling thread mutates UseFallback; all other fields are set once during construction.
     private volatile PollingSnapshot _pollingSnapshot = PollingSnapshot.Empty;
@@ -430,17 +438,125 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         {
             try
             {
-                var readResult = await ((IValueSymbol)snapshot.Symbols[index])
-                    .ReadValueAsync(cancellationToken).ConfigureAwait(false);
-                if ((AdsErrorCode)readResult.ErrorCode == AdsErrorCode.NoError)
+                var value = await ReadPolledValueAsync(
+                    connectionManager, snapshot, index, cancellationToken).ConfigureAwait(false);
+                if (value is not null)
                 {
-                    OnValueReceived(snapshot.Entries[index].Reference, readResult.Value, null, propertyWriter, source);
+                    OnValueReceived(snapshot.Entries[index].Reference, value, null, propertyWriter, source);
                 }
             }
             catch (Exception exception)
             {
                 connectionManager.LogFirstOccurrence("BatchPoll", exception, "Failed to read polled symbol '{SymbolPath}'.", snapshot.Entries[index].SymbolPath);
             }
+        }
+    }
+
+    /// <summary>
+    /// Returns false when the symbol's PLC data type cannot be resolved by the TwinCAT type system
+    /// (e.g. an enum whose definition was not loaded). Used to choose the raw integer read path.
+    /// </summary>
+    internal static bool IsDataTypeResolvable(ISymbol symbol)
+    {
+        try
+        {
+            return symbol.DataType is not null;
+        }
+        catch (CannotResolveDataTypeException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads one polled symbol, typed where the type system allows it and as a raw integer where it
+    /// does not. Returns null when nothing should be published. Safe to call concurrently.
+    /// </summary>
+    private async Task<object?> ReadPolledValueAsync(
+        AdsConnectionManager connectionManager,
+        PollingSnapshot snapshot,
+        int index,
+        CancellationToken cancellationToken)
+    {
+        var symbol = snapshot.Symbols[index];
+        var symbolPath = snapshot.Entries[index].SymbolPath;
+
+        // An enum throws while the value is built, not while its DataType is inspected, so it can
+        // only be recognised by trying. Remembered on first failure so the doomed typed read
+        // happens once, not every cycle.
+        if (!_rawIntegerSymbols.ContainsKey(symbolPath))
+        {
+            try
+            {
+                var readResult = await ((IValueSymbol)symbol)
+                    .ReadValueAsync(cancellationToken).ConfigureAwait(false);
+                return (AdsErrorCode)readResult.ErrorCode == AdsErrorCode.NoError
+                    ? readResult.Value
+                    : null;
+            }
+            catch (CannotResolveDataTypeException)
+            {
+                if (_rawIntegerSymbols.TryAdd(symbolPath, 0))
+                {
+                    _logger.LogDebug(
+                        "Symbol '{SymbolPath}' has an unresolvable PLC type. Polling it as a raw integer.",
+                        symbolPath);
+                }
+            }
+        }
+
+        // Underlying integer, as the notification side does; the converter rebuilds the enum.
+        return await ReadRawIntegerAsync(
+            connectionManager.Connection!, symbolPath,
+            ((IBitSize)symbol).ByteSize, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads a symbol whose PLC type will not resolve (an enum) as its underlying integer, picked
+    /// by byte size. Null means the width has no integer counterpart. Signedness is irrelevant: the
+    /// converter rebuilds the enum unchecked, so a UINT past 32767 such as Disabled still fits.
+    /// </summary>
+    private async Task<object?> ReadRawIntegerAsync(
+        IAdsConnection connection,
+        string symbolPath,
+        int byteSize,
+        CancellationToken cancellationToken)
+    {
+        // Not by instance path: that overload sizes its request buffer from T, so the path does not
+        // fit. A handle carries it once, as the write side does.
+        if (!_rawIntegerHandles.TryGetValue(symbolPath, out var handle))
+        {
+            var errorCode = connection.TryCreateVariableHandle(symbolPath, out handle);
+            if (errorCode != AdsErrorCode.NoError)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to create ADS variable handle for '{symbolPath}': {errorCode}");
+            }
+
+            _rawIntegerHandles[symbolPath] = handle;
+        }
+
+        try
+        {
+            // ReadAnyAsync returns ResultValue<T>; unwrap it or the converter sees a non-integer
+            // and passes it through untouched.
+            return byteSize switch
+            {
+                1 => Unwrap(await connection.ReadAnyAsync<byte>(handle, cancellationToken).ConfigureAwait(false)),
+                2 => Unwrap(await connection.ReadAnyAsync<short>(handle, cancellationToken).ConfigureAwait(false)),
+                4 => Unwrap(await connection.ReadAnyAsync<int>(handle, cancellationToken).ConfigureAwait(false)),
+                8 => Unwrap(await connection.ReadAnyAsync<long>(handle, cancellationToken).ConfigureAwait(false)),
+                _ => null,
+            };
+
+            static object? Unwrap<T>(ResultValue<T> result) =>
+                result.ErrorCode == AdsErrorCode.NoError ? result.Value : null;
+        }
+        catch
+        {
+            // Handles do not survive a reconnect or download; drop it so the next cycle recreates it.
+            _rawIntegerHandles.TryRemove(symbolPath, out _);
+            throw;
         }
     }
 
