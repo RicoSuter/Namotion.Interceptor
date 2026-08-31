@@ -212,12 +212,16 @@ public partial class InMemoryHistoryStoreSubject :
         var recorder = new HistoryChangeRecorder(engine, resolver);
         _recorder = recorder;
 
+        // A recorder is not a sink that can fall behind the model, so the settled condition never holds
+        // for it. Under the other rule a source-applied value does not retire an older commit, which is
+        // what keeps both points in the series.
         using var processor = new ChangeQueueProcessor(
             this,
             context,
             HistoryChangeRecorder.IsEligible,
             (changes, _) => recorder.RecordBatch(changes),
-            TimeSpan.FromMilliseconds(BufferTimeMilliseconds),
+            ChangeDeliveryRule.SourceValuesMayBeStale,
+            bufferTime: TimeSpan.FromMilliseconds(BufferTimeMilliseconds),
             maxQueueDepth: null,
             logger: _logger);
 

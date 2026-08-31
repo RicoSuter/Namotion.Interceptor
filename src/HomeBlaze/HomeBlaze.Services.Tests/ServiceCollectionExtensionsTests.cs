@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -16,9 +17,9 @@ public class ServiceCollectionExtensionsTests
     public void WhenHostedServicesAreResolved_ThenPathResolverIsRegisteredBeforeTheGraphLoads()
     {
         // Arrange
-        // SubjectPathResolver adds itself to the subject context in its constructor, so subjects
-        // attached by RootManager (the history stores) only find it if the singleton already exists
-        // when RootManager starts. Nothing else resolves it during startup.
+        // RootManager takes the resolver as a dependency and puts it on the subject context, so
+        // subjects attached while it loads (the history stores) only find it once RootManager has
+        // been constructed. Nothing else registers it during startup.
         var services = new ServiceCollection();
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         services.AddHomeBlazeServices();
@@ -30,5 +31,25 @@ public class ServiceCollectionExtensionsTests
 
         // Assert
         Assert.NotNull(context.TryGetService<ISubjectPathResolver>());
+    }
+
+    [Fact]
+    public void WhenHomeBlazeServicesAreResolved_ThenPathResolverIsRegisteredAsLifecycleHandler()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        services.AddHomeBlazeServices();
+        using var serviceProvider = services.BuildServiceProvider();
+        var context = serviceProvider.GetRequiredService<IInterceptorSubjectContext>();
+
+        // Act
+        _ = serviceProvider.GetRequiredService<RootManager>();
+        var resolver = serviceProvider.GetRequiredService<SubjectPathResolver>();
+        var lifecycleHandlers = context.GetServices<ILifecycleHandler>();
+
+        // Assert
+        Assert.Contains(resolver, lifecycleHandlers);
+        Assert.Single(lifecycleHandlers.OfType<SubjectPathResolver>());
     }
 }
