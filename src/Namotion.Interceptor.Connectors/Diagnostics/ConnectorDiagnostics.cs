@@ -26,15 +26,17 @@ public class ConnectorDiagnostics
     }
 
     /// <summary>
-    /// Gets a value indicating whether the transport is up and serving. What that means is defined
-    /// by each connector and documented on its own diagnostics type. It does not mean the model is
-    /// in sync: see the remarks on this type.
+    /// Gets a value indicating whether the transport is up and serving, or <c>null</c> when liveness
+    /// is unavailable because the connector has not reported it. What that means is defined by each
+    /// connector and documented on its own diagnostics type. It does not mean the model is in sync:
+    /// see the remarks on this type.
     /// </summary>
-    public bool IsOperational => _metrics.IsOperational;
+    public bool? IsOperational => _metrics.IsOperational;
 
     /// <summary>
     /// Gets when <see cref="IsOperational"/> last changed, or <c>null</c> until the first liveness
-    /// change. Moves whenever the flag moves, so the pair reads as "up since T" or "down since T".
+    /// report establishes a value and timestamp. Moves whenever the flag moves, so the pair reads as
+    /// "up since T" or "down since T".
     /// </summary>
     public DateTimeOffset? OperationalChangeTime => _metrics.OperationalChangeTime;
 

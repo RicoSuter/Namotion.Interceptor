@@ -7,15 +7,19 @@ namespace Namotion.Interceptor.Connectors.Diagnostics;
 /// never reachable through <see cref="ISubjectConnector"/>, so only the connector itself can move
 /// its liveness or record its errors.
 /// </summary>
+/// <remarks>
+/// Liveness stays unavailable until the connector reports it, and diagnostics expose that state as
+/// <c>null</c>. The first liveness report establishes its change timestamp.
+/// </remarks>
 public class ConnectorMetrics
 {
-    private sealed record Liveness(bool IsOperational, long ChangeTicks, bool IsStopped);
+    private sealed record Liveness(bool? IsOperational, long ChangeTicks, bool IsStopped);
 
     // Writers serialize on this lock; readers take an immutable snapshot without locking, so no
     // getter can throw or block. Transitions are rare (per connect/disconnect, not per item).
     private readonly Lock _livenessLock = new();
 
-    private Liveness _liveness = new(false, 0, false);
+    private Liveness _liveness = new(null, 0, false);
     private long _startTicks;
     private Exception? _lastError;
     private ImmutableArray<IResettableMetrics> _resettables = [];
@@ -91,13 +95,14 @@ public class ConnectorMetrics
     }
 
     /// <summary>
-    /// Reports that the connector is now serving. Ignored between <see cref="MarkStopped"/> and the
-    /// next <see cref="MarkStarted"/>.
+    /// Reports that the connector is now serving. The first liveness report establishes the liveness
+    /// change timestamp. Ignored between <see cref="MarkStopped"/> and the next <see cref="MarkStarted"/>.
     /// </summary>
     public void MarkOperational() => SetOperational(true, terminal: false);
 
     /// <summary>
-    /// Reports that the connector is no longer serving but may recover.
+    /// Reports that the connector is no longer serving but may recover. The first liveness report
+    /// establishes the liveness change timestamp.
     /// </summary>
     public void MarkNotOperational() => SetOperational(false, terminal: false);
 
@@ -123,7 +128,7 @@ public class ConnectorMetrics
         Volatile.Write(ref _lastError, error);
     }
 
-    internal bool IsOperational => Volatile.Read(ref _liveness).IsOperational;
+    internal bool? IsOperational => Volatile.Read(ref _liveness).IsOperational;
 
     internal DateTimeOffset? OperationalChangeTime
     {
@@ -172,7 +177,11 @@ public class ConnectorMetrics
             }
 
             var stopped = current.IsStopped || terminal;
-            if (current.IsOperational == isOperational && current.IsStopped == stopped)
+            bool? publishedValue = terminal && current.IsOperational is null
+                ? null
+                : isOperational;
+
+            if (current.IsOperational == publishedValue && current.IsStopped == stopped)
             {
                 return;
             }
@@ -180,9 +189,9 @@ public class ConnectorMetrics
             // The timestamp moves only when the flag does, so latching the terminal bit on a connector
             // that was never operational does not invent a transition. It is sampled inside the lock,
             // so it cannot move backwards relative to an already published transition.
-            var updated = current.IsOperational == isOperational
+            var updated = current.IsOperational == publishedValue
                 ? current with { IsStopped = stopped }
-                : new Liveness(isOperational, DateTimeOffset.UtcNow.UtcTicks, stopped);
+                : new Liveness(publishedValue, DateTimeOffset.UtcNow.UtcTicks, stopped);
 
             Volatile.Write(ref _liveness, updated);
         }
