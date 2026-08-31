@@ -36,6 +36,33 @@ public class AdsSubjectExtensionsTests
     }
 
     [Fact]
+    public void AddAdsSubjectClientSource_WithLocalAmsNetId_ShouldRegisterInSystemRouterMode()
+    {
+        // Arrange
+        var context = TestHelpers.CreateContext();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<TestPlcModel>(_ => new TestPlcModel(context));
+
+        // Act - the loopback overload: no host, so no embedded router is started
+        services.AddAdsSubjectClientSource<TestPlcModel>(AmsNetId.Local);
+
+        // Assert
+        var provider = services.BuildServiceProvider();
+        var source = provider.GetServices<IHostedService>()
+            .OfType<AdsSubjectClientSource>()
+            .Single();
+
+        Assert.Equal(AmsNetId.Local, source.Configuration.AmsNetId);
+        Assert.Null(source.Configuration.Host);
+        Assert.Equal(851, source.Configuration.AmsPort);
+
+        // Validate() rejects a configuration with neither Host nor AmsNetId, so this also proves
+        // the overload produces a usable one.
+        source.Configuration.Validate();
+    }
+
+    [Fact]
     public void AddAdsSubjectClientSource_WithCustomConfiguration_ShouldUseProvidedConfiguration()
     {
         // Arrange

@@ -18,6 +18,14 @@ public class AdsVariableAttributeTests
     }
 
     [Fact]
+    public void Constructor_WithNullSymbolPath_Throws()
+    {
+        // Arrange & Act & Assert - a null path would otherwise surface much later as a symbol
+        // that never resolves, with nothing pointing back at the attribute
+        Assert.Throws<ArgumentNullException>(() => new AdsVariableAttribute(null!));
+    }
+
+    [Fact]
     public void Constructor_WithCustomConnectorName_UsesCustomName()
     {
         // Arrange & Act

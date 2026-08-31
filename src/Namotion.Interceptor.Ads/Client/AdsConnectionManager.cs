@@ -242,10 +242,22 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
         // the first access to Symbols, on whichever thread happens to touch it, and DynamicTree
         // builds struct members, array elements and enum fields from the type information on the
         // fly. Beckhoff documents the async pair as the one to prefer for the first call.
-        if (_configuration.PrefetchSymbols && symbolLoader is ISymbolServer symbolServer)
+        if (_configuration.PrefetchSymbols)
         {
-            await symbolServer.GetDataTypesAsync(cancellationToken).ConfigureAwait(false);
-            await symbolServer.GetSymbolsAsync(cancellationToken).ConfigureAwait(false);
+            if (symbolLoader is ISymbolServer symbolServer)
+            {
+                await symbolServer.GetDataTypesAsync(cancellationToken).ConfigureAwait(false);
+                await symbolServer.GetSymbolsAsync(cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                // Otherwise the prefetch silently does nothing and the slow lazy path returns,
+                // which on a large symbol table looks like an unexplained stall rather than a
+                // missing capability.
+                LogFirstOccurrence("PrefetchUnsupported", null,
+                    "Symbol loader '{LoaderType}' does not implement ISymbolServer. Symbols are fetched lazily.",
+                    symbolLoader.GetType().Name);
+            }
         }
 
         _symbolLoader = symbolLoader;

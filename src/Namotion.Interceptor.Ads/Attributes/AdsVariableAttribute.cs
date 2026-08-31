@@ -16,6 +16,7 @@ public class AdsVariableAttribute : PathAttribute
     public AdsVariableAttribute(string symbolPath, string? connectorName = null)
         : base(connectorName ?? AdsConstants.DefaultConnectorName, symbolPath)
     {
+        ArgumentNullException.ThrowIfNull(symbolPath);
     }
 
     /// <summary>
