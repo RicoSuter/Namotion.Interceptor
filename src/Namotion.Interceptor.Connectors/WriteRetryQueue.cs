@@ -31,6 +31,8 @@ internal sealed class WriteRetryQueue : IDisposable
     private long _lastFlushWarningTimestamp;
     private bool _hasFlushWarnings;
 
+    private readonly record struct FlushSettlement(bool IsRetired, int DroppedCount, int PendingWriteCount);
+
     /// <summary>
     /// Gets a value indicating whether the write queue is empty.
     /// </summary>
@@ -176,25 +178,36 @@ internal sealed class WriteRetryQueue : IDisposable
                 {
                     // FailedChanges is complete (see WriteChangesInBatchesAsync), so every failed
                     // item is restored before ring capacity is applied to the combined queue.
-                    var droppedCount = SettleFlushedChanges(result.FailedChanges.AsSpan(), count);
+                    var settlement = SettleFlushedChanges(result.FailedChanges.AsSpan(), count);
+                    if (settlement.IsRetired)
+                    {
+                        Array.Clear(_scratchBuffer, 0, count);
+                        return false;
+                    }
+
                     var now = Environment.TickCount64;
                     if (now - _lastFlushWarningTimestamp >= 5000)
                     {
-                        var queueSize = count + PendingWriteCount;
                         _lastFlushWarningTimestamp = now;
                         _logger.LogWarning(result.Error,
                             "Failed to flush queued writes to source, re-queuing failed items ({QueueSize} writes queued).",
-                            queueSize);
+                            settlement.PendingWriteCount);
                     }
 
                     _hasFlushWarnings = true;
 
-                    _metrics.AddDropped(droppedCount);
+                    _metrics.AddDropped(settlement.DroppedCount);
                     Array.Clear(_scratchBuffer, 0, count);
                     return false;
                 }
 
-                SettleFlushedChanges(ReadOnlySpan<SubjectPropertyChange>.Empty, count);
+                var successfulSettlement = SettleFlushedChanges(ReadOnlySpan<SubjectPropertyChange>.Empty, count);
+                if (successfulSettlement.IsRetired)
+                {
+                    Array.Clear(_scratchBuffer, 0, count);
+                    return true;
+                }
+
                 totalFlushed += count;
                 Array.Clear(_scratchBuffer, 0, count);
             }
@@ -250,20 +263,24 @@ internal sealed class WriteRetryQueue : IDisposable
         _metrics.AddDropped(stranded);
     }
 
-    private int SettleFlushedChanges(ReadOnlySpan<SubjectPropertyChange> failedChanges, int attemptedCount)
+    private FlushSettlement SettleFlushedChanges(ReadOnlySpan<SubjectPropertyChange> failedChanges, int attemptedCount)
     {
         lock (_lock)
         {
             if (_retired)
             {
-                return 0;
+                return new FlushSettlement(IsRetired: true, DroppedCount: 0, PendingWriteCount: 0);
             }
 
             _activeWriteCount -= attemptedCount;
             _pendingWrites.InsertRange(0, failedChanges);
             var droppedCount = TrimToCapacity();
-            Volatile.Write(ref _count, _pendingWrites.Count);
-            return droppedCount;
+            var pendingWriteCount = _pendingWrites.Count;
+            Volatile.Write(ref _count, pendingWriteCount);
+            return new FlushSettlement(
+                IsRetired: false,
+                DroppedCount: droppedCount,
+                PendingWriteCount: pendingWriteCount);
         }
     }
 
