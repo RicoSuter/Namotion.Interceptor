@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Reactive.Disposables;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.TwinCAT.Mapping;
@@ -433,23 +434,61 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             }
         }
 
-        // Individual read fallback
-        for (var index = 0; index < snapshot.Symbols.Count; index++)
+        // Individual read fallback. Sum commands cannot resolve these symbols, so the round trip
+        // count is fixed and the only lever is how many are in flight. The work is IO, not CPU, so
+        // every read is issued at once unless MaxConcurrentReads bounds it. Values are applied
+        // afterwards on this thread: the property writer's threading contract is not ours to assume.
+        var passStarted = Stopwatch.GetTimestamp();
+        var readValues = new object?[snapshot.Symbols.Count];
+        var failures = 0;
+
+        async Task ReadIntoAsync(int index)
         {
             try
             {
-                var value = await ReadPolledValueAsync(
+                readValues[index] = await ReadPolledValueAsync(
                     connectionManager, snapshot, index, cancellationToken).ConfigureAwait(false);
-                if (value is not null)
-                {
-                    OnValueReceived(snapshot.Entries[index].Reference, value, null, propertyWriter, source);
-                }
             }
             catch (Exception exception)
             {
-                connectionManager.LogFirstOccurrence("BatchPoll", exception, "Failed to read polled symbol '{SymbolPath}'.", snapshot.Entries[index].SymbolPath);
+                Interlocked.Increment(ref failures);
+                connectionManager.LogFirstOccurrence("BatchPoll", exception,
+                    "Failed to read polled symbol '{SymbolPath}'.", snapshot.Entries[index].SymbolPath);
             }
         }
+
+        var maxConcurrentReads = _configuration.MaxConcurrentReads;
+        if (maxConcurrentReads > 0)
+        {
+            await Parallel.ForAsync(0, snapshot.Symbols.Count,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = maxConcurrentReads,
+                    CancellationToken = cancellationToken,
+                },
+                async (index, _) => await ReadIntoAsync(index).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+        else
+        {
+            var reads = new Task[snapshot.Symbols.Count];
+            for (var index = 0; index < snapshot.Symbols.Count; index++)
+            {
+                reads[index] = ReadIntoAsync(index);
+            }
+
+            await Task.WhenAll(reads).ConfigureAwait(false);
+        }
+
+        for (var index = 0; index < readValues.Length; index++)
+        {
+            if (readValues[index] is not null)
+            {
+                OnValueReceived(snapshot.Entries[index].Reference, readValues[index], null, propertyWriter, source);
+            }
+        }
+
+        _logger.LogDebug("Poll pass: {Count} symbols in {Elapsed:N0} ms, {Failures} failed.",
+            snapshot.Symbols.Count, Stopwatch.GetElapsedTime(passStarted).TotalMilliseconds, failures);
     }
 
     /// <summary>
