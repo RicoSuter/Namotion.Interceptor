@@ -35,7 +35,7 @@ One record per property, stored in property data under a short key (same convent
 | `Kind` | enum `DivergenceKind` | `Value` or `Structure` |
 | `Reason` | enum `DivergenceReason` | `Refused`, `Transformed`, `DroppedWrite` |
 | `Direction` | computed property | Derived from `Reason`: `Refused` and `Transformed` are inbound, `DroppedWrite` is outbound. Not a stored field. |
-| `Value` | `object?` | `Kind == Value` only. Inbound: the value the source sent. Outbound: the value that never arrived. Always a data value (scalar, string, enum, array, DTO), never an `IInterceptorSubject` or anything graph-attached; the classification gate below guarantees this. `null` is a legitimate sent value, which is why `Kind` is a separate field. |
+| `Value` | `object?` | `Kind == Value` only. Inbound: the value the source sent. Outbound: the value that never arrived. Always a data value (scalar, string, enum, array, DTO), never anything graph-attached; the classification gate below is the exact complement of the lifecycle's own attach gate (`CanContainSubjects`), so nothing the graph tracks can reach it. `null` is a legitimate sent value, which is why `Kind` is a separate field. |
 | `Message` | `string?` | The exception message for `Refused`, never the `Exception` object (no stack or inner-exception graph is pinned). |
 | `Timestamp` | `DateTimeOffset` | When the divergence was detected (`UtcNow` at record time). |
 
@@ -68,7 +68,7 @@ Checked before any read-back or record work, so excluded paths pay almost nothin
 2. That source currently owns the property (`TryGetSource` plus reference equality). Belt and braces over gate 1, and it scopes divergence to the owning relationship.
 3. Not `Metadata.IsDerived`. A derived property's getter recomputes the stored value, so a sent value never survives literally and every complete update carries derived properties (`SubjectUpdateFactory.cs:83`), which would otherwise mark them permanently.
 4. Inbound only: the property has a setter (`Metadata.SetValue is not null`). `SetValueFromOrigin` writes through `SetValue?.Invoke` (`SubjectChangeContextExtensions.cs:51`), so a missing setter is a silent no-op; without this gate the read-back would see stored differs from sent and mislabel every read-only property in a welcome snapshot as `Transformed`. Outbound drop sites do not apply this gate: a dropped change is a real loss regardless of the setter, and the predicate only needs the getter.
-5. Kind selection: properties classified `IsSubjectReference`, `IsSubjectCollection`, or `IsSubjectDictionary` (`RegisteredSubjectProperty.cs:120-138`, the same predicates `SubjectUpdateFactory` uses) take the `Structure` path; everything else takes the `Value` path. This classification, not the update's `Kind`, is what guarantees `record.Value` never holds a subject: null subject assignments travel as `Kind = Value` updates (`SubjectUpdateFactory.cs:147`, `:159`, `:173`), and the OPC UA loader's structural writes bind to the instrumented Connectors overload because they hold `RegisteredSubjectProperty` (`OpcUaSubjectLoader.cs:253`, `:268`, `:296`, `:344`).
+5. Kind selection: properties classified `IsSubjectReference`, `IsSubjectCollection`, or `IsSubjectDictionary` (`RegisteredSubjectProperty.cs:120-138`, the same predicates `SubjectUpdateFactory` uses) take the `Structure` path; everything else takes the `Value` path. This classification, not the update's `Kind`, is what guarantees `record.Value` never holds a subject: null subject assignments travel as `Kind = Value` updates (`SubjectUpdateFactory.cs:147`, `:159`, `:173`), and the OPC UA loader's structural writes bind to the instrumented Connectors overload because they hold `RegisteredSubjectProperty` (`OpcUaSubjectLoader.cs:268`, `:292`, `:333`, `:378`).
 
 ### Inbound: the shared helper
 
@@ -81,7 +81,7 @@ An internal helper in Connectors wraps the write attempt for both inbound sites:
 Sites:
 
 1. `RegisteredSubjectPropertyExtensions.SetValueFromSource` (`RegisteredSubjectPropertyExtensions.cs:16`). All direct client call sites route through this overload; per the review rounds exactly three sites currently bind to the `PropertyReference`-typed Tracking overload and change binding (extension binding follows the receiver's static type, not namespace imports; several OPC UA sites already bind here because they hold a `RegisteredSubjectProperty`). The Tracking overload itself stays untouched and undetected, which is correct because non-connector callers have no owning source.
-2. The applier: `SubjectUpdateApplyContext.SetPropertyValue` (`SubjectUpdateApplyContext.cs:51-64`) wraps its non-Local branch with the helper (Local origins keep the unarmed path and are excluded by gate 1 anyway), and #500's per-property catch (`SubjectUpdateApplier.cs:153-158`) records `Refused` for the failed property before `RecordFailure` aggregates it. A successful structural walk of a property (`Object`, `Collection`, `Dictionary` update kinds completing without a throw for that property) clears a `Structure` record.
+2. The applier: `SubjectUpdateApplyContext.SetPropertyValue` (`SubjectUpdateApplyContext.cs:52-64`) wraps its non-Local branch with the helper (Local origins keep the unarmed path and are excluded by gate 1 anyway), and #500's per-property catch (`SubjectUpdateApplier.cs:153-158`) records `Refused` for the failed property before `RecordFailure` aggregates it. The two recorders overlap for a Value-kind failure, so the precedence is fixed: the helper's record wins when it wrote one (it holds the converted sent value), and the catch records only when the helper did not reach its own recording step. That case is real, because `ConvertValue` runs inside the try (`SubjectUpdateApplier.cs:119-128`) and can throw before the write is attempted; such a record carries no value (`Kind == Value`, value absent, treated as never-agreeing) rather than the raw `JsonElement`, which could never compare equal to a stored value and would defeat the local-write self-heal. A later landing clears it normally. A successful structural walk of a property (`Object`, `Collection`, `Dictionary` update kinds completing without a throw for that property) clears a `Structure` record.
 
 The applier's transform arm passes distinct written and sent values (`SubjectUpdateApplier.cs:107-124`); the read-back compares against the sent value, so a deliberate local correction records `Transformed` until the source converges, which is the intended reading of the contract.
 
@@ -89,7 +89,7 @@ WebSocket coverage comes through site 2 (it applies everything through the appli
 
 ### Outbound: record at drops, clear at deliveries
 
-Record `{DroppedWrite, change value}` at every live drop site, beside the existing `Metrics.OutboundRetries.AddDropped` calls, applying gates 3 to 5 (gates 1 and 2 are implied: the delivery filter routes changes to the owning source):
+Record `{DroppedWrite, change value}` at every live drop site, beside the existing `Metrics.OutboundRetries.AddDropped` calls, applying gates 2 to 5. Gate 2 (ownership) must be re-checked at the drop and clear sites themselves, not inherited from capture: the delivery filter checks ownership when the change is captured (`SubjectSourceBase.cs:308`), but eviction and flush happen arbitrarily later and ownership can change in between. Without the re-check, a queue belonging to a released source can write a `DroppedWrite` record against a property another source has since claimed (reported as `Diverged` on a healthy property), or its later successful flush can clear a record the new owner's detection legitimately wrote. Drops are cold and clears already cost one probe, so the re-check is effectively free. With it, the residual window shrinks to the same microsecond race the inbound sites have, which the Record lifecycle section describes.
 
 | Site | What drops |
 |---|---|
@@ -97,18 +97,20 @@ Record `{DroppedWrite, change value}` at every live drop site, beside the existi
 | `WriteRetryQueue.cs:229` | Ring eviction on requeue after a failed flush |
 | `SubjectSourceBase.cs:366` | Write failure with no retry queue configured, from `result.FailedChanges` |
 | `SubjectSourceBase.cs:381` | Defensive catch, documented unreachable; recording there is one line and costs nothing |
-| `SubjectSourceBase.cs:613` | Reconnect reconciliation, property without a setter (mostly derived recalcs, which gate 3 skips; the residue is recorded) |
-| `SubjectSourceBase.cs:625` | Reconnect reconciliation failure |
+| `SubjectSourceBase.cs:614` | Reconnect reconciliation, property without a setter (mostly derived recalcs, which gate 3 skips; the residue is recorded) |
+| `SubjectSourceBase.cs:626` | Reconnect reconciliation failure |
 
 Inside `WriteRetryQueue`, evicted changes are collected under the lock and recorded after releasing it, keeping the lock footprint unchanged.
 
-Clear on confirmed delivery: wherever a `WriteResult` is interpreted, every attempted change not listed in `FailedChanges` counts as written (`WriteResult.cs:13-16`) and clears its property's record by compare-and-remove. Concretely: the flush loop's successful batches (`WriteRetryQueue.cs:160-183`), the direct no-queue path (`SubjectSourceBase.cs:363`), and the normal send path's result handling. The probe is one dictionary miss per delivered change in the healthy case. An inbound faithful landing also clears outbound records, per the helper above.
+Clear on confirmed delivery: wherever a `WriteResult` is interpreted, every change the writer **attempted** and did not list in `FailedChanges` counts as written and clears its property's record by compare-and-remove. This applies to every flush batch whether or not `Error` is set, since in the error path the non-failed remainder of the batch did reach the source; clearing only on fully successful batches would leave stale records whenever a partial failure occurs. Sites: the flush loop (`WriteRetryQueue.cs:160-183`, both arms), the direct no-queue path (`SubjectSourceBase.cs:363`), the normal send path's result handling, and the three transaction interpretation sites in `SourceTransactionWriter` (`:164`, `:375`, `:416`), which already compute the written set (`:176`, `:381`). The transaction sites are not optional: a commit writes `ChangeOrigin.Confirmed` (`SourceTransactionWriter.cs:306`, `:325`) whose re-delivery is suppressed (`ChangeDeliveryFilter.cs:82`), so no other clear site ever observes a transaction delivery, and an operator retrying a dropped write through a transaction would otherwise leave the property reporting `Diverged` indefinitely. The probe is one dictionary miss per delivered change in the healthy case. An inbound faithful landing also clears outbound records, per the helper above.
+
+**Attempted, not "everything unlisted".** `WriteResult.cs:13-16` documents unlisted changes as written, but two shipping writers violate that contract by skipping changes silently: OPC UA drops changes with no writable node (`OutboundWriter.cs:96-97`, `:149-152`) and returns `WriteResult.Success` when every change was skipped (`:46-49`); MQTT skips unregistered or subject-containing properties, properties with no topic, and **serialization failures** (`MqttSubjectClientSource.cs:425-445`), logging the last and continuing. Consuming the documented contract naively would both miss terminal losses (a serialization failure is exactly the per-property terminal loss this feature exists to report) and actively erase true records, because a skipped change would clear the very record describing its own non-delivery. Resolution: extend `WriteResult` with a `SkippedChanges` list (new property defaulting to empty, source-compatible), populate it at the five skip sites above, clear on `attempted minus FailedChanges minus SkippedChanges`, and record `DroppedWrite` for skipped changes whose skip is terminal (missing writable node, serialization failure) rather than a mapping gap (no topic, not registered, subject-containing). This also repairs a latent pre-existing defect: `SourceTransactionWriter`'s `written` set (`:176`, `:381`) currently counts silently-skipped changes as written, which feeds commit and revert decisions.
 
 ## Record lifecycle (claim scoping)
 
 No weak references and no identity tokens. The record's validity is scoped to the property-source claim, enforced at the two universal choke points every claim and release flows through:
 
-- `RemoveSource` (`SourcePropertyExtensions.cs:73-82`) removes the record unconditionally. Every release path funnels here: explicit release (`SourceOwnershipManager.cs:113`), subject detach (`:134`), dispose (`:156`). A record is a statement about one property-source relationship; when the relationship ends, the statement goes with it, and nothing pins a replaced or disposed source's data.
+- `RemoveSource` (`SourcePropertyExtensions.cs:73-82`) removes the record, but only once the ownership removal itself succeeded: the function returns early on an ownership mismatch (`:75-78`), and clearing in that branch would delete the current owner's record. Every release path funnels here: explicit release (`SourceOwnershipManager.cs:113`), subject detach (`:134`), dispose (`:156`). A record is a statement about one property-source relationship; when the relationship ends, the statement goes with it, and nothing pins a replaced or disposed source's data.
 - `SetSource` (`SourcePropertyExtensions.cs:32-43`) removes any leftover record, but only on the fresh-claim branch (`TryAddPropertyData` succeeded). An idempotent re-claim by the same instance, which is what an OPC UA rebrowse after reconnect performs, deliberately does not clear, so records survive reconnects and `TryGetDivergence()` keeps answering during an outage.
 - `TryGetDivergence()` returns false when the property has no current owner, consistent with divergence being defined against an owning source.
 
@@ -136,6 +138,7 @@ Honest limitation, documented: events fire on detection actions. A predicate fli
 - A record written by a losing race with a different value over-reports until the next landing or delivery of that property heals it. Transports serialize per-connection delivery, so the window requires cross-path concurrency (OPC UA subscription against polling) and closes on the next message including a no-op landing.
 - The read-back races a concurrent local write outside `SyncRoot` (`WriteInterceptorFactory.cs:19`, `:50` scope the lock to the store itself), which can record a transient divergence that is real at that instant (the model did just move away from what the source sent) and heals the same way.
 - While the owning source is not `Synchronized`, `GetSourceState()` reports the source's state and a diverged property reads `Synchronizing` for the duration of a reconnect. The record survives and `TryGetDivergence()` still returns it.
+- Ring eviction is not perfectly superseding for A-B-A value sequences. If the queue holds P=1, P=2, P=1 (newest) and capacity evicts the oldest P=1, the record is `{DroppedWrite, 1}` while the stored value is also 1, so the predicate reports `Diverged` even though two newer writes of P are still queued. It heals on the next successful flush of P. A true fix needs the queue scan the design rejects on cost, so this is accepted rather than solved.
 - MQTT without retained messages re-applies nothing on reconnect (`LoadInitialStateAsync` returns null), so records persist across reconnects there until a live message arrives, which is correct: the disagreement persists too.
 
 ## What is not covered
@@ -176,6 +179,7 @@ Benchmark gate before merge: the inbound apply path and the outbound batch path,
 
 - Unit tests in `Connectors.Tests`: the helper matrix (faithful, refused, transformed, no-op equal landing, derived skip, no-setter skip, structural refusal and clear, server-origin skip, unclaimed skip), record lifecycle (fresh claim clears, idempotent re-claim preserves, release clears), outbound drop and delivery clear paths including ring eviction and supersession, `GetSourceState` precedence, `TryGetDivergence` during `Synchronizing`, event emission including the cleared-only-when-removed rule.
 - A test pinning the re-entrant clamp scenario producing no record (the probe, promoted).
+- Transaction commit clearing an outbound record (the B2 workflow: drop, retry via transaction, source accepts, record clears), and a writer-skip test proving a skipped change neither clears a record nor counts as written.
 - Connector suites locally: OPC UA, MQTT, WebSocket (CI path filters skip them for shared-library changes; run the OPC UA suite alone, it cannot run concurrently).
 - Both API snapshot tests; accept the Connectors snapshot change.
 - Benchmark gate as above.
@@ -202,6 +206,13 @@ Elsewhere: `docs/connectors.md`'s "Inbound Update Error Handling" points at `Div
 5. No weak references; claim-scoped record lifetime via `SetSource`/`RemoveSource`.
 6. `record.Value` holds data values only, guaranteed by the registry classification gate, and stores the exception message rather than the exception.
 7. Re-entrant clamp: pre-existing footgun, behavior kept, one documentation sentence, closed for divergence by construction.
+
+Amended after adversarial review (2026-08-31, findings verified independently against code):
+
+8. Ownership is re-checked at the outbound drop and clear sites rather than inherited from capture-time filtering.
+9. The three `SourceTransactionWriter` interpretation sites join the clear inventory; without them a transaction-confirmed delivery never clears.
+10. `WriteResult` gains `SkippedChanges`, because two shipping writers silently skip changes and the documented "unlisted counts as written" contract is therefore false today. **This is the one amendment that widens scope beyond Connectors** (it edits the OPC UA and MQTT writers) and needs explicit approval; the alternative is to narrow the clear rule and document the resulting hole, at the cost of erasing true records on a skip.
+11. A-B-A ring eviction is an accepted transient rather than a solved case.
 
 ## Falsified claims from the review rounds (do not repeat)
 
