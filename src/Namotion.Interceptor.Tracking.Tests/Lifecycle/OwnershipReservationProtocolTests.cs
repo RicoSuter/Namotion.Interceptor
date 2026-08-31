@@ -271,6 +271,113 @@ public class OwnershipReservationProtocolTests
     }
 
     [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenProvisionalCaptureLosesToExplicitAttach_ThenItDoesNotDemoteTheAnchor()
+    {
+        // Arrange
+        var context = CreateContext();
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var root = new Person { FirstName = "root" };
+        var captureEntered = new ManualResetEventSlim(false);
+        var allowCapture = new ManualResetEventSlim(false);
+        var captureClaimed = 0;
+        ((IInterceptorSubject)root).AddProperties(new SubjectPropertyMetadata(
+            "CaptureGate",
+            typeof(Person),
+            [],
+            _ =>
+            {
+                if (Interlocked.CompareExchange(ref captureClaimed, 1, 0) == 0)
+                {
+                    captureEntered.Set();
+                    WaitFor(allowCapture, "the provisional capture to resume");
+                }
+
+                return null;
+            },
+            null,
+            isIntercepted: true,
+            isDynamic: true));
+        var attachCount = 0;
+        lifecycle.SubjectAttached += change =>
+        {
+            if (ReferenceEquals(change.Subject, root))
+            {
+                Interlocked.Increment(ref attachCount);
+            }
+        };
+        Exception? provisionalException = null;
+        var provisional = new Thread(() =>
+        {
+            provisionalException = Record.Exception(() =>
+                ((IInterceptorSubject)root).AttachToContext(
+                    context, SubjectAttachmentAnchorKind.Provisional));
+        }) { IsBackground = true };
+
+        // Act
+        provisional.Start();
+        WaitFor(captureEntered, "the provisional stable-null capture");
+        var explicitException = Record.Exception(() => root.AttachToContext(context));
+        allowCapture.Set();
+        var provisionalCompleted = provisional.Join(WriteProtocolAcceptance.RendezvousTimeout);
+
+        // Assert
+        Assert.True(provisionalCompleted);
+        Assert.Null(explicitException);
+        Assert.Null(provisionalException);
+        Assert.Same(context, root.TryGetContext());
+        Assert.Equal(SubjectAttachmentAnchorKind.Explicit,
+            ((IInterceptorSubject)root).Executor.AttachmentAnchor);
+        Assert.True(lifecycle.Graph.IsOwned(root));
+        Assert.Equal(1, attachCount);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenReservationCompletionDrainsDetachCallbacks_ThenConcurrentDisposeDoesNotWaitForATokenMonitor()
+    {
+        // Arrange
+        var context = CreateContext();
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var root = new Person(context) { FirstName = "root" };
+        var executor = (InterceptorExecutor)((IInterceptorSubject)root).Executor;
+        var reservation = (OwnershipReservationToken)lifecycle.Graph.ReserveForStructuralWrite(executor);
+        var workerStarted = new ManualResetEventSlim(false);
+        var workerCompleted = new ManualResetEventSlim(false);
+        var tokenMonitorHeld = false;
+        lifecycle.SubjectDetaching += change =>
+        {
+            if (change.IsContextDetach && ReferenceEquals(change.Subject, root))
+            {
+                var concurrentDispose = new Thread(() =>
+                {
+                    workerStarted.Set();
+                    reservation.Dispose();
+                    workerCompleted.Set();
+                }) { IsBackground = true };
+                concurrentDispose.Start();
+                WaitFor(workerStarted, "the concurrent reservation disposal");
+                tokenMonitorHeld = Monitor.IsEntered(reservation);
+                if (!tokenMonitorHeld)
+                {
+                    WaitFor(workerCompleted, "the concurrent reservation disposal to complete");
+                }
+            }
+        };
+
+        // Act
+        root.DetachFromContext(context);
+        lifecycle.Graph.ReleaseUnusedReservation(reservation);
+        WaitFor(workerCompleted, "the concurrent reservation disposal after callback drain");
+
+        // Assert
+        Assert.False(tokenMonitorHeld);
+        Assert.Equal(0, reservation.Reservation.ParticipantCount);
+        Assert.False(reservation.IsActive(executor));
+        Assert.Null(root.TryGetContext());
+    }
+
+    [Fact]
     public void WhenAnchoredRootDetachesWithExclusiveReservation_ThenItConflictsWithoutChangingAnchor()
     {
         // Arrange

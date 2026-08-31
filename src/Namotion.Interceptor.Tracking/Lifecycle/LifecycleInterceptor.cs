@@ -553,6 +553,9 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                             executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out _);
                             InterceptorSubjectExtensions.ValidateRootAnchor(
                                 attachedContext, currentAnchor, context, anchor);
+                            if (anchor == SubjectAttachmentAnchorKind.Provisional && attachedContext is not null)
+                                return;
+
                             using var change = _graph.PrepareAttach(
                                 subject, anchor, snapshots, propertyNames, reservations, _notifier);
                             journal = journalCapture.Complete();
