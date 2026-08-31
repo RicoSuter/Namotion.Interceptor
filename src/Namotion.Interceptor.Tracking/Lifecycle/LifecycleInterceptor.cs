@@ -161,57 +161,81 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var seededPropertyNames = new Dictionary<IInterceptorSubject, ImmutableArray<string>>(ReferenceEqualityComparer.Instance);
         try
         {
-            ReserveComponent(snapshot, discovered, reservations, seededSnapshots, seededPropertyNames);
-            using var journalCapture = _notifier.BeginJournal();
-            var runWithheld = false;
-            try
+            while (true)
             {
-                lock (context.Executor.SyncRoot)
+                var participants = ReserveComponent(
+                    snapshot, discovered, reservations, seededSnapshots, seededPropertyNames);
+                var retryCapture = false;
+                var runWithheld = false;
+                try
                 {
-                    context.SetTerminalPredecessor(readValue(context.Property.Subject));
-                    var gate = EnterGate();
-                    try
+                    using (var journalCapture = _notifier.BeginJournal())
                     {
-                        if (!context.Executor.IsStructuralWriteLeaseActive(lease, (InterceptorSubjectContext)_context) ||
-                            reservations.Values.Any(reservation =>
-                                !((InterceptorExecutor)reservation.Subject.Executor).IsOwnershipReservationActive(
-                                    reservation, (InterceptorSubjectContext)_context)))
+                        lock (context.Executor.SyncRoot)
                         {
-                            throw LifecycleConflictException.Retryable(context.Property.Subject);
-                        }
+                            context.SetTerminalPredecessor(readValue(context.Property.Subject));
+                            var gate = EnterGate();
+                            try
+                            {
+                                if (!context.Executor.IsStructuralWriteLeaseActive(
+                                        lease, (InterceptorSubjectContext)_context) ||
+                                    reservations.Values.Any(reservation =>
+                                        !((InterceptorExecutor)reservation.Subject.Executor)
+                                            .IsOwnershipReservationActive(
+                                                reservation, (InterceptorSubjectContext)_context)))
+                                {
+                                    throw LifecycleConflictException.Retryable(context.Property.Subject);
+                                }
 
-                        using var change = _graph.PrepareWrite(
-                            context.Property,
-                            snapshot,
-                            context.Executor.Revision + 1,
-                            seededSnapshots,
-                            seededPropertyNames,
-                            reservations,
-                            _notifier);
-                        if (change.RefreshCollection)
-                        {
-                            _notifier.RefreshCollectionProperty(context.Property, value);
-                        }
+                                if (!_graph.IsCaptureCurrent(participants))
+                                {
+                                    retryCapture = true;
+                                }
+                                else
+                                {
+                                    using var change = _graph.PrepareWrite(
+                                        context.Property,
+                                        snapshot,
+                                        context.Executor.Revision + 1,
+                                        seededSnapshots,
+                                        seededPropertyNames,
+                                        reservations,
+                                        _notifier);
+                                    if (change.RefreshCollection)
+                                    {
+                                        _notifier.RefreshCollectionProperty(context.Property, value);
+                                    }
 
-                        var journal = journalCapture.Complete(
-                            context.Property,
-                            context.Executor.Revision + 1);
-                        context.Executor.CommitRawWriteLocked(ref context, value, writeValue);
-                        _graph.Publish(change);
-                        context.CommittedLifecycleJournal = journal;
-                    }
-                    finally
-                    {
-                        runWithheld = gate.ExitWithoutCallouts();
+                                    var journal = journalCapture.Complete(
+                                        context.Property,
+                                        context.Executor.Revision + 1);
+                                    context.Executor.CommitRawWriteLocked(ref context, value, writeValue);
+                                    _graph.Publish(change);
+                                    context.CommittedLifecycleJournal = journal;
+                                }
+                            }
+                            finally
+                            {
+                                runWithheld = gate.ExitWithoutCallouts();
+                            }
+                        }
                     }
                 }
-            }
-            finally
-            {
-                if (runWithheld)
+                finally
                 {
-                    RunWithheldRecalculations();
+                    if (runWithheld)
+                    {
+                        RunWithheldRecalculations();
+                    }
                 }
+
+                if (!retryCapture)
+                {
+                    break;
+                }
+
+                ResetCaptureAttempt(
+                    discovered, reservations, seededSnapshots, seededPropertyNames);
             }
         }
         finally
@@ -222,7 +246,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         }
     }
 
-    private void ReserveComponent(
+    private ImmutableArray<StructuralSnapshotBuilder.CaptureParticipant> ReserveComponent(
         StructuralSnapshot snapshot,
         List<IInterceptorSubject> discovered,
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
@@ -232,7 +256,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var visited = LifecycleScratch.RentSubjectSet();
         try
         {
-            StructuralSnapshotBuilder.CaptureComponent(
+            var participants = StructuralSnapshotBuilder.CaptureComponent(
                 snapshot,
                 _context,
                 _graph.State,
@@ -240,17 +264,31 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                 discovered,
                 seededSnapshots,
                 seededPropertyNames);
+
+            if (!_graph.TryReserveDiscovered(discovered, reservations))
+            {
+                throw new InvalidOperationException(
+                    "Another context claimed a subject of the assigned graph before its structural write reached the terminal.");
+            }
+
+            return participants;
         }
         finally
         {
             LifecycleScratch.Return(visited);
         }
+    }
 
-        if (!_graph.TryReserveDiscovered(discovered, reservations))
-        {
-            throw new InvalidOperationException(
-                "Another context claimed a subject of the assigned graph before its structural write reached the terminal.");
-        }
+    private void ResetCaptureAttempt(
+        List<IInterceptorSubject> discovered,
+        Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
+        Dictionary<PropertyReference, StructuralSnapshot> snapshots,
+        Dictionary<IInterceptorSubject, ImmutableArray<string>> propertyNames)
+    {
+        _graph.ReleaseUnusedReservations(reservations);
+        discovered.Clear();
+        snapshots.Clear();
+        propertyNames.Clear();
     }
 
     StructuralWriteLease ITopologyAdmissionCoordinator.AcquireStructuralWriteLease(InterceptorExecutor executor)
@@ -351,68 +389,87 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var reservations = LifecycleScratch.RentOwnershipReservations();
         try
         {
-            var capture = _admission.CaptureBatch(registration, discovered);
-            if (capture.AddedPropertyNames.IsEmpty)
+            while (true)
             {
-                return true;
-            }
+                var capture = _admission.CaptureBatch(registration, discovered);
+                if (capture.AddedPropertyNames.IsEmpty)
+                {
+                    return true;
+                }
 
-            if (!_graph.TryReserveDiscovered(discovered, reservations))
-            {
-                throw new InvalidOperationException(
-                    "Another context claimed a subject of the admitted graph while this call was validating it.");
-            }
+                if (!_graph.TryReserveDiscovered(discovered, reservations))
+                {
+                    throw new InvalidOperationException(
+                        "Another context claimed a subject of the admitted graph while this call was validating it.");
+                }
 
-            using var journalCapture = _notifier.BeginJournal();
-            LifecycleJournal journal;
-            var runWithheld = false;
-            try
-            {
-                var gate = EnterGate();
+                LifecycleJournal? journal = null;
+                var retryCapture = false;
+                var runWithheld = false;
                 try
                 {
-                    var subject = registration.Subject;
-                    if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
+                    using (var journalCapture = _notifier.BeginJournal())
                     {
-                        return false;
-                    }
+                        var gate = EnterGate();
+                        try
+                        {
+                            var subject = registration.Subject;
+                            if (reservations.Values.Any(reservation =>
+                                    !((InterceptorExecutor)reservation.Subject.Executor)
+                                        .IsOwnershipReservationActive(
+                                            reservation, (InterceptorSubjectContext)_context)))
+                            {
+                                throw LifecycleConflictException.Retryable(subject);
+                            }
 
-                    if (!_graph.IsOwned(subject))
-                    {
-                        registration.PublishPrepared();
-                        return true;
+                            if (!_admission.IsCaptureCurrent(capture))
+                            {
+                                retryCapture = true;
+                            }
+                            else if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
+                            {
+                                return false;
+                            }
+                            else if (!_graph.IsOwned(subject))
+                            {
+                                registration.PublishPrepared();
+                                return true;
+                            }
+                            else
+                            {
+                                using var change = _admission.Prepare(capture, reservations);
+                                journal = journalCapture.Complete(default, 0);
+                                _admission.Publish(capture, change);
+                            }
+                        }
+                        finally
+                        {
+                            runWithheld = gate.ExitWithoutCallouts();
+                        }
                     }
-
-                    if (reservations.Values.Any(reservation =>
-                        !((InterceptorExecutor)reservation.Subject.Executor).IsOwnershipReservationActive(
-                            reservation, (InterceptorSubjectContext)_context)))
-                    {
-                        throw LifecycleConflictException.Retryable(subject);
-                    }
-
-                    using var change = _admission.Prepare(capture, reservations);
-                    journal = journalCapture.Complete(default, 0);
-                    _admission.Publish(capture, change);
                 }
                 finally
                 {
-                    runWithheld = gate.ExitWithoutCallouts();
+                    if (runWithheld)
+                    {
+                        RunWithheldRecalculations();
+                    }
                 }
-            }
-            finally
-            {
-                if (runWithheld)
+
+                if (retryCapture)
                 {
-                    RunWithheldRecalculations();
+                    _graph.ReleaseUnusedReservations(reservations);
+                    discovered.Clear();
+                    continue;
                 }
-            }
 
-            if (journal.Drain(null) is { } exception)
-            {
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception).Throw();
-            }
+                if (journal!.Drain(null) is { } exception)
+                {
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception).Throw();
+                }
 
-            return true;
+                return true;
+            }
         }
         finally
         {
@@ -477,35 +534,60 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var propertyNames = new Dictionary<IInterceptorSubject, ImmutableArray<string>>(ReferenceEqualityComparer.Instance);
         try
         {
-            _attach.Capture(subject, visited, discovered, snapshots, propertyNames);
-            if (!_graph.TryReserveDiscovered(discovered, reservations, subject))
+            while (true)
             {
-                throw new InvalidOperationException(
-                    "Another context claimed a subject of this graph while the attach was validating it.");
-            }
-
-            using var journalCapture = _notifier.BeginJournal();
-            LifecycleJournal journal;
-            using (EnterGate())
-            {
-                executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out _);
-                InterceptorSubjectExtensions.ValidateRootAnchor(attachedContext, currentAnchor, context, anchor);
-                if (reservations.Values.Any(reservation =>
-                    !((InterceptorExecutor)reservation.Subject.Executor).IsOwnershipReservationActive(
-                        reservation, (InterceptorSubjectContext)_context)))
+                var participants = _attach.Capture(
+                    subject, visited, discovered, snapshots, propertyNames);
+                if (!_graph.TryReserveDiscovered(discovered, reservations, subject))
                 {
-                    throw LifecycleConflictException.Retryable(subject);
+                    throw new InvalidOperationException(
+                        "Another context claimed a subject of this graph while the attach was validating it.");
                 }
 
-                using var change = _attach.Prepare(
-                    subject, anchor, snapshots, propertyNames, reservations);
-                journal = journalCapture.Complete(default, 0);
-                _attach.Publish(change);
-            }
+                LifecycleJournal? journal = null;
+                var retryCapture = false;
+                using (var journalCapture = _notifier.BeginJournal())
+                {
+                    using (EnterGate())
+                    {
+                        if (reservations.Values.Any(reservation =>
+                                !((InterceptorExecutor)reservation.Subject.Executor)
+                                    .IsOwnershipReservationActive(
+                                        reservation, (InterceptorSubjectContext)_context)))
+                        {
+                            throw LifecycleConflictException.Retryable(subject);
+                        }
 
-            if (journal.Drain(null) is { } exception)
-            {
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception).Throw();
+                        if (!_attach.IsCaptureCurrent(participants))
+                        {
+                            retryCapture = true;
+                        }
+                        else
+                        {
+                            executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out _);
+                            InterceptorSubjectExtensions.ValidateRootAnchor(
+                                attachedContext, currentAnchor, context, anchor);
+                            using var change = _attach.Prepare(
+                                subject, anchor, snapshots, propertyNames, reservations);
+                            journal = journalCapture.Complete(default, 0);
+                            _attach.Publish(change);
+                        }
+                    }
+                }
+
+                if (retryCapture)
+                {
+                    ResetCaptureAttempt(discovered, reservations, snapshots, propertyNames);
+                    visited.Clear();
+                    continue;
+                }
+
+                if (journal!.Drain(null) is { } exception)
+                {
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception).Throw();
+                }
+
+                return;
             }
         }
         finally

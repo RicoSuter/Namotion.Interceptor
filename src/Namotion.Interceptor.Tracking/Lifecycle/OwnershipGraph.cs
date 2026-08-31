@@ -146,6 +146,28 @@ internal sealed class OwnershipGraph
 
     internal void Publish(PreparedTopologyChange change) => change.Publish();
 
+    internal bool IsCaptureCurrent(
+        ImmutableArray<StructuralSnapshotBuilder.CaptureParticipant> participants)
+    {
+        var state = _state;
+        foreach (var participant in participants)
+        {
+            if (!participant.IsLocallyCurrent())
+            {
+                return false;
+            }
+
+            var isOwned = state.Owned.TryGetValue(participant.Subject, out var ownership);
+            if (isOwned != (participant.Ownership is not null) ||
+                isOwned && !ReferenceEquals(ownership, participant.Ownership))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     internal PreparedTopologyChange PrepareReconcile(
         PropertyReference property,
         StructuralSnapshot snapshot,
@@ -1038,7 +1060,13 @@ internal sealed class OwnershipGraph
             catch (LifecycleConflictException)
             {
                 ReleaseUnusedReservations(reservations);
-                return false;
+                var attachedContext = subject.Executor.AttachedContext;
+                if (attachedContext is not null && !ReferenceEquals(attachedContext, Context))
+                {
+                    return false;
+                }
+
+                throw;
             }
         }
 

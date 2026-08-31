@@ -95,7 +95,8 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             var current = _attachment;
             if (current.Phase != AttachmentPhase.Stable ||
                 (current.Context is not null && !ReferenceEquals(current.Context, context)) ||
-                (mode == ReservationMode.Exclusive && current.StructuralLeaseCount != 0))
+                (mode == ReservationMode.Exclusive || current.Context is null) &&
+                current.StructuralLeaseCount != 0)
             {
                 throw LifecycleConflictException.Retryable(_subject);
             }
@@ -290,7 +291,8 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             }
 
             if (current.Phase != AttachmentPhase.Stable ||
-                _ownershipReservation?.Mode == ReservationMode.Exclusive)
+                _ownershipReservation is { } reservation &&
+                (reservation.Mode == ReservationMode.Exclusive || current.Context is null))
             {
                 throw LifecycleConflictException.Retryable(_subject);
             }
@@ -780,6 +782,11 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 {
                     if (ReferenceEquals(_attachment.Context, attachedContext))
                     {
+                        if (attachedContext is null && _ownershipReservation is not null)
+                        {
+                            throw LifecycleConflictException.Retryable(_subject);
+                        }
+
                         registration.Publish();
                         return;
                     }

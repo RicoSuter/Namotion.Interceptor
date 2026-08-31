@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph graph)
 {
-    public void Capture(
+    public ImmutableArray<StructuralSnapshotBuilder.CaptureParticipant> Capture(
         IInterceptorSubject root,
         HashSet<IInterceptorSubject> visited,
         List<IInterceptorSubject> discovered,
@@ -13,6 +13,10 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
         Dictionary<IInterceptorSubject, ImmutableArray<string>> propertyNames) =>
         StructuralSnapshotBuilder.CaptureComponent(
             root, graph.Context, graph.State, visited, discovered, snapshots, propertyNames);
+
+    public bool IsCaptureCurrent(
+        ImmutableArray<StructuralSnapshotBuilder.CaptureParticipant> participants) =>
+        graph.IsCaptureCurrent(participants);
 
     public OwnershipGraph.PreparedTopologyChange Prepare(
         IInterceptorSubject root,

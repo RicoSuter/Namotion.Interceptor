@@ -7,6 +7,37 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// <summary>Materializes the subject occurrences exposed by one structural property value.</summary>
 internal static class StructuralSnapshotBuilder
 {
+    internal readonly struct CaptureParticipant(
+        IInterceptorSubject subject,
+        long revision,
+        IReadOnlyDictionary<string, SubjectPropertyMetadata> properties,
+        IInterceptorSubjectContext? attachmentContext,
+        long attachmentRevision,
+        SubjectOwnership? ownership)
+    {
+        internal IInterceptorSubject Subject { get; } = subject;
+        internal long Revision { get; } = revision;
+        internal IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties { get; } = properties;
+        internal IInterceptorSubjectContext? AttachmentContext { get; } = attachmentContext;
+        internal long AttachmentRevision { get; } = attachmentRevision;
+        internal SubjectOwnership? Ownership { get; } = ownership;
+
+        internal bool HasCurrentRevision() =>
+            ((InterceptorExecutor)Subject.Executor).CurrentRevision == Revision;
+
+        internal bool IsLocallyCurrent()
+        {
+            var executor = (InterceptorExecutor)Subject.Executor;
+            if (executor.CurrentRevision != Revision || !ReferenceEquals(Subject.Properties, Properties))
+            {
+                return false;
+            }
+
+            executor.TryGetAttachment(out var context, out _, out var attachmentRevision);
+            return ReferenceEquals(context, AttachmentContext) && attachmentRevision == AttachmentRevision;
+        }
+    }
+
     public static StructuralSnapshot Build(Type declaredType, object? value, long sourceRevision)
     {
         if (value is null or string)
@@ -103,7 +134,7 @@ internal static class StructuralSnapshotBuilder
         return declaredType.IsSubjectDictionaryType() || value.GetType().IsSubjectDictionaryType();
     }
 
-    internal static void CaptureComponent(
+    internal static ImmutableArray<CaptureParticipant> CaptureComponent(
         StructuralSnapshot roots,
         IInterceptorSubjectContext context,
         OwnershipGraph.GraphState graphState,
@@ -119,10 +150,11 @@ internal static class StructuralSnapshotBuilder
             pending.Push(occurrence.Subject);
         }
 
-        CapturePending(context, graphState, visited, discovered, snapshots, propertyNames, includeAttached, pending);
+        return CapturePending(
+            context, graphState, visited, discovered, snapshots, propertyNames, includeAttached, pending);
     }
 
-    internal static void CaptureComponent(
+    internal static ImmutableArray<CaptureParticipant> CaptureComponent(
         IInterceptorSubject root,
         IInterceptorSubjectContext context,
         OwnershipGraph.GraphState graphState,
@@ -133,10 +165,23 @@ internal static class StructuralSnapshotBuilder
     {
         var pending = LifecycleScratch.RentSubjectStack();
         pending.Push(root);
-        CapturePending(context, graphState, visited, discovered, snapshots, propertyNames, true, pending);
+        return CapturePending(context, graphState, visited, discovered, snapshots, propertyNames, true, pending);
     }
 
-    private static void CapturePending(
+    internal static CaptureParticipant CaptureParticipantState(
+        IInterceptorSubject subject,
+        OwnershipGraph.GraphState graphState)
+    {
+        var executor = (InterceptorExecutor)subject.Executor;
+        var revision = executor.CurrentRevision;
+        var properties = subject.Properties;
+        executor.TryGetAttachment(out var attachmentContext, out _, out var attachmentRevision);
+        graphState.Owned.TryGetValue(subject, out var ownership);
+        return new CaptureParticipant(
+            subject, revision, properties, attachmentContext, attachmentRevision, ownership);
+    }
+
+    private static ImmutableArray<CaptureParticipant> CapturePending(
         IInterceptorSubjectContext context,
         OwnershipGraph.GraphState graphState,
         HashSet<IInterceptorSubject> visited,
@@ -146,6 +191,7 @@ internal static class StructuralSnapshotBuilder
         bool includeAttached,
         Stack<IInterceptorSubject> pending)
     {
+        var participants = ImmutableArray.CreateBuilder<CaptureParticipant>();
         try
         {
             while (pending.Count > 0)
@@ -156,7 +202,8 @@ internal static class StructuralSnapshotBuilder
                     continue;
                 }
 
-                var attachedContext = subject.Executor.AttachedContext;
+                var participant = CaptureParticipantState(subject, graphState);
+                var attachedContext = participant.AttachmentContext;
                 if (attachedContext is not null && !ReferenceEquals(attachedContext, context))
                 {
                     throw new InvalidOperationException(
@@ -169,16 +216,15 @@ internal static class StructuralSnapshotBuilder
                     discovered.Add(subject);
                 }
 
-                if (graphState.Owned.TryGetValue(subject, out var ownership))
+                if (participant.Ownership is { } ownership)
                 {
                     propertyNames.TryAdd(subject, ownership.PropertyNames);
+                    participants.Add(participant);
                     continue;
                 }
 
-                var executor = (InterceptorExecutor)subject.Executor;
-                var revision = executor.CurrentRevision;
-                var names = ImmutableArray.CreateBuilder<string>(subject.Properties.Count);
-                foreach (var entry in subject.Properties)
+                var names = ImmutableArray.CreateBuilder<string>(participant.Properties.Count);
+                foreach (var entry in participant.Properties)
                 {
                     names.Add(entry.Key);
                     if (!OwnershipGraph.IsStructural(entry.Value))
@@ -194,13 +240,16 @@ internal static class StructuralSnapshotBuilder
                     }
                 }
 
-                if (executor.CurrentRevision != revision)
+                if (!participant.HasCurrentRevision())
                 {
                     throw LifecycleConflictException.Retryable(subject);
                 }
 
                 propertyNames.Add(subject, names.MoveToImmutable());
+                participants.Add(participant);
             }
+
+            return participants.ToImmutable();
         }
         finally
         {

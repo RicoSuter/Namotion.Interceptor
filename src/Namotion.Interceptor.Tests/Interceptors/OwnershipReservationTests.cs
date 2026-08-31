@@ -84,6 +84,67 @@ public class OwnershipReservationTests
     }
 
     [Fact]
+    public void WhenDetachedSubjectHasSharedReservation_ThenStructuralLeaseFailsPromptly()
+    {
+        // Arrange
+        var (_, executor) = CreateSubject();
+        var context = CreateContext();
+        using var reservation = executor.TryAcquireOwnershipReservation(context, ReservationMode.Shared);
+
+        // Act & Assert
+        Assert.Throws<LifecycleConflictException>(() => executor.TryAcquireStructuralWriteLease());
+    }
+
+    [Fact]
+    public void WhenDetachedSubjectHasActiveStructuralLease_ThenSharedReservationFailsPromptly()
+    {
+        // Arrange
+        var (_, executor) = CreateSubject();
+        var context = CreateContext();
+        using var lease = executor.TryAcquireStructuralWriteLease();
+
+        // Act & Assert
+        Assert.Throws<LifecycleConflictException>(() =>
+            executor.TryAcquireOwnershipReservation(context, ReservationMode.Shared));
+    }
+
+    [Fact]
+    public void WhenAttachedSubjectHasSharedReservation_ThenStructuralLeaseRemainsAvailable()
+    {
+        // Arrange
+        var (_, executor) = CreateSubject();
+        var context = CreateContext();
+        Assert.True(executor.TryUpdateAttachment(
+            0,
+            context,
+            SubjectAttachmentAnchorKind.Explicit,
+            out _));
+        using var reservation = executor.TryAcquireOwnershipReservation(context, ReservationMode.Shared);
+
+        // Act
+        using var lease = executor.TryAcquireStructuralWriteLease(context);
+
+        // Assert
+        Assert.Same(context, lease.Context);
+    }
+
+    [Fact]
+    public void WhenDetachedSubjectHasSharedReservation_ThenMetadataPublicationFailsPromptly()
+    {
+        // Arrange
+        var (subject, executor) = CreateSubject();
+        var context = CreateContext();
+        using var reservation = executor.TryAcquireOwnershipReservation(context, ReservationMode.Shared);
+        var metadata = new SubjectPropertyMetadata(
+            "Late", typeof(int), [], _ => 1, null, isIntercepted: true, isDynamic: true);
+
+        // Act & Assert
+        Assert.Throws<LifecycleConflictException>(() =>
+            ((IInterceptorSubject)subject).AddProperties([metadata]));
+        Assert.False(((IInterceptorSubject)subject).Properties.ContainsKey("Late"));
+    }
+
+    [Fact]
     public void WhenExclusiveReservationOwnsAttachmentTransition_ThenItsTokenCanCommit()
     {
         // Arrange

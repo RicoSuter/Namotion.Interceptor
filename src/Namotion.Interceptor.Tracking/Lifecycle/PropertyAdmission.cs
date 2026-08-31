@@ -11,7 +11,8 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
         ImmutableArray<string> AddedPropertyNames,
         ImmutableArray<PropertyReference> StructuralProperties,
         Dictionary<PropertyReference, StructuralSnapshot> Snapshots,
-        Dictionary<IInterceptorSubject, ImmutableArray<string>> PropertyNames);
+        Dictionary<IInterceptorSubject, ImmutableArray<string>> PropertyNames,
+        ImmutableArray<StructuralSnapshotBuilder.CaptureParticipant> Participants);
 
     internal Capture CaptureBatch(
         SubjectPropertyRegistration registration,
@@ -24,6 +25,7 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
             ReferenceEqualityComparer.Instance);
         var addedNames = ImmutableArray.CreateBuilder<string>(batch.Count);
         var structuralProperties = ImmutableArray.CreateBuilder<PropertyReference>();
+        var participants = ImmutableArray.CreateBuilder<StructuralSnapshotBuilder.CaptureParticipant>();
         var visited = LifecycleScratch.RentSubjectSet();
         var graphState = graph.State;
         try
@@ -41,18 +43,20 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
                     metadata.Type, metadata.GetValue?.Invoke(subject), 0);
                 structuralProperties.Add(property);
                 snapshots.Add(property, snapshot);
-                StructuralSnapshotBuilder.CaptureComponent(
-                    snapshot, graph.Context, graphState, visited, discovered, snapshots, propertyNames);
+                participants.AddRange(StructuralSnapshotBuilder.CaptureComponent(
+                    snapshot, graph.Context, graphState, visited, discovered, snapshots, propertyNames));
             }
 
             registration.PreparePublication();
+            participants.Add(StructuralSnapshotBuilder.CaptureParticipantState(subject, graph.State));
             propertyNames[subject] = registration.PreparedProperties.Keys.ToImmutableArray();
             return new Capture(
                 registration,
                 addedNames.MoveToImmutable(),
                 structuralProperties.ToImmutable(),
                 snapshots,
-                propertyNames);
+                propertyNames,
+                participants.ToImmutable());
         }
         finally
         {
@@ -73,6 +77,8 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
             reservations,
             notifier);
     }
+
+    internal bool IsCaptureCurrent(Capture capture) => graph.IsCaptureCurrent(capture.Participants);
 
     internal void Publish(Capture capture, OwnershipGraph.PreparedTopologyChange change)
     {
