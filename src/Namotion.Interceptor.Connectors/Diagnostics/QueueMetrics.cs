@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Connectors.Diagnostics;
 /// </remarks>
 public sealed class QueueMetrics
 {
-    private sealed record Snapshot(long Accumulated, Registration? Active, int? Capacity);
+    private sealed record Snapshot(long Accumulated, long Epoch, Registration? Active, int? Capacity);
 
     private readonly string _name;
 
@@ -18,7 +18,7 @@ public sealed class QueueMetrics
     // getter can throw or block. Mutations are rare (per registration or drop batch, not per item).
     private readonly Lock _snapshotLock = new();
 
-    private Snapshot _snapshot = new(0, null, null);
+    private Snapshot _snapshot = new(0, 0, null, null);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="QueueMetrics"/> class.
@@ -43,7 +43,7 @@ public sealed class QueueMetrics
     /// <remarks>
     /// The depth delegate may not throw (a throwing delegate is treated as reporting zero) and may not
     /// take a lock owned by this library, because a diagnostics read can happen while a monitor holds
-    /// its own lock. A buffer must report every drop through <see cref="AddDropped"/>. The metrics own
+    /// its own lock. A buffer must report every drop through <see cref="AddDropped(long)"/>. The metrics own
     /// that count so a drop racing registration release cannot be lost or make the total decrease.
     /// Lifetime-long providers may intentionally leave the returned handle undisposed when their
     /// lifetime matches this instance.
@@ -67,7 +67,7 @@ public sealed class QueueMetrics
                     $"A registration is already live on the '{_name}' queue metrics. Dispose its registration handle before registering again.");
             }
 
-            Volatile.Write(ref _snapshot, new Snapshot(current.Accumulated, registration, registration.Capacity));
+            Volatile.Write(ref _snapshot, current with { Active = registration, Capacity = registration.Capacity });
         }
 
         return registration;
@@ -77,6 +77,15 @@ public sealed class QueueMetrics
     /// Records drops for a buffer that has no counter of its own.
     /// </summary>
     public void AddDropped(long count)
+        => AddDropped(count, epoch: null);
+
+    internal Action<long> CreateDropReporter()
+    {
+        var epoch = Volatile.Read(ref _snapshot).Epoch;
+        return count => AddDropped(count, epoch);
+    }
+
+    private void AddDropped(long count, long? epoch)
     {
         if (count <= 0)
         {
@@ -86,7 +95,10 @@ public sealed class QueueMetrics
         lock (_snapshotLock)
         {
             var current = _snapshot;
-            Volatile.Write(ref _snapshot, current with { Accumulated = current.Accumulated + count });
+            if (epoch is null || current.Epoch == epoch)
+            {
+                Volatile.Write(ref _snapshot, current with { Accumulated = current.Accumulated + count });
+            }
         }
     }
 
@@ -94,7 +106,8 @@ public sealed class QueueMetrics
     {
         lock (_snapshotLock)
         {
-            Volatile.Write(ref _snapshot, _snapshot with { Accumulated = 0 });
+            var current = _snapshot;
+            Volatile.Write(ref _snapshot, current with { Accumulated = 0, Epoch = current.Epoch + 1 });
         }
     }
 
@@ -146,7 +159,7 @@ public sealed class QueueMetrics
             var current = _snapshot;
             if (ReferenceEquals(current.Active, registration))
             {
-                Volatile.Write(ref _snapshot, new Snapshot(current.Accumulated, Active: null, current.Capacity));
+                Volatile.Write(ref _snapshot, current with { Active = null });
             }
         }
     }
