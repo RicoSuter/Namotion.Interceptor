@@ -24,6 +24,8 @@ internal sealed class WriteRetryQueue : IDisposable
     private readonly QueueMetrics _metrics;
     private readonly int _maxQueueSize;
     private int _count;
+    private bool _retired;
+    private int _activeWriteCount;
 
     // Throttle flush-failure warnings to avoid log spam during extended disconnections
     private long _lastFlushWarningTimestamp;
@@ -65,23 +67,34 @@ internal sealed class WriteRetryQueue : IDisposable
         }
 
         int droppedCount;
+        var rejected = false;
         lock (_lock)
         {
-            // Add all new items
-            var span = changes.Span;
-            for (var i = 0; i < span.Length; i++)
+            if (_retired)
             {
-                _pendingWrites.Add(span[i]);
+                rejected = true;
+                droppedCount = 0;
             }
-
-            // Ring buffer: Drop the oldest if over capacity
-            droppedCount = _pendingWrites.Count - _maxQueueSize;
-            if (droppedCount > 0)
+            else
             {
-                _pendingWrites.RemoveRange(0, droppedCount);
-            }
+                // Add all new items
+                var span = changes.Span;
+                for (var i = 0; i < span.Length; i++)
+                {
+                    _pendingWrites.Add(span[i]);
+                }
 
-            Volatile.Write(ref _count, _pendingWrites.Count);
+                // Ring buffer: Drop the oldest if over capacity
+                droppedCount = TrimToCapacity();
+
+                Volatile.Write(ref _count, _pendingWrites.Count);
+            }
+        }
+
+        if (rejected)
+        {
+            _metrics.AddDropped(changes.Length);
+            return;
         }
 
         if (droppedCount > 0)
@@ -153,6 +166,7 @@ internal sealed class WriteRetryQueue : IDisposable
                         _scratchBuffer[i] = _pendingWrites[i];
                     }
                     _pendingWrites.RemoveRange(0, count);
+                    _activeWriteCount += count;
                     Volatile.Write(ref _count, _pendingWrites.Count);
                 }
 
@@ -160,6 +174,9 @@ internal sealed class WriteRetryQueue : IDisposable
                 var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
                 if (result.Error is not null)
                 {
+                    // FailedChanges is complete (see WriteChangesInBatchesAsync), so every failed
+                    // item is restored before ring capacity is applied to the combined queue.
+                    var droppedCount = SettleFlushedChanges(result.FailedChanges.AsSpan(), count);
                     var now = Environment.TickCount64;
                     if (now - _lastFlushWarningTimestamp >= 5000)
                     {
@@ -172,14 +189,12 @@ internal sealed class WriteRetryQueue : IDisposable
 
                     _hasFlushWarnings = true;
 
-                    // FailedChanges is complete (see WriteChangesInBatchesAsync), so every failed
-                    // item is restored before ring capacity is applied to the combined queue.
-                    var droppedCount = RequeueChanges(result.FailedChanges.AsSpan());
                     _metrics.AddDropped(droppedCount);
                     Array.Clear(_scratchBuffer, 0, count);
                     return false;
                 }
 
+                SettleFlushedChanges(ReadOnlySpan<SubjectPropertyChange>.Empty, count);
                 totalFlushed += count;
                 Array.Clear(_scratchBuffer, 0, count);
             }
@@ -215,23 +230,52 @@ internal sealed class WriteRetryQueue : IDisposable
         }
     }
 
-    private int RequeueChanges(ReadOnlySpan<SubjectPropertyChange> changes)
+    public void Retire()
+    {
+        int stranded;
+        lock (_lock)
+        {
+            if (_retired)
+            {
+                return;
+            }
+
+            _retired = true;
+            stranded = _pendingWrites.Count + _activeWriteCount;
+            _pendingWrites.Clear();
+            _activeWriteCount = 0;
+            Volatile.Write(ref _count, 0);
+        }
+
+        _metrics.AddDropped(stranded);
+    }
+
+    private int SettleFlushedChanges(ReadOnlySpan<SubjectPropertyChange> failedChanges, int attemptedCount)
     {
         lock (_lock)
         {
-            _pendingWrites.InsertRange(0, changes);
-
-            // The failed in-flight changes are older than anything enqueued while the write was in
-            // progress. Ring semantics therefore evict from the front after restoring the batch.
-            var droppedCount = _pendingWrites.Count - _maxQueueSize;
-            if (droppedCount > 0)
+            if (_retired)
             {
-                _pendingWrites.RemoveRange(0, droppedCount);
+                return 0;
             }
 
+            _activeWriteCount -= attemptedCount;
+            _pendingWrites.InsertRange(0, failedChanges);
+            var droppedCount = TrimToCapacity();
             Volatile.Write(ref _count, _pendingWrites.Count);
             return droppedCount;
         }
+    }
+
+    private int TrimToCapacity()
+    {
+        var droppedCount = _pendingWrites.Count - _maxQueueSize;
+        if (droppedCount > 0)
+        {
+            _pendingWrites.RemoveRange(0, droppedCount);
+        }
+
+        return droppedCount;
     }
 
     /// <summary>
@@ -239,6 +283,7 @@ internal sealed class WriteRetryQueue : IDisposable
     /// </summary>
     public void Dispose()
     {
+        Retire();
         _flushSemaphore.Dispose();
     }
 }
