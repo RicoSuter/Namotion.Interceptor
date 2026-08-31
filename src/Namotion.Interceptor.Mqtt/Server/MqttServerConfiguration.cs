@@ -1,6 +1,5 @@
 using System;
 using MQTTnet.Protocol;
-using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Registry.Paths;
@@ -70,14 +69,6 @@ public class MqttServerConfiguration
     public TimeSpan BufferTime { get; init; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
-    /// Gets or sets how long a stop may block while the last buffered batch is written. Connectors stop
-    /// one after another under the host's shared <c>HostOptions.ShutdownTimeout</c>, 30 seconds by
-    /// default, so enough of them blocked on unreachable endpoints still exhaust it. Zero discards the
-    /// batch instead.
-    /// </summary>
-    public TimeSpan TeardownFlushTimeout { get; init; } = ChangeQueueProcessor.DefaultTeardownFlushTimeout;
-
-    /// <summary>
     /// Gets or sets the delay before publishing the initial state to a newly connected client.
     /// This allows time for the client to complete its subscription setup.
     /// Set to zero to disable initial state publishing (relies on retained messages only).
@@ -137,11 +128,6 @@ public class MqttServerConfiguration
         if (BufferTime < TimeSpan.Zero)
         {
             throw new ArgumentException($"BufferTime must be non-negative, got: {BufferTime}", nameof(BufferTime));
-        }
-
-        if (TeardownFlushTimeout < TimeSpan.Zero)
-        {
-            throw new ArgumentException($"TeardownFlushTimeout must be non-negative, got: {TeardownFlushTimeout}", nameof(TeardownFlushTimeout));
         }
 
         if (InitialStateDelay < TimeSpan.Zero)

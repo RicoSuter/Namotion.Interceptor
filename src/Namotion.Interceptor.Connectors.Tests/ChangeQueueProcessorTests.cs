@@ -1030,47 +1030,7 @@ public class ChangeQueueProcessorTests
     }
 
     [Fact]
-    public async Task WhenTeardownFlushTimeoutIsZero_ThenBufferedChangesAreDiscardedOnStop()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create();
-        context.WithRegistry();
-        context.WithPropertyChangeSubscriptions();
-
-        var subject = new Person(context);
-        var writeCount = 0;
-
-        using var processor = new ChangeQueueProcessor(
-            source: new object(),
-            context: context,
-            propertyFilter: _ => true,
-            writeHandler: (_, _) =>
-            {
-                Interlocked.Increment(ref writeCount);
-                return ValueTask.CompletedTask;
-            },
-            bufferTime: TimeSpan.FromMinutes(5),
-            maxQueueDepth: null,
-            logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
-            teardownFlushTimeout: TimeSpan.Zero);
-
-        using var cancellation = new CancellationTokenSource();
-        var processing = processor.ProcessAsync(cancellation.Token);
-
-        subject.FirstName = "buffered";
-        await AsyncTestHelpers.WaitUntilAsync(() => processor.QueueDepth == 1);
-
-        // Act
-        await cancellation.CancelAsync();
-        await processing;
-
-        // Assert
-        Assert.Equal(0, Volatile.Read(ref writeCount));
-    }
-
-    [Fact]
-    public async Task WhenTheTeardownWriteBlocks_ThenStopEndsAtTheConfiguredTimeout()
+    public async Task WhenTheTeardownWriteBlocks_ThenStopEndsAtTheTeardownBound()
     {
         // Arrange: a write that never returns on its own, which is what a dead transport looks like here.
         var context = InterceptorSubjectContext.Create();
@@ -1092,8 +1052,7 @@ public class ChangeQueueProcessorTests
             bufferTime: TimeSpan.FromMinutes(5),
             maxQueueDepth: null,
             logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
-            teardownFlushTimeout: TimeSpan.FromMilliseconds(200));
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
@@ -1107,27 +1066,6 @@ public class ChangeQueueProcessorTests
 
         // Assert
         Assert.True(writeStarted.IsSet, "The teardown drain should have reached the write handler.");
-    }
-
-    [Fact]
-    public void WhenTeardownFlushTimeoutIsNegative_ThenConstructionThrows()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create();
-        context.WithRegistry();
-        context.WithPropertyChangeSubscriptions();
-
-        // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => new ChangeQueueProcessor(
-            source: null,
-            context: context,
-            propertyFilter: _ => true,
-            writeHandler: (_, _) => ValueTask.CompletedTask,
-            bufferTime: TimeSpan.FromMilliseconds(8),
-            maxQueueDepth: null,
-            logger: NullLogger.Instance,
-            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
-            teardownFlushTimeout: TimeSpan.FromMilliseconds(-1)));
     }
 
     [Fact]

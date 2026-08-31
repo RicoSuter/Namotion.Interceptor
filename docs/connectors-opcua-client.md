@@ -524,7 +524,6 @@ For 24/7 production use, the default configuration provides robust resilience:
 | `SubscriptionHealthCheckInterval` | 5s | Interval for health checks and post-reconnection state sync |
 | `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
 | `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
-| `TeardownFlushTimeout` | 5s | Max wait for the buffered outbound batch on stop, 0 to discard it (see [Flushing On Stop](connectors.md#flushing-on-stop)) |
 | `SubscriptionSequentialPublishing` | false | Process subscription messages in order (see Thread Safety) |
 
 ## Extensibility
