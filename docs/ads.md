@@ -366,7 +366,9 @@ A notification is registered per property through the raw ADS API, and the conne
 
 Holding the handles is what makes the release explicit. Nothing else deletes a device notification, so a re-scan that only forgot them would leave the previous registrations standing on the controller. With re-scans firing on connection restore, PLC state change and symbol version change, a long-lived connection would accumulate them until the PLC hit its own notification limit.
 
-A property is registered only when its .NET type marshals to exactly the number of bytes the PLC symbol holds. An enum registers as its underlying integer and a nullable as its underlying type, while a string and an array take their length from the symbol. A type that cannot be marshalled, or one whose width disagrees with the PLC, falls back to polling rather than registering: a narrower type is refused by the controller anyway, and a wider one would be accepted and read past the variable.
+A property is registered only when its .NET type marshals to exactly what the PLC symbol holds. An enum registers as its underlying integer and a nullable as its underlying type. A string takes its length from the symbol's PLC string type, and an array its element count from the symbol's array type; a byte size alone cannot validate either, since the marshalled size of a string is its length plus one by definition and a byte array divides evenly into any width.
+
+A type that cannot be marshalled falls back to polling rather than registering. That includes a `WSTRING`, which holds two bytes per character where the any-type path marshals single-byte text, and a nullable enum, whose boxed integer cannot be unboxed back into the property. So does a width that disagrees with the PLC: a narrower type is refused by the controller anyway, and a wider one would be accepted and read past the variable.
 
 A registration the PLC refuses also falls that property back to polling on its own, so one symbol that cannot carry a notification does not affect any other.
 

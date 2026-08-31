@@ -125,8 +125,19 @@ internal static class AdsEmbeddedRouter
             // returned for a route that is simply already present, which is the normal case when a
             // second source acquires the shared router, so that is checked first rather than
             // treated as a refusal.
-            if (_router.Routes.Any(existing => existing.NetId == route.NetId))
+            var existing = _router.Routes.FirstOrDefault(candidate => candidate.NetId == route.NetId);
+            if (existing is not null)
             {
+                // The router holds one route per net id, so two sources naming the same target
+                // through different addresses cannot both be satisfied. Reported rather than
+                // silently routed through whichever arrived first.
+                if (!string.Equals(existing.Address, route.Address, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"The embedded AMS router already routes '{route.NetId}' to '{existing.Address}', "
+                        + $"so it cannot also route it to '{route.Address}'.");
+                }
+
                 return;
             }
 

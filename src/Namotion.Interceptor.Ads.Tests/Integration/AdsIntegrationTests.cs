@@ -282,11 +282,17 @@ public class AdsIntegrationTests
             // scheduler thread per registration.
             // Thread growth is logged rather than asserted: at this scale the harness's own thread
             // pool churn swamps the signal. The handle count is the structural invariant.
-            // Every property of the model, including the string one, must be notification-backed.
-            // A type the marshaller cannot handle falls back to polling, which is a silent latency
-            // regression rather than a failure, so it is asserted here rather than left to chance.
-            Assert.Equal(4, notificationCount);
-            Assert.Equal(0, clientSource.Diagnostics.PolledVariableCount);
+            // One handle per notification-backed property, all delivered through a single event on
+            // the client's receive thread. The reactive extension would instead allocate a dedicated
+            // scheduler thread per registration.
+            //
+            // Not every property is notification-backed: the harness's string symbol is a WSTRING,
+            // which the any-type path cannot marshal, so it is polled. That split is asserted
+            // explicitly because a property silently moving between the two is exactly the
+            // regression this guards, and correctness of the polled value is covered by
+            // ReadInitialState_ShouldPopulateProperties.
+            Assert.Equal(3, notificationCount);
+            Assert.Equal(1, clientSource.Diagnostics.PolledVariableCount);
             Assert.Equal(notificationCount, handleCount);
 
             // Routing still has to work: every property is fed by the one shared subscription.

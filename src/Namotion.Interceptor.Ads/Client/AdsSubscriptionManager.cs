@@ -417,22 +417,34 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
 
     /// <summary>
     /// Resolves the type and dimensions the ADS any-type marshaller needs for a property, and
-    /// confirms they describe the same number of bytes the PLC holds.
+    /// confirms they describe exactly what the PLC holds.
     /// </summary>
     /// <remarks>
-    /// The property's own type is not usable as-is. An enum and a nullable are rejected outright by
-    /// the marshaller, and a string or an array needs its length supplied separately, which only the
-    /// PLC symbol knows. The size check is the important half: a .NET type narrower than the PLC
-    /// variable is refused by the controller, but a wider one is accepted and reads whatever follows
-    /// the variable, so a mismatch has to fall back to polling rather than register.
+    /// The property's own type is not usable as-is: an enum and a nullable are rejected by the
+    /// marshaller, and a string or an array needs its length supplied separately. Those lengths come
+    /// from the symbol's PLC data type rather than from its byte size, because a size comparison
+    /// cannot validate them. <c>MarshalSize(string, [n])</c> is <c>n + 1</c> by definition, so
+    /// deriving <c>n</c> from the byte size and then comparing the two is a tautology that accepts
+    /// any symbol, including a two-byte-per-character WSTRING. The same holds for a
+    /// <see cref="byte"/> array, whose element size of one makes every width divide evenly.
     /// </remarks>
     internal static bool TryResolveNotificationType(
         Type propertyType, ISymbol symbol, out Type marshalType, out int[]? marshalArgs)
     {
         marshalArgs = null;
+        var isNullable = Nullable.GetUnderlyingType(propertyType) is not null;
         marshalType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+
         if (marshalType.IsEnum)
         {
+            // The value arrives as the underlying integer. Unboxing it into an enum works, but
+            // unboxing it into a nullable enum throws, and the property writer would swallow that
+            // on every delivery, so this one stays on polling.
+            if (isNullable)
+            {
+                return false;
+            }
+
             marshalType = Enum.GetUnderlyingType(marshalType);
         }
 
@@ -448,11 +460,27 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         {
             if (marshalType == typeof(string))
             {
-                // A PLC STRING(n) occupies n + 1 bytes, and the marshaller wants n.
-                marshalArgs = [byteSize - 1];
+                // Single-byte strings only. A WSTRING holds two bytes per character, and the
+                // any-type path marshals with the target's single-byte value encoding, so it would
+                // decode the payload as one character and stop at the first NUL.
+                if (symbol.DataType is not IStringType stringType ||
+                    stringType.Length <= 0 ||
+                    stringType.ByteSize != stringType.Length + 1)
+                {
+                    return false;
+                }
+
+                marshalArgs = [stringType.Length];
             }
             else if (marshalType.IsArray)
             {
+                // Validated against the PLC array type, not against a byte count that divides evenly.
+                if (symbol.DataType is not IArrayType { IsJagged: false } arrayType ||
+                    arrayType.Dimensions.Count != 1)
+                {
+                    return false;
+                }
+
                 var elementType = marshalType.GetElementType();
                 if (elementType is null || !marshaler.CanMarshal(elementType, null, Encoding.UTF8))
                 {
@@ -460,12 +488,12 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                 }
 
                 var elementSize = marshaler.MarshalSize(elementType, null, Encoding.UTF8);
-                if (elementSize <= 0 || byteSize % elementSize != 0)
+                if (elementSize <= 0 || arrayType.ElementType is null || elementSize != arrayType.ElementType.ByteSize)
                 {
                     return false;
                 }
 
-                marshalArgs = [byteSize / elementSize];
+                marshalArgs = [arrayType.Dimensions.ElementCount];
             }
 
             return marshaler.CanMarshal(marshalType, marshalArgs, Encoding.UTF8)
