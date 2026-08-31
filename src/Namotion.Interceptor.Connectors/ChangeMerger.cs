@@ -76,9 +76,12 @@ internal sealed class ChangeMerger : IDisposable
     /// <param name="deliveryRule">When set, drops survivors the model has already moved past under
     /// that rule, which is what makes delivery converge across flushes rather than only within one. Null
     /// by default so the batch collapse can be exercised on its own.</param>
+    /// <param name="admissionHandler">Optional terminal admission invoked with the exact survivor count
+    /// after delivery suppression. Returning false hides the rejected batch from the caller.</param>
     public ReadOnlyMemory<SubjectPropertyChange> Merge(
         ReadOnlySpan<SubjectPropertyChange> changes,
-        ChangeDeliveryRule? deliveryRule = null)
+        ChangeDeliveryRule? deliveryRule = null,
+        Func<int, bool>? admissionHandler = null)
     {
         if (_buffer is null)
         {
@@ -192,6 +195,11 @@ internal sealed class ChangeMerger : IDisposable
         if (deliveryRule is { } rule && _count > 0)
         {
             SuppressSupersededChanges(rule);
+        }
+
+        if (_count > 0 && admissionHandler is not null && !admissionHandler(_count))
+        {
+            return ReadOnlyMemory<SubjectPropertyChange>.Empty;
         }
 
         return new ReadOnlyMemory<SubjectPropertyChange>(_buffer, 0, _count);

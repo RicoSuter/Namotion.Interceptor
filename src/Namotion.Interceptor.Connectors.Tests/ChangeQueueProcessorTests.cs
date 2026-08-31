@@ -285,6 +285,12 @@ public class ChangeQueueProcessorTests
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
 
+        subject.FirstName = "warmup";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processor.QueueDepth == 1,
+            message: "The processor should start before the overflow changes are produced");
+        await TriggerFlushAsync(processor);
+
         // Act - five changes into a buffer bounded to two; the three oldest must be dropped
         for (var i = 1; i <= 5; i++)
         {
@@ -816,6 +822,15 @@ public class ChangeQueueProcessorTests
         var task = (ValueTask)tryFlushMethod!.Invoke(processor, [CancellationToken.None])!;
         await task;
     }
+
+    private static bool IsDisposed(ChangeQueueProcessor processor)
+    {
+        var disposedField = typeof(ChangeQueueProcessor)
+            .GetField("_disposed", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        return (int)disposedField!.GetValue(processor)! != 0;
+    }
+
     [Fact]
     public async Task WhenChangeQueuedBeforeProcessingIsSuperseded_ThenOnlyCurrentValueIsWritten()
     {
@@ -1156,6 +1171,66 @@ public class ChangeQueueProcessorTests
     }
 
     [Fact]
+    public async Task WhenMergedDeliveryFilteringBlocks_ThenStoppingEndsAtTheBoundAndCountsTheLateSurvivor()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var dataAccessEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDataAccess = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completionReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var subject = new BlockingDataSubject(context, dataAccessEntered, releaseDataAccess);
+        var property = new PropertyReference(subject, nameof(Person.FirstName));
+        var writeHandlerEntered = false;
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            subscription: subscription,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) =>
+            {
+                writeHandlerEntered = true;
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMilliseconds(10),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            completionHandler: _ =>
+            {
+                completionReached.TrySetResult();
+                return ValueTask.CompletedTask;
+            });
+
+        EnqueueChange(processor, property, "old", "late", revision: 1);
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        await dataAccessEntered.Task.WaitAsync(TestTimeout);
+
+        try
+        {
+            // Act
+            await cancellation.CancelAsync();
+            await processing.WaitAsync(TeardownWaitTimeout);
+
+            // Assert
+            Assert.False(releaseDataAccess.Task.IsCompleted);
+        }
+        finally
+        {
+            releaseDataAccess.TrySetResult();
+        }
+
+        await completionReached.Task.WaitAsync(TestTimeout);
+
+        // Assert
+        Assert.False(writeHandlerEntered);
+        Assert.Equal(1, processor.DropCount);
+    }
+
+    [Fact]
     public async Task WhenAHandlerOwnedProcessorIsDisposedWhileFiltering_ThenTheDelegatedOwnerRetiresBeforeLateHandoff()
     {
         // Arrange
@@ -1221,6 +1296,84 @@ public class ChangeQueueProcessorTests
         {
             releaseFilter.TrySetResult();
         }
+    }
+
+    [Fact]
+    public async Task WhenTerminalRetirementIsRunning_ThenDisposeWaitsAndDoesNotInvokeItAgain()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var terminalEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseTerminal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completionReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var terminalInvocationCount = 0;
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            subscription: subscription,
+            propertyFilter: _ => true,
+            writeHandler: async (_, _) =>
+            {
+                writeEntered.TrySetResult();
+                await releaseWrite.Task.ConfigureAwait(false);
+            },
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            writeHandlerOwnsChanges: true,
+            terminalHandler: () =>
+            {
+                Interlocked.Increment(ref terminalInvocationCount);
+                terminalEntered.TrySetResult();
+                releaseTerminal.Task.GetAwaiter().GetResult();
+            },
+            completionHandler: _ =>
+            {
+                completionReached.TrySetResult();
+                return ValueTask.CompletedTask;
+            });
+
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() =>
+        {
+            releaseTerminal.TrySetResult();
+            releaseWrite.TrySetResult();
+        });
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        subject.FirstName = "blocked";
+        await writeEntered.Task.WaitAsync(TestTimeout);
+        await cancellation.CancelAsync();
+        await terminalEntered.Task.WaitAsync(TeardownWaitTimeout);
+
+        var disposing = Task.Run(processor.Dispose);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => IsDisposed(processor),
+            message: "Dispose should enter before terminal retirement is released.");
+
+        try
+        {
+            // Act & Assert
+            Assert.False(disposing.IsCompleted);
+        }
+        finally
+        {
+            releaseTerminal.TrySetResult();
+            releaseWrite.TrySetResult();
+        }
+
+        await Task.WhenAll(disposing, processing).WaitAsync(TestTimeout);
+        await completionReached.Task.WaitAsync(TestTimeout);
+
+        // Assert
+        Assert.Equal(1, terminalInvocationCount);
     }
 
     [Fact]
@@ -1777,4 +1930,32 @@ public class ChangeQueueProcessorTests
     }
 
     private sealed class CoreSetupException : Exception;
+
+    private sealed class BlockingDataSubject(
+        IInterceptorSubjectContext context,
+        TaskCompletionSource dataAccessEntered,
+        TaskCompletionSource releaseDataAccess) : IInterceptorSubject
+    {
+        private readonly ConcurrentDictionary<(string? property, string key), object?> _data = new();
+
+        public object SyncRoot { get; } = new();
+
+        public IInterceptorSubjectContext Context { get; } = context;
+
+        public ConcurrentDictionary<(string? property, string key), object?> Data
+        {
+            get
+            {
+                dataAccessEntered.TrySetResult();
+                releaseDataAccess.Task.GetAwaiter().GetResult();
+                return _data;
+            }
+        }
+
+        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties { get; } =
+            new Dictionary<string, SubjectPropertyMetadata>();
+
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) =>
+            throw new NotSupportedException();
+    }
 }

@@ -722,6 +722,45 @@ public class ChangeMergerTests
         Assert.Equal("Newer", survivor.GetNewValue<string>());
     }
 
+    [Fact]
+    public void WhenAdmissionRejectsFilteredSurvivors_ThenMergeReturnsEmptyWithTheExactSurvivorCount()
+    {
+        // Arrange
+        using var merger = new ChangeMerger();
+
+        var subject = new Person(InterceptorSubjectContext.Create());
+        var firstName = new PropertyReference(subject, nameof(Person.FirstName));
+        var lastName = new PropertyReference(subject, nameof(Person.LastName));
+
+        subject.FirstName = "Stale";
+        Assert.True(firstName.TryGetWriteState(includeSourceCommitsInRevision: false, out var staleRevision, out _));
+        subject.FirstName = "Newest";
+
+        subject.LastName = "Current";
+        Assert.True(lastName.TryGetWriteState(includeSourceCommitsInRevision: false, out var currentRevision, out _));
+
+        var admissionCount = 0;
+        SubjectPropertyChange[] changes =
+        [
+            CreateChange(firstName, "Old", "Stale", staleRevision),
+            CreateChange(lastName, "Old", "Current", currentRevision)
+        ];
+
+        // Act
+        var merged = merger.Merge(
+            changes,
+            ChangeDeliveryRule.SourceValuesMayBeStale,
+            count =>
+            {
+                admissionCount = count;
+                return false;
+            });
+
+        // Assert
+        Assert.True(merged.IsEmpty);
+        Assert.Equal(1, admissionCount);
+    }
+
     /// <summary>
     /// Suppression shrinks the survivor count, and <see cref="ChangeMerger.Reset"/> only clears
     /// the prefix that count describes. Without clearing the dropped tail, those slots would keep their

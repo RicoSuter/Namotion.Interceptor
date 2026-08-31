@@ -32,7 +32,9 @@ public class ChangeQueueProcessor : IDisposable
     private readonly Action<long>? _dropHandler;
     private readonly bool _writeHandlerOwnsChanges;
     private readonly Action? _terminalHandler;
+    private readonly object? _terminalHandlerGate;
     private readonly Func<CancellationToken, ValueTask>? _completionHandler;
+    private readonly Func<int, bool>? _mergedDeliveryAdmission;
 
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
@@ -42,7 +44,7 @@ public class ChangeQueueProcessor : IDisposable
     private int _deliveryState;
     private int _processingActive;
     private int _mergerDisposed;
-    private int _terminalHandlerInvoked;
+    private bool _terminalHandlerInvoked;
     private int _flushGate; // 0 = free, 1 = flushing
     private int _disposed; // 0 = not disposed, 1 = disposed (use Interlocked for thread-safe check)
 
@@ -130,6 +132,7 @@ public class ChangeQueueProcessor : IDisposable
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _dropHandler = dropHandler;
         _writeHandlerOwnsChanges = false;
+        _mergedDeliveryAdmission = TryAdmitMergedDelivery;
 
         try
         {
@@ -177,7 +180,9 @@ public class ChangeQueueProcessor : IDisposable
         _dropHandler = dropHandler;
         _writeHandlerOwnsChanges = writeHandlerOwnsChanges;
         _terminalHandler = terminalHandler;
+        _terminalHandlerGate = terminalHandler is null ? null : new object();
         _completionHandler = completionHandler;
+        _mergedDeliveryAdmission = writeHandlerOwnsChanges ? null : TryAdmitMergedDelivery;
 
         try
         {
@@ -455,6 +460,17 @@ public class ChangeQueueProcessor : IDisposable
     private int CloseDelivery() =>
         Math.Max(0, Interlocked.Exchange(ref _deliveryState, ClosedDelivery));
 
+    private bool TryAdmitMergedDelivery(int count)
+    {
+        if (TryAdmitDelivery(count))
+        {
+            return true;
+        }
+
+        CountTimedOutDelivery(count);
+        return false;
+    }
+
     private int CloseDeliveryAndDrain()
     {
         // Cancellation requeue and failure accounting must settle before close observes the delivery
@@ -596,16 +612,9 @@ public class ChangeQueueProcessor : IDisposable
         // Whether the merger was handed a batch, which decides whether it has one to release below. Set
         // before the call rather than after, so a throw part-way through a merge still releases it.
         var merged = false;
-        var ownershipLockTaken = false;
 
         try
         {
-            if (!_writeHandlerOwnsChanges)
-            {
-                Monitor.Enter(_changes);
-                ownershipLockTaken = true;
-            }
-
             // Drain the concurrent queue into the scratch buffer under exclusive flush
             _flushChanges.Clear();
             while (_changes.TryDequeue(out var change))
@@ -619,16 +628,10 @@ public class ChangeQueueProcessor : IDisposable
             }
 
             merged = true;
-            var mergedChanges = _changeMerger.Merge(CollectionsMarshal.AsSpan(_flushChanges), _deliveryRule);
-            var admitted = _writeHandlerOwnsChanges ||
-                mergedChanges.Length == 0 ||
-                TryAdmitDelivery(mergedChanges.Length);
-
-            if (ownershipLockTaken)
-            {
-                Monitor.Exit(_changes);
-                ownershipLockTaken = false;
-            }
+            var mergedChanges = _changeMerger.Merge(
+                CollectionsMarshal.AsSpan(_flushChanges),
+                _deliveryRule,
+                _mergedDeliveryAdmission);
 
             if (mergedChanges.Length > 0)
             {
@@ -636,23 +639,14 @@ public class ChangeQueueProcessor : IDisposable
                 {
                     await _writeHandler(mergedChanges, cancellationToken).ConfigureAwait(false);
                 }
-                else if (admitted)
-                {
-                    await DeliverAdmittedAsync(mergedChanges, cancellationToken).ConfigureAwait(false);
-                }
                 else
                 {
-                    CountTimedOutDelivery(mergedChanges.Length);
+                    await DeliverAdmittedAsync(mergedChanges, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
         finally
         {
-            if (ownershipLockTaken)
-            {
-                Monitor.Exit(_changes);
-            }
-
             try
             {
                 // Clear buffers to allow GC of SubjectPropertyChange objects
@@ -703,9 +697,22 @@ public class ChangeQueueProcessor : IDisposable
 
     private void InvokeTerminalHandlerOnce()
     {
-        if (Interlocked.Exchange(ref _terminalHandlerInvoked, 1) == 0)
+        if (_terminalHandlerGate is not { } gate)
         {
-            _terminalHandler?.Invoke();
+            return;
+        }
+
+        lock (gate)
+        {
+            if (_terminalHandlerInvoked)
+            {
+                return;
+            }
+
+            // Publish once inside the reentrant monitor before invoking: competing threads wait for
+            // completion, callback reentry does not recurse, and an exception cannot trigger a retry.
+            _terminalHandlerInvoked = true;
+            _terminalHandler!.Invoke();
         }
     }
 
