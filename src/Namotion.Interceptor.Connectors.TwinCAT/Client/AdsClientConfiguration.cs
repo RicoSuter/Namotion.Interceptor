@@ -84,6 +84,20 @@ public class AdsClientConfiguration
     public int MaxNotifications { get; set; } = 500;
 
     /// <summary>
+    /// Gets or sets whether the symbol table and data types are fetched when the symbol loader is
+    /// created, rather than on the first symbol access.
+    /// </summary>
+    /// <remarks>
+    /// The fetch happens either way. Left to itself it runs synchronously, on whichever thread
+    /// first touches the symbols, which Beckhoff advises against for the first call. Fetching up
+    /// front moves it onto a thread that is allowed to wait and gets it out of the way before
+    /// DynamicTree starts building struct members, array elements and enum fields from the type
+    /// information. Set to false to restore the lazy load, which also defers any error in it to
+    /// the first symbol access.
+    /// </remarks>
+    public bool PrefetchSymbols { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets how many polled reads may be in flight at once, or 0 for no limit.
     /// </summary>
     /// <remarks>

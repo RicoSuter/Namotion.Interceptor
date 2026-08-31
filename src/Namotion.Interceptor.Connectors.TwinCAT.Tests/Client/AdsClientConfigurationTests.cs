@@ -29,6 +29,7 @@ public class AdsClientConfigurationTests
         Assert.Equal(0, configuration.DefaultMaxDelay);
         Assert.Equal(500, configuration.MaxNotifications);
         Assert.Equal(0, configuration.MaxConcurrentReads);
+        Assert.True(configuration.PrefetchSymbols);
         Assert.Equal(TimeSpan.FromMilliseconds(100), configuration.PollingInterval);
         Assert.Equal(1000, configuration.WriteRetryQueueSize);
         Assert.Equal(TimeSpan.FromSeconds(5), configuration.HealthCheckInterval);
