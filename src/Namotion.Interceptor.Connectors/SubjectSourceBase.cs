@@ -176,6 +176,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             // This source will never pump. Reporting a stop keeps it in scope as never-synchronized,
             // so in-scope waits answer Incomplete; unwinding left them on a vacuous Synchronized.
             // Nothing unregisters it until Dispose, which a graph-attached source may never get.
+            WriteRetryQueue.Retire();
             TransitionStateTo(SourceState.Stopped);
             throw;
         }
@@ -287,7 +288,13 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         logger: _logger,
                         dropHandler: Metrics.OutboundChanges.CreateDropReporter(),
                         writeHandlerOwnsChanges: true,
-                        terminalHandler: WriteRetryQueue.Retire,
+                        terminalHandler: () =>
+                        {
+                            if (stoppingToken.IsCancellationRequested)
+                            {
+                                WriteRetryQueue.Retire();
+                            }
+                        },
                         completionHandler: async teardownToken =>
                         {
                             await WriteRetryQueue.FlushAsync(this, teardownToken).ConfigureAwait(false);
@@ -630,9 +637,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// <inheritdoc />
     public override void Dispose()
     {
-        // Publish the final Stopped while still registered, so a dispose without a stop is not silent.
-        // Deliberately ahead of base.Dispose(), which is what lets the monitors see it; the price is a
-        // sub-microsecond window in which a reader sees Stopped beside a still-true IsOperational.
+        // Close outbound admission before publishing the final Stopped, so an observer blocked inside
+        // the notification cannot still hand a write to the transport. Publishing while registered keeps
+        // a dispose without a stop visible to the monitors.
+        WriteRetryQueue.Retire();
         TransitionStateTo(SourceState.Stopped);
 
         // Take-and-clear in one step, so a concurrent StartAsync unwinding through its own local
