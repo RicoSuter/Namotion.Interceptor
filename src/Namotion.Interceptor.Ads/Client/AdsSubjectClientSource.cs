@@ -238,15 +238,43 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
         return () =>
         {
             var now = DateTimeOffset.UtcNow;
+            var applied = 0;
+            var failed = 0;
+
             foreach (var (property, value) in values)
             {
-                if (property is not null)
+                if (property is null)
+                {
+                    continue;
+                }
+
+                try
                 {
                     property.SetValueFromSource(this, now, now, value);
+                    applied++;
+                }
+                catch (Exception exception)
+                {
+                    // Guarded per property: this action runs unprotected inside the property
+                    // writer, so one value the PLC cannot supply in the property's type would
+                    // abort the whole apply, fail the listen attempt, and take the source with
+                    // it. No property would hold a value and no write would ever reach the PLC.
+                    failed++;
+                    _logger.LogError(exception,
+                        "Failed to apply the PLC value to property '{Property}'.", property.Name);
                 }
             }
 
-            _logger.LogInformation("Updated {Count} properties with PLC values.", properties.Count);
+            if (failed > 0)
+            {
+                _logger.LogWarning(
+                    "Applied {AppliedCount} of {TotalCount} PLC values; {FailedCount} could not be assigned.",
+                    applied, properties.Count, failed);
+            }
+            else
+            {
+                _logger.LogInformation("Updated {Count} properties with PLC values.", applied);
+            }
         };
     }
 

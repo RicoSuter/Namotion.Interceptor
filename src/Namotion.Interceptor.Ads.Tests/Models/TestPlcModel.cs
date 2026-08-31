@@ -23,4 +23,26 @@ public partial class TestPlcModel
 
     [AdsVariable("GVL.Values")]
     public partial int[]? Values { get; set; }
+
+    [AdsVariable("GVL.Mode")]
+    public partial TestMode Mode { get; set; }
+
+    [AdsVariable("GVL.UnsignedMode")]
+    public partial TestUnsignedMode UnsignedMode { get; set; }
+
+    [AdsVariable("GVL.OptionalMode")]
+    public partial TestMode? OptionalMode { get; set; }
+}
+
+public enum TestMode
+{
+    Idle = 0,
+    Running = 1,
+}
+
+/// <summary>Unsigned underlying type: unboxing a signed integer into this throws.</summary>
+public enum TestUnsignedMode : ushort
+{
+    Idle = 0,
+    Disabled = 40000,
 }

@@ -47,6 +47,41 @@ public class AdsValueConverterTests
     }
 
     [Fact]
+    public void ConvertToPropertyValue_WithIntegerForEnumProperty_ReturnsTheEnum()
+    {
+        // A PLC type that will not resolve is read as a raw integer, and a notification is
+        // registered on the enum's underlying type, so the value always arrives as an integer.
+        var property = GetProperty(nameof(TestPlcModel.Mode));
+
+        var result = _converter.ConvertToPropertyValue(1, property);
+
+        Assert.Equal(TestMode.Running, Assert.IsType<TestMode>(result));
+    }
+
+    [Fact]
+    public void ConvertToPropertyValue_WithSignedIntegerForUnsignedEnumProperty_ReturnsTheEnum()
+    {
+        // The raw-integer read picks its type by byte size alone, so a ushort-backed enum arrives
+        // as a short. Unboxing is strict about signedness and would throw.
+        var property = GetProperty(nameof(TestPlcModel.UnsignedMode));
+
+        var result = _converter.ConvertToPropertyValue(unchecked((short)40000), property);
+
+        Assert.Equal(TestUnsignedMode.Disabled, Assert.IsType<TestUnsignedMode>(result));
+    }
+
+    [Fact]
+    public void ConvertToPropertyValue_WithIntegerForNullableEnumProperty_ReturnsTheEnum()
+    {
+        // Unboxing an integer straight into a nullable enum throws.
+        var property = GetProperty(nameof(TestPlcModel.OptionalMode));
+
+        var result = _converter.ConvertToPropertyValue(1, property);
+
+        Assert.Equal(TestMode.Running, Assert.IsType<TestMode>(result));
+    }
+
+    [Fact]
     public void ConvertToPropertyValue_WithDateTimeForDateTimeOffsetProperty_ReturnsDateTimeOffset()
     {
         // Arrange

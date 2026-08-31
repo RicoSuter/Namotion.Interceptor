@@ -26,6 +26,14 @@ public class AdsValueConverter
         if (targetType == typeof(DateTimeOffset) && adsValue is DateTime dateTime)
             return new DateTimeOffset(DateTime.SpecifyKind(dateTime, DateTimeKind.Utc), TimeSpan.Zero);
 
+        // An enum arrives as an integer, from the raw-integer read for a PLC type that will not
+        // resolve or from a notification registered on the underlying type. Unboxing is strict about
+        // both signedness and nullability, so assigning a short to a ushort-backed enum, or any
+        // integer to a nullable enum, throws where Enum.ToObject succeeds.
+        var enumType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+        if (enumType.IsEnum && adsValue.GetType().IsPrimitive)
+            return Enum.ToObject(enumType, adsValue);
+
         return adsValue;
     }
 

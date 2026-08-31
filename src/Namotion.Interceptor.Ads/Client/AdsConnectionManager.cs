@@ -203,6 +203,8 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
                     client.AdsStateChanged += OnAdsStateChanged;
                     client.AdsSymbolVersionChanged += OnSymbolVersionChanged;
 
+                    // The initial connect does not raise ConnectionStateChanged, so re-arm here too.
+                    ResetFirstOccurrenceLog();
                     Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
                     Volatile.Write(ref _client, client);
                     _circuitBreaker.RecordSuccess();
@@ -281,11 +283,26 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
         _loggedErrors.TryRemove(category, out _);
     }
 
+    /// <summary>
+    /// Re-arms every first-occurrence category, so the next failure of each is a warning again.
+    /// </summary>
+    /// <remarks>
+    /// Called when a connection is established. Without it a category warns once per process: a
+    /// benign message during startup, such as the sum-read capability probe falling back, consumes
+    /// the one warning for its category, and a later total failure of the same area is logged only
+    /// at Debug. That turns most of this connector's loud failures into silent ones.
+    /// </remarks>
+    internal void ResetFirstOccurrenceLog()
+    {
+        _loggedErrors.Clear();
+    }
+
     internal void OnConnectionStateChanged(object? sender, ConnectionStateChangedEventArgs eventArgs)
     {
         if (eventArgs.NewState == ConnectionState.Connected &&
             eventArgs.OldState != ConnectionState.Connected)
         {
+            ResetFirstOccurrenceLog();
             Interlocked.Increment(ref _successfulReconnections);
             ConnectionRestored?.Invoke();
         }
