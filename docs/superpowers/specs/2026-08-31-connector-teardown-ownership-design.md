@@ -54,9 +54,9 @@ Connect-window writes enter the same retry ownership protocol directly. Retry ov
 4. Wait for the core for at most the fixed five-second deadline.
 5. If the deadline expires, atomically close direct delivery, invoke the source queue's idempotent retirement callback when configured, drain locally buffered direct work, update `DropCount`, detach potentially blocking reporting and logging, and return.
 
-Private cancellation sources, merger buffers, and other state used by late work remain owned by the detached worker until it exits. `Dispose` closes admission but never resets a terminal state or releases data still used by that worker.
+Private cancellation sources, merger buffers, and other state used by late work remain owned by detached cleanup until the worker and outstanding asynchronous cancellation callbacks exit. A callback that never returns intentionally retains those sources instead of allowing disposal to race live token users. `Dispose` closes admission but never resets a terminal state or releases data still used by that worker.
 
-The current processing cancellation helper, preparing and timed-out sentinels, repeated in-flight claims, and teardown-time retry flush are removed. One terminal state plus a task/deadline race replaces them.
+The current processing cancellation helper, preparing and timed-out sentinels, repeated in-flight claims, and separately owned retry-flush timeout are removed. A source completion hook may flush retry ownership while the transport is still up, but it uses the processor coordinator's same teardown token and deadline. One terminal state plus a task/deadline race replaces the overlapping timeout machinery.
 
 ## Retry Queue Protocol
 
