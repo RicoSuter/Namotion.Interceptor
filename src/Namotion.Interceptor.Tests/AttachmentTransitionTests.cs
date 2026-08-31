@@ -1,3 +1,4 @@
+using System.Reflection;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tests;
@@ -174,5 +175,102 @@ public class AttachmentTransitionTests
         // Assert
         Assert.Same(context, subject.TryGetContext());
         Assert.Same(context, subject.GetContext());
+    }
+
+    [Fact]
+    public void WhenPreparedDetachmentCannotReserveItsFinalRevision_ThenItFailsBeforeChangingPhase()
+    {
+        // Arrange
+        var executor = (InterceptorExecutor)CreateExecutor();
+        var context = (InterceptorSubjectContext)InterceptorSubjectContext.Create();
+        SetAttachment(executor, context, SubjectAttachmentAnchorKind.Explicit,
+            long.MaxValue - 1, AttachmentPhase.Stable);
+
+        // Act
+        var exception = Record.Exception(() => executor.PrepareAttachmentUpdate(
+            context, null, SubjectAttachmentAnchorKind.None));
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.Same(context, executor.AttachedContext);
+        Assert.Equal(SubjectAttachmentAnchorKind.Explicit, executor.AttachmentAnchor);
+        Assert.Equal(long.MaxValue - 1, executor.AttachmentRevision);
+        Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
+    }
+
+    [Fact]
+    public void WhenPreparedDetachmentUsesLastTwoRevisions_ThenFinalClearEndsAtMaximumWithoutWrapping()
+    {
+        // Arrange
+        var executor = (InterceptorExecutor)CreateExecutor();
+        var context = (InterceptorSubjectContext)InterceptorSubjectContext.Create();
+        SetAttachment(executor, context, SubjectAttachmentAnchorKind.Explicit,
+            long.MaxValue - 2, AttachmentPhase.Stable);
+
+        // Act
+        using var transition = executor.PrepareAttachmentUpdate(
+            context, null, SubjectAttachmentAnchorKind.None);
+        transition.PublishPrepared();
+        executor.FinalizeDetachment(context, long.MaxValue - 1);
+
+        // Assert
+        Assert.Null(executor.AttachedContext);
+        Assert.Equal(SubjectAttachmentAnchorKind.None, executor.AttachmentAnchor);
+        Assert.Equal(long.MaxValue, executor.AttachmentRevision);
+        Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
+    }
+
+    [Fact]
+    public void WhenDetachmentFinalizerDoesNotMatchExactPreparedEpoch_ThenEveryGuardPreservesState()
+    {
+        // Arrange
+        var executor = (InterceptorExecutor)CreateExecutor();
+        var context = (InterceptorSubjectContext)InterceptorSubjectContext.Create();
+        var foreignContext = (InterceptorSubjectContext)InterceptorSubjectContext.Create();
+        SetAttachment(executor, context, SubjectAttachmentAnchorKind.Explicit, 10, AttachmentPhase.Stable);
+        using var transition = executor.PrepareAttachmentUpdate(
+            context, null, SubjectAttachmentAnchorKind.None);
+        transition.PublishPrepared();
+
+        // Act & Assert: stale revision and foreign context cannot clear a real prepared record.
+        executor.FinalizeDetachment(context, 10);
+        AssertDetaching(executor, context, 11, SubjectAttachmentAnchorKind.None);
+        executor.FinalizeDetachment(foreignContext, 11);
+        AssertDetaching(executor, context, 11, SubjectAttachmentAnchorKind.None);
+
+        // A stable phase and a non-None anchor are independently rejected as stale/corrupt plans.
+        SetAttachment(executor, context, SubjectAttachmentAnchorKind.None, 11, AttachmentPhase.Stable);
+        executor.FinalizeDetachment(context, 11);
+        Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
+        Assert.Same(context, executor.AttachedContext);
+
+        SetAttachment(executor, context, SubjectAttachmentAnchorKind.Explicit, 11, AttachmentPhase.Detaching);
+        executor.FinalizeDetachment(context, 11);
+        AssertDetaching(executor, context, 11, SubjectAttachmentAnchorKind.Explicit);
+    }
+
+    private static void SetAttachment(
+        InterceptorExecutor executor,
+        InterceptorSubjectContext? context,
+        SubjectAttachmentAnchorKind anchor,
+        long revision,
+        AttachmentPhase phase)
+    {
+        var field = typeof(InterceptorExecutor).GetField(
+            "_attachment", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        field.SetValue(executor, new InterceptorExecutor.AttachmentState(
+            context, anchor, revision, phase, 0));
+    }
+
+    private static void AssertDetaching(
+        InterceptorExecutor executor,
+        InterceptorSubjectContext context,
+        long revision,
+        SubjectAttachmentAnchorKind anchor)
+    {
+        Assert.Same(context, executor.AttachedContext);
+        Assert.Equal(anchor, executor.AttachmentAnchor);
+        Assert.Equal(revision, executor.AttachmentRevision);
+        Assert.Equal(AttachmentPhase.Detaching, executor.CurrentAttachmentPhase);
     }
 }

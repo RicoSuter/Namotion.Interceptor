@@ -213,23 +213,24 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 return;
             }
 
+            var current = _attachment;
+            var clearsAttachment = reservation.ParticipantCount == 1 &&
+                detachIfLast && current.Phase == AttachmentPhase.Stable &&
+                current.StructuralLeaseCount == 0 &&
+                ReferenceEquals(current.Context, reservation.Context);
             reservation.ParticipantCount--;
             if (reservation.ParticipantCount == 0)
             {
-                var current = _attachment;
-                if (detachIfLast && current.Phase == AttachmentPhase.Stable &&
-                    current.StructuralLeaseCount == 0 &&
-                    ReferenceEquals(current.Context, reservation.Context))
+                _ownershipReservation = null;
+                if (clearsAttachment)
                 {
                     _attachment = new AttachmentState(
                         null,
                         SubjectAttachmentAnchorKind.None,
-                        current.Revision + 1,
+                        GetNextAttachmentRevision(current.Revision),
                         AttachmentPhase.Stable,
                         0);
                 }
-
-                _ownershipReservation = null;
             }
         }
     }
@@ -283,7 +284,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 throw LifecycleConflictException.Retryable(_subject);
             }
 
-            currentRevision++;
+            currentRevision = GetNextAttachmentRevision(currentRevision);
             _attachment = new AttachmentState(
                 context,
                 anchor,
@@ -459,9 +460,13 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         {
             var current = _attachment;
             var isAnchorUpdate = context is not null && ReferenceEquals(current.Context, context);
+            var removesAnchorUnderSharedReservation = reservation is null &&
+                isAnchorUpdate && anchor == SubjectAttachmentAnchorKind.None &&
+                _ownershipReservation is { Mode: ReservationMode.Shared } activeReservation &&
+                ReferenceEquals(activeReservation.Context, current.Context);
             var reservationMatches = reservation is not null
                 ? reservation.IsActive(this) && ReferenceEquals(_ownershipReservation, reservation.Reservation)
-                : _ownershipReservation is null;
+                : _ownershipReservation is null || removesAnchorUnderSharedReservation;
             if (!ReferenceEquals(current.Context, expectedContext) ||
                 current.Phase != AttachmentPhase.Stable ||
                 !isAnchorUpdate && current.StructuralLeaseCount != 0 ||
@@ -471,17 +476,23 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             }
 
             var isDetaching = context is null && current.Context is not null;
+            var preparedRevision = GetNextAttachmentRevision(current.Revision);
+            if (isDetaching)
+            {
+                _ = GetNextAttachmentRevision(preparedRevision);
+            }
+
             var preparedState = isDetaching
                 ? new AttachmentState(
                     current.Context,
                     SubjectAttachmentAnchorKind.None,
-                    current.Revision + 1,
+                    preparedRevision,
                     AttachmentPhase.Detaching,
                     current.StructuralLeaseCount)
                 : new AttachmentState(
                     context,
                     anchor,
-                    current.Revision + 1,
+                    preparedRevision,
                     AttachmentPhase.Stable,
                     current.StructuralLeaseCount);
             var transition = new AttachmentTransition(this, current, preparedState, isDetaching);
@@ -511,7 +522,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             _attachment = new AttachmentState(
                 null,
                 SubjectAttachmentAnchorKind.None,
-                current.Revision + 1,
+                GetNextAttachmentRevision(current.Revision),
                 AttachmentPhase.Stable,
                 0);
         }
@@ -537,7 +548,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                     "Cannot attach the subject directly to a different context. Detach it to null first.");
             }
 
-            currentRevision = current.Revision + 1;
+            currentRevision = GetNextAttachmentRevision(current.Revision);
             _attachment = new AttachmentState(
                 context,
                 anchor,
@@ -569,6 +580,17 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             _attachment = transition.PreparedState!;
             _activeAttachmentTransition = null;
         }
+    }
+
+    private static long GetNextAttachmentRevision(long revision)
+    {
+        if (revision == long.MaxValue)
+        {
+            throw new InvalidOperationException(
+                "The attachment revision space is exhausted; publication cannot continue safely.");
+        }
+
+        return revision + 1;
     }
 
     /// <inheritdoc />

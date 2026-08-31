@@ -506,12 +506,6 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var executor = subject.Executor;
         executor.TryGetAttachment(out var initialContext, out var initialAnchor, out _);
         InterceptorSubjectExtensions.ValidateRootAnchor(initialContext, initialAnchor, context, anchor);
-        if (anchor == SubjectAttachmentAnchorKind.Provisional &&
-            initialContext is not null &&
-            ((InterceptorExecutor)executor).CurrentAttachmentPhase == AttachmentPhase.Stable)
-        {
-            return;
-        }
 
         var visited = LifecycleScratch.RentSubjectSet();
         var reservations = LifecycleScratch.RentOwnershipReservations();
@@ -550,6 +544,11 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                             executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out _);
                             InterceptorSubjectExtensions.ValidateRootAnchor(
                                 attachedContext, currentAnchor, context, anchor);
+                            if (anchor == SubjectAttachmentAnchorKind.Provisional && attachedContext is not null)
+                            {
+                                return;
+                            }
+
                             using var change = _graph.PrepareAttach(
                                 subject, anchor, snapshots, propertyNames, reservations, _notifier);
                             journal = journalCapture.Complete();
@@ -616,7 +615,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     internal void CompleteDetachments(
         ImmutableArray<OwnershipGraph.DetachmentPlan> detachments)
     {
-        using (EnterGate())
+        lock (_gate)
         {
             foreach (var detachment in detachments)
             {
@@ -672,9 +671,16 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             }
             catch (Exception exception)
             {
-                Trace.TraceError(
-                    "LifecycleInterceptor: a recalculation deferred until this topology transaction " +
-                    $"ended failed with {exception.GetType().Name}: {exception.Message}");
+                try
+                {
+                    Trace.TraceError(
+                        "LifecycleInterceptor: a recalculation deferred until this topology transaction " +
+                        $"ended failed with {exception.GetType().Name}: {exception.Message}");
+                }
+                catch
+                {
+                    // Deferred cleanup remains no-throw when diagnostics are misconfigured.
+                }
             }
         }
     }

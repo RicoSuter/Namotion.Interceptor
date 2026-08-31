@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Reflection;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -37,6 +38,15 @@ public class OwnershipReservationProtocolTests
         public override void Write(string? message) => Messages.Add(message ?? string.Empty);
 
         public override void WriteLine(string? message) => Messages.Add(message ?? string.Empty);
+    }
+
+    private sealed class ThrowingTraceListener : TraceListener
+    {
+        public override void Write(string? message) =>
+            throw new InvalidOperationException("trace listener failed");
+
+        public override void WriteLine(string? message) =>
+            throw new InvalidOperationException("trace listener failed");
     }
 
     [RunsAfter(typeof(LifecycleInterceptor))]
@@ -163,6 +173,88 @@ public class OwnershipReservationProtocolTests
         Assert.IsAssignableFrom<InvalidOperationException>(detachException);
         Assert.Same(context, child.TryGetContext());
         Assert.Equal(2, child.GetReferenceCount());
+    }
+
+    [Fact]
+    public void WhenAnchoredRootDetachesWithSharedReservation_ThenFinalParticipantReleasesItOnce()
+    {
+        // Arrange
+        var context = CreateContext();
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var graph = lifecycle.Graph;
+        var root = new Person(context) { FirstName = "root" };
+        var executor = (InterceptorExecutor)((IInterceptorSubject)root).Executor;
+        var reservation = graph.ReserveForStructuralWrite(executor);
+        var detachCount = 0;
+        lifecycle.SubjectDetaching += change =>
+        {
+            if (change.IsContextDetach && ReferenceEquals(change.Subject, root))
+            {
+                detachCount++;
+            }
+        };
+
+        // Act
+        var provisionalBeforeDetachException = Record.Exception(() =>
+            ((IInterceptorSubject)root).AttachToContext(
+                context, SubjectAttachmentAnchorKind.Provisional));
+        var detachException = Record.Exception(() => root.DetachFromContext(context));
+        var provisionalAfterDetachException = Record.Exception(() =>
+            ((IInterceptorSubject)root).AttachToContext(
+                context, SubjectAttachmentAnchorKind.Provisional));
+
+        // Assert: removing the anchor commits while the exact shared reservation protects the
+        // closure. Provisional attach cannot bypass the exclusive epoch boundary on either side
+        // of that commit. Completing the final participant runs the one deferred release.
+        Assert.IsType<LifecycleConflictException>(provisionalBeforeDetachException);
+        Assert.Null(detachException);
+        Assert.IsType<LifecycleConflictException>(provisionalAfterDetachException);
+        Assert.Same(context, root.TryGetContext());
+        Assert.Equal(SubjectAttachmentAnchorKind.None,
+            ((IInterceptorSubject)root).Executor.AttachmentAnchor);
+        Assert.Equal(0, detachCount);
+
+        graph.ReleaseUnusedReservation(reservation);
+        Assert.Null(root.TryGetContext());
+        Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
+        Assert.Equal(1, detachCount);
+
+        var foreignContext = CreateContext();
+        root.AttachToContext(foreignContext);
+        var staleContextException = Record.Exception(() =>
+            ((IInterceptorSubject)root).AttachToContext(
+                context, SubjectAttachmentAnchorKind.Provisional));
+        Assert.IsAssignableFrom<InvalidOperationException>(staleContextException);
+        Assert.Same(foreignContext, root.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenAnchoredRootDetachesWithExclusiveReservation_ThenItConflictsWithoutChangingAnchor()
+    {
+        // Arrange
+        var context = CreateContext();
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var graph = lifecycle.Graph;
+        var root = new Person(context) { FirstName = "root" };
+        var reservation = graph.ReserveForStructuralWrite(
+            (InterceptorExecutor)((IInterceptorSubject)root).Executor,
+            ReservationMode.Exclusive);
+
+        try
+        {
+            // Act
+            var detachException = Record.Exception(() => root.DetachFromContext(context));
+
+            // Assert
+            Assert.IsType<LifecycleConflictException>(detachException);
+            Assert.Same(context, root.TryGetContext());
+            Assert.Equal(SubjectAttachmentAnchorKind.Provisional,
+                ((IInterceptorSubject)root).Executor.AttachmentAnchor);
+        }
+        finally
+        {
+            graph.ReleaseUnusedReservation(reservation);
+        }
     }
 
     [Fact]
@@ -555,6 +647,35 @@ public class OwnershipReservationProtocolTests
             Assert.Contains(listener.Messages, message => message.Contains("fallback sweep callback failed"));
             Assert.Null(first.TryGetContext());
             Assert.Null(second.TryGetContext());
+        }
+        finally
+        {
+            Trace.Listeners.Remove(listener);
+        }
+    }
+
+    [Fact]
+    public void WhenWithheldRecalculationAndTraceListenerThrow_ThenDiagnosticDrainDoesNotThrow()
+    {
+        // Arrange: this directly exercises the Task 6 compatibility drain. Its diagnostics are a
+        // no-throw boundary even when both the deferred recalculation and Trace infrastructure fail.
+        var context = CreateContext();
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        typeof(LifecycleInterceptor).GetField("_withheldRecalculations", flags)!.SetValue(
+            lifecycle,
+            new List<Action> { () => throw new InvalidOperationException("recalculation failed") });
+        var drain = typeof(LifecycleInterceptor).GetMethod("RunWithheldRecalculations", flags)!;
+        var listener = new ThrowingTraceListener();
+        Trace.Listeners.Add(listener);
+
+        try
+        {
+            // Act
+            var exception = Record.Exception(() => drain.Invoke(lifecycle, null));
+
+            // Assert
+            Assert.Null(exception);
         }
         finally
         {

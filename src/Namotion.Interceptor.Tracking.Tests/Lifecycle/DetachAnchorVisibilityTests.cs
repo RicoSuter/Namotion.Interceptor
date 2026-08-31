@@ -1,4 +1,6 @@
+using System.Reflection;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Parent;
 
@@ -105,6 +107,86 @@ public class DetachAnchorVisibilityTests
         Assert.Same(context, simulation.TryGetContext());
         Assert.Equal(SubjectAttachmentAnchorKind.Provisional,
             ((IInterceptorSubject)simulation).Executor.AttachmentAnchor);
+        Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public async Task WhenFinalClearWaitsForAttachmentLock_ThenItIsNotATopologyTransaction()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var simulation = new Simulation(context) { Name = "Root" };
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var executor = (InterceptorExecutor)((IInterceptorSubject)simulation).Executor;
+        var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        var attachmentLock = typeof(InterceptorExecutor).GetField("_attachmentLock", flags)!.GetValue(executor)!;
+        var callbackEntered = new ManualResetEventSlim(false);
+        var callbackReturning = new ManualResetEventSlim(false);
+        var attachmentLockHeld = new ManualResetEventSlim(false);
+        var releaseAttachmentLock = new ManualResetEventSlim(false);
+        var allowCallbackToReturn = new ManualResetEventSlim(false);
+        lifecycle.SubjectDetaching += change =>
+        {
+            if (change.IsContextDetach && ReferenceEquals(change.Subject, simulation))
+            {
+                callbackEntered.Set();
+                if (!allowCallbackToReturn.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+                {
+                    throw new TimeoutException("Timed out waiting to return from the detach callback.");
+                }
+
+                callbackReturning.Set();
+            }
+        };
+
+        var lockHolder = new Thread(() =>
+        {
+            if (!callbackEntered.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+            {
+                return;
+            }
+
+            lock (attachmentLock)
+            {
+                attachmentLockHeld.Set();
+                releaseAttachmentLock.Wait(WriteProtocolAcceptance.RendezvousTimeout);
+            }
+        }) { IsBackground = true };
+        Exception? detachException = null;
+        var detacher = new Thread(() =>
+        {
+            detachException = Record.Exception(() => simulation.DetachFromContext(context));
+        }) { IsBackground = true };
+
+        // Act
+        lockHolder.Start();
+        detacher.Start();
+        Assert.True(callbackEntered.Wait(WriteProtocolAcceptance.RendezvousTimeout));
+        Assert.True(attachmentLockHeld.Wait(WriteProtocolAcceptance.RendezvousTimeout));
+        allowCallbackToReturn.Set();
+        Assert.True(callbackReturning.Wait(WriteProtocolAcceptance.RendezvousTimeout));
+        var recalculationRan = false;
+        var withheld = false;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => (detacher.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0,
+                message: "the final clear did not wait for the attachment lock");
+            withheld = lifecycle.TryRunWhenTransactionEnds(() => recalculationRan = true);
+        }
+        finally
+        {
+            releaseAttachmentLock.Set();
+        }
+
+        // Assert
+        Assert.True(detacher.Join(WriteProtocolAcceptance.RendezvousTimeout));
+        Assert.True(lockHolder.Join(WriteProtocolAcceptance.RendezvousTimeout));
+        Assert.Null(detachException);
+        Assert.False(withheld);
+        Assert.False(recalculationRan);
+        Assert.Null(simulation.TryGetContext());
         Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
     }
 }

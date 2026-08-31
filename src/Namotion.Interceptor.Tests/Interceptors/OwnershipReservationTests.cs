@@ -1,3 +1,4 @@
+using System.Reflection;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 
@@ -253,5 +254,33 @@ public class OwnershipReservationTests
             out _));
         Assert.Null(executor.AttachedContext);
         Assert.Equal(0, executor.AttachmentRevision);
+    }
+
+    [Fact]
+    public void WhenFinalReservationCannotAdvanceAttachmentRevision_ThenItDoesNotStrandTheReservation()
+    {
+        // Arrange
+        var (_, executor) = CreateSubject();
+        var context = CreateContext();
+        var field = typeof(InterceptorExecutor).GetField(
+            "_attachment", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        field.SetValue(executor, new InterceptorExecutor.AttachmentState(
+            context,
+            SubjectAttachmentAnchorKind.None,
+            long.MaxValue,
+            AttachmentPhase.Stable,
+            0));
+        var reservation = executor.TryAcquireOwnershipReservation(context, ReservationMode.Shared);
+
+        // Act
+        var exception = Record.Exception(() => reservation.Complete(retainCommittedOwnership: false));
+
+        // Assert: exhaustion fails before attachment publication, but the participant itself is
+        // still released because its token has already irreversibly entered completion.
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.False(executor.HasOwnershipReservation(context));
+        Assert.Same(context, executor.AttachedContext);
+        Assert.Equal(long.MaxValue, executor.AttachmentRevision);
+        Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
     }
 }
