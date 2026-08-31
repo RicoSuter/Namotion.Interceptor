@@ -431,7 +431,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                     return;
                 }
             }
-            catch (AdsException exception) when ((AdsErrorCode)exception.HResult == AdsErrorCode.DeviceServiceNotSupported)
+            catch (AdsException exception) when (AdsErrorClassifier.GetErrorCode(exception) == AdsErrorCode.DeviceServiceNotSupported)
             {
                 _logger.LogDebug("SumSymbolRead threw DeviceServiceNotSupported for polling, falling back to individual reads.");
                 snapshot.UseFallback = true;

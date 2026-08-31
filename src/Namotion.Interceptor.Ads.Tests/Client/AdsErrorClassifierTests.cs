@@ -38,6 +38,46 @@ public class AdsErrorClassifierTests
         Assert.True(result);
     }
 
+    [Theory]
+    [InlineData(AdsErrorCode.DeviceInvalidAccess)]
+    [InlineData(AdsErrorCode.DeviceServiceNotSupported)]
+    [InlineData(AdsErrorCode.DeviceTimeOut)]
+    public void GetErrorCode_FromAdsErrorException_ReturnsTheAdsCode(AdsErrorCode errorCode)
+    {
+        // Arrange
+        var exception = new AdsErrorException("Simulated.", errorCode);
+
+        // Act
+        var result = AdsErrorClassifier.GetErrorCode(exception);
+
+        // Assert
+        Assert.Equal(errorCode, result);
+    }
+
+    [Fact]
+    public void GetErrorCode_DoesNotUseHResult()
+    {
+        // Arrange - HResult is the generic managed 0x80131500 for every ADS error, so a classifier
+        // reading it would see one value for all of them and match no entry in the permanent set
+        var exception = new AdsErrorException("Simulated.", AdsErrorCode.DeviceInvalidAccess);
+
+        // Act & Assert
+        Assert.NotEqual(AdsErrorCode.DeviceInvalidAccess, (AdsErrorCode)exception.HResult);
+        Assert.Equal(AdsErrorCode.DeviceInvalidAccess, AdsErrorClassifier.GetErrorCode(exception));
+        Assert.False(AdsErrorClassifier.IsTransientError(AdsErrorClassifier.GetErrorCode(exception)));
+    }
+
+    [Fact]
+    public void GetErrorCode_FromExceptionWithoutAnAdsCode_ReturnsNoError()
+    {
+        // Arrange & Act - falls through to the transient default rather than guessing permanent
+        var result = AdsErrorClassifier.GetErrorCode(new InvalidOperationException("No ADS code."));
+
+        // Assert
+        Assert.Equal(AdsErrorCode.NoError, result);
+        Assert.True(AdsErrorClassifier.IsTransientError(result));
+    }
+
     [Fact]
     public void IsTransientError_WithUnknownErrorCode_ReturnsTrue()
     {
