@@ -66,6 +66,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     private long _captureRevision;
     private int _captureWriterThreadId;
     private long _captureWriterRunStart;
+    internal ManualResetEventSlim? CaptureMutationBlocked { get; set; }
     internal long CaptureRevision => Volatile.Read(ref _captureRevision);
 
     internal bool IsCaptureRevisionCurrent(long revision) =>
@@ -78,6 +79,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         while (((revision = CaptureRevision) & 1) != 0 ||
                Interlocked.CompareExchange(ref _captureRevision, revision + 1, revision) != revision)
         {
+            CaptureMutationBlocked?.Set();
             spin.SpinOnce();
         }
 
@@ -108,7 +110,8 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
         return current == revision ||
                (current & 1) == 0 &&
                Volatile.Read(ref _captureWriterThreadId) == Environment.CurrentManagedThreadId &&
-               Volatile.Read(ref _captureWriterRunStart) <= revision + 2 && CaptureRevision == current;
+               unchecked(revision + 2 - Volatile.Read(ref _captureWriterRunStart)) >= 0 &&
+               CaptureRevision == current;
     }
 
     private readonly object _attachmentLock = new();
@@ -833,6 +836,9 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             var lifecycle = attachedContext?.TryGetService<ILifecycleInterceptor>();
             if (lifecycle is null)
             {
+                try { registration.PreparePublication(this); }
+                catch (LifecycleConflictException) { continue; }
+
                 lock (_attachmentLock)
                 {
                     if (ReferenceEquals(_attachment.Context, attachedContext))
@@ -842,8 +848,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                             throw LifecycleConflictException.Retryable(_subject);
                         }
 
-                        registration.Publish(this);
-                        return;
+                        if (registration.PublishPrepared(this)) return;
                     }
                 }
             }

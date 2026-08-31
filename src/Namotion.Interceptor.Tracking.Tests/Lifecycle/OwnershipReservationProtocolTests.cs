@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
@@ -9,6 +10,26 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 [Collection(TemporaryRootTraceCollection.Name)]
 public class OwnershipReservationProtocolTests
 {
+    private sealed class GatedExecutorSubject : IInterceptorSubject
+    {
+        private IInterceptorExecutor? _executor;
+        private bool _armed;
+
+        public IInterceptorExecutor Executor => _armed
+            ? throw new InvalidOperationException("The executor accessor was called during reservation completion.")
+            : InterceptorExecutor.GetOrCreate(ref _executor, this);
+
+        public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
+
+        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties { get; } =
+            new Dictionary<string, SubjectPropertyMetadata>();
+
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) =>
+            throw new NotSupportedException();
+
+        internal void Arm() => _armed = true;
+    }
+
     private sealed class RecordingTraceListener : TraceListener
     {
         internal List<string> Messages { get; } = [];
@@ -80,7 +101,8 @@ public class OwnershipReservationProtocolTests
         var foreignContext = CreateContext();
         var graph = GetGraph(context);
         var dropped = new Person { FirstName = "dropped" };
-        var reservation = graph.ReserveForStructuralWrite(dropped);
+        var reservation = graph.ReserveForStructuralWrite(
+            (InterceptorExecutor)((IInterceptorSubject)dropped).Executor);
 
         // Act
         graph.ReleaseUnusedReservation(reservation);
@@ -88,6 +110,23 @@ public class OwnershipReservationProtocolTests
 
         // Assert
         Assert.Same(foreignContext, dropped.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenReservationCompletes_ThenTheCoordinatorUsesItsCapturedExecutor()
+    {
+        // Arrange
+        var context = CreateContext();
+        var graph = GetGraph(context);
+        var subject = new GatedExecutorSubject();
+        var reservation = graph.ReserveForStructuralWrite((InterceptorExecutor)subject.Executor);
+        subject.Arm();
+
+        // Act
+        var exception = Record.Exception(() => graph.ReleaseUnusedReservation(reservation));
+
+        // Assert
+        Assert.Null(exception);
     }
 
     [Fact]
@@ -100,7 +139,8 @@ public class OwnershipReservationProtocolTests
         var secondParent = new Person(context) { FirstName = "second" };
         var child = new Person { FirstName = "child" };
         firstParent.Father = child;
-        var reservation = graph.ReserveForStructuralWrite(child);
+        var reservation = graph.ReserveForStructuralWrite(
+            (InterceptorExecutor)((IInterceptorSubject)child).Executor);
         var executor = ((IInterceptorSubject)child).Executor;
         executor.TryGetAttachment(out _, out _, out var revision);
 
@@ -154,7 +194,8 @@ public class OwnershipReservationProtocolTests
             IDisposable? reservation = null;
             try
             {
-                reservation = graph.ReserveForStructuralWrite(child);
+                reservation = graph.ReserveForStructuralWrite(
+                    (InterceptorExecutor)((IInterceptorSubject)child).Executor);
                 firstReserved.Set();
                 WaitFor(firstForeignAttempted, "the first foreign attempt");
                 graph.ReleaseUnusedReservation(reservation);
@@ -185,7 +226,8 @@ public class OwnershipReservationProtocolTests
             try
             {
                 WaitFor(firstReserved, "the first reservation");
-                reservation = graph.ReserveForStructuralWrite(child);
+                reservation = graph.ReserveForStructuralWrite(
+                    (InterceptorExecutor)((IInterceptorSubject)child).Executor);
                 secondReserved.Set();
                 WaitFor(secondForeignAttempted, "the second foreign attempt");
                 secondParent.Mother = child;
@@ -264,7 +306,8 @@ public class OwnershipReservationProtocolTests
         var child = new Person { FirstName = "child" };
         parent.Children = [child];
         var graph = GetGraph(context);
-        var reservation = graph.ReserveForStructuralWrite(child);
+        var reservation = graph.ReserveForStructuralWrite(
+            (InterceptorExecutor)((IInterceptorSubject)child).Executor);
         try
         {
             // Act

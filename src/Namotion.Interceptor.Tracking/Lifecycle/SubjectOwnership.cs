@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
@@ -13,15 +14,13 @@ internal readonly struct IncomingEdge(PropertyReference property, int subjectOrd
 internal sealed record SubjectOwnership(
     ImmutableArray<IncomingEdge> Edges,
     ImmutableArray<SubjectParent> Parents,
-    ImmutableArray<string> PropertyNames)
+    ImmutableArray<string> PropertyNames,
+    InterceptorExecutor? Executor)
 {
-    internal SubjectOwnership() : this([], [], [])
-    {
-    }
+    internal SubjectOwnership() : this([], [], [], null) { }
 
-    internal SubjectOwnership(ImmutableArray<string> propertyNames) : this([], [], propertyNames)
-    {
-    }
+    internal SubjectOwnership(ImmutableArray<string> propertyNames, InterceptorExecutor executor) :
+        this([], [], propertyNames, executor) { }
 
     public int IncomingCount => Edges.Length;
 
@@ -92,6 +91,6 @@ internal sealed record SubjectOwnership(
             parents.Add(new SubjectParent(edge.Property, edge.Index));
         }
 
-        return new SubjectOwnership(edges, parents.MoveToImmutable(), PropertyNames);
+        return new SubjectOwnership(edges, parents.MoveToImmutable(), PropertyNames, Executor);
     }
 }

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -55,8 +56,8 @@ internal sealed class LifecycleNotifier(
         return new JournalCapture(_currentJournal);
     }
 
-    public void RaiseSubjectAttached(SubjectLifecycleChange change) =>
-        RecordEvent(SubjectAttached, change, change.Subject);
+    public void RaiseSubjectAttached(SubjectLifecycleChange change, InterceptorExecutor executor) =>
+        RecordEvent(SubjectAttached, change, executor);
 
     public void RaiseSubjectDetaching(SubjectLifecycleChange change) =>
         RecordEvent(SubjectDetaching, change);
@@ -75,21 +76,16 @@ internal sealed class LifecycleNotifier(
             IsPropertyReferenceRemoved = true
         });
 
-    public void InvokeAddedLifecycleHandlers(
-        IInterceptorSubject subject,
-        SubjectLifecycleChange change) =>
-        InvokeAddedLifecycleHandlersCore(subject, change, null);
+    public void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, InterceptorExecutor executor, SubjectLifecycleChange change) =>
+        InvokeAddedLifecycleHandlersCore(subject, executor, change, null);
 
     internal void InvokePreparedAddedLifecycleHandlers(
-        IInterceptorSubject subject,
-        SubjectLifecycleChange change,
-        Action? prepareChildren) =>
-        InvokeAddedLifecycleHandlersCore(subject, change, prepareChildren);
+        IInterceptorSubject subject, InterceptorExecutor executor, SubjectLifecycleChange change, Action? prepareChildren) =>
+        InvokeAddedLifecycleHandlersCore(subject, executor, change, prepareChildren);
 
     private void InvokeAddedLifecycleHandlersCore(
-        IInterceptorSubject subject,
-        SubjectLifecycleChange change,
-        Action? prepareChildren)
+        IInterceptorSubject subject, InterceptorExecutor executor,
+        SubjectLifecycleChange change, Action? prepareChildren)
     {
         foreach (var handler in GetLifecycleHandlers())
         {
@@ -100,14 +96,14 @@ internal sealed class LifecycleNotifier(
             else
             {
                 Record(() => handler.HandleLifecycleChange(change),
-                    attachedSubject: change.IsContextAttach ? subject : null);
+                    attachedExecutor: change.IsContextAttach ? executor : null);
             }
         }
 
         if (subject is ILifecycleHandler subjectHandler)
         {
             Record(() => subjectHandler.HandleLifecycleChange(change),
-                attachedSubject: change.IsContextAttach ? subject : null);
+                attachedExecutor: change.IsContextAttach ? executor : null);
         }
     }
 
@@ -124,13 +120,14 @@ internal sealed class LifecycleNotifier(
         }
     }
 
-    public void AttachSubjectProperties(IInterceptorSubject subject, IEnumerable<string> propertyNames) =>
-        RecordProperties(subject, propertyNames, attach: true);
+    public void AttachSubjectProperties(IInterceptorSubject subject, InterceptorExecutor executor, IEnumerable<string> propertyNames) =>
+        RecordProperties(subject, executor, propertyNames, attach: true);
 
     public void DetachSubjectProperties(IInterceptorSubject subject, IEnumerable<string> propertyNames) =>
-        RecordProperties(subject, propertyNames, attach: false);
+        RecordProperties(subject, null, propertyNames, attach: false);
 
-    private void RecordProperties(IInterceptorSubject subject, IEnumerable<string> propertyNames, bool attach)
+    private void RecordProperties(
+        IInterceptorSubject subject, InterceptorExecutor? executor, IEnumerable<string> propertyNames, bool attach)
     {
         foreach (var name in propertyNames)
         {
@@ -140,7 +137,7 @@ internal sealed class LifecycleNotifier(
                 Record(
                     () => InvokeProperty(handler, change, attach),
                     propertyCallback: true,
-                    attachedSubject: attach ? subject : null);
+                    attachedExecutor: attach ? executor : null);
             }
 
             if (subject is IPropertyLifecycleHandler subjectHandler)
@@ -148,7 +145,7 @@ internal sealed class LifecycleNotifier(
                 Record(
                     () => InvokeProperty(subjectHandler, change, attach),
                     propertyCallback: true,
-                    attachedSubject: attach ? subject : null);
+                    attachedExecutor: attach ? executor : null);
             }
         }
     }
@@ -200,31 +197,28 @@ internal sealed class LifecycleNotifier(
     }
 
     private void RecordEvent(
-        Action<SubjectLifecycleChange>? handlers,
-        SubjectLifecycleChange change,
-        IInterceptorSubject? attachedSubject = null)
+        Action<SubjectLifecycleChange>? handlers, SubjectLifecycleChange change,
+        InterceptorExecutor? attachedExecutor = null)
     {
         if (handlers is not null)
         {
             foreach (Action<SubjectLifecycleChange> handler in handlers.GetInvocationList())
             {
-                Record(() => handler(change), attachedSubject: attachedSubject);
+                Record(() => handler(change), attachedExecutor: attachedExecutor);
             }
         }
     }
 
     private void Record(
-        Action action,
-        bool propertyCallback = false,
-        IInterceptorSubject? attachedSubject = null)
+        Action action, bool propertyCallback = false, InterceptorExecutor? attachedExecutor = null)
     {
-        var expectedRevision = attachedSubject?.Executor.AttachmentRevision +
-            (attachedSubject?.Executor.AttachedContext is null ? 1 : 0);
-        bool IsCurrentAttachment() => attachedSubject?.Executor.AttachmentRevision == expectedRevision;
+        var expectedRevision = attachedExecutor?.AttachmentRevision +
+            (attachedExecutor?.AttachedContext is null ? 1 : 0);
+        bool IsCurrentAttachment() => attachedExecutor?.AttachmentRevision == expectedRevision;
 
         void Invoke()
         {
-            if (attachedSubject is not null && !IsCurrentAttachment())
+            if (attachedExecutor is not null && !IsCurrentAttachment())
             {
                 return;
             }
@@ -242,7 +236,7 @@ internal sealed class LifecycleNotifier(
                     action();
                 }
             }
-            catch when (attachedSubject is not null && !IsCurrentAttachment())
+            catch when (attachedExecutor is not null && !IsCurrentAttachment())
             {
             }
         }

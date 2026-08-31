@@ -147,10 +147,8 @@ internal static class StructuralSnapshotBuilder
         IInterceptorSubjectContext context,
         OwnershipGraph.GraphState graphState,
         HashSet<IInterceptorSubject> visited,
-        List<IInterceptorSubject> discovered,
         Dictionary<PropertyReference, StructuralSnapshot> snapshots,
-        Dictionary<IInterceptorSubject, ImmutableArray<string>> propertyNames,
-        bool includeAttached = true)
+        Dictionary<IInterceptorSubject, ImmutableArray<string>> propertyNames)
     {
         var pending = LifecycleScratch.RentSubjectStack();
         foreach (var occurrence in roots.Occurrences)
@@ -158,8 +156,7 @@ internal static class StructuralSnapshotBuilder
             pending.Push(occurrence.Subject);
         }
 
-        return CapturePending(
-            context, graphState, visited, discovered, snapshots, propertyNames, includeAttached, pending);
+        return CapturePending(context, graphState, visited, snapshots, propertyNames, pending);
     }
 
     internal static ImmutableArray<CaptureParticipant> CaptureComponent(
@@ -167,13 +164,12 @@ internal static class StructuralSnapshotBuilder
         IInterceptorSubjectContext context,
         OwnershipGraph.GraphState graphState,
         HashSet<IInterceptorSubject> visited,
-        List<IInterceptorSubject> discovered,
         Dictionary<PropertyReference, StructuralSnapshot> snapshots,
         Dictionary<IInterceptorSubject, ImmutableArray<string>> propertyNames)
     {
         var pending = LifecycleScratch.RentSubjectStack();
         pending.Push(root);
-        return CapturePending(context, graphState, visited, discovered, snapshots, propertyNames, true, pending);
+        return CapturePending(context, graphState, visited, snapshots, propertyNames, pending);
     }
 
     internal static CaptureParticipant CaptureParticipantState(
@@ -200,10 +196,8 @@ internal static class StructuralSnapshotBuilder
         IInterceptorSubjectContext context,
         OwnershipGraph.GraphState graphState,
         HashSet<IInterceptorSubject> visited,
-        List<IInterceptorSubject> discovered,
         Dictionary<PropertyReference, StructuralSnapshot> snapshots,
         Dictionary<IInterceptorSubject, ImmutableArray<string>> propertyNames,
-        bool includeAttached,
         Stack<IInterceptorSubject> pending)
     {
         var participants = ImmutableArray.CreateBuilder<CaptureParticipant>();
@@ -224,11 +218,6 @@ internal static class StructuralSnapshotBuilder
                     throw new InvalidOperationException(
                         $"The subject '{subject.GetType().Name}' is owned by a different context and cannot " +
                         "join this graph. Detach it from that context first.");
-                }
-
-                if (attachedContext is null || includeAttached)
-                {
-                    discovered.Add(subject);
                 }
 
                 if (participant.Ownership is { } ownership)

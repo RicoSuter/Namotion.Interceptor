@@ -114,7 +114,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         CallbackReentrancyGuard.ThrowIfInsideCallback();
 
         var subject = property.Subject;
-        if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
+        if (!ReferenceEquals(context.Executor.AttachedContext, _context))
         {
             next(ref context);
             return;
@@ -155,7 +155,6 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
 
         var value = context.GetFinalValue();
         var snapshot = StructuralSnapshotBuilder.Build(context.Property.Metadata.Type, value, 0);
-        var discovered = LifecycleScratch.RentSubjectList();
         var reservations = LifecycleScratch.RentOwnershipReservations();
         var seededSnapshots = new Dictionary<PropertyReference, StructuralSnapshot>(PropertyReference.Comparer);
         var seededPropertyNames = new Dictionary<IInterceptorSubject, ImmutableArray<string>>(ReferenceEqualityComparer.Instance);
@@ -164,7 +163,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             while (true)
             {
                 var participants = ReserveComponent(
-                    snapshot, discovered, reservations, seededSnapshots, seededPropertyNames);
+                    snapshot, reservations, seededSnapshots, seededPropertyNames);
                 var retryCapture = false;
                 var runWithheld = false;
                 try
@@ -233,20 +232,18 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                 }
 
                 ResetCaptureAttempt(
-                    discovered, reservations, seededSnapshots, seededPropertyNames);
+                    reservations, seededSnapshots, seededPropertyNames);
             }
         }
         finally
         {
             _graph.ReleaseUnusedReservations(reservations);
             LifecycleScratch.Return(reservations);
-            LifecycleScratch.Return(discovered);
         }
     }
 
     private ImmutableArray<StructuralSnapshotBuilder.CaptureParticipant> ReserveComponent(
         StructuralSnapshot snapshot,
-        List<IInterceptorSubject> discovered,
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
         Dictionary<PropertyReference, StructuralSnapshot> seededSnapshots,
         Dictionary<IInterceptorSubject, ImmutableArray<string>> seededPropertyNames)
@@ -259,11 +256,10 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                 _context,
                 _graph.State,
                 visited,
-                discovered,
                 seededSnapshots,
                 seededPropertyNames);
 
-            if (!_graph.TryReserveDiscovered(discovered, reservations))
+            if (!_graph.TryReserveParticipants(participants, reservations))
             {
                 throw new InvalidOperationException(
                     "Another context claimed a subject of the assigned graph before its structural write reached the terminal.");
@@ -278,13 +274,11 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     }
 
     private void ResetCaptureAttempt(
-        List<IInterceptorSubject> discovered,
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
         Dictionary<PropertyReference, StructuralSnapshot> snapshots,
         Dictionary<IInterceptorSubject, ImmutableArray<string>> propertyNames)
     {
         _graph.ReleaseUnusedReservations(reservations);
-        discovered.Clear();
         snapshots.Clear();
         propertyNames.Clear();
     }
@@ -348,8 +342,8 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         {
             if (!retainCommittedOwnership)
             {
-                token.Subject.Executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
-                retainCommittedOwnership = _graph.IsOwned(token.Subject) ||
+                executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
+                retainCommittedOwnership = _graph.IsOwned(executor.Subject) ||
                     (anchor != SubjectAttachmentAnchorKind.None && ReferenceEquals(attachedContext, _context));
             }
 
@@ -384,18 +378,16 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         }
 
         using var logicalContextScope = logicalScope;
-        var discovered = LifecycleScratch.RentSubjectList();
         var reservations = LifecycleScratch.RentOwnershipReservations();
         try
         {
             while (true)
             {
                 PropertyAdmission.Capture capture;
-                try { capture = _admission.CaptureBatch(registration, discovered); }
-                catch (LifecycleConflictException) { discovered.Clear(); continue; }
+                try { capture = _admission.CaptureBatch(registration); }
+                catch (LifecycleConflictException) { continue; }
                 if (!_graph.IsCaptureCurrent(capture.Participants))
                 {
-                    discovered.Clear();
                     continue;
                 }
 
@@ -406,8 +398,8 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
 
                 var rootExecutor = capture.Participants[0].Executor;
 
-                if (!_graph.TryReserveDiscovered(
-                        discovered, reservations, joinExclusiveRoot: registration.Subject))
+                if (!_graph.TryReserveParticipants(
+                        capture.Participants, reservations, joinExclusiveRoot: registration.Subject))
                 {
                     throw new InvalidOperationException(
                         "Another context claimed a subject of the admitted graph while this call was validating it.");
@@ -446,8 +438,24 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                             else
                             {
                                 using var change = _admission.Prepare(capture, reservations);
-                                journal = journalCapture.Complete(default, 0);
-                                retryCapture = !_admission.Publish(capture, change);
+                                if (!registration.TryClaimPreparedPublication(rootExecutor))
+                                {
+                                    retryCapture = true;
+                                }
+                                else
+                                {
+                                    try
+                                    {
+                                        journal = journalCapture.Complete(default, 0);
+                                        registration.PublishClaimed();
+                                        registration.BeforeTopologyPublication?.Invoke();
+                                        _graph.Publish(change);
+                                    }
+                                    finally
+                                    {
+                                        registration.ReleasePublicationClaim(rootExecutor);
+                                    }
+                                }
                             }
                         }
                         finally
@@ -467,7 +475,6 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                 if (retryCapture)
                 {
                     _graph.ReleaseUnusedReservations(reservations);
-                    discovered.Clear();
                     continue;
                 }
 
@@ -483,7 +490,6 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         {
             _graph.ReleaseUnusedReservations(reservations);
             LifecycleScratch.Return(reservations);
-            LifecycleScratch.Return(discovered);
         }
     }
 
@@ -536,7 +542,6 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         }
 
         var visited = LifecycleScratch.RentSubjectSet();
-        var discovered = LifecycleScratch.RentSubjectList();
         var reservations = LifecycleScratch.RentOwnershipReservations();
         var snapshots = new Dictionary<PropertyReference, StructuralSnapshot>(PropertyReference.Comparer);
         var propertyNames = new Dictionary<IInterceptorSubject, ImmutableArray<string>>(ReferenceEqualityComparer.Instance);
@@ -545,8 +550,8 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             while (true)
             {
                 var participants = _attach.Capture(
-                    subject, visited, discovered, snapshots, propertyNames);
-                if (!_graph.TryReserveDiscovered(discovered, reservations, subject))
+                    subject, visited, snapshots, propertyNames);
+                if (!_graph.TryReserveParticipants(participants, reservations, subject))
                 {
                     throw new InvalidOperationException(
                         "Another context claimed a subject of this graph while the attach was validating it.");
@@ -583,7 +588,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
 
                 if (retryCapture)
                 {
-                    ResetCaptureAttempt(discovered, reservations, snapshots, propertyNames);
+                    ResetCaptureAttempt(reservations, snapshots, propertyNames);
                     visited.Clear();
                     continue;
                 }
@@ -600,7 +605,6 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         {
             _graph.ReleaseUnusedReservations(reservations);
             LifecycleScratch.Return(reservations);
-            LifecycleScratch.Return(discovered);
             LifecycleScratch.Return(visited);
         }
     }
@@ -616,14 +620,14 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         }
 
         using var logicalScope = InterceptorExecutor.EnterLogicalContext((InterceptorSubjectContext)_context);
+        var executor = (InterceptorExecutor)subject.Executor;
         using var journalCapture = _notifier.BeginJournal();
         LifecycleJournal journal;
         using (EnterGate())
         {
-            var executor = subject.Executor;
             executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
             InterceptorSubjectExtensions.ValidateDetach(attachedContext, anchor, context);
-            using var change = _release.Prepare(subject);
+            using var change = _release.Prepare(subject, executor);
             journal = journalCapture.Complete(default, 0);
             _graph.Publish(change);
         }

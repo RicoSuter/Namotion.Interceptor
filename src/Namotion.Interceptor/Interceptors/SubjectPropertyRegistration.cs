@@ -24,9 +24,10 @@ public sealed class SubjectPropertyRegistration
     private readonly Action<IReadOnlyDictionary<string, SubjectPropertyMetadata>> _publishProperties;
     private SubjectPropertyMetadata[]? _materialized;
     private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _preparedProperties;
-    private InterceptorExecutor? _preparedExecutor;
     private long _preparedCaptureRevision;
     private bool _published;
+
+    internal Action? BeforeTopologyPublication { get; set; }
 
     /// <summary>
     /// Creates the registration for one <see cref="IInterceptorSubject.AddProperties"/> call.
@@ -146,7 +147,6 @@ public sealed class SubjectPropertyRegistration
             throw LifecycleConflictException.Retryable(Subject);
         }
 
-        _preparedExecutor = executor;
         _preparedCaptureRevision = captureRevision;
         _preparedProperties = merged.ToFrozenDictionary();
     }
@@ -161,13 +161,22 @@ public sealed class SubjectPropertyRegistration
             return true;
         }
 
+        if (!TryClaimPreparedPublication(executor)) return false;
+        try { PublishClaimed(); }
+        finally { ReleasePublicationClaim(executor); }
+
+        return true;
+    }
+
+    internal bool TryClaimPreparedPublication(InterceptorExecutor executor)
+    {
         if (_published)
         {
             throw new InvalidOperationException(
                 "The property batch was already published; the publication continuation is invoked at most once.");
         }
 
-        if (_preparedProperties is null || !ReferenceEquals(executor, _preparedExecutor))
+        if (_preparedProperties is null)
         {
             throw new InvalidOperationException(
                 $"The properties of subject '{Subject.GetType().Name}' changed while this batch was being admitted. " +
@@ -180,15 +189,11 @@ public sealed class SubjectPropertyRegistration
         }
 
         _published = true;
-        try
-        {
-            _publishProperties(_preparedProperties);
-        }
-        finally
-        {
-            executor.CompleteMetadataPublication(_preparedCaptureRevision);
-        }
-
         return true;
     }
+
+    internal void PublishClaimed() => _publishProperties(_preparedProperties!);
+
+    internal void ReleasePublicationClaim(InterceptorExecutor executor) =>
+        executor.CompleteMetadataPublication(_preparedCaptureRevision);
 }

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
+using System.Reflection;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tests;
@@ -12,6 +13,8 @@ namespace Namotion.Interceptor.Tests;
 /// </summary>
 public class HandWrittenSubjectWriteTests
 {
+    private static readonly TimeSpan RendezvousTimeout = TimeSpan.FromSeconds(20);
+
     /// <summary>
     /// A minimal faithful lifecycle that counts gate entries and chain executions, so a test can
     /// observe on which side of the structural routing a write ran.
@@ -112,6 +115,75 @@ public class HandWrittenSubjectWriteTests
         }
     }
 
+    private sealed class DynamicHandWrittenSubject : IInterceptorSubject
+    {
+        private IInterceptorExecutor? _executor;
+        private IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties =
+            new Dictionary<string, SubjectPropertyMetadata>
+            {
+                [nameof(Count)] = new(
+                    nameof(Count), typeof(int), [],
+                    subject => ((DynamicHandWrittenSubject)subject)._count,
+                    (subject, value) => ((DynamicHandWrittenSubject)subject).Count = (int)value!,
+                    isIntercepted: true, isDynamic: false)
+            };
+        private int _count;
+        private int _propertyReads;
+
+        internal ManualResetEventSlim? PreparationReached { get; set; }
+        internal ManualResetEventSlim? ResumePreparation { get; set; }
+        internal int PublisherCalls { get; private set; }
+
+        public IInterceptorExecutor Executor => InterceptorExecutor.GetOrCreate(ref _executor, this);
+
+        public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
+
+        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties
+        {
+            get
+            {
+                if (Interlocked.Increment(ref _propertyReads) == 2 && PreparationReached is { } reached)
+                {
+                    reached.Set();
+                    if (ResumePreparation?.Wait(RendezvousTimeout) != true)
+                    {
+                        throw new TimeoutException("Timed out waiting for the concurrent scalar write.");
+                    }
+                }
+
+                return Volatile.Read(ref _properties);
+            }
+        }
+
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) =>
+            Executor.AddProperties(new SubjectPropertyRegistration(this, properties, published =>
+            {
+                PublisherCalls++;
+                Volatile.Write(ref _properties, published);
+            }));
+
+        public int Count
+        {
+            get => Executor.GetPropertyValue(nameof(Count), subject => ((DynamicHandWrittenSubject)subject)._count);
+            set => Executor.SetPropertyValue(nameof(Count), value, _count,
+                (subject, newValue) => ((DynamicHandWrittenSubject)subject)._count = newValue);
+        }
+    }
+
+    private sealed class CountingMetadataSequence(SubjectPropertyMetadata metadata) :
+        IEnumerable<SubjectPropertyMetadata>
+    {
+        internal int EnumerationCount { get; private set; }
+
+        public IEnumerator<SubjectPropertyMetadata> GetEnumerator()
+        {
+            EnumerationCount++;
+            yield return metadata;
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     [Fact]
     public void WhenHandWrittenSetterAssignsASubjectTypedProperty_ThenTheWriteTakesTheLifecycleGate()
     {
@@ -174,5 +246,103 @@ public class HandWrittenSubjectWriteTests
         Assert.True(new PropertyReference(generated, nameof(StructuralHolder.Child))
             .TryGetWriteState(true, out var generatedRevision, out _));
         Assert.Equal(1, generatedRevision);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenLifecycleFreeMetadataPreparationRacesAScalarWrite_ThenItRetriesWithoutReplayingInputOrPublisher()
+    {
+        // Arrange
+        var subject = new DynamicHandWrittenSubject();
+        var reached = new ManualResetEventSlim(false);
+        var resume = new ManualResetEventSlim(false);
+        subject.PreparationReached = reached;
+        subject.ResumePreparation = resume;
+        var sequence = new CountingMetadataSequence(new SubjectPropertyMetadata(
+            "Dynamic", typeof(string), [], _ => "value", null,
+            isIntercepted: true, isDynamic: true));
+        Exception? writerException = null;
+        var writer = new Thread(() =>
+        {
+            if (!reached.Wait(RendezvousTimeout))
+            {
+                writerException = new TimeoutException("Metadata preparation was never reached.");
+                resume.Set();
+                return;
+            }
+
+            writerException = Record.Exception(() => subject.Count = 1);
+            resume.Set();
+        }) { IsBackground = true };
+
+        // Act
+        writer.Start();
+        var admissionException = Record.Exception(() => subject.AddProperties(sequence));
+        var writerCompleted = writer.Join(RendezvousTimeout);
+
+        // Assert
+        Assert.True(writerCompleted, "the scalar writer did not complete");
+        Assert.Null(writerException);
+        Assert.Null(admissionException);
+        Assert.Equal(1, sequence.EnumerationCount);
+        Assert.Equal(1, subject.PublisherCalls);
+        Assert.True(subject.Properties.ContainsKey("Dynamic"));
+        Assert.Equal(1, subject.Count);
+    }
+
+    [Fact]
+    public void WhenSameThreadCaptureRefreshCrossesRollover_ThenTheContinuousRunIsAccepted()
+    {
+        // Arrange
+        var subject = new DynamicHandWrittenSubject();
+        var executor = (InterceptorExecutor)subject.Executor;
+        var capturedRevision = long.MaxValue - 1;
+        SetCaptureState(executor, capturedRevision, Environment.CurrentManagedThreadId, long.MaxValue - 3);
+
+        // Act
+        subject.Count = 1;
+        var refreshed = executor.TryRefreshCapture(capturedRevision, out var currentRevision);
+
+        // Assert
+        Assert.True(refreshed);
+        Assert.Equal(long.MinValue, currentRevision);
+    }
+
+    [Fact]
+    public void WhenForeignWriterCrossesCaptureRollover_ThenTheRunIsRejected()
+    {
+        // Arrange
+        var subject = new DynamicHandWrittenSubject();
+        var executor = (InterceptorExecutor)subject.Executor;
+        var capturedRevision = long.MaxValue - 1;
+        SetCaptureState(executor, capturedRevision, Environment.CurrentManagedThreadId, long.MaxValue - 3);
+        Exception? writerException = null;
+        var writer = new Thread(() => writerException = Record.Exception(() => subject.Count = 1))
+        {
+            IsBackground = true
+        };
+
+        // Act
+        writer.Start();
+        var writerCompleted = writer.Join(RendezvousTimeout);
+        var refreshed = executor.TryRefreshCapture(capturedRevision, out var currentRevision);
+
+        // Assert
+        Assert.True(writerCompleted, "the foreign writer did not complete");
+        Assert.Null(writerException);
+        Assert.False(refreshed);
+        Assert.Equal(long.MinValue, currentRevision);
+    }
+
+    private static void SetCaptureState(
+        InterceptorExecutor executor,
+        long revision,
+        int writerThreadId,
+        long writerRunStart)
+    {
+        var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        typeof(InterceptorExecutor).GetField("_captureRevision", flags)!.SetValue(executor, revision);
+        typeof(InterceptorExecutor).GetField("_captureWriterThreadId", flags)!.SetValue(executor, writerThreadId);
+        typeof(InterceptorExecutor).GetField("_captureWriterRunStart", flags)!.SetValue(executor, writerRunStart);
     }
 }

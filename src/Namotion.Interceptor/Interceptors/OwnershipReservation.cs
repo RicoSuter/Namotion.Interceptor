@@ -26,13 +26,10 @@ internal sealed class OwnershipReservationToken : IDisposable
     {
         _executor = executor;
         Reservation = reservation;
-        Subject = executor.Subject;
         Coordinator = coordinator;
     }
 
     internal OwnershipReservation Reservation { get; }
-
-    internal IInterceptorSubject Subject { get; }
 
     internal ITopologyAdmissionCoordinator? Coordinator { get; }
 

@@ -14,9 +14,7 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
         Dictionary<IInterceptorSubject, ImmutableArray<string>> PropertyNames,
         ImmutableArray<StructuralSnapshotBuilder.CaptureParticipant> Participants);
 
-    internal Capture CaptureBatch(
-        SubjectPropertyRegistration registration,
-        List<IInterceptorSubject> discovered)
+    internal Capture CaptureBatch(SubjectPropertyRegistration registration)
     {
         var subject = registration.Subject;
         var graphState = graph.State;
@@ -33,7 +31,6 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
         {
             participants.Add(rootParticipant);
             visited.Add(subject);
-            discovered.Add(subject);
             foreach (var metadata in batch)
             {
                 addedNames.Add(metadata.Name);
@@ -48,7 +45,7 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
                 structuralProperties.Add(property);
                 snapshots.Add(property, snapshot);
                 participants.AddRange(StructuralSnapshotBuilder.CaptureComponent(
-                    snapshot, graph.Context, graphState, visited, discovered, snapshots, propertyNames));
+                    snapshot, graph.Context, graphState, visited, snapshots, propertyNames));
             }
 
             registration.PreparePublication(rootParticipant.Executor);
@@ -76,7 +73,10 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
         Capture capture,
         Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations)
     {
-        notifier.AttachSubjectProperties(capture.Registration.Subject, capture.AddedPropertyNames);
+        notifier.AttachSubjectProperties(
+            capture.Registration.Subject,
+            capture.Participants[0].Executor,
+            capture.AddedPropertyNames);
         return graph.PrepareAdmission(
             capture.Registration.Subject,
             capture.StructuralProperties,
@@ -86,10 +86,4 @@ internal sealed class PropertyAdmission(LifecycleNotifier notifier, OwnershipGra
             notifier);
     }
 
-    internal bool Publish(Capture capture, OwnershipGraph.PreparedTopologyChange change)
-    {
-        if (!capture.Registration.PublishPrepared(capture.Participants[0].Executor)) return false;
-        graph.Publish(change);
-        return true;
-    }
 }

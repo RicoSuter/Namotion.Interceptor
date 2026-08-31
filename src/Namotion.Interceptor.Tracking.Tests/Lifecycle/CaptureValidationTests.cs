@@ -210,6 +210,93 @@ public class CaptureValidationTests
     }
 
     [Fact]
+    public void WhenAdmissionAttachesAHandWrittenChild_ThenGraphPreparationUsesTheCapturedExecutor()
+    {
+        // Arrange
+        var context = CreateContext();
+        var root = new Person(context) { FirstName = "root" };
+        var child = new GatedAccessorSubject();
+        child.Arm(throwFromExecutor: true, allowedReads: 2);
+        var metadata = new SubjectPropertyMetadata(
+            "DynamicChild",
+            typeof(IInterceptorSubject),
+            [],
+            _ => child,
+            null,
+            isIntercepted: true,
+            isDynamic: true);
+
+        // Act
+        var exception = Record.Exception(() => ((IInterceptorSubject)root).AddProperties(metadata));
+        child.Disarm();
+
+        // Assert
+        Assert.Null(exception);
+        Assert.Same(context, child.TryGetContext());
+        Assert.Equal(1, child.GetReferenceCount());
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void WhenAdmissionClaimsMetadata_ThenScalarCommitWaitsForGraphPublication()
+    {
+        // Arrange
+        var interceptor = new CountingWriteInterceptor();
+        var context = CreateContext(interceptor);
+        var root = new AdmissionClaimSubject();
+        root.AttachToContext(context);
+        interceptor.Arm(root, nameof(AdmissionClaimSubject.Count));
+        var executor = (InterceptorExecutor)root.Executor;
+        var child = new Person { FirstName = "child" };
+        var writerBlocked = new ManualResetEventSlim(false);
+        executor.CaptureMutationBlocked = writerBlocked;
+        var publisherCalls = 0;
+        var scalarObservedPublishedGraph = false;
+        Exception? writerException = null;
+        var writer = new Thread(() =>
+        {
+            writerException = Record.Exception(() => root.Count = 1);
+            scalarObservedPublishedGraph = root.Properties.ContainsKey("DynamicChild") &&
+                                           ReferenceEquals(child.TryGetContext(), context);
+        }) { IsBackground = true };
+        var registration = new SubjectPropertyRegistration(
+            root,
+            [new SubjectPropertyMetadata(
+                "DynamicChild", typeof(Person), [], _ => child, null,
+                isIntercepted: true, isDynamic: true)],
+            properties =>
+            {
+                Interlocked.Increment(ref publisherCalls);
+                root.PublishProperties(properties);
+            })
+        {
+            BeforeTopologyPublication = () =>
+            {
+                writer.Start();
+                if (!writerBlocked.Wait(WriteProtocolAcceptance.RendezvousTimeout))
+                {
+                    throw new TimeoutException("The scalar writer did not block on the publication claim.");
+                }
+
+                Assert.NotEqual(0, executor.CaptureRevision & 1);
+            }
+        };
+
+        // Act
+        var admissionException = Record.Exception(() => executor.AddProperties(registration));
+        var writerCompleted = writer.Join(WriteProtocolAcceptance.RendezvousTimeout);
+
+        // Assert
+        Assert.True(writerCompleted, "the scalar writer remained blocked after admission");
+        Assert.Null(admissionException);
+        Assert.Null(writerException);
+        Assert.True(scalarObservedPublishedGraph);
+        Assert.Same(context, child.TryGetContext());
+        Assert.Equal(1, publisherCalls);
+        Assert.Equal(1, interceptor.Count);
+    }
+
+    [Fact]
     [Trait("Category", "Concurrency")]
     public void WhenUnrelatedGraphChangesAfterCapture_ThenAttachDoesNotRecaptureParticipants()
     {
@@ -359,13 +446,14 @@ public class CaptureValidationTests
         private int _propertyReads;
         private int _armed;
         private bool _throwFromExecutor;
+        private int _allowedReads;
 
         public IInterceptorExecutor Executor
         {
             get
             {
                 if (Volatile.Read(ref _armed) != 0 &&
-                    Interlocked.Increment(ref _executorReads) > 3 &&
+                    Interlocked.Increment(ref _executorReads) > _allowedReads &&
                     _throwFromExecutor)
                 {
                     throw new InvalidOperationException("The executor accessor was reentered during admission.");
@@ -398,14 +486,50 @@ public class CaptureValidationTests
                 properties,
                 published => _properties = published));
 
-        internal void Arm(bool throwFromExecutor)
+        internal void Arm(bool throwFromExecutor, int allowedReads = 3)
         {
             _throwFromExecutor = throwFromExecutor;
+            _allowedReads = allowedReads;
             Volatile.Write(ref _executorReads, 0);
             Volatile.Write(ref _propertyReads, 0);
             Volatile.Write(ref _armed, 1);
         }
 
         internal void Disarm() => Volatile.Write(ref _armed, 0);
+    }
+
+    private sealed class AdmissionClaimSubject : IInterceptorSubject
+    {
+        private IInterceptorExecutor? _executor;
+        private IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties =
+            new Dictionary<string, SubjectPropertyMetadata>
+            {
+                [nameof(Count)] = new(
+                    nameof(Count), typeof(int), [],
+                    subject => ((AdmissionClaimSubject)subject)._count,
+                    (subject, value) => ((AdmissionClaimSubject)subject).Count = (int)value!,
+                    isIntercepted: true, isDynamic: false)
+            };
+        private int _count;
+
+        public IInterceptorExecutor Executor => InterceptorExecutor.GetOrCreate(ref _executor, this);
+
+        public ConcurrentDictionary<(string? property, string key), object?> Data { get; } = new();
+
+        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties =>
+            Volatile.Read(ref _properties);
+
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) =>
+            Executor.AddProperties(new SubjectPropertyRegistration(this, properties, PublishProperties));
+
+        public int Count
+        {
+            get => Executor.GetPropertyValue(nameof(Count), subject => ((AdmissionClaimSubject)subject)._count);
+            set => Executor.SetPropertyValue(nameof(Count), value, _count,
+                (subject, newValue) => ((AdmissionClaimSubject)subject)._count = newValue);
+        }
+
+        internal void PublishProperties(IReadOnlyDictionary<string, SubjectPropertyMetadata> properties) =>
+            Volatile.Write(ref _properties, properties);
     }
 }
