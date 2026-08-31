@@ -372,8 +372,7 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
             var changesArray = changes.ToArray();
             var capacity = changesArray.Length;
             var symbols = new List<ISymbol>(capacity);
-            var writeValues = new object[capacity];
-            var writeCount = 0;
+            var writeValues = new List<object>(capacity);
             var validChanges = new List<SubjectPropertyChange>(capacity);
             List<SubjectPropertyChange>? unresolvedChanges = null;
             List<SubjectPropertyChange>? permanentFailures = null;
@@ -447,13 +446,8 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
                 }
 
                 symbols.Add(symbol);
-                writeValues[writeCount++] = convertedValue;
+                writeValues.Add(convertedValue);
                 validChanges.Add(change);
-            }
-
-            if (symbols.Count == 0 && unresolvedChanges is null && permanentFailures is null)
-            {
-                return WriteResult.Success;
             }
 
             if (symbols.Count == 0)
@@ -466,15 +460,12 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
                 return BuildWriteResult(null, null, unresolvedChanges, permanentFailures, validChangeCount: 0);
             }
 
-            // Trim writeValues to exact count only if some changes were skipped
-            var writeArray = writeCount == capacity ? writeValues : writeValues[..writeCount];
-
             // Never SumSymbolWrite: it addresses by index group/offset, which a
             // {attribute 'monitoring' := 'call'} property does not have. It then writes raw bytes
             // past the variable and faults the PLC, without reporting an error. The per-symbol
             // value API calls the setter instead.
             return await WriteIndividualValuesAsync(
-                symbols, writeArray, validChanges, unresolvedChanges, permanentFailures, cancellationToken).ConfigureAwait(false);
+                symbols, writeValues, validChanges, unresolvedChanges, permanentFailures, cancellationToken).ConfigureAwait(false);
         }
         catch (AdsException exception)
         {
@@ -556,7 +547,7 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
 
     private async ValueTask<WriteResult> WriteIndividualValuesAsync(
         List<ISymbol> symbols,
-        object[] writeValues,
+        IReadOnlyList<object> writeValues,
         List<SubjectPropertyChange> validChanges,
         List<SubjectPropertyChange>? unresolvedChanges,
         List<SubjectPropertyChange>? permanentFailures,
@@ -578,37 +569,25 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
                 var resultCode = (AdsErrorCode)writeResult.ErrorCode;
                 if (resultCode != AdsErrorCode.NoError)
                 {
-                    Bucket(resultCode, index);
+                    Bucket(index, AdsErrorClassifier.IsTransientError(resultCode));
                 }
             }
             catch (AdsException exception)
             {
-                BucketException(exception, index);
+                Bucket(index, AdsErrorClassifier.IsTransientException(exception));
             }
             catch (Exception)
             {
-                (permanentWriteFailures ??= []).Add(validChanges[index]);
+                Bucket(index, isTransient: false);
             }
         }
 
         return BuildWriteResult(
             transientFailures, permanentWriteFailures, unresolvedChanges, permanentFailures, validChanges.Count);
 
-        void BucketException(Exception exception, int index)
+        void Bucket(int index, bool isTransient)
         {
-            if (AdsErrorClassifier.IsTransientException(exception))
-            {
-                (transientFailures ??= []).Add(validChanges[index]);
-            }
-            else
-            {
-                (permanentWriteFailures ??= []).Add(validChanges[index]);
-            }
-        }
-
-        void Bucket(AdsErrorCode errorCode, int index)
-        {
-            if (AdsErrorClassifier.IsTransientError(errorCode))
+            if (isTransient)
             {
                 (transientFailures ??= []).Add(validChanges[index]);
             }

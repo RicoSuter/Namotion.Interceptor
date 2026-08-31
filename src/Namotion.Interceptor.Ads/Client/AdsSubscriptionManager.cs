@@ -152,14 +152,9 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             _notificationConnection = connection;
         }
 
-        var mappingByReference = new Dictionary<PropertyReference, AdsPropertyMapping>(PropertyReference.Comparer);
-        foreach (var (property, _, mapping) in mappings)
+        for (var index = 0; index < effectiveModes.Count; index++)
         {
-            mappingByReference[property.Reference] = mapping;
-        }
-
-        foreach (var (property, symbolPath, effectiveMode) in effectiveModes)
-        {
+            var (property, symbolPath, effectiveMode) = effectiveModes[index];
             if (!ownership.ClaimSource(property.Reference))
             {
                 continue;
@@ -179,7 +174,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                     continue;
                 }
 
-                var mapping = mappingByReference[property.Reference];
+                var mapping = mappings[index].Mapping;
                 if (!TryRegisterNotification(property, symbolPath, symbol, mapping, connection, connectionManager))
                 {
                     // Keeps updating rather than silently freezing at its last value.
@@ -294,6 +289,11 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// when the MaxNotifications limit is exceeded, with higher Priority values demoted first,
     /// then higher CycleTime as tiebreaker.
     /// </summary>
+    /// <remarks>
+    /// The result is index-aligned with <paramref name="mappings"/>: one entry is appended per input
+    /// in order, and the demotion pass only rewrites entries in place. Callers rely on that to
+    /// recover each property's mapping without a lookup.
+    /// </remarks>
     internal static IReadOnlyList<(RegisteredSubjectProperty Property, string SymbolPath, AdsReadMode EffectiveMode)>
         DetermineEffectiveReadModes(
             IReadOnlyList<(RegisteredSubjectProperty Property, string SymbolPath, AdsPropertyMapping Mapping)> mappings,
@@ -680,8 +680,9 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         {
             try
             {
-                readValues[index] = await ReadPolledValueAsync(
-                    connectionManager, snapshot, index, cancellationToken).ConfigureAwait(false);
+                readValues[index] = await ReadSymbolValueAsync(
+                    connectionManager.Connection!, snapshot.Symbols[index],
+                    snapshot.Entries[index].SymbolPath, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception)
             {
@@ -747,19 +748,6 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// Reads one polled symbol, typed where the type system allows it and as a raw integer where it
     /// does not. Returns null when nothing should be published. Safe to call concurrently.
     /// </summary>
-    private Task<object?> ReadPolledValueAsync(
-        AdsConnectionManager connectionManager,
-        PollingSnapshot snapshot,
-        int index,
-        CancellationToken cancellationToken)
-    {
-        return ReadSymbolValueAsync(
-            connectionManager.Connection!,
-            snapshot.Symbols[index],
-            snapshot.Entries[index].SymbolPath,
-            cancellationToken);
-    }
-
     /// <summary>
     /// Reads one symbol, typed where the type system allows it and as a raw integer where it does
     /// not. Shared by the initial state load and by every polling pass, so a symbol whose PLC type
