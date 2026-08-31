@@ -188,8 +188,8 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
                 if (_serverService is { } service)
                 {
                     var diagnostics = service.Diagnostics;
-                    IncomingChangesPerSecond = diagnostics.IncomingChangesPerSecond;
-                    OutgoingChangesPerSecond = diagnostics.OutgoingChangesPerSecond;
+                    IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
+                    OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
                     ActiveSessionCount = diagnostics.ActiveSessionCount;
                 }
 

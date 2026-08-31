@@ -450,7 +450,7 @@ public class TwinCatSubjectClientSourceTests
         var propertyReference = new PropertyReference(model, propertyName);
         return SubjectPropertyChange.Create(
             propertyReference,
-            null,
+            ChangeOrigin.Local,
             DateTimeOffset.UtcNow,
             null,
             oldValue,

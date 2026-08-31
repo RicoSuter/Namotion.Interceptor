@@ -69,21 +69,6 @@ internal sealed class OutboundWriter
         }
     }
 
-    internal static bool IsTransientWriteError(StatusCode statusCode)
-    {
-        if (statusCode == StatusCodes.BadNodeIdUnknown ||
-            statusCode == StatusCodes.BadAttributeIdInvalid ||
-            statusCode == StatusCodes.BadTypeMismatch ||
-            statusCode == StatusCodes.BadWriteNotSupported ||
-            statusCode == StatusCodes.BadUserAccessDenied ||
-            statusCode == StatusCodes.BadNotWritable)
-        {
-            return false;
-        }
-
-        return StatusCode.IsBad(statusCode);
-    }
-
     private WriteResult ProcessWriteResults(StatusCodeCollection results, ReadOnlyMemory<SubjectPropertyChange> allChanges)
     {
         var failureCount = 0;
@@ -113,7 +98,7 @@ internal sealed class OutboundWriter
             if (!StatusCode.IsGood(results[resultIndex]))
             {
                 failedChanges.Add(change);
-                if (IsTransientWriteError(results[resultIndex]))
+                if (OpcUaStatusCodeClassifier.IsTransientError(results[resultIndex]))
                     transientCount++;
             }
             resultIndex++;

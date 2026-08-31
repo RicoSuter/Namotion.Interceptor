@@ -1,5 +1,6 @@
 using System.Buffers;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Performance;
 
 namespace Namotion.Interceptor.Tracking.Transactions;
 
@@ -12,6 +13,9 @@ public sealed class SubjectTransaction : IDisposable
     private static readonly AsyncLocal<SubjectTransaction?> CurrentTransaction = new();
     private static int _activeTransactionCount;
 
+    [ThreadStatic]
+    private static SubjectTransaction? _commitModelAccessTransaction;
+
     /// <summary>
     /// Gets a value indicating whether any transaction is currently active across all contexts.
     /// This is a fast-path check using a volatile read; it may briefly return true after
@@ -21,7 +25,6 @@ public sealed class SubjectTransaction : IDisposable
     internal static bool HasActiveTransaction => Volatile.Read(ref _activeTransactionCount) > 0;
 
     private readonly TransactionFailureHandling _failureHandling;
-    private readonly TransactionLocking _locking;
     private readonly TransactionRequirement _requirement;
     private readonly TimeSpan _commitTimeout;
     private readonly IDisposable? _lockReleaser; // null for Optimistic until commit
@@ -31,7 +34,10 @@ public sealed class SubjectTransaction : IDisposable
     /// Preserves insertion order so that commit replays changes in the order they were written.
     /// Access must be synchronized via <see cref="_pendingChangesLock"/>.
     /// </summary>
-    private readonly OrderedDictionary<PropertyReference, SubjectPropertyChange> _pendingChanges = new(PropertyReference.Comparer);
+    private static readonly ObjectPool<OrderedDictionary<PropertyReference, SubjectPropertyChange>> PendingChangesPool
+        = new(() => new OrderedDictionary<PropertyReference, SubjectPropertyChange>(PropertyReference.Comparer));
+
+    private OrderedDictionary<PropertyReference, SubjectPropertyChange>? _pendingChanges = PendingChangesPool.Rent();
     private readonly Lock _pendingChangesLock = new();
 
     private volatile bool _isCommitting;
@@ -39,10 +45,22 @@ public sealed class SubjectTransaction : IDisposable
     private int _commitStarted;
     private int _isDisposed;
 
+    // Handoff from Dispose to EndCommit: when Dispose runs mid-commit, EndCommit releases the exclusive lock
+    // once the commit finishes. Accessed only under _pendingChangesLock (no volatile needed; never read lock-free).
+    private bool _disposeRequestedDuringCommit;
+
     /// <summary>
     /// Gets the current transaction in this execution context, or null if none is active.
     /// </summary>
     public static SubjectTransaction? Current => CurrentTransaction.Value;
+
+    /// <summary>
+    /// Enables runtime validation that a custom <see cref="ITransactionWriter"/> fulfills the in-place
+    /// marking contract of <see cref="ITransactionWriter.WriteToSourcesAsync"/>: the commit then fails
+    /// terminally if the writer moved or replaced a snapshot slot. Intended for developing custom writers
+    /// (costs one array allocation and sweep per commit); process-wide, set once at startup.
+    /// </summary>
+    public static bool ValidateWriterContract { get; set; }
 
     /// <summary>
     /// Sets the current transaction in this execution context.
@@ -59,6 +77,21 @@ public sealed class SubjectTransaction : IDisposable
     internal bool IsCommitting => _isCommitting;
 
     /// <summary>
+    /// Gets a value indicating whether the transaction has reached a terminal committed state.
+    /// </summary>
+    internal bool IsCommitted => _isCommitted;
+
+    /// <summary>
+    /// Gets a value indicating whether the transaction has been disposed.
+    /// </summary>
+    internal bool IsDisposed => Volatile.Read(ref _isDisposed) != 0;
+
+    /// <summary>
+    /// Gets a value indicating whether this thread is synchronously replaying this transaction's model work.
+    /// </summary>
+    internal bool IsCommitModelAccessAuthorized => ReferenceEquals(_commitModelAccessTransaction, this);
+
+    /// <summary>
     /// Gets the interceptor this transaction is bound to (for cross-context validation).
     /// </summary>
     internal SubjectTransactionInterceptor Interceptor { get; }
@@ -70,7 +103,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            return _pendingChanges.Values.ToList();
+            return _pendingChanges?.Values.ToList() ?? [];
         }
     }
 
@@ -82,6 +115,12 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
+            if (Volatile.Read(ref _isDisposed) != 0 || _isCommitted || _pendingChanges is null)
+            {
+                value = default!;
+                return false;
+            }
+
             ThrowIfCommittingConcurrently();
 
             if (_pendingChanges.TryGetValue(property, out var change))
@@ -98,12 +137,13 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Atomically captures a property change into the pending dictionary.
     /// First write preserves <paramref name="currentValue"/> as old value for conflict detection;
-    /// subsequent writes preserve the original old value (last write wins).
+    /// subsequent writes preserve the original old value (last write wins). Returns false when
+    /// disposal wins the race, allowing the caller to continue the normal write chain.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
-    internal void CaptureChange<TProperty>(
+    internal bool TryCaptureChange<TProperty>(
         PropertyReference property,
-        object? source,
+        ChangeOrigin origin,
         DateTimeOffset changedTimestamp,
         DateTimeOffset? receivedTimestamp,
         TProperty currentValue,
@@ -111,16 +151,42 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
+            if (Volatile.Read(ref _isDisposed) != 0 || _isCommitted || _pendingChanges is null)
+            {
+                return false;
+            }
+
             ThrowIfCommittingConcurrently();
 
-            var isFirstWrite = !_pendingChanges.TryGetValue(property, out var existingChange);
-            _pendingChanges[property] = SubjectPropertyChange.Create(
+            var pendingChanges = _pendingChanges!;
+            var isFirstWrite = !pendingChanges.TryGetValue(property, out var existingChange);
+            pendingChanges[property] = SubjectPropertyChange.Create(
                 property,
-                source: source,
+                origin: origin,
                 changedTimestamp: changedTimestamp,
                 receivedTimestamp: receivedTimestamp,
                 isFirstWrite ? currentValue : existingChange.GetOldValue<TProperty>(),
                 newValue);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Rechecks an interceptor's lock-free state observation. Returns true when the transaction became
+    /// inactive, throws while a live commit still owns the model, and otherwise returns false so the caller
+    /// can continue the live non-committing path.
+    /// </summary>
+    internal bool IsInactiveUnderLockOrThrowIfCommitting()
+    {
+        lock (_pendingChangesLock)
+        {
+            if (Volatile.Read(ref _isDisposed) != 0 || _isCommitted || _pendingChanges is null)
+            {
+                return true;
+            }
+
+            ThrowIfCommittingConcurrently();
+            return false;
         }
     }
 
@@ -130,7 +196,9 @@ public sealed class SubjectTransaction : IDisposable
         {
             throw new InvalidOperationException(
                 "Cannot access transactional property while commit is in progress. " +
-                "This typically indicates the transaction is being used from multiple threads.");
+                "Source writes and transaction writer callbacks run on the committing flow: build the " +
+                "payload from the supplied changes instead of reading or writing subject properties. " +
+                "This is also reported when the transaction is used from another thread.");
         }
     }
 
@@ -147,7 +215,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Gets the locking mode for this transaction.
     /// </summary>
-    public TransactionLocking Locking => _locking;
+    public TransactionLocking Locking { get; }
 
     private SubjectTransaction(
         IInterceptorSubjectContext context,
@@ -162,13 +230,12 @@ public sealed class SubjectTransaction : IDisposable
         Context = context;
         Interceptor = interceptor;
         _failureHandling = failureHandling;
-        _locking = locking;
+        Locking = locking;
         _requirement = requirement;
         ConflictBehavior = conflictBehavior;
         _commitTimeout = commitTimeout;
         _lockReleaser = lockReleaser;
 
-        // Increment in constructor ensures counter is always paired with Dispose
         Interlocked.Increment(ref _activeTransactionCount);
     }
 
@@ -195,8 +262,8 @@ public sealed class SubjectTransaction : IDisposable
         TimeSpan commitTimeout,
         CancellationToken cancellationToken)
     {
-        // Check for nested transactions BEFORE acquiring lock (prevents deadlock)
-        if (CurrentTransaction.Value != null)
+        // Check before acquiring the context lock so an attempted nested exclusive transaction cannot deadlock.
+        if (CurrentTransaction.Value is { IsDisposed: false })
         {
             throw new InvalidOperationException("Nested transactions are not supported.");
         }
@@ -207,16 +274,13 @@ public sealed class SubjectTransaction : IDisposable
 
         IDisposable? transactionLock = null;
 
-        // For Exclusive locking, acquire the lock now
-        // For Optimistic locking, skip the lock - we'll acquire it during commit only
         if (locking == TransactionLocking.Exclusive)
         {
             transactionLock = await interceptor.AcquireTransactionLockAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        // Don't set CurrentTransaction.Value here because it won't flow to caller's context
-        // The caller (extension method) will call SetCurrent after awaiting this
-        // Counter increment is in constructor to ensure it's always paired with Dispose
+        // An AsyncLocal assignment here would not flow back through this async method's await;
+        // the caller assigns the transaction in its own execution context.
         return new SubjectTransaction(
             context,
             interceptor,
@@ -230,7 +294,7 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Commits all pending changes. If external write handlers are configured on subjects' contexts,
-    /// changes are written to external sources first, then applied to the in-process model.
+    /// changes are written to external sources first, then applied to the local model.
     /// The behavior on partial failure depends on the <see cref="_failureHandling"/> specified at transaction creation.
     /// </summary>
     /// <remarks>
@@ -241,54 +305,369 @@ public sealed class SubjectTransaction : IDisposable
     /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <exception cref="ObjectDisposedException">Thrown when the transaction has been disposed.</exception>
-    /// <exception cref="SubjectTransactionException">Thrown when one or more external source writes failed.</exception>
-    public async Task CommitAsync(CancellationToken cancellationToken)
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when commit is called from a different async flow than the one the transaction is active in,
+    /// when the transaction was already committed, or when another commit is already in progress.
+    /// </exception>
+    /// <exception cref="SubjectTransactionException">
+    /// Thrown when one or more changes failed to commit. A registered <see cref="ITransactionWriter"/>
+    /// that throws instead of reporting failures makes the transaction terminal (it must be disposed,
+    /// not retried) and may leave its sources un-reverted.
+    /// </exception>
+    public ValueTask CommitAsync(CancellationToken cancellationToken)
     {
         ValidateCanCommit();
 
         lock (_pendingChangesLock)
         {
-            if (_pendingChanges.Count == 0)
+            if (_pendingChanges is null || _pendingChanges.Count == 0)
             {
                 _isCommitted = true;
-                return;
+                return default;
             }
         }
 
-        var commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken);
-        var (rentedArray, changes) = StartCommitAndSnapshotChanges();
+        var writer = Context.TryGetService<ITransactionWriter>();
+        if (writer is null)
+        {
+            // No source writer: the entire commit is local. For the default (Exclusive) locking
+            // mode the lock is already held, so the whole flow runs synchronously without a
+            // CancellationTokenSource or an async state machine. Optimistic locking needs an async lock
+            // acquisition, so only that case falls back to the async wrapper.
+            var lockTask = AcquireOptimisticLockIfNeededAsync(cancellationToken);
+            if (lockTask.IsCompletedSuccessfully)
+            {
+                CommitWithoutWriter(lockTask.Result);
+                return default;
+            }
 
+            return CommitLocalAfterLockAsync(lockTask);
+        }
+
+        return CommitWithWriterAsync(writer, cancellationToken);
+    }
+
+    private async ValueTask CommitLocalAfterLockAsync(ValueTask<IDisposable?> lockTask)
+    {
+        IDisposable? commitLock;
         try
         {
-            ThrowIfConflictsDetected(changes.Span);
+            commitLock = await lockTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            // A failed optimistic lock must not wedge the transaction: reset so a retry is possible.
+            Volatile.Write(ref _commitStarted, 0);
+            throw;
+        }
+        CommitWithoutWriter(commitLock);
+    }
+
+    /// <summary>
+    /// Fully synchronous local commit when no <see cref="ITransactionWriter"/> is registered.
+    /// </summary>
+    private void CommitWithoutWriter(IDisposable? commitLock)
+    {
+        SubjectPropertyChange[]? rentedArray = null;
+        try
+        {
+            var (rented, changes) = StartCommitAndSnapshotChanges();
+            rentedArray = rented;
+
+            SubjectTransactionException? failure = null;
+            using (EnterCommitModelAccess())
+            {
+                ThrowIfConflictsDetected(changes.Span);
+
+                var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null);
+
+                if (applyFailed.Count > 0)
+                {
+                    if (_failureHandling == TransactionFailureHandling.Rollback)
+                    {
+                        var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
+                        failure = CreateFailureException([], SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed), SubjectPropertyChangeOperations.Concat(applyErrors, revertErrors));
+                    }
+                    else
+                    {
+                        failure = CreateFailureException(applied, applyFailed, applyErrors);
+                    }
+                }
+            }
+
+            FinishCommit();
+
+            if (failure is not null)
+            {
+                throw failure;
+            }
+        }
+        finally
+        {
+            EndCommit(rentedArray, commitLock);
+        }
+    }
+
+    /// <summary>
+    /// Commit when an <see cref="ITransactionWriter"/> is registered.
+    /// </summary>
+    private async ValueTask CommitWithWriterAsync(ITransactionWriter writer, CancellationToken cancellationToken)
+    {
+        IDisposable? commitLock = null;
+        SubjectPropertyChange[]? rentedArray = null;
+        try
+        {
+            commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken).ConfigureAwait(false);
+            var (rented, changes) = StartCommitAndSnapshotChanges();
+            rentedArray = rented;
+
+            using (EnterCommitModelAccess())
+            {
+                ThrowIfConflictsDetected(changes.Span);
+            }
 
             using var timeoutCts = CreateCommitTimeoutCts();
             var commitToken = timeoutCts?.Token ?? CancellationToken.None;
 
-            var (successful, failed, errors) = await ExecuteWritesAsync(changes, commitToken);
+            var failure = await ReconcileWithWriterAsync(writer, changes, commitToken).ConfigureAwait(false);
 
-            lock (_pendingChangesLock)
+            FinishCommit();
+
+            if (failure is not null)
             {
-                _pendingChanges.Clear();
+                throw failure;
             }
-
-            _isCommitted = true;
-
-            ThrowIfFailed(successful, failed, errors);
         }
         finally
         {
-            _isCommitting = false;
+            EndCommit(rentedArray, commitLock);
+        }
+    }
 
-            if (!_isCommitted)
+    /// <summary>
+    /// Implements the failure/rollback matrix for the writer path. Returns null on full success.
+    /// </summary>
+    private async ValueTask<SubjectTransactionException?> ReconcileWithWriterAsync(
+        ITransactionWriter writer,
+        Memory<SubjectPropertyChange> changes,
+        CancellationToken cancellationToken)
+    {
+        // The writer marks accepted snapshot slots with the confirming source so the local apply and
+        // revert notifications are echo-suppressed by the outbound connector queue (#343).
+        var capturedProperties = ValidateWriterContract ? CaptureSnapshotProperties(changes.Span) : null;
+
+        // A throwing writer returns neither the written set nor the revert state, so sources cannot be
+        // reverted: report a full failure, which the caller makes terminal. A contract violation is
+        // terminal too (source writes already happened, a retry would repeat them). Only a commit-timeout
+        // OperationCanceledException propagates and stays retryable; the built-in writer throws it
+        // only from its revert phase (write-phase cancellation is reported as a failure).
+        SourceWriteResult writeResult;
+        try
+        {
+            writeResult = await writer
+                .WriteToSourcesAsync(changes, _requirement, cancellationToken).ConfigureAwait(false);
+
+            VerifySnapshotIntegrity(capturedProperties, changes.Span);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            return new SubjectTransactionException(
+                "The transaction writer threw an exception or violated its contract during commit. Sources " +
+                "may be in an undefined, un-reverted state; the transaction is terminal and must be disposed, " +
+                "not retried.",
+                appliedChanges: [],
+                failedChanges: changes.ToArray(),
+                errors: [exception]);
+        }
+
+        var (written, failedSource, sourceErrors, revertState) = writeResult;
+
+        // Rollback with any source-write failure or reported error: nothing is applied to the local model;
+        // revert what reached a source and report. Local (no-source) changes did not commit either and are
+        // reported as failed. An error without failed changes (custom writers only) must not be swallowed.
+        if (_failureHandling == TransactionFailureHandling.Rollback && (failedSource.Count > 0 || sourceErrors.Count > 0))
+        {
+            var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, cancellationToken).ConfigureAwait(false);
+            var notApplied = SubjectPropertyChangeOperations.ExcludeByProperty(changes.Span, failedSource, written);
+            return CreateFailureException(
+                [],
+                SubjectPropertyChangeOperations.Concat(failedSource, notApplied, revert.Failed),
+                SubjectPropertyChangeOperations.Concat(sourceErrors, revert.Errors));
+        }
+
+        // Apply the whole snapshot except the source-write failures in a single pass. With no source
+        // failure, this is the entire snapshot, and ApplyAllChanges returns an empty Successful set.
+        var exclude = failedSource.Count == 0 ? null : failedSource;
+        IReadOnlyList<SubjectPropertyChange> applied;
+        IReadOnlyList<SubjectPropertyChange> applyFailed;
+        IReadOnlyList<Exception> applyErrors;
+        IReadOnlyList<SubjectPropertyChange> revertFailed = [];
+        IReadOnlyList<Exception> revertErrors = [];
+        using (EnterCommitModelAccess())
+        {
+            (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude);
+            if (applyFailed.Count > 0 && _failureHandling == TransactionFailureHandling.Rollback)
             {
-                // Allow retry: reset so CommitAsync can be called again after a failure
-                // (e.g., conflict detected, timeout, validation during replay).
-                Volatile.Write(ref _commitStarted, 0);
+                (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
+            }
+        }
+
+        if (applyFailed.Count > 0)
+        {
+            if (_failureHandling == TransactionFailureHandling.Rollback)
+            {
+                // All-or-nothing: revert local applies, then the source writes.
+                var sourceRevert = await RevertSourceWritesSafelyAsync(writer, written, revertState, cancellationToken).ConfigureAwait(false);
+                // The no-source local changes were applied then reverted; under all-or-nothing they did not
+                // commit, so report them as failed too (consistent with the source-write-failure branch and
+                // the documented Rollback contract). Exclude source-bound changes (in 'written'; failedSource
+                // is empty on this branch) and anything already reported as an apply/revert failure.
+                var rolledBackLocals = SubjectPropertyChangeOperations.ExcludeByProperty(
+                    changes.Span, written, SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed));
+                return CreateFailureException(
+                    [],
+                    SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, rolledBackLocals, revertFailed, sourceRevert.Failed),
+                    SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, revertErrors, sourceRevert.Errors));
             }
 
-            ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray);
-            commitLock?.Dispose();
+            // BestEffort: keep source == model for failed-apply properties by reverting only the
+            // source writes whose property failed to apply (matched by Property equality).
+            var toRevert = SubjectPropertyChangeOperations.IntersectByProperty(applyFailed, written);
+            var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, cancellationToken).ConfigureAwait(false);
+            return CreateFailureException(
+                applied,
+                SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, bestEffortRevert.Failed),
+                SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, bestEffortRevert.Errors));
+        }
+
+        // Apply succeeded. Report any remaining source failure or writer error (BestEffort; Rollback
+        // returned above). On the no-exclude path ApplyLocalChanges returned an empty Successful set,
+        // so materialize the snapshot as the applied set.
+        if (failedSource.Count > 0 || sourceErrors.Count > 0)
+        {
+            var appliedChanges = exclude is null ? changes.ToArray() : applied;
+            return CreateFailureException(appliedChanges, failedSource, sourceErrors);
+        }
+
+        return null;
+    }
+
+    private static PropertyReference[] CaptureSnapshotProperties(ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        var properties = new PropertyReference[changes.Length];
+        for (var i = 0; i < changes.Length; i++)
+        {
+            properties[i] = changes[i].Property;
+        }
+        return properties;
+    }
+
+    /// <summary>
+    /// Verifies no snapshot slot was moved or replaced by the writer. Checks slot identity only; tampered
+    /// values or timestamps are not detected. No-op when validation is disabled (null capture).
+    /// </summary>
+    private static void VerifySnapshotIntegrity(PropertyReference[]? capturedProperties, ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        if (capturedProperties is null)
+        {
+            return;
+        }
+
+        for (var i = 0; i < changes.Length; i++)
+        {
+            if (!PropertyReference.Comparer.Equals(changes[i].Property, capturedProperties[i]))
+            {
+                throw new InvalidOperationException(
+                    "The transaction writer violated its contract: it changed the property at snapshot slot " +
+                    $"{i} instead of only marking the accepting source. A writer must change only the Source " +
+                    "of an accepted slot and must never move a change to a different slot.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Converts a contract-violating throw from <see cref="ITransactionWriter.RevertSourceWritesAsync"/>
+    /// into "every requested revert failed" so the commit stays on the reported-failure path and becomes
+    /// terminal; a propagating throw would leave the transaction retryable, and a retry would re-push
+    /// to sources that already accepted writes. Only the commit timeout propagates.
+    /// </summary>
+    private static async ValueTask<SourceRevertResult> RevertSourceWritesSafelyAsync(
+        ITransactionWriter writer,
+        IReadOnlyList<SubjectPropertyChange> written,
+        object? revertState,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await writer.RevertSourceWritesAsync(written, revertState, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            return new SourceRevertResult(written, [exception]);
+        }
+    }
+
+    /// <summary>
+    /// Clears pending changes and marks the transaction committed BEFORE any exception is thrown so
+    /// later property reads do not return stale captured values via TryGetPendingValue.
+    /// </summary>
+    private void FinishCommit()
+    {
+        lock (_pendingChangesLock)
+        {
+            _pendingChanges?.Clear();
+            _isCommitted = true;
+        }
+    }
+
+    /// <summary>
+    /// Common cleanup for every commit path (success or failure): resets commit state for retry on
+    /// failure, returns the pooled snapshot array, and releases the optimistic lock.
+    /// </summary>
+    private void EndCommit(SubjectPropertyChange[]? rentedArray, IDisposable? commitLock)
+    {
+        bool releaseDeferredLock;
+        OrderedDictionary<PropertyReference, SubjectPropertyChange>? pendingChangesToReturn = null;
+        lock (_pendingChangesLock)
+        {
+            // Clear under the lock so Dispose observes the in-flight commit consistently. A disposing caller
+            // defers exclusive-lock release until commit completion so another transaction cannot interleave
+            // with the apply pass. If it also owns the pending dictionary, detach it here and return it after
+            // the lock so ownership transfers exactly once.
+            _isCommitting = false;
+            releaseDeferredLock = _disposeRequestedDuringCommit;
+            if (releaseDeferredLock)
+            {
+                pendingChangesToReturn = _pendingChanges;
+                _pendingChanges = null;
+            }
+        }
+
+        if (pendingChangesToReturn is not null)
+        {
+            PendingChangesPool.Return(pendingChangesToReturn);
+        }
+
+        if (rentedArray != null)
+        {
+            // clearArray: true because SubjectPropertyChange holds object references (subject, source,
+            // boxed value holders); leaving them in the pooled buffer would keep those graphs alive
+            // until the slot is next overwritten.
+            ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray, clearArray: true);
+        }
+
+        // Release the optimistic lock before allowing a retry to start.
+        commitLock?.Dispose();
+
+        if (releaseDeferredLock)
+        {
+            _lockReleaser?.Dispose();
+        }
+
+        if (!_isCommitted)
+        {
+            // Only failures that escape before FinishCommit are retryable; later failures are terminal.
+            Volatile.Write(ref _commitStarted, 0);
         }
     }
 
@@ -297,6 +676,11 @@ public sealed class SubjectTransaction : IDisposable
         if (Volatile.Read(ref _isDisposed) != 0)
             throw new ObjectDisposedException(nameof(SubjectTransaction));
 
+        if (!ReferenceEquals(CurrentTransaction.Value, this))
+            throw new InvalidOperationException(
+                "Transaction is being committed from a different async flow than the one it is active in. " +
+                "Begin, use, commit, and dispose a transaction within the same async flow.");
+
         if (_isCommitted)
             throw new InvalidOperationException("Transaction has already been committed.");
 
@@ -304,30 +688,39 @@ public sealed class SubjectTransaction : IDisposable
             throw new InvalidOperationException("CommitAsync is already in progress.");
     }
 
-    private async ValueTask<IDisposable?> AcquireOptimisticLockIfNeededAsync(CancellationToken cancellationToken)
+    private ValueTask<IDisposable?> AcquireOptimisticLockIfNeededAsync(CancellationToken cancellationToken)
     {
-        if (_locking == TransactionLocking.Optimistic)
+        if (Locking != TransactionLocking.Optimistic)
         {
-            return await Interceptor.AcquireTransactionLockAsync(cancellationToken).ConfigureAwait(false);
+            return default;
         }
-        return null;
+        return AcquireOptimisticLockSlowAsync(cancellationToken);
+    }
+
+    private async ValueTask<IDisposable?> AcquireOptimisticLockSlowAsync(CancellationToken cancellationToken)
+    {
+        return await Interceptor.AcquireTransactionLockAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes) StartCommitAndSnapshotChanges()
     {
         lock (_pendingChangesLock)
         {
-            // Set _isCommitting inside the lock to prevent concurrent writes from being
-            // captured into _pendingChanges between the copy and the flag update (TOCTOU).
-            _isCommitting = true;
-
-            var changeCount = _pendingChanges.Count;
+            // Rent before setting _isCommitting so an allocation failure leaves the transaction reusable.
+            var pendingChanges = _pendingChanges;
+            var changeCount = pendingChanges?.Count ?? 0;
             var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
 
+            // Set this while holding the lock so no write can be captured between snapshot and commit.
+            _isCommitting = true;
+
             var index = 0;
-            foreach (var change in _pendingChanges.Values)
+            if (pendingChanges is not null)
             {
-                rentedArray[index++] = change;
+                foreach (var change in pendingChanges.Values)
+                {
+                    rentedArray[index++] = change;
+                }
             }
 
             return (rentedArray, rentedArray.AsMemory(0, changeCount));
@@ -338,7 +731,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         if (ConflictBehavior == TransactionConflictBehavior.FailOnConflict)
         {
-            var conflictingProperties = DetectConflicts(changes);
+            var conflictingProperties = SubjectPropertyChangeOperations.DetectChangeConflicts(changes);
             if (conflictingProperties.Count > 0)
             {
                 throw new SubjectTransactionConflictException(conflictingProperties);
@@ -353,148 +746,41 @@ public sealed class SubjectTransaction : IDisposable
             : new CancellationTokenSource(_commitTimeout);
     }
 
-    private async Task<(List<SubjectPropertyChange> Successful, List<SubjectPropertyChange> Failed, List<Exception> Errors)>
-        ExecuteWritesAsync(Memory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
-    {
-        var changeCount = changes.Length;
-        
-        var allSuccessfulChanges = new List<SubjectPropertyChange>(changeCount);
-        var allFailedChanges = new List<SubjectPropertyChange>();  // Rare, keep small initial capacity
-        var allErrors = new List<Exception>();  // Rare, keep small initial capacity
-
-        var localChangesToApply = new List<SubjectPropertyChange>(changeCount);
-
-        var writeHandler = Context.TryGetService<ITransactionWriter>();
-        if (writeHandler != null)
-        {
-            await WriteToSourcesAsync(
-                writeHandler, changes,
-                allSuccessfulChanges, allFailedChanges, allErrors, localChangesToApply, cancellationToken);
-        }
-        else
-        {
-            foreach (var change in changes.Span)
-            {
-                localChangesToApply.Add(change);
-            }
-        }
-
-        if (localChangesToApply.Count > 0)
-        {
-            await ApplyLocalChangesAsync(
-                writeHandler,
-                allSuccessfulChanges, allFailedChanges, allErrors, localChangesToApply, cancellationToken);
-        }
-
-        return (allSuccessfulChanges, allFailedChanges, allErrors);
-    }
-
-    private async Task WriteToSourcesAsync(ITransactionWriter writeHandler,
-        Memory<SubjectPropertyChange> changes,
-        List<SubjectPropertyChange> allSuccessfulChanges,
-        List<SubjectPropertyChange> allFailedChanges,
-        List<Exception> allErrors,
-        List<SubjectPropertyChange> localChangesToApply,
-        CancellationToken cancellationToken)
-    {
-        var result = await writeHandler.WriteChangesAsync(changes, _failureHandling, _requirement, cancellationToken);
-        allSuccessfulChanges.AddRange(result.SuccessfulChanges);
-        allFailedChanges.AddRange(result.FailedChanges);
-        allErrors.AddRange(result.Errors);
-        localChangesToApply.AddRange(result.LocalChanges);
-
-        if (_failureHandling == TransactionFailureHandling.Rollback && allFailedChanges.Count > 0)
-        {
-            allFailedChanges.AddRange(localChangesToApply);
-            localChangesToApply.Clear();
-        }
-    }
-
-    private async Task ApplyLocalChangesAsync(ITransactionWriter? writeHandler,
-        List<SubjectPropertyChange> allSuccessfulChanges,
-        List<SubjectPropertyChange> allFailedChanges,
-        List<Exception> allErrors,
-        List<SubjectPropertyChange> localChangesToApply,
-        CancellationToken cancellationToken)
-    {
-        var (applied, applyFailed, applyErrors) = localChangesToApply.ApplyAllChanges();
-        allSuccessfulChanges.AddRange(applied);
-        allFailedChanges.AddRange(applyFailed);
-        allErrors.AddRange(applyErrors);
-
-        if (_failureHandling == TransactionFailureHandling.Rollback && applyFailed.Count > 0)
-        {
-            await RollbackOnLocalFailureAsync(
-                writeHandler,
-                allSuccessfulChanges, allFailedChanges, allErrors, applied, cancellationToken);
-        }
-    }
-
-    private async Task RollbackOnLocalFailureAsync(ITransactionWriter? writeHandler,
-        List<SubjectPropertyChange> allSuccessfulChanges,
-        List<SubjectPropertyChange> allFailedChanges,
-        List<Exception> allErrors,
-        List<SubjectPropertyChange> applied,
-        CancellationToken cancellationToken)
-    {
-        // Revert successful local applies
-        var (_, localRevertFailed, localRevertErrors) = applied.ToRollbackChanges().ApplyAllChanges();
-        allFailedChanges.AddRange(localRevertFailed);
-        allErrors.AddRange(localRevertErrors);
-
-        // Revert source-bound changes by calling writer with rollback changes
-        if (writeHandler != null && allSuccessfulChanges.Count > 0)
-        {
-            var rollbackChanges = allSuccessfulChanges.ToRollbackChanges().ToArray();
-            var rollbackResult = await writeHandler.WriteChangesAsync(
-                rollbackChanges.AsMemory(),
-                TransactionFailureHandling.BestEffort,
-                TransactionRequirement.None,
-                cancellationToken);
-
-            allFailedChanges.AddRange(rollbackResult.FailedChanges);
-            allErrors.AddRange(rollbackResult.Errors);
-        }
-
-        allSuccessfulChanges.Clear();
-    }
-
-    private void ThrowIfFailed(
-        List<SubjectPropertyChange> successful,
-        List<SubjectPropertyChange> failed,
-        List<Exception> errors)
-    {
-        if (failed.Count > 0)
-        {
-            var message = _failureHandling switch
-            {
-                TransactionFailureHandling.BestEffort => "One or more changes failed. Successfully written changes have been applied.",
-                TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted. No changes have been applied to the in-process model.",
-                _ => "One or more changes failed."
-            };
-
-            throw new SubjectTransactionException(message, successful, failed, errors);
-        }
-    }
+    private CommitModelAccessScope EnterCommitModelAccess() => new(this);
 
     /// <summary>
-    /// Detects conflicts by comparing captured OldValue with current actual value.
+    /// Grants model access only to synchronous commit-owned work on this thread. The previous identity is
+    /// restored for nested/reentrant use. Callers must dispose the scope before awaiting external code.
     /// </summary>
-    private static List<PropertyReference> DetectConflicts(ReadOnlySpan<SubjectPropertyChange> changes)
+    private readonly struct CommitModelAccessScope : IDisposable
     {
-        List<PropertyReference>? conflictingProperties = null;
-        foreach (var change in changes)
-        {
-            var currentValue = change.Property.Metadata.GetValue?.Invoke(change.Property.Subject);
-            var capturedOldValue = change.GetOldValue<object?>();
+        private readonly SubjectTransaction? _previousTransaction;
 
-            if (!Equals(currentValue, capturedOldValue))
-            {
-                conflictingProperties ??= [];
-                conflictingProperties.Add(change.Property);
-            }
+        public CommitModelAccessScope(SubjectTransaction transaction)
+        {
+            _previousTransaction = _commitModelAccessTransaction;
+            _commitModelAccessTransaction = transaction;
         }
-        return conflictingProperties ?? [];
+
+        public void Dispose()
+        {
+            _commitModelAccessTransaction = _previousTransaction;
+        }
+    }
+
+    private SubjectTransactionException CreateFailureException(
+        IReadOnlyList<SubjectPropertyChange> successful,
+        IReadOnlyList<SubjectPropertyChange> failed,
+        IReadOnlyList<Exception> errors)
+    {
+        var message = _failureHandling switch
+        {
+            TransactionFailureHandling.BestEffort => "One or more changes failed. Successful changes have been applied.",
+            TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted. No changes have been applied to the local model.",
+            _ => "One or more changes failed."
+        };
+
+        return new SubjectTransactionException(message, successful, failed, errors);
     }
 
     /// <summary>
@@ -502,17 +788,44 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     public void Dispose()
     {
+        // Publish disposal before taking the lock so a waiting capture observes it and continues normally.
         if (Interlocked.CompareExchange(ref _isDisposed, 1, 0) == 0)
         {
             Interlocked.Decrement(ref _activeTransactionCount);
 
+            bool committing;
+            OrderedDictionary<PropertyReference, SubjectPropertyChange>? pendingChangesToReturn = null;
             lock (_pendingChangesLock)
             {
-                _pendingChanges.Clear();
+                _pendingChanges?.Clear();
+                committing = _isCommitting;
+                if (committing)
+                {
+                    _disposeRequestedDuringCommit = true;
+                }
+                else
+                {
+                    // Detach while locked; return the pooled dictionary after releasing the lock.
+                    pendingChangesToReturn = _pendingChanges;
+                    _pendingChanges = null;
+                }
             }
 
-            CurrentTransaction.Value = null;
-            _lockReleaser?.Dispose(); // May be null for Optimistic transactions
+            // Clear the slot only when it holds this transaction so a cross-flow Dispose cannot
+            // clobber an unrelated transaction.
+            if (CurrentTransaction.Value == this)
+            {
+                CurrentTransaction.Value = null;
+            }
+
+            if (!committing)
+            {
+                if (pendingChangesToReturn is not null)
+                {
+                    PendingChangesPool.Return(pendingChangesToReturn);
+                }
+                _lockReleaser?.Dispose(); // May be null for Optimistic transactions
+            }
         }
     }
 }

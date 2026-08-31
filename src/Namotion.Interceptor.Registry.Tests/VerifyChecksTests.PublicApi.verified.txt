@@ -104,6 +104,9 @@ namespace Namotion.Interceptor.Registry
     {
         public static Namotion.Interceptor.IInterceptorSubjectContext WithRegistry(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
     }
+    [Namotion.Interceptor.Attributes.RunsBefore(new System.Type[] {
+            typeof(Namotion.Interceptor.Tracking.Parent.ParentTrackingHandler),
+            typeof(Namotion.Interceptor.Tracking.Lifecycle.ContextInheritanceHandler)})]
     public class SubjectRegistry : Namotion.Interceptor.Registry.Abstractions.ISubjectIdRegistry, Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, Namotion.Interceptor.Tracking.Lifecycle.IPropertyLifecycleHandler
     {
         public SubjectRegistry() { }
@@ -119,7 +122,7 @@ namespace Namotion.Interceptor.Registry
         public static void SetSubjectId(this Namotion.Interceptor.IInterceptorSubject subject, string id) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetRegisteredProperty(this Namotion.Interceptor.PropertyReference propertyReference) { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetRegisteredProperty(this Namotion.Interceptor.IInterceptorSubject subject, string propertyName, Namotion.Interceptor.Registry.Abstractions.ISubjectRegistry? registry = null) { }
-        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetRegisteredProperty<T>(this T subject, System.Linq.Expressions.Expression<System.Func<T, object?>> propertyExpression)
+        public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetRegisteredProperty<T, TValue>(this T subject, System.Linq.Expressions.Expression<System.Func<T, TValue>> propertyExpression)
             where T : Namotion.Interceptor.IInterceptorSubject { }
         public static Namotion.Interceptor.Registry.Abstractions.RegisteredSubject? TryGetRegisteredSubject(this Namotion.Interceptor.IInterceptorSubject subject) { }
         public static string? TryGetSubjectId(this Namotion.Interceptor.IInterceptorSubject subject) { }
@@ -190,15 +193,5 @@ namespace Namotion.Interceptor.Registry.Paths
         public virtual bool IsPropertyIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
         public virtual Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetPropertyFromSegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, string segment) { }
         public virtual string? TryGetPropertySegment(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
-    }
-}
-namespace Namotion.Interceptor.Registry.Performance
-{
-    public sealed class ObjectPool<T>
-        where T :  class
-    {
-        public ObjectPool(System.Func<T> factory) { }
-        public T Rent() { }
-        public void Return(T item) { }
     }
 }

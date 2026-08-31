@@ -1,15 +1,26 @@
+using Namotion.Interceptor.Connectors.Diagnostics;
+
 using TwinCAT.Ads;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Client;
 
 /// <summary>
-/// Provides diagnostic information about the ADS client connection state.
+/// What the ADS client reports about its connection, on top of the shared source diagnostics.
 /// </summary>
-public class AdsClientDiagnostics
+/// <remarks>
+/// <see cref="ConnectorDiagnostics.IsOperational"/> means the client holds an ADS connection and
+/// has registered its symbols. It does not mean the model is in sync: the initial value read runs
+/// while the source state is
+/// <see cref="Namotion.Interceptor.Connectors.Monitoring.SourceState.Synchronizing"/>, so read the
+/// two together to tell a lost connection from a connected client still loading. See
+/// docs/connectors-monitoring.md.
+/// </remarks>
+public sealed class AdsClientDiagnostics : SourceDiagnostics
 {
     private readonly TwinCatSubjectClientSource _source;
 
-    internal AdsClientDiagnostics(TwinCatSubjectClientSource source)
+    internal AdsClientDiagnostics(TwinCatSubjectClientSource source, SourceMetrics metrics)
+        : base(metrics)
     {
         _source = source;
     }

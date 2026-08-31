@@ -162,4 +162,36 @@ public class DagTests
         // Assert - Shared loses one ref (still has one from B), Replacement attached
         return Verify(helper.GetEvents());
     }
+
+    [Fact]
+    public void WhenCollectionIndexOfSecondParentShifts_ThenOverflowParentIndexIsUpdated()
+    {
+        // Arrange: Father occupies the shared child's inline first-parent slot, so the
+        // Children entry is stored in the overflow parent list; its collection index
+        // update must hit the overflow branch of UpdateParentIndex.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var other = new Person { FirstName = "Other" };
+        var shared = new Person { FirstName = "Shared" };
+        var root = new Person(context)
+        {
+            FirstName = "Root",
+            Father = shared,
+            Children = [other, shared]
+        };
+
+        var sharedRegistered = shared.TryGetRegisteredSubject();
+        Assert.NotNull(sharedRegistered);
+        var childrenEntry = sharedRegistered.Parents.Single(p => p.Property.Name == nameof(Person.Children));
+        Assert.Equal(1, (int)childrenEntry.Index!);
+
+        // Act: removing the sibling shifts the shared child's collection index from 1 to 0.
+        root.Children = [shared];
+
+        // Assert
+        childrenEntry = sharedRegistered.Parents.Single(p => p.Property.Name == nameof(Person.Children));
+        Assert.Equal(0, (int)childrenEntry.Index!);
+    }
 }

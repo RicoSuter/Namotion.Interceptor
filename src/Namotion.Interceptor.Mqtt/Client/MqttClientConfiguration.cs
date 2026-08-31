@@ -1,5 +1,6 @@
 using System;
 using MQTTnet.Protocol;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Registry.Paths;
@@ -140,6 +141,14 @@ public class MqttClientConfiguration
     /// Set to 0 to disable write buffering.
     /// </summary>
     public int WriteRetryQueueSize { get; init; } = 1000;
+
+    /// <summary>
+    /// Gets or sets how long a stop may block while the last buffered batch is written. Connectors stop
+    /// one after another under the host's shared <c>HostOptions.ShutdownTimeout</c>, 30 seconds by
+    /// default, so enough of them blocked on unreachable endpoints still exhaust it. Zero discards the
+    /// batch instead.
+    /// </summary>
+    public TimeSpan TeardownFlushTimeout { get; init; } = ChangeQueueProcessor.DefaultTeardownFlushTimeout;
     
     /// <summary>
     /// Gets or sets the value converter for serialization/deserialization. Default is JSON.
@@ -203,6 +212,11 @@ public class MqttClientConfiguration
         if (WriteRetryQueueSize < 0)
         {
             throw new ArgumentException($"WriteRetryQueueSize must be non-negative, got: {WriteRetryQueueSize}", nameof(WriteRetryQueueSize));
+        }
+
+        if (TeardownFlushTimeout < TimeSpan.Zero)
+        {
+            throw new ArgumentException($"TeardownFlushTimeout must be non-negative, got: {TeardownFlushTimeout}", nameof(TeardownFlushTimeout));
         }
 
         if (ValueConverter is null)

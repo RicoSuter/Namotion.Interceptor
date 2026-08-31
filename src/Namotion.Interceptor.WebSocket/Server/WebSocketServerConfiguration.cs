@@ -31,6 +31,14 @@ public class WebSocketServerConfiguration
     public TimeSpan BufferTime { get; set; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
+    /// Gets or sets how long a stop may block while the last buffered batch is written. Connectors stop
+    /// one after another under the host's shared <c>HostOptions.ShutdownTimeout</c>, 30 seconds by
+    /// default, so enough of them blocked on unreachable endpoints still exhaust it. Zero discards the
+    /// batch instead.
+    /// </summary>
+    public TimeSpan TeardownFlushTimeout { get; set; } = ChangeQueueProcessor.DefaultTeardownFlushTimeout;
+
+    /// <summary>
     /// Maximum number of property changes per WebSocket message. Default: 1000.
     /// Smaller batches reduce latency, larger batches reduce per-message overhead.
     /// Set to 0 for unlimited (not recommended for large object graphs).
@@ -54,8 +62,14 @@ public class WebSocketServerConfiguration
     public TimeSpan HelloTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
+    /// The smallest heartbeat interval that can be configured.
+    /// </summary>
+    public static readonly TimeSpan MinimumHeartbeatInterval = TimeSpan.FromSeconds(1);
+
+    /// <summary>
     /// Interval between heartbeat messages. Default: 30 seconds.
-    /// Set to TimeSpan.Zero to disable heartbeats.
+    /// Set to TimeSpan.Zero to disable heartbeats, otherwise at least
+    /// <see cref="MinimumHeartbeatInterval"/>.
     /// </summary>
     public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -108,6 +122,11 @@ public class WebSocketServerConfiguration
             throw new ArgumentException($"BufferTime must be non-negative, got: {BufferTime}", nameof(BufferTime));
         }
 
+        if (TeardownFlushTimeout < TimeSpan.Zero)
+        {
+            throw new ArgumentException($"TeardownFlushTimeout must be non-negative, got: {TeardownFlushTimeout}", nameof(TeardownFlushTimeout));
+        }
+
         if (MaxMessageSize <= 0)
         {
             throw new ArgumentException($"MaxMessageSize must be positive, got: {MaxMessageSize}", nameof(MaxMessageSize));
@@ -128,9 +147,11 @@ public class WebSocketServerConfiguration
             throw new ArgumentException($"WriteBatchSize must be non-negative, got: {WriteBatchSize}", nameof(WriteBatchSize));
         }
 
-        if (HeartbeatInterval < TimeSpan.Zero)
+        if (HeartbeatInterval != TimeSpan.Zero && HeartbeatInterval < MinimumHeartbeatInterval)
         {
-            throw new ArgumentException($"HeartbeatInterval must be non-negative, got: {HeartbeatInterval}", nameof(HeartbeatInterval));
+            throw new ArgumentException(
+                $"HeartbeatInterval must be TimeSpan.Zero to disable heartbeats, or at least {MinimumHeartbeatInterval}, got: {HeartbeatInterval}",
+                nameof(HeartbeatInterval));
         }
 
         if (BroadcastTimeout <= TimeSpan.Zero)

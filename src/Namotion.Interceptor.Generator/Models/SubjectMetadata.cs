@@ -4,13 +4,13 @@ namespace Namotion.Interceptor.Generator.Models;
 
 internal sealed record SubjectMetadata(
     string ClassName,
-    string NamespaceName,
+    string AccessModifier,
+    bool IsSealed,
+    string? NamespaceName,
     string FullTypeName,
-    string[] ContainingTypes,
+    ContainingType[] ContainingTypes,
     bool NeedsGeneratedParameterlessConstructor,
     bool HasOrWillHaveParameterlessConstructor,
-    string? BaseClassTypeName,
-    bool BaseClassHasInterceptorSubject,
-    bool BaseClassHasInpc,
+    SubjectBaseClass BaseClass,
     IReadOnlyList<PropertyMetadata> Properties,
     IReadOnlyList<MethodMetadata> Methods);

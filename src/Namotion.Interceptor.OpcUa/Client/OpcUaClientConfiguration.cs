@@ -43,7 +43,7 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets the maximum number of monitored items per subscription. Default is 1000.
     /// </summary>
-    public int MaximumItemsPerSubscription { get; set; } = 1000;
+    public int MaxItemsPerSubscription { get; set; } = 1000;
 
     /// <summary>
     /// Gets the maximum number of write operations to queue for retry when disconnected. Default is 1000.
@@ -108,7 +108,15 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the retry time (default: 10s).
     /// </summary>
-    public TimeSpan? RetryTime { get; set; } = TimeSpan.FromSeconds(1);
+    public TimeSpan? RetryTime { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Gets or sets how long a stop may block while the last buffered batch is written. Connectors stop
+    /// one after another under the host's shared <c>HostOptions.ShutdownTimeout</c>, 30 seconds by
+    /// default, so enough of them blocked on unreachable endpoints still exhaust it. Zero discards the
+    /// batch instead.
+    /// </summary>
+    public TimeSpan TeardownFlushTimeout { get; set; } = ChangeQueueProcessor.DefaultTeardownFlushTimeout;
 
     /// <summary>
     /// Gets or sets the default sampling interval in milliseconds for monitored items when not specified on the [OpcUaNode] attribute.
@@ -183,7 +191,7 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the maximum notifications per publish that the client requests (default: 0 = server default).
     /// </summary>
-    public uint SubscriptionMaximumNotificationsPerPublish { get; set; } = 0;
+    public uint SubscriptionMaxNotificationsPerPublish { get; set; } = 0;
 
     /// <summary>
     /// Gets or sets whether to process subscription messages sequentially (in order).
@@ -205,7 +213,7 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the maximum references per node to read per browse request. 0 uses server default.
     /// </summary>
-    public uint MaximumReferencesPerNode { get; set; } = 0;
+    public uint MaxReferencesPerNode { get; set; } = 0;
 
     /// <summary>
     /// Gets or sets whether to enable automatic polling fallback when subscriptions are not supported.
@@ -444,6 +452,13 @@ public class OpcUaClientConfiguration
                 nameof(WriteRetryQueueSize));
         }
 
+        if (TeardownFlushTimeout < TimeSpan.Zero)
+        {
+            throw new ArgumentException(
+                $"TeardownFlushTimeout must be non-negative, got: {TeardownFlushTimeout}",
+                nameof(TeardownFlushTimeout));
+        }
+
         if (SubscriptionHealthCheckInterval < TimeSpan.FromSeconds(1))
         {
             throw new ArgumentException(
@@ -451,11 +466,11 @@ public class OpcUaClientConfiguration
                 nameof(SubscriptionHealthCheckInterval));
         }
 
-        if (MaximumItemsPerSubscription <= 0)
+        if (MaxItemsPerSubscription <= 0)
         {
             throw new ArgumentException(
-                $"MaximumItemsPerSubscription must be positive, got: {MaximumItemsPerSubscription}",
-                nameof(MaximumItemsPerSubscription));
+                $"MaxItemsPerSubscription must be positive, got: {MaxItemsPerSubscription}",
+                nameof(MaxItemsPerSubscription));
         }
 
         if (EnablePollingFallback)

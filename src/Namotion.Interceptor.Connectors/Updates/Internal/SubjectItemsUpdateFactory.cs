@@ -1,5 +1,5 @@
 using System.Collections;
-using Namotion.Interceptor.Registry.Performance;
+using Namotion.Interceptor.Tracking.Performance;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 

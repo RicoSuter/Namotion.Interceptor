@@ -305,7 +305,7 @@ public class CustomMqttValueConverter : IMqttValueConverter
 
 ### Write Retry Queue
 
-Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
+Write retry queue behavior (ring buffer, reconcile by commit order on reconnection) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 new MqttClientConfiguration
@@ -337,6 +337,30 @@ new MqttClientConfiguration
     HealthCheckInterval = TimeSpan.FromSeconds(30) // 5 minute timeout
 }
 ```
+
+## Diagnostics
+
+Both MQTT connectors report through the shared model: the member tree, the three buffers, `LastError` stickiness and the read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to MQTT.
+
+**`IsOperational` for the client means the connection to the broker is up.** It is set as soon as the connect returns, before the property subscriptions are established, so on the first connect it leads them by the duration of the subscribe. After a reconnect it is raised only once resubscription and the initial-state reload have both succeeded, because a client that reconnected but could not resubscribe is not serving anything. It drops on every disconnect, including one the connection monitor is about to recover from, and on teardown.
+
+**`IsOperational` for the server means the broker is listening.**
+
+Neither connector measures throughput, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are both `null` rather than `0.0`.
+
+The client's diagnostics are a plain `SourceDiagnostics` with no MQTT specific additions. `OutboundRetries.Capacity` echoes `WriteRetryQueueSize`, and is `0` when the queue is disabled; in that configuration read `TotalDropped` as a floor rather than the whole loss (see [Known Limitations](connectors.md#known-limitations)). `ClaimedPropertyCount` rises as topics are claimed during the subscribe step of the connect, which runs before the initial state is loaded, and falls as subjects detach.
+
+The server's diagnostics are an `MqttServerDiagnostics`, which adds one member:
+
+| Member | Meaning |
+|---|---|
+| `ConnectedClientCount` | Clients currently connected to the broker. |
+
+A server has no inbound buffer or retry queue, so only `OutboundChanges` applies there. It is registered while the change queue processor is running and its capacity is `null`, because that queue is unbounded.
+
+The client's broker connection state is transport health only. Whether the model can be trusted is `ISubjectSource.State`, and for MQTT `Synchronized` is weaker than for the other connectors (see [What Synchronized Means per Protocol](connectors-monitoring.md#what-synchronized-means-per-protocol)).
+
+Reaching the diagnostics differs by connector. `MqttSubjectServer` is public, so pick it out of the registered hosted services with `serviceProvider.GetServices<IHostedService>().OfType<MqttSubjectServer>()`, or hold the instance if you constructed it yourself. The client source type is internal: reach it as an `ISubjectSource` through the source monitor's `SourceSubscription.Sources`, or through `property.TryGetSource(out var source)` on a property it owns.
 
 ## Thread Safety
 

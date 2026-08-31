@@ -58,7 +58,7 @@ public class PerformanceProfiler : IDisposable
 
             lock (_syncLock)
             {
-                if (change.Source == null)
+                if (change.Origin.Source == null)
                 {
                     // Only count FirstName/LastName to exclude derived properties like FullName
                     var propertyName = change.Property.Name;

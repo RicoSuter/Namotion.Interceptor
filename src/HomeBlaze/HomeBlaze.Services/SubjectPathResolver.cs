@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -14,7 +15,7 @@ namespace HomeBlaze.Services;
 /// Supports canonical notation (/Items[0]/Name) and route notation (/Items/0/Name).
 /// Implements lifecycle handling to invalidate caches when subjects are attached/detached.
 /// </summary>
-public class SubjectPathResolver : ILifecycleHandler
+public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
 {
     private readonly RootManager _rootManager;
 
@@ -24,10 +25,18 @@ public class SubjectPathResolver : ILifecycleHandler
     // (path, style) → Subject resolve cache (absolute paths only)
     private readonly ConcurrentDictionary<(string Path, PathStyle Style), IInterceptorSubject?> _resolveCache = new();
 
-    public SubjectPathResolver(RootManager rootManager, IInterceptorSubjectContext context)
+    /// <summary>
+    /// Initializes a new subject path resolver.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SubjectPathResolverExtensions.WithPathResolver"/> registers the factory result
+    /// after construction; keeping registration out of the constructor adds the resolver exactly
+    /// once.
+    /// </remarks>
+    /// <param name="rootManager">The root manager.</param>
+    public SubjectPathResolver(RootManager rootManager)
     {
         _rootManager = rootManager;
-        context.AddService(this);
     }
 
     /// <summary>

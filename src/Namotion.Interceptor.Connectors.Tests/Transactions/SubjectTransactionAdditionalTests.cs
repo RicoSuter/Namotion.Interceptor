@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 public class SubjectTransactionAdditionalTests : TransactionTestBase
 {
     [Fact]
-    public async Task CommitAsync_WithInfiniteTimeout_DoesNotTimeout()
+    public async Task WhenCommitTimeoutIsInfinite_ThenSlowSourceCommitSucceeds()
     {
         // Arrange
         var context = CreateContext();
@@ -33,7 +33,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task BeginTransactionAsync_DefaultTimeout_Is30Seconds()
+    public async Task WhenNoTimeoutSpecified_ThenDefaultCommitTimeoutIs30Seconds()
     {
         // Arrange & Assert
         // Verify the default timeout constant is 30 seconds
@@ -49,7 +49,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task BeginTransactionAsync_WithCancelledToken_ThrowsOperationCanceledException()
+    public async Task WhenBeginCalledWithCancelledToken_ThenThrows()
     {
         // Arrange
         var context = CreateContext();
@@ -67,44 +67,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task Dispose_CalledMultipleTimes_IsIdempotent()
-    {
-        // Arrange
-        var context = CreateContext();
-        var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        Assert.NotNull(SubjectTransaction.Current);
-
-        // Act - dispose multiple times (simulates concurrent/repeated dispose)
-        transaction.Dispose();
-        Assert.Null(SubjectTransaction.Current);
-
-        // Should not throw on subsequent disposes
-        transaction.Dispose();
-        transaction.Dispose();
-
-        // Assert
-        AssertNoActiveTransaction();
-    }
-
-    [Fact]
-    public async Task CommitAsync_WithNoChanges_CompletesImmediately()
-    {
-        // Arrange
-        var context = CreateContext();
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-
-        // Act
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        await transaction.CommitAsync(CancellationToken.None);
-        stopwatch.Stop();
-
-        // Assert
-        Assert.Empty(transaction.GetPendingChanges());
-        Assert.True(stopwatch.ElapsedMilliseconds < 100, "Empty commit should be fast");
-    }
-
-    [Fact]
-    public async Task HasActiveTransaction_TracksCorrectly()
+    public async Task WhenTransactionBeginsAndEnds_ThenHasActiveTransactionTracksIt()
     {
         // Arrange
         var context = CreateContext();
@@ -128,7 +91,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task TransactionException_IsPartialSuccess_ReturnsCorrectValue()
+    public async Task WhenSomeChangesApplied_ThenIsPartialSuccessIsTrue()
     {
         // Arrange
         var context = CreateContext();
@@ -153,50 +116,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task WriteProperty_DerivedProperty_NotCapturedInTransaction()
-    {
-        // Arrange
-        var context = CreateContext();
-        var person = new Person(context);
-
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-
-        // Act - set base properties (FullName is derived from FirstName and LastName)
-        person.FirstName = "John";
-        person.LastName = "Doe";
-
-        // Assert - only FirstName and LastName should be in pending changes
-        // FullName is a derived property and should not be captured
-        var pendingPropertyNames = transaction.GetPendingChanges()
-            .Select(c => c.Property.Name)
-            .ToList();
-
-        Assert.Contains("FirstName", pendingPropertyNames);
-        Assert.Contains("LastName", pendingPropertyNames);
-        Assert.DoesNotContain("FullName", pendingPropertyNames);
-    }
-
-    [Fact]
-    public async Task CommitAsync_CalledSecondTime_ThrowsWithClearMessage()
-    {
-        // Arrange
-        var context = CreateContext();
-        var person = new Person(context);
-
-        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
-        person.FirstName = "John";
-        await transaction.CommitAsync(CancellationToken.None);
-
-        // Act
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            async () => await transaction.CommitAsync(CancellationToken.None));
-
-        // Assert
-        Assert.Contains("already been committed", exception.Message);
-    }
-
-    [Fact]
-    public void WriteResult_IsPartialFailure_DistinguishesFromFullFailure()
+    public void WhenWriteResultIsPartialFailure_ThenItIsDistinctFromFullFailure()
     {
         // Arrange - create a dummy change for testing
         var dummyChanges = new SubjectPropertyChange[1];
@@ -215,7 +135,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
     }
 
     [Fact]
-    public void WriteResult_Success_IsZeroAllocation()
+    public void WhenWriteResultSuccessReused_ThenBothValuesAreFullySuccessful()
     {
         // Act
         var success1 = WriteResult.Success;

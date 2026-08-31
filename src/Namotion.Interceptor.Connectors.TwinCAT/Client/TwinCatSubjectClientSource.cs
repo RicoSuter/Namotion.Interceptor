@@ -28,7 +28,6 @@ internal sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDisp
     private volatile SubjectPropertyWriter? _propertyWriter;
     private long _lastRescanRequestedAtTicks; // DateTimeOffset.UtcNow.UtcTicks, 0 = no pending request
 
-    private AdsClientDiagnostics? _diagnostics;
     private int _disposed; // 0 = false, 1 = true
 
     /// <summary>
@@ -49,6 +48,8 @@ internal sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDisp
             configuration.WriteRetryQueueSize)
     {
         configuration.Validate();
+
+        Diagnostics = new AdsClientDiagnostics(this, Metrics);
 
         _subject = subject;
         _configuration = configuration;
@@ -701,10 +702,8 @@ internal sealed class TwinCatSubjectClientSource : SubjectSourceBase, IAsyncDisp
         }
     }
 
-    /// <summary>
-    /// Gets diagnostic information about the client connection state.
-    /// </summary>
-    public AdsClientDiagnostics Diagnostics => _diagnostics ??= new AdsClientDiagnostics(this);
+    /// <inheritdoc cref="SubjectSourceBase.Diagnostics" />
+    public override AdsClientDiagnostics Diagnostics { get; }
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync()

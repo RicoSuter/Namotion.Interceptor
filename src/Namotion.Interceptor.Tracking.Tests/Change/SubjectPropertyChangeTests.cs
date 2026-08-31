@@ -1,3 +1,6 @@
+using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -20,11 +23,11 @@ public class SubjectPropertyChangeTests
     [InlineData("OldName", "NewName")]
     [InlineData("", "NewName")]
     [InlineData("Test", "")]
-    public void Create_WithString_StoresAndRetrievesCorrectly(string oldValue, string newValue)
+    public void WhenCreatedWithString_ThenStoresAndRetrievesCorrectly(string oldValue, string newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -33,7 +36,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithNullString_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithNullString_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         string? oldValue = null;
@@ -41,7 +44,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -50,7 +53,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithBothStringsNull_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithBothStringsNull_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         string? oldValue = null;
@@ -58,7 +61,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -70,11 +73,11 @@ public class SubjectPropertyChangeTests
     [InlineData(42, 100)]
     [InlineData(int.MinValue, int.MaxValue)]
     [InlineData(0, -1)]
-    public void Create_WithInt_StoresAndRetrievesCorrectly(int oldValue, int newValue)
+    public void WhenCreatedWithInt_ThenStoresAndRetrievesCorrectly(int oldValue, int newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -85,11 +88,11 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData(123456789012345L, 987654321098765L)]
     [InlineData(long.MinValue, long.MaxValue)]
-    public void Create_WithLong_StoresAndRetrievesCorrectly(long oldValue, long newValue)
+    public void WhenCreatedWithLong_ThenStoresAndRetrievesCorrectly(long oldValue, long newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -100,11 +103,11 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData(3.14159265358979, 2.71828182845904)]
     [InlineData(double.MinValue, double.MaxValue)]
-    public void Create_WithDouble_StoresAndRetrievesCorrectly(double oldValue, double newValue)
+    public void WhenCreatedWithDouble_ThenStoresAndRetrievesCorrectly(double oldValue, double newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -115,11 +118,11 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData(3.14f, 2.71f)]
     [InlineData(float.MinValue, float.MaxValue)]
-    public void Create_WithFloat_StoresAndRetrievesCorrectly(float oldValue, float newValue)
+    public void WhenCreatedWithFloat_ThenStoresAndRetrievesCorrectly(float oldValue, float newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -130,11 +133,11 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData(false, true)]
     [InlineData(true, false)]
-    public void Create_WithBool_StoresAndRetrievesCorrectly(bool oldValue, bool newValue)
+    public void WhenCreatedWithBool_ThenStoresAndRetrievesCorrectly(bool oldValue, bool newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -145,11 +148,11 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData((byte)0, (byte)255)]
     [InlineData((byte)128, (byte)64)]
-    public void Create_WithByte_StoresAndRetrievesCorrectly(byte oldValue, byte newValue)
+    public void WhenCreatedWithByte_ThenStoresAndRetrievesCorrectly(byte oldValue, byte newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -160,11 +163,11 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData('A', 'Z')]
     [InlineData('0', '9')]
-    public void Create_WithChar_StoresAndRetrievesCorrectly(char oldValue, char newValue)
+    public void WhenCreatedWithChar_ThenStoresAndRetrievesCorrectly(char oldValue, char newValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -183,16 +186,16 @@ public class SubjectPropertyChangeTests
 
     [Theory]
     [MemberData(nameof(LargerValueTypeTestData))]
-    public void Create_WithLargerValueTypes_StoresAndRetrievesCorrectly(object oldValue, object newValue)
+    public void WhenCreatedWithLargerValueTypes_ThenStoresAndRetrievesCorrectly(object oldValue, object newValue)
     {
         // Arrange
         var method = typeof(SubjectPropertyChange)
             .GetMethod(nameof(SubjectPropertyChange.Create))!
             .MakeGenericMethod(oldValue.GetType());
 
-        // Act
+        // Act - reflection does not fill in the optional revision parameter, so it is passed explicitly
         var change = (SubjectPropertyChange)method.Invoke(null,
-            [_property, null, _changedTimestamp, _receivedTimestamp, oldValue, newValue])!;
+            [_property, null, _changedTimestamp, _receivedTimestamp, oldValue, newValue, 0L])!;
 
         // Assert
         var getOldMethod = typeof(SubjectPropertyChange)
@@ -209,7 +212,7 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData(42, 100)]
     [InlineData(0, int.MaxValue)]
-    public void Create_WithNullableInt_WithValue_StoresAndRetrievesCorrectly(int oldVal, int newVal)
+    public void WhenCreatedWithNullableIntWithValue_ThenStoresAndRetrievesCorrectly(int oldVal, int newVal)
     {
         // Arrange
         int? oldValue = oldVal;
@@ -217,7 +220,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -226,7 +229,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithNullableInt_WithNull_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithNullableIntWithNull_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         int? oldValue = null;
@@ -234,7 +237,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -243,7 +246,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithNullableInt_BothNull_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithNullableIntBothNull_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         int? oldValue = null;
@@ -251,7 +254,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -260,7 +263,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithNullableDecimal_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithNullableDecimal_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         decimal? oldValue = 123.456m;
@@ -268,7 +271,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -296,7 +299,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithSmallCustomStruct_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithSmallCustomStruct_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         var oldValue = new SmallCustomStruct { Value1 = 1, Value2 = 2 };
@@ -304,7 +307,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -317,7 +320,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithLargeCustomStruct_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithLargeCustomStruct_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         var oldValue = new LargeCustomStruct { Value1 = 111111111111L, Value2 = 222222222222L };
@@ -325,7 +328,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -338,7 +341,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithOversizedCustomStruct_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithOversizedCustomStruct_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         var oldValue = new OversizedCustomStruct { Value1 = 1L, Value2 = 2L, Value3 = 3L };
@@ -346,7 +349,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -361,12 +364,12 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void GetOldValue_WithCustomStructAsObject_ReturnsBoxedStruct()
+    public void WhenGettingOldValueOfCustomStructAsObject_ThenReturnsBoxedStruct()
     {
         // Arrange
         var oldValue = new SmallCustomStruct { Value1 = 42, Value2 = 84 };
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, new SmallCustomStruct());
 
         // Act
@@ -380,12 +383,12 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void GetOldValue_WithOversizedStructAsObject_ReturnsBoxedStruct()
+    public void WhenGettingOldValueOfOversizedStructAsObject_ThenReturnsBoxedStruct()
     {
         // Arrange
         var oldValue = new OversizedCustomStruct { Value1 = 1L, Value2 = 2L, Value3 = 3L };
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, new OversizedCustomStruct());
 
         // Act
@@ -406,7 +409,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithReferenceType_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithReferenceType_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         var oldValue = new CustomClass { Id = 1, Name = "Old" };
@@ -414,7 +417,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -423,7 +426,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithNullReferenceType_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithNullReferenceType_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         CustomClass? oldValue = null;
@@ -431,7 +434,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -440,7 +443,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithIntArray_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithIntArray_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         int[] oldValue = [1, 2, 3];
@@ -448,7 +451,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -457,7 +460,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithNullArray_StoresAndRetrievesCorrectly()
+    public void WhenCreatedWithNullArray_ThenStoresAndRetrievesCorrectly()
     {
         // Arrange
         int[]? oldValue = null;
@@ -465,7 +468,7 @@ public class SubjectPropertyChangeTests
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, newValue);
 
         // Assert
@@ -476,11 +479,11 @@ public class SubjectPropertyChangeTests
     [Theory]
     [InlineData(42)]
     [InlineData("test")]
-    public void GetOldValue_AsObject_ReturnsValue(object oldValue)
+    public void WhenGettingOldValueAsObject_ThenReturnsValue(object oldValue)
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldValue, oldValue);
 
         // Assert
@@ -489,11 +492,11 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void TryGetOldValue_WithWrongType_ReturnsFalse()
+    public void WhenTryGettingOldValueWithWrongType_ThenReturnsFalse()
     {
         // Arrange
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             42, 100);
 
         // Act
@@ -505,12 +508,12 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void TryGetNewValue_WithCorrectType_ReturnsTrue()
+    public void WhenTryGettingNewValueWithCorrectType_ThenReturnsTrue()
     {
         // Arrange
         var newValue = 42.5;
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             0.0, newValue);
 
         // Act
@@ -522,11 +525,11 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_PreservesPropertyReference()
+    public void WhenCreated_ThenPreservesPropertyReference()
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             "old", "new");
 
         // Assert
@@ -534,26 +537,26 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_PreservesSource()
+    public void WhenCreated_ThenPreservesSource()
     {
         // Arrange
         var source = new object();
 
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source, _changedTimestamp, _receivedTimestamp,
+            _property, ChangeOrigin.FromSource(source), _changedTimestamp, _receivedTimestamp,
             "old", "new");
 
         // Assert
-        Assert.Same(source, change.Source);
+        Assert.Same(source, change.Origin.Source);
     }
 
     [Fact]
-    public void Create_PreservesTimestamps()
+    public void WhenCreated_ThenPreservesTimestamps()
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             "old", "new");
 
         // Assert
@@ -562,11 +565,11 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void Create_WithNullReceivedTimestamp_PreservesNull()
+    public void WhenCreatedWithNullReceivedTimestamp_ThenPreservesNull()
     {
         // Act
         var change = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, receivedTimestamp: null,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, receivedTimestamp: null,
             "old", "new");
 
         // Assert
@@ -574,7 +577,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void MergeWithNewer_WithInlineValues_KeepsOldFromEarlierAndNewFromLater()
+    public void WhenMergingWithNewerWithInlineValues_ThenKeepsOldFromEarlierAndNewFromLater()
     {
         // Arrange
         var earlierSource = new object();
@@ -583,10 +586,10 @@ public class SubjectPropertyChangeTests
         var laterTimestamp = DateTimeOffset.UtcNow;
 
         var earlier = SubjectPropertyChange.Create(
-            _property, earlierSource, earlierTimestamp, earlierTimestamp,
+            _property, ChangeOrigin.FromSource(earlierSource), earlierTimestamp, earlierTimestamp,
             10, 20);
         var later = SubjectPropertyChange.Create(
-            _property, laterSource, laterTimestamp, laterTimestamp,
+            _property, ChangeOrigin.FromSource(laterSource), laterTimestamp, laterTimestamp,
             20, 30);
 
         // Act
@@ -595,19 +598,19 @@ public class SubjectPropertyChangeTests
         // Assert
         Assert.Equal(10, merged.GetOldValue<int>());
         Assert.Equal(30, merged.GetNewValue<int>());
-        Assert.Same(laterSource, merged.Source);
+        Assert.Same(laterSource, merged.Origin.Source);
         Assert.Equal(laterTimestamp, merged.ChangedTimestamp);
     }
 
     [Fact]
-    public void MergeWithNewer_WithStrings_KeepsOldFromEarlierAndNewFromLater()
+    public void WhenMergingWithNewerWithStrings_ThenKeepsOldFromEarlierAndNewFromLater()
     {
         // Arrange
         var earlier = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             "original", "intermediate");
         var later = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             "intermediate", "final");
 
         // Act
@@ -619,14 +622,14 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void MergeWithNewer_WithNullStringOldValue_PreservesNull()
+    public void WhenMergingWithNewerWithNullStringOldValue_ThenPreservesNull()
     {
         // Arrange
         var earlier = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             null, "intermediate");
         var later = SubjectPropertyChange.Create<string?>(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             "intermediate", "final");
 
         // Act
@@ -638,7 +641,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void MergeWithNewer_WithBoxedReferenceTypes_KeepsOldFromEarlierAndNewFromLater()
+    public void WhenMergingWithNewerWithBoxedReferenceTypes_ThenKeepsOldFromEarlierAndNewFromLater()
     {
         // Arrange
         var oldObj = new CustomClass { Id = 1, Name = "Old" };
@@ -646,10 +649,10 @@ public class SubjectPropertyChangeTests
         var newObj = new CustomClass { Id = 3, Name = "New" };
 
         var earlier = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             oldObj, midObj);
         var later = SubjectPropertyChange.Create(
-            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
             midObj, newObj);
 
         // Act
@@ -658,5 +661,350 @@ public class SubjectPropertyChangeTests
         // Assert
         Assert.Same(oldObj, merged.GetOldValue<CustomClass>());
         Assert.Same(newObj, merged.GetNewValue<CustomClass>());
+    }
+
+    [Fact]
+    public void WhenMergingWithNewerWithFromSourceOrigins_ThenPreservesKindAndSource()
+    {
+        // Arrange
+        var source = new object();
+        var earlier = SubjectPropertyChange.Create(
+            _property, ChangeOrigin.FromSource(source), _changedTimestamp, _receivedTimestamp,
+            "old", "intermediate");
+        var later = SubjectPropertyChange.Create(
+            _property, ChangeOrigin.FromSource(source), _changedTimestamp, _receivedTimestamp,
+            "intermediate", "new");
+
+        // Act
+        var merged = earlier.MergeWithNewer(later);
+
+        // Assert - both the kind and the source survive the merge
+        Assert.Equal(ChangeOriginKind.FromSource, merged.Origin.Kind);
+        Assert.Same(source, merged.Origin.Source);
+    }
+
+    [Fact]
+    public void WhenCreatedWithSmallStructContainingReference_ThenKeepsReferenceAliveForGc()
+    {
+        // Arrange: a small ref-carrying struct; the non-inlined helper leaves the retained change
+        // as the value's only possible GC root.
+        var (change, weakReference) = CreateChangeWithReferenceStruct(_property, _changedTimestamp, _receivedTimestamp);
+
+        // Act
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+
+        // Assert
+        Assert.True(weakReference.IsAlive,
+            "SubjectPropertyChange must keep references inside stored values alive for the GC.");
+        Assert.Same(weakReference.Target, change.GetOldValue<SmallStructWithReference>().Reference);
+        GC.KeepAlive(change);
+    }
+
+    [Fact]
+    public void WhenCreatedWithImmutableArray_ThenKeepsBackingArrayAliveAcrossGc()
+    {
+        // Arrange: ImmutableArray<T> wraps a T[] reference; the change may be the backing array's only GC root.
+        var (change, weakBackingArray) = CreateChangeWithImmutableArray(_property, _changedTimestamp, _receivedTimestamp);
+
+        // Act
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+
+        // Assert - the backing array survives and the value round-trips intact through the
+        // boxed object read (the path collection diffing uses)
+        Assert.True(weakBackingArray.IsAlive,
+            "SubjectPropertyChange must keep the ImmutableArray's backing array alive for the GC.");
+        var oldValue = Assert.IsType<ImmutableArray<string>>(change.GetOldValue<object?>());
+        Assert.Equal(new[] { "a", "b" }, oldValue);
+        GC.KeepAlive(change);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (SubjectPropertyChange Change, WeakReference WeakReference) CreateChangeWithReferenceStruct(
+        PropertyReference property, DateTimeOffset changedTimestamp, DateTimeOffset receivedTimestamp)
+    {
+        var referenced = new object();
+        var change = SubjectPropertyChange.Create(
+            property, origin: ChangeOrigin.Local, changedTimestamp, receivedTimestamp,
+            new SmallStructWithReference(referenced), new SmallStructWithReference(null));
+        return (change, new WeakReference(referenced));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (SubjectPropertyChange Change, WeakReference WeakBackingArray) CreateChangeWithImmutableArray(
+        PropertyReference property, DateTimeOffset changedTimestamp, DateTimeOffset receivedTimestamp)
+    {
+        var oldValue = ImmutableArray.Create("a", "b");
+        var backingArray = ImmutableCollectionsMarshal.AsArray(oldValue)!;
+        var change = SubjectPropertyChange.Create(
+            property, origin: ChangeOrigin.Local, changedTimestamp, receivedTimestamp,
+            oldValue, ImmutableArray.Create("a", "b", "c"));
+        return (change, new WeakReference(backingArray));
+    }
+
+    private readonly record struct SmallStructWithReference(object? Reference);
+
+    [Fact]
+    public void WhenCreatedWithRevision_ThenRevisionIsExposedAndSurvivesMergeAndOrigin()
+    {
+        // Arrange
+        var source = new object();
+
+        // Act
+        var earlier = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            "a", "b", 5L);
+        var later = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            "b", "c", 6L);
+        var merged = earlier.MergeWithNewer(later);
+        var reoriginated = later.WithOrigin(ChangeOrigin.Confirmed(source));
+        var withoutRevision = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            "a", "b");
+
+        // Assert
+        Assert.Equal(5L, earlier.Revision);
+        Assert.Equal(6L, later.Revision);
+        Assert.Equal(6L, merged.Revision);
+        Assert.Equal("a", merged.GetOldValue<string>());
+        Assert.Equal("c", merged.GetNewValue<string>());
+        Assert.Equal(6L, reoriginated.Revision);
+        Assert.Equal(0L, withoutRevision.Revision);
+    }
+
+    [Fact]
+    public void WhenCreatedWithRevisionOnEveryStoragePath_ThenRevisionIsPreserved()
+    {
+        // Arrange: each Create return path passes the revision separately, so all three are covered:
+        // inline storage, the string fast path and the boxed holder.
+        const long revision = 42L;
+
+        // Act
+        var inlineChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            1, 2, revision);
+        var stringChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            "old", "new", revision);
+        var referenceChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            new CustomClass { Id = 1 }, new CustomClass { Id = 2 }, revision);
+        var oversizedStructChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            new OversizedCustomStruct { Value1 = 1L }, new OversizedCustomStruct { Value1 = 2L }, revision);
+
+        // Assert
+        Assert.Equal(revision, inlineChange.Revision);
+        Assert.Equal(1, inlineChange.GetOldValue<int>());
+        Assert.Equal(revision, stringChange.Revision);
+        Assert.Equal("old", stringChange.GetOldValue<string>());
+        Assert.Equal(revision, referenceChange.Revision);
+        Assert.Equal(1, referenceChange.GetOldValue<CustomClass>().Id);
+        Assert.Equal(revision, oversizedStructChange.Revision);
+        Assert.Equal(1L, oversizedStructChange.GetOldValue<OversizedCustomStruct>().Value1);
+    }
+
+    [Fact]
+    public void WhenConvertedToRollbackChange_ThenPropertyOriginAndTimestampsArePreserved()
+    {
+        // Arrange
+        var source = new object();
+        var change = SubjectPropertyChange.Create(
+            _property, ChangeOrigin.FromSource(source), _changedTimestamp, _receivedTimestamp,
+            "old", "new");
+
+        // Act
+        var rollback = change.ToRollbackChange();
+
+        // Assert
+        Assert.Equal(_property, rollback.Property);
+        Assert.Equal(ChangeOriginKind.FromSource, rollback.Origin.Kind);
+        Assert.Same(source, rollback.Origin.Source);
+        Assert.Equal(_changedTimestamp, rollback.ChangedTimestamp);
+        Assert.Equal(_receivedTimestamp, rollback.ReceivedTimestamp);
+    }
+
+    [Fact]
+    public void WhenConvertedToRollbackChange_ThenRevisionIsReset()
+    {
+        // Arrange: a rollback describes a write to perform, not a commit that happened, and Revision is
+        // only meaningful for the latter. Applying it commits with a revision of its own.
+        var change = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            "old", "new", 7L);
+
+        // Act
+        var rollback = change.ToRollbackChange();
+
+        // Assert
+        Assert.Equal(0L, rollback.Revision);
+    }
+
+    [Fact]
+    public void WhenConvertedToRollbackChangeOnEveryStoragePath_ThenTypedValuesRoundTrip()
+    {
+        // Arrange: the swap moves the storage fields directly, so every storage path has to survive it
+        // with its stored type intact rather than degrading to a boxed object.
+        var oldReference = new CustomClass { Id = 1 };
+        var newReference = new CustomClass { Id = 2 };
+
+        var inlineChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, 1, 2);
+        var nullableChange = SubjectPropertyChange.Create<int?>(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, 1, 2);
+        var stringChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, "old", "new");
+        var nullStringChange = SubjectPropertyChange.Create<string?>(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, null, "new");
+        var referenceChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            oldReference, newReference);
+        var oversizedChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            new OversizedCustomStruct { Value1 = 1L }, new OversizedCustomStruct { Value1 = 2L });
+
+        // Act
+        var inlineRollback = inlineChange.ToRollbackChange();
+        var nullableRollback = nullableChange.ToRollbackChange();
+        var stringRollback = stringChange.ToRollbackChange();
+        var nullStringRollback = nullStringChange.ToRollbackChange();
+        var referenceRollback = referenceChange.ToRollbackChange();
+        var oversizedRollback = oversizedChange.ToRollbackChange();
+
+        // Assert
+        Assert.Equal(2, inlineRollback.GetOldValue<int>());
+        Assert.Equal(1, inlineRollback.GetNewValue<int>());
+        Assert.Equal(2, nullableRollback.GetOldValue<int?>());
+        Assert.Equal(1, nullableRollback.GetNewValue<int?>());
+        Assert.Equal("new", stringRollback.GetOldValue<string>());
+        Assert.Equal("old", stringRollback.GetNewValue<string>());
+        Assert.Equal("new", nullStringRollback.GetOldValue<string>());
+        Assert.Null(nullStringRollback.GetNewValue<string>());
+        Assert.Same(newReference, referenceRollback.GetOldValue<CustomClass>());
+        Assert.Same(oldReference, referenceRollback.GetNewValue<CustomClass>());
+        Assert.Equal(2L, oversizedRollback.GetOldValue<OversizedCustomStruct>().Value1);
+        Assert.Equal(1L, oversizedRollback.GetNewValue<OversizedCustomStruct>().Value1);
+    }
+
+    [Fact]
+    public void WhenConvertedToRollbackChangeAndReadAsObject_ThenValuesAreSwapped()
+    {
+        // Arrange: both revert paths read a rollback through object, so that is the read that has to
+        // hold on every storage path.
+        var inlineChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, 1, 2);
+        var nullableChange = SubjectPropertyChange.Create<int?>(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, null, 2);
+        var stringChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, "old", "new");
+        var referenceChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            new CustomClass { Id = 1 }, new CustomClass { Id = 2 });
+
+        // Act
+        var inlineRollback = inlineChange.ToRollbackChange();
+        var nullableRollback = nullableChange.ToRollbackChange();
+        var stringRollback = stringChange.ToRollbackChange();
+        var referenceRollback = referenceChange.ToRollbackChange();
+
+        // Assert
+        Assert.Equal(2, inlineRollback.GetOldValue<object?>());
+        Assert.Equal(1, inlineRollback.GetNewValue<object?>());
+        Assert.Equal(2, nullableRollback.GetOldValue<object?>());
+        Assert.Null(nullableRollback.GetNewValue<object?>());
+        Assert.Equal("new", stringRollback.GetOldValue<object?>());
+        Assert.Equal("old", stringRollback.GetNewValue<object?>());
+        Assert.Equal(2, Assert.IsType<CustomClass>(referenceRollback.GetOldValue<object?>()).Id);
+        Assert.Equal(1, Assert.IsType<CustomClass>(referenceRollback.GetNewValue<object?>()).Id);
+    }
+
+    [Fact]
+    public void WhenConvertedToRollbackChange_ThenValuesKeepTheirDeclaredStorageType()
+    {
+        // Arrange: moving the storage rather than re-boxing through object means a rollback refuses a
+        // narrower type exactly as the change it inverts does. A nullable stores its own type inline,
+        // so int? does not read back as int on either of them.
+        var change = SubjectPropertyChange.Create<int?>(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, 1, 2);
+
+        // Act
+        var rollback = change.ToRollbackChange();
+
+        // Assert
+        Assert.False(rollback.TryGetOldValue<int>(out _));
+        Assert.False(change.TryGetOldValue<int>(out _));
+    }
+
+    [Fact]
+    public void WhenConvertedToRollbackChange_ThenNothingIsAllocatedOnAnyStoragePath()
+    {
+        // Arrange: the conversion moves the storage fields instead of round-tripping both values
+        // through object. Rebuilding it through Create<object?> would cost two boxed holders per
+        // reverted change plus a box per inline value, so every storage path has to measure zero:
+        // measuring only the inline one would miss a partial revert on the two holder paths.
+        var inlineChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, 1, 2);
+        var stringChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp, "old", "new");
+        var referenceChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            new CustomClass { Id = 1 }, new CustomClass { Id = 2 });
+        var oversizedChange = SubjectPropertyChange.Create(
+            _property, origin: ChangeOrigin.Local, _changedTimestamp, _receivedTimestamp,
+            new OversizedCustomStruct { Value1 = 1L }, new OversizedCustomStruct { Value1 = 2L });
+
+        // Act
+        var inlineAllocated = MeasureRollbackAllocations(inlineChange, c => c.GetNewValue<int>());
+        var stringAllocated = MeasureRollbackAllocations(stringChange, c => c.GetNewValue<string>().Length);
+        var referenceAllocated = MeasureRollbackAllocations(referenceChange, c => c.GetNewValue<CustomClass>().Id);
+        var oversizedAllocated = MeasureRollbackAllocations(
+            oversizedChange, c => (int)c.GetNewValue<OversizedCustomStruct>().Value1);
+
+        // Assert
+        Assert.Equal(0L, inlineAllocated);
+        Assert.Equal(0L, stringAllocated);
+        Assert.Equal(0L, referenceAllocated);
+        Assert.Equal(0L, oversizedAllocated);
+    }
+
+    /// <summary>
+    /// Converts <paramref name="change"/> in a tight loop and returns the bytes allocated. The read is
+    /// passed in as a non-capturing lambda, so its delegate is cached before the measured window and the
+    /// result is consumed, which keeps the conversion from being optimized away.
+    /// </summary>
+    private static long MeasureRollbackAllocations(
+        SubjectPropertyChange change, Func<SubjectPropertyChange, int> read)
+    {
+        // Warm up so JIT compilation does not land inside the measured window.
+        var accumulator = 0L;
+        for (var i = 0; i < 100; i++)
+        {
+            accumulator += read(change.ToRollbackChange());
+        }
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1000; i++)
+        {
+            accumulator += read(change.ToRollbackChange());
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.NotEqual(0L, accumulator);
+        return allocated;
+    }
+
+    [Fact]
+    public void WhenMeasuringSubjectPropertyChange_ThenSizeStaysWithinTheAcceptedBudget()
+    {
+        // The struct is copied on every publish, so growth is a hot-path cost that has to be a decision
+        // rather than a side effect. The commit revision took it up by one alignment slot, to the 144
+        // bytes measured here, and that growth is accepted. The bound is the exact measurement: slack
+        // would let the next field through unnoticed.
+        var size = System.Runtime.CompilerServices.Unsafe.SizeOf<SubjectPropertyChange>();
+        Assert.True(size <= 144, $"SubjectPropertyChange grew to {size} bytes");
     }
 }

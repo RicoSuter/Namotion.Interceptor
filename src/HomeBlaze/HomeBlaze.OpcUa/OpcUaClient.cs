@@ -218,13 +218,13 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
         if (_clientSource is { } source)
         {
             var diagnostics = source.Diagnostics;
-            IsConnected = diagnostics.IsConnected;
-            IncomingChangesPerSecond = diagnostics.IncomingChangesPerSecond;
-            OutgoingChangesPerSecond = diagnostics.OutgoingChangesPerSecond;
+            IsConnected = diagnostics.IsOperational;
+            IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
+            OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
             MonitoredItemCount = diagnostics.MonitoredItemCount;
-            PollingItemCount = diagnostics.PollingItemCount;
-            PendingWriteCount = diagnostics.PendingWriteCount;
-            TotalReconnections = diagnostics.TotalReconnectionAttempts;
+            PollingItemCount = diagnostics.Polling?.ItemCount ?? 0;
+            PendingWriteCount = diagnostics.OutboundRetries.Depth;
+            TotalReconnections = diagnostics.Reconnects.TotalAttempts;
         }
     }
 
@@ -277,10 +277,11 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     {
         if (_clientSource != null)
         {
+            var clientSource = _clientSource;
             try
             {
                 Status = ServiceStatus.Stopping;
-                await this.DetachHostedServiceAsync(_clientSource, cancellationToken);
+                await this.DetachHostedServiceAsync(clientSource, cancellationToken);
                 _logger.LogInformation("OPC UA client stopped");
             }
             catch (Exception ex)
@@ -289,6 +290,22 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
             }
             finally
             {
+                // Detaching only stops the hosted service; the source also owns a lifecycle
+                // subscription and a SemaphoreSlim that are released only on dispose. Without
+                // this, every start/stop cycle leaks one of each (a new source is created on
+                // each StartClientAsync).
+                if (clientSource is IAsyncDisposable disposable)
+                {
+                    try
+                    {
+                        await disposable.DisposeAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to dispose OPC UA client source");
+                    }
+                }
+
                 _clientSource = null;
                 Root = null;
                 Status = ServiceStatus.Stopped;

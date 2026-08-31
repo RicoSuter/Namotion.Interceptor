@@ -103,16 +103,27 @@ propertyFilter: propertyReference =>
 ### Server-Side (C#)
 
 ```csharp
-// Apply update from external source (e.g., WebSocket message from client)
-// The WithSource scope enables echo prevention in change tracking
-using (SubjectChangeContext.WithSource(source))
-{
-    subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
-}
+// Apply update from external source (e.g., WebSocket message from client).
+// A FromSource origin stamps the applied changes so echo suppression skips
+// that source's own outbound path.
+subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.FromSource(source));
 
-// Apply update without source tracking
-subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+// Apply update as a local change (no source tracking).
+subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 ```
+
+### When a Property Fails to Apply
+
+A property that throws is skipped and the rest of the update still applies, including the properties of nested subjects, for every update kind. Applying is not all-or-nothing.
+
+The call still reports failure once every property has been attempted. A single failure is rethrown as itself, keeping its original type and stack, so a caller catching a specific exception type is unaffected. Several failures are wrapped in an `AggregateException` whose message names the properties.
+
+Two limits follow from applying in place rather than staging:
+
+- A collection or dictionary item whose own property fails is still inserted, carrying a default for that property, so the parent references a new item that is only partly populated.
+- A failure raised by the collection or dictionary machinery itself, such as the out-of-range index described in [Applying Collection Updates](#applying-collection-updates), is contained at that property but abandons the remaining items of it.
+
+What a caller does with the failure is its own decision; see [Inbound Update Error Handling](connectors.md#inbound-update-error-handling) for what the built-in connector infrastructure does.
 
 ## Property Update Kinds
 
@@ -364,7 +375,7 @@ No special `reference` field is needed - the `id` field always points to a subje
 
 ## Null Collections and Dictionaries
 
-When a collection or dictionary property is set to `null`, it is represented as `Kind=Value, Value=null` — the same as any other null property value:
+When a collection or dictionary property is set to `null`, it is represented as `Kind=Value, Value=null`, the same as any other null property value:
 
 ```json
 {
@@ -373,7 +384,7 @@ When a collection or dictionary property is set to `null`, it is represented as 
 }
 ```
 
-Note: In partial updates, `Kind=Collection/Dictionary` entries with no operations are **path nodes** — they describe the structural parent-to-child reference so the apply side can navigate the tree, not the collection's new state. An empty collection in a complete update is represented with `count: 0` and no items.
+Note: In partial updates, `Kind=Collection/Dictionary` entries with no operations are **path nodes**: they describe the structural parent-to-child reference so the apply side can navigate the tree, not the collection's new state. An empty collection in a complete update is represented with `count: 0` and no items.
 
 ## Limitations
 

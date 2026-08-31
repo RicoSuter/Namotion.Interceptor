@@ -1,22 +1,53 @@
 ﻿using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Registry;
 
+/// <summary>
+/// Registers subjects and their property edges as they enter the object graph.
+/// </summary>
+/// <remarks>
+/// Runs before <see cref="ContextInheritanceHandler"/>, which walks down into a newly attached
+/// subtree, so a subject is registered before the descent reaches its children. That holds at every
+/// level, so while attaching, any handler running at or behind this one finds every ancestor of a
+/// subject already registered. Detach does not mirror that; see the design doc. Also ordered ahead
+/// of <see cref="ParentTrackingHandler"/>, which fixes the order of
+/// the two recorders instead of leaving it to registration order. See "Handler Order Around the
+/// Descent" in docs/design/tracking-lifecycle.md.
+/// </remarks>
+[RunsBefore(typeof(ParentTrackingHandler), typeof(ContextInheritanceHandler))]
 public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
 {
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
     private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
-    
+    private ImmutableDictionary<IInterceptorSubject, RegisteredSubject>? _knownSubjectsSnapshot;
+
     /// <inheritdoc />
     public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects
     {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
-            lock (_knownSubjects)
-                return _knownSubjects.ToImmutableDictionary();
+            var snapshot = Volatile.Read(ref _knownSubjectsSnapshot);
+            return snapshot ?? GetKnownSubjectsSlow();
+        }
+    }
+
+    private ImmutableDictionary<IInterceptorSubject, RegisteredSubject> GetKnownSubjectsSlow()
+    {
+        lock (_knownSubjects)
+        {
+            var snapshot = _knownSubjectsSnapshot;
+            if (snapshot is not null)
+                return snapshot;
+
+            snapshot = _knownSubjects.ToImmutableDictionary();
+            Volatile.Write(ref _knownSubjectsSnapshot, snapshot);
+            return snapshot;
         }
     }
 
@@ -183,6 +214,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                         }
 
                         _knownSubjects.Remove(change.Subject);
+                        Volatile.Write(ref _knownSubjectsSnapshot, null);
 
                         // Clean up subject ID reverse index
                         if (_subjectIdToSubject.Count > 0)
@@ -222,6 +254,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     {
         var registeredSubject = new RegisteredSubject(subject);
         _knownSubjects[subject] = registeredSubject;
+        Volatile.Write(ref _knownSubjectsSnapshot, null);
         return registeredSubject;
     }
 

@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -18,7 +19,7 @@ public static class SubjectPathResolverExtensions
             .WithService(() =>
             {
                 var rootManager = context.GetService<RootManager>();
-                return new SubjectPathResolver(rootManager, context);
+                return new SubjectPathResolver(rootManager);
             }, _ => true);
     }
 

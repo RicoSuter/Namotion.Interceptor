@@ -17,6 +17,7 @@ public class WebSocketServerConfigurationTests
         Assert.Equal("/ws", configuration.Path);
         Assert.Null(configuration.BindAddress);
         Assert.Equal(TimeSpan.FromMilliseconds(8), configuration.BufferTime);
+        Assert.Equal(TimeSpan.FromSeconds(5), configuration.TeardownFlushTimeout);
     }
 
     [Fact]
@@ -71,6 +72,19 @@ public class WebSocketServerConfigurationTests
     {
         // Arrange
         var configuration = new WebSocketServerConfiguration { Path = "   " };
+
+        // Act & Assert
+        Assert.Throws<ArgumentException>(configuration.Validate);
+    }
+
+    [Fact]
+    public void Validate_WithNegativeTeardownFlushTimeout_ShouldThrow()
+    {
+        // Arrange
+        var configuration = new WebSocketServerConfiguration
+        {
+            TeardownFlushTimeout = TimeSpan.FromMilliseconds(-1)
+        };
 
         // Act & Assert
         Assert.Throws<ArgumentException>(configuration.Validate);
@@ -157,6 +171,31 @@ public class WebSocketServerConfigurationTests
     {
         // Arrange
         var configuration = new WebSocketServerConfiguration { HeartbeatInterval = TimeSpan.Zero };
+
+        // Act & Assert
+        configuration.Validate(); // should not throw
+    }
+
+    [Fact]
+    public void WhenHeartbeatIntervalIsPositiveButBelowTheMinimum_ThenValidateThrows()
+    {
+        // Arrange - a heartbeat is broadcast to every connected client, so a sub-second interval
+        // floods the connections rather than probing them.
+        var configuration = new WebSocketServerConfiguration { HeartbeatInterval = TimeSpan.FromMilliseconds(500) };
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(configuration.Validate);
+        Assert.Equal(nameof(WebSocketServerConfiguration.HeartbeatInterval), exception.ParamName);
+    }
+
+    [Fact]
+    public void WhenHeartbeatIntervalIsExactlyTheMinimum_ThenValidateAccepts()
+    {
+        // Arrange
+        var configuration = new WebSocketServerConfiguration
+        {
+            HeartbeatInterval = WebSocketServerConfiguration.MinimumHeartbeatInterval
+        };
 
         // Act & Assert
         configuration.Validate(); // should not throw

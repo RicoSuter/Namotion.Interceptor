@@ -44,9 +44,9 @@ public class NavigationTests
         await page.GotoAsync(_fixture.ServerAddress);
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
-        // Assert - AppBar should have navigation links
-        var toolbar = page.GetByRole(AriaRole.Toolbar);
-        await Assertions.Expect(toolbar).ToBeVisibleAsync(new() { Timeout = 30000 });
+        // Assert - MudBlazor's MudAppBar renders as <header> (ARIA role "banner")
+        var appBar = page.GetByRole(AriaRole.Banner);
+        await Assertions.Expect(appBar).ToBeVisibleAsync(new() { Timeout = 30000 });
     }
 
     [Fact]

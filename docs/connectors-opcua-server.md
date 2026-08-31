@@ -100,6 +100,7 @@ await server.StartAsync(cancellationToken);
 | `ValueConverter` | `OpcUaValueConverter` | *required* | Converts between C# properties and OPC UA values |
 | `Mapper` | `IPropertyMapper<OpcUaPropertyMapping>` | OpcUaCompositeMapper | Maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
 | `BufferTime` | `TimeSpan?` | 8ms | Time window to buffer incoming property changes before publishing to clients |
+| `TeardownFlushTimeout` | `TimeSpan` | 5s | Max wait for the buffered outbound batch on stop, 0 to discard it (see [Flushing On Stop](connectors.md#flushing-on-stop)) |
 | `TelemetryContext` | `ITelemetryContext` | NullTelemetryContext | Telemetry integration for logging and diagnostics |
 | `AutoAcceptUntrustedCertificates` | `bool` | false | Accept untrusted client certificates (testing/development only) |
 | `CleanCertificateStore` | `bool` | true | Remove old certificates from the application certificate store on startup |
@@ -254,9 +255,20 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 ## Diagnostics
 
-`IOpcUaSubjectServer.Diagnostics` exposes a live facade. Resolve it once and poll (see [Resolving the Server](#resolving-the-server)).
+`IOpcUaSubjectServer.Diagnostics` exposes a live facade of type `OpcUaServerDiagnostics`. Resolve it once and poll (see [Resolving the Server](#resolving-the-server)).
 
-Properties: `IsRunning`, `ActiveSessionCount`, `StartTime`, `Uptime`, `LastError`, `ConsecutiveFailures` (resets on successful start, see [Resilience](#resilience)), `IncomingChangesPerSecond` (client writes to server, 60-second sliding window), `OutgoingChangesPerSecond` (subject changes pushed to OPC UA nodes, 60-second sliding window).
+`OpcUaServerDiagnostics` derives from `ConnectorDiagnostics`, whose members, buffer semantics and read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to this server.
+
+**`IsOperational` here means the server has started and is accepting client connections.** The server restarts itself internally on failure, and the two timestamps split along that line: `OperationalChangeTime` moves on every internal restart, while the inherited `StartTime` marks the current run of the hosted service and does not.
+
+This server measures both throughput directions, so `Throughput.IncomingPerSecond` (client writes to the server) and `Throughput.OutgoingPerSecond` (subject changes pushed to OPC UA nodes) are never `null` here. `OutboundChanges` is the change queue feeding the address space, and its `Capacity` is `null` because that queue is unbounded.
+
+| Member | Meaning |
+|---|---|
+| `ActiveSessionCount` | Currently active client sessions. |
+| `ConsecutiveFailures` | Consecutive startup failures. A gauge that resets on a successful start, which is why it carries no `Total` prefix. See [Resilience](#resilience). |
+
+`LastError` is cleared by a restart of the hosted service, not by the server's own internal restart, so a non-null value means "a start failed, or something escaped the change queue processor, at some point during this run of the hosted service". A failed write into the address space is not one of them: the change queue processor logs and swallows every exception its write handler raises, so those never reach `LastError` at all.
 
 ## Direct Server Access
 

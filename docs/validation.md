@@ -85,22 +85,30 @@ public class NoSwearWordsValidator : IPropertyValidator
 {
     private static readonly string[] BadWords = ["bad", "words"];
 
-    public IEnumerable<ValidationResult> Validate<TProperty>(PropertyReference property, TProperty value)
+    public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
     {
-        if (value is string text)
+        if (context.Value is not string text)
         {
-            foreach (var word in BadWords)
+            return [];
+        }
+
+        List<ValidationResult>? results = null;
+        foreach (var word in BadWords)
+        {
+            if (text.Contains(word, StringComparison.OrdinalIgnoreCase))
             {
-                if (text.Contains(word, StringComparison.OrdinalIgnoreCase))
-                {
-                    yield return new ValidationResult(
-                        $"Property '{property.Name}' contains prohibited word: {word}");
-                }
+                results ??= [];
+                results.Add(new ValidationResult(
+                    $"Property '{context.Property.Name}' contains prohibited word: {word}"));
             }
         }
+
+        return results ?? [];
     }
 }
 ```
+
+The `PropertyValidationContext` carries the property, the new value, and the attempted `Origin` of the write (`Local` for user writes, `FromSource` for inbound source applies, `Confirmed` for transaction commit replays). Provenance-aware validators can treat source values as authoritative while strictly validating local input. Because the context is passed by `in`, implementations must return a collection instead of using `yield`.
 
 Register your custom validator:
 
@@ -115,7 +123,7 @@ Multiple validators can be registered and all will run. Errors from all validato
 
 ### Use Cases for Custom Validators
 
-- **Cross-property validation**: Access other properties via `property.Subject`
+- **Cross-property validation**: Access other properties via `context.Property.Subject`
 - **External validation**: Check against databases, APIs, or configuration
 - **Complex business rules**: Validation logic that doesn't fit in attributes
 - **Conditional validation**: Rules that depend on subject state

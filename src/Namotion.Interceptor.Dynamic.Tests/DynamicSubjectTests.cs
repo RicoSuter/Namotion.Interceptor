@@ -118,6 +118,21 @@ public class DynamicSubjectTests
         Assert.Equal(5, sensor.Temperature);
     }
 
+    [Fact]
+    public void WhenProxyingAGeneratedSubject_ThenNoGeneratedInterceptionMemberBecomesAProperty()
+    {
+        // Arrange & Act: Motor is [InterceptorSubject], so the proxy's base is generated code.
+        var motor = DynamicSubjectFactory.CreateSubject<Motor>(typeof(IMotor), typeof(ISensor));
+
+        // Assert: DynamicSubjectFactory turns every reflected instance property that is not already
+        // known into an intercepted subject property, and GetProperties(Instance | Public |
+        // NonPublic) returns inherited protected properties. A generated subject has no protected
+        // instance property today, which is exactly why nothing catches a new one. The set is
+        // asserted exactly rather than by name, so a leak under any name fails here.
+        var propertyNames = ((IInterceptorSubject)motor).Properties.Keys.OrderBy(name => name);
+        Assert.Equal(["Speed", "Temperature"], propertyNames);
+    }
+
     public class TestInterceptor : IReadInterceptor, IWriteInterceptor, ILifecycleInterceptor
     {
         private readonly string _name;
@@ -129,7 +144,7 @@ public class DynamicSubjectTests
             _logs = logs;
         }
 
-        public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
         {
             _logs.Add($"{_name}: Before read {context.Property.Name}");
             var result = next(ref context);

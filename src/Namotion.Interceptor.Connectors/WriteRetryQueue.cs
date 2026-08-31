@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
@@ -20,6 +21,7 @@ internal sealed class WriteRetryQueue : IDisposable
     private SubjectPropertyChange[] _scratchBuffer = new SubjectPropertyChange[64];
 
     private readonly ILogger _logger;
+    private readonly QueueMetrics _metrics;
     private readonly int _maxQueueSize;
     private int _count;
 
@@ -37,13 +39,16 @@ internal sealed class WriteRetryQueue : IDisposable
     /// </summary>
     public int PendingWriteCount => Volatile.Read(ref _count);
 
-    public WriteRetryQueue(int maxQueueSize, ILogger logger)
+    // Metrics is required rather than optional, so no construction site can drop writes uncounted.
+    public WriteRetryQueue(int maxQueueSize, ILogger logger, QueueMetrics metrics)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(maxQueueSize);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(metrics);
 
         _maxQueueSize = maxQueueSize;
         _logger = logger;
+        _metrics = metrics;
     }
 
     /// <summary>
@@ -54,6 +59,7 @@ internal sealed class WriteRetryQueue : IDisposable
     {
         if (_maxQueueSize is 0)
         {
+            _metrics.AddDropped(changes.Length);
             _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes.", changes.Length);
             return;
         }
@@ -80,6 +86,7 @@ internal sealed class WriteRetryQueue : IDisposable
 
         if (droppedCount > 0)
         {
+            _metrics.AddDropped(droppedCount);
             _logger.LogWarning(
                 "Write queue at capacity, dropped {Count} oldest writes (queue size: {QueueSize}).",
                 droppedCount,
@@ -165,7 +172,10 @@ internal sealed class WriteRetryQueue : IDisposable
 
                     _hasFlushWarnings = true;
 
-                    RequeueChanges(result.FailedChanges);
+                    // FailedChanges is complete (see WriteChangesInBatchesAsync), so every failed
+                    // item is restored before ring capacity is applied to the combined queue.
+                    var droppedCount = RequeueChanges(result.FailedChanges.AsSpan());
+                    _metrics.AddDropped(droppedCount);
                     Array.Clear(_scratchBuffer, 0, count);
                     return false;
                 }
@@ -205,12 +215,22 @@ internal sealed class WriteRetryQueue : IDisposable
         }
     }
 
-    private void RequeueChanges(ImmutableArray<SubjectPropertyChange> changes)
+    private int RequeueChanges(ReadOnlySpan<SubjectPropertyChange> changes)
     {
         lock (_lock)
         {
             _pendingWrites.InsertRange(0, changes);
+
+            // The failed in-flight changes are older than anything enqueued while the write was in
+            // progress. Ring semantics therefore evict from the front after restoring the batch.
+            var droppedCount = _pendingWrites.Count - _maxQueueSize;
+            if (droppedCount > 0)
+            {
+                _pendingWrites.RemoveRange(0, droppedCount);
+            }
+
             Volatile.Write(ref _count, _pendingWrites.Count);
+            return droppedCount;
         }
     }
 
