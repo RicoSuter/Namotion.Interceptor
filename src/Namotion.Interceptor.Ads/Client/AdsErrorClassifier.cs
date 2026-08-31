@@ -1,4 +1,5 @@
 using TwinCAT.Ads;
+using TwinCAT.TypeSystem;
 
 namespace Namotion.Interceptor.Ads.Client;
 
@@ -44,5 +45,29 @@ internal static class AdsErrorClassifier
         return exception is AdsErrorException adsErrorException
             ? adsErrorException.ErrorCode
             : AdsErrorCode.NoError;
+    }
+
+    /// <summary>
+    /// Classifies an exception thrown by the ADS API.
+    /// </summary>
+    /// <remarks>
+    /// Only <see cref="AdsErrorException"/> carries an error code, so classifying the others by code
+    /// puts them all in the transient bucket. Several describe something no retry can change: a value
+    /// whose PLC type will not resolve, will not marshal, or names a symbol the PLC will not expose
+    /// fails the same way on every attempt. <c>ClientNotConnectedException</c> and the session
+    /// exceptions stay transient, since a reconnect does change the answer.
+    /// </remarks>
+    /// <param name="exception">The exception to classify.</param>
+    /// <returns>True when retrying could plausibly succeed.</returns>
+    public static bool IsTransientException(Exception exception)
+    {
+        return exception switch
+        {
+            AdsErrorException adsErrorException => IsTransientError(adsErrorException.ErrorCode),
+            DataTypeException => false,
+            MarshalException => false,
+            SymbolException => false,
+            _ => true,
+        };
     }
 }

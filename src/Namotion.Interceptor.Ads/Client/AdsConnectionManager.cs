@@ -244,19 +244,21 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
         // fly. Beckhoff documents the async pair as the one to prefer for the first call.
         if (_configuration.PrefetchSymbols)
         {
-            if (symbolLoader is ISymbolServer symbolServer)
+            // ISymbolLoader extends ISymbolServer, so no capability check is needed. The results
+            // carry the error rather than throwing, and a half-loaded symbol table resolves nothing
+            // later, so a failure here has to abort rather than publish the loader.
+            var dataTypes = await symbolLoader.GetDataTypesAsync(cancellationToken).ConfigureAwait(false);
+            if (!dataTypes.Succeeded)
             {
-                await symbolServer.GetDataTypesAsync(cancellationToken).ConfigureAwait(false);
-                await symbolServer.GetSymbolsAsync(cancellationToken).ConfigureAwait(false);
+                throw new AdsErrorException(
+                    "Failed to prefetch ADS data types.", dataTypes.ErrorCode);
             }
-            else
+
+            var symbols = await symbolLoader.GetSymbolsAsync(cancellationToken).ConfigureAwait(false);
+            if (!symbols.Succeeded)
             {
-                // Otherwise the prefetch silently does nothing and the slow lazy path returns,
-                // which on a large symbol table looks like an unexplained stall rather than a
-                // missing capability.
-                LogFirstOccurrence("PrefetchUnsupported", null,
-                    "Symbol loader '{LoaderType}' does not implement ISymbolServer. Symbols are fetched lazily.",
-                    symbolLoader.GetType().Name);
+                throw new AdsErrorException(
+                    "Failed to prefetch ADS symbols.", symbols.ErrorCode);
             }
         }
 

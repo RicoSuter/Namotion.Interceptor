@@ -436,7 +436,7 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
         catch (AdsException exception)
         {
             var errorCode = AdsErrorClassifier.GetErrorCode(exception);
-            var isTransient = AdsErrorClassifier.IsTransientError(errorCode);
+            var isTransient = AdsErrorClassifier.IsTransientException(exception);
             var error = new AdsWriteException(
                 isTransient ? changes.Length : 0,
                 isTransient ? 0 : changes.Length,
@@ -535,7 +535,7 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
             }
             catch (AdsException exception)
             {
-                Bucket(AdsErrorClassifier.GetErrorCode(exception), index);
+                BucketException(exception, index);
             }
             catch (Exception)
             {
@@ -545,6 +545,18 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
 
         return BuildWriteResult(
             transientFailures, permanentWriteFailures, unresolvedChanges, permanentFailures, validChanges.Count);
+
+        void BucketException(Exception exception, int index)
+        {
+            if (AdsErrorClassifier.IsTransientException(exception))
+            {
+                (transientFailures ??= []).Add(validChanges[index]);
+            }
+            else
+            {
+                (permanentWriteFailures ??= []).Add(validChanges[index]);
+            }
+        }
 
         void Bucket(AdsErrorCode errorCode, int index)
         {
