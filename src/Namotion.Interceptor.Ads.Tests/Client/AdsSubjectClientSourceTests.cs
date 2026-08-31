@@ -472,7 +472,7 @@ public class AdsSubjectClientSourceTests
     }
 
     [Fact]
-    public async Task WriteChangesAsyncCore_WithDetachedSubjects_ShouldReturnSuccess()
+    public async Task WriteChangesAsyncCore_WithDetachedSubjects_ShouldReportTheChange()
     {
         // Arrange — model WITHOUT registry so TryGetRegisteredProperty returns null
         var source = CreateSource();
@@ -483,8 +483,11 @@ public class AdsSubjectClientSourceTests
         // Act
         var result = await source.WriteChangesAsyncCore(MockConnection, changes.AsMemory(), CancellationToken.None);
 
-        // Assert — all changes skipped (detached) → Success
-        Assert.True(result.IsFullySuccessful);
+        // Assert — never reached the PLC, so it has to be reported rather than counted as written
+        Assert.False(result.IsFullySuccessful);
+        Assert.Single(result.FailedChanges);
+        var error = Assert.IsType<AdsWriteException>(result.Error);
+        Assert.Equal(1, error.PermanentCount);
     }
 
     [Fact]
@@ -525,12 +528,13 @@ public class AdsSubjectClientSourceTests
         // Act
         var result = await source.WriteChangesAsyncCore(MockConnection, changes.AsMemory(), CancellationToken.None);
 
-        // Assert — null conversion → skipped → Success
+        // Assert — ADS has no null representation, so there is nothing to write and nothing to retry.
+        // This is the one documented exception to reporting every unwritten change.
         Assert.True(result.IsFullySuccessful);
     }
 
     [Fact]
-    public async Task WriteChangesAsyncCore_WithConversionException_ShouldDropWrite()
+    public async Task WriteChangesAsyncCore_WithConversionException_ShouldReportTheChange()
     {
         // Arrange
         var configuration = TestHelpers.CreateConfiguration();
@@ -553,8 +557,10 @@ public class AdsSubjectClientSourceTests
         // Act
         var result = await source.WriteChangesAsyncCore(MockConnection, changes.AsMemory(), CancellationToken.None);
 
-        // Assert — conversion exception → dropped → Success
-        Assert.True(result.IsFullySuccessful);
+        // Assert — a converter that throws is a mapping bug, and the write never reached the PLC
+        Assert.False(result.IsFullySuccessful);
+        Assert.Single(result.FailedChanges);
+        Assert.Equal(1, Assert.IsType<AdsWriteException>(result.Error).PermanentCount);
         mockLogger.Verify(
             l => l.Log(
                 LogLevel.Warning,
@@ -577,16 +583,19 @@ public class AdsSubjectClientSourceTests
 
         var changes = new[]
         {
-            CreateChange(model, nameof(TestPlcModel.Temperature)),        // registered, no symbol path → unresolved
-            CreateChange(detachedModel, nameof(TestPlcModel.Pressure)),   // detached → skipped
+            CreateChange(model, nameof(TestPlcModel.Temperature)),        // registered, no symbol path → transient
+            CreateChange(detachedModel, nameof(TestPlcModel.Pressure)),   // detached → permanent
         };
 
         // Act
         var result = await source.WriteChangesAsyncCore(MockConnection, changes.AsMemory(), CancellationToken.None);
 
-        // Assert — one unresolved change → failure with 1 deferred change
+        // Assert — both are reported, and the classification splits them across the two counts
         Assert.False(result.IsFullySuccessful);
-        Assert.Single(result.FailedChanges);
+        Assert.Equal(2, result.FailedChanges.Length);
+        var error = Assert.IsType<AdsWriteException>(result.Error);
+        Assert.Equal(1, error.TransientCount);
+        Assert.Equal(1, error.PermanentCount);
     }
 
     [Fact]
@@ -623,6 +632,97 @@ public class AdsSubjectClientSourceTests
 
 
 
+
+    [Fact]
+    public async Task WriteChangesAsyncCore_WhenSymbolWriteFailsPermanently_ShouldReportTheChange()
+    {
+        // Arrange — a symbol whose write fails with a permanent ADS error
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var model = new TestPlcModel(context);
+        var source = CreateSource(subject: model);
+
+        var propertyReference = new PropertyReference(model, nameof(TestPlcModel.Temperature));
+        source.SubscriptionManager.SetSymbolPath(propertyReference, "GVL.Temperature");
+        source.ConnectionManager.SetSymbolLoader(
+            CreateMockSymbolLoader("GVL.Temperature", CreateThrowingValueSymbol(AdsErrorCode.DeviceInvalidAccess)));
+
+        var changes = new[] { CreateChange(model, nameof(TestPlcModel.Temperature)) };
+
+        // Act
+        var result = await source.WriteChangesAsyncCore(MockConnection, changes.AsMemory(), CancellationToken.None);
+
+        // Assert — a permanent rejection is reported, not dropped: FailedChanges has to stay complete
+        // or the retry queue and the transaction writer both treat it as written.
+        Assert.False(result.IsFullySuccessful);
+        Assert.Single(result.FailedChanges);
+        var error = Assert.IsType<AdsWriteException>(result.Error);
+        Assert.Equal(1, error.PermanentCount);
+        Assert.Equal(0, error.TransientCount);
+    }
+
+    [Fact]
+    public async Task WriteChangesAsyncCore_WhenOneOfTwoSymbolWritesFails_ShouldReportPartialFailure()
+    {
+        // Arrange — one symbol writes cleanly, the other rejects permanently
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var model = new TestPlcModel(context);
+        var source = CreateSource(subject: model);
+
+        source.SubscriptionManager.SetSymbolPath(
+            new PropertyReference(model, nameof(TestPlcModel.Temperature)), "GVL.Temperature");
+        source.SubscriptionManager.SetSymbolPath(
+            new PropertyReference(model, nameof(TestPlcModel.Pressure)), "GVL.Pressure");
+
+        var mockInstanceCollection = new Mock<IInstanceCollection<ISymbol>>();
+        ISymbol? good = CreateWritableValueSymbol();
+        ISymbol? bad = CreateThrowingValueSymbol(AdsErrorCode.DeviceInvalidAccess);
+        mockInstanceCollection.Setup(c => c.TryGetInstance("GVL.Temperature", out good)).Returns(true);
+        mockInstanceCollection.Setup(c => c.TryGetInstance("GVL.Pressure", out bad)).Returns(true);
+
+        var mockSymbolLoader = new Mock<ISymbolLoader>();
+        mockSymbolLoader
+            .Setup(l => l.Symbols)
+            .Returns(mockInstanceCollection.As<ISymbolCollection<ISymbol>>().Object);
+        source.ConnectionManager.SetSymbolLoader(mockSymbolLoader.Object);
+
+        var changes = new[]
+        {
+            CreateChange(model, nameof(TestPlcModel.Temperature)),
+            CreateChange(model, nameof(TestPlcModel.Pressure)),
+        };
+
+        // Act
+        var result = await source.WriteChangesAsyncCore(MockConnection, changes.AsMemory(), CancellationToken.None);
+
+        // Assert — the successful write must not be replayed, so this is partial rather than total
+        Assert.False(result.IsFullySuccessful);
+        Assert.True(result.IsPartialFailure);
+        Assert.Single(result.FailedChanges);
+    }
+
+    /// <summary>
+    /// Creates a value symbol whose data type resolves (so the typed write path is taken) and whose
+    /// write fails with the given ADS error.
+    /// </summary>
+    private static ISymbol CreateThrowingValueSymbol(AdsErrorCode errorCode)
+    {
+        var mockSymbol = new Mock<ISymbol>();
+        mockSymbol.As<IValueSymbol>()
+            .Setup(v => v.WriteValueAsync(It.IsAny<object>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new AdsErrorException("Simulated write rejection.", errorCode));
+        mockSymbol.Setup(sy => sy.DataType).Returns(Mock.Of<IDataType>());
+        return mockSymbol.Object;
+    }
+
+    private static ISymbol CreateWritableValueSymbol()
+    {
+        var mockSymbol = new Mock<ISymbol>();
+        mockSymbol.As<IValueSymbol>()
+            .Setup(v => v.WriteValueAsync(It.IsAny<object>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult(new TwinCAT.ValueAccess.ResultWriteAccess(0, 0)));
+        mockSymbol.Setup(sy => sy.DataType).Returns(Mock.Of<IDataType>());
+        return mockSymbol.Object;
+    }
 
     private class NullReturningValueConverter : AdsValueConverter
     {

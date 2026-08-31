@@ -328,12 +328,19 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
             var writeCount = 0;
             var validChanges = new List<SubjectPropertyChange>(capacity);
             List<SubjectPropertyChange>? unresolvedChanges = null;
+            List<SubjectPropertyChange>? permanentFailures = null;
 
             foreach (var change in changesArray)
             {
                 var registeredProperty = change.Property.TryGetRegisteredProperty();
                 if (registeredProperty is null)
                 {
+                    // Only properties this source claimed ownership of reach this method, and ownership
+                    // is claimed through a registered property, so this is an anomaly rather than traffic
+                    // for another source. Reported so it cannot be lost silently.
+                    _logger.LogWarning("Property '{Property}' is no longer registered. Cannot write to ADS.",
+                        change.Property.Name);
+                    (permanentFailures ??= []).Add(change);
                     continue;
                 }
 
@@ -361,12 +368,16 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
                 }
                 catch (Exception exception)
                 {
-                    _logger.LogWarning(exception, "Failed to convert value for ADS symbol '{SymbolPath}'. Dropping write.", symbolPath);
+                    _logger.LogWarning(exception, "Failed to convert value for ADS symbol '{SymbolPath}'.", symbolPath);
+                    (permanentFailures ??= []).Add(change);
                     continue;
                 }
 
                 if (convertedValue is null)
                 {
+                    // ADS has no null: every symbol is a fixed-size value, so there is nothing to write.
+                    // Deliberately not reported as a failure. Retrying could only produce the same
+                    // outcome, and a later non-null assignment arrives as its own change.
                     _logger.LogDebug("Skipping write of null value to ADS symbol '{SymbolPath}'.", symbolPath);
                     continue;
                 }
@@ -392,16 +403,19 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
                 validChanges.Add(change);
             }
 
-            if (symbols.Count == 0 && unresolvedChanges is null)
+            if (symbols.Count == 0 && unresolvedChanges is null && permanentFailures is null)
             {
                 return WriteResult.Success;
             }
 
             if (symbols.Count == 0)
             {
-                _logger.LogDebug("Deferring {Count} writes: symbol paths not available (rescan in progress?).", unresolvedChanges!.Count);
-                return WriteResult.Failure(unresolvedChanges.ToArray(),
-                    new AdsWriteException(unresolvedChanges.Count, 0, unresolvedChanges.Count));
+                if (unresolvedChanges is not null)
+                {
+                    _logger.LogDebug("Deferring {Count} writes: symbol paths not available (rescan in progress?).", unresolvedChanges.Count);
+                }
+
+                return BuildWriteResult(null, null, unresolvedChanges, permanentFailures, validChangeCount: 0);
             }
 
             // Trim writeValues to exact count only if some changes were skipped
@@ -411,25 +425,28 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
             // {attribute 'monitoring' := 'call'} property does not have. It then writes raw bytes
             // past the variable and faults the PLC, without reporting an error. The per-symbol
             // value API calls the setter instead.
-            return await WriteIndividualValuesAsync(symbols, writeArray, validChanges, unresolvedChanges, cancellationToken).ConfigureAwait(false);
+            return await WriteIndividualValuesAsync(
+                symbols, writeArray, validChanges, unresolvedChanges, permanentFailures, cancellationToken).ConfigureAwait(false);
         }
         catch (AdsException exception)
         {
-            var errorCode = (AdsErrorCode)exception.HResult;
+            var errorCode = AdsErrorClassifier.GetErrorCode(exception);
             var isTransient = AdsErrorClassifier.IsTransientError(errorCode);
             var error = new AdsWriteException(
                 isTransient ? changes.Length : 0,
                 isTransient ? 0 : changes.Length,
                 changes.Length);
 
-            if (isTransient)
+            if (!isTransient)
             {
-                return WriteResult.Failure(changes, error);
+                // Reported rather than dropped: FailedChanges has to stay complete or the retry queue
+                // and the transaction writer both treat these as written. Classification only decides
+                // the counts on the exception, as it does for OPC UA.
+                _logger.LogWarning("Permanent ADS write error: {ErrorCode} on {Count} writes.",
+                    errorCode, changes.Length);
             }
 
-            _logger.LogWarning("Permanent ADS write error: {ErrorCode}. Dropping {Count} writes.",
-                errorCode, changes.Length);
-            return WriteResult.Success;
+            return WriteResult.Failure(changes, error);
         }
         catch (Exception exception)
         {
@@ -480,10 +497,11 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
         object[] writeValues,
         List<SubjectPropertyChange> validChanges,
         List<SubjectPropertyChange>? unresolvedChanges,
+        List<SubjectPropertyChange>? permanentFailures,
         CancellationToken cancellationToken)
     {
         List<SubjectPropertyChange>? transientFailures = null;
-        var permanentCount = 0;
+        List<SubjectPropertyChange>? permanentWriteFailures = null;
 
         for (var index = 0; index < symbols.Count; index++)
         {
@@ -493,75 +511,96 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
             }
             catch (AdsException exception)
             {
-                if (AdsErrorClassifier.IsTransientError((AdsErrorCode)exception.HResult))
+                if (AdsErrorClassifier.IsTransientError(AdsErrorClassifier.GetErrorCode(exception)))
                 {
                     (transientFailures ??= []).Add(validChanges[index]);
                 }
                 else
                 {
-                    permanentCount++;
+                    (permanentWriteFailures ??= []).Add(validChanges[index]);
                 }
             }
             catch (Exception)
             {
-                permanentCount++;
+                (permanentWriteFailures ??= []).Add(validChanges[index]);
             }
         }
 
-        return BuildWriteResult(transientFailures, permanentCount, validChanges.Count, unresolvedChanges);
+        return BuildWriteResult(
+            transientFailures, permanentWriteFailures, unresolvedChanges, permanentFailures, validChanges.Count);
     }
 
     /// <summary>
-    /// Builds a WriteResult from classified write failures.
-    /// Logs permanent errors, merges transient and unresolved changes for retry.
+    /// Builds a WriteResult from classified write failures. Every change that did not reach the PLC is
+    /// reported, whether it failed transiently or permanently: <see cref="WriteResult.FailedChanges"/>
+    /// has to stay complete or the retry queue and the transaction writer count it as written.
+    /// Classification only decides the counts carried on <see cref="AdsWriteException"/>.
     /// </summary>
+    /// <param name="transientFailures">Attempted writes that failed with a transient ADS error.</param>
+    /// <param name="permanentWriteFailures">Attempted writes that failed with a permanent error.</param>
+    /// <param name="unresolvedChanges">Changes never attempted because the symbol was unavailable, treated as transient.</param>
+    /// <param name="permanentMappingFailures">Changes never attempted because they could not be mapped or converted.</param>
+    /// <param name="validChangeCount">The number of changes actually attempted against the PLC.</param>
     private WriteResult BuildWriteResult(
         List<SubjectPropertyChange>? transientFailures,
-        int permanentCount,
-        int validChangeCount,
-        List<SubjectPropertyChange>? unresolvedChanges)
+        List<SubjectPropertyChange>? permanentWriteFailures,
+        List<SubjectPropertyChange>? unresolvedChanges,
+        List<SubjectPropertyChange>? permanentMappingFailures,
+        int validChangeCount)
     {
-        if (permanentCount > 0)
-        {
-            _logger.LogWarning("Dropped {Count} writes due to permanent ADS errors.", permanentCount);
-        }
-
-        var retryChanges = MergeRetryChanges(transientFailures, unresolvedChanges);
+        var retryChanges = MergeRetryChanges(
+            transientFailures, permanentWriteFailures, unresolvedChanges, permanentMappingFailures);
         if (retryChanges is null)
         {
             return WriteResult.Success;
         }
 
         var transientCount = (transientFailures?.Count ?? 0) + (unresolvedChanges?.Count ?? 0);
-        var error = new AdsWriteException(transientCount, permanentCount, validChangeCount);
-        var successCount = validChangeCount - (transientFailures?.Count ?? 0) - permanentCount;
+        var permanentCount = (permanentWriteFailures?.Count ?? 0) + (permanentMappingFailures?.Count ?? 0);
+        if (permanentCount > 0)
+        {
+            _logger.LogWarning("Reporting {Count} writes that failed permanently.", permanentCount);
+        }
+
+        var totalCount = validChangeCount
+                         + (unresolvedChanges?.Count ?? 0)
+                         + (permanentMappingFailures?.Count ?? 0);
+        var error = new AdsWriteException(transientCount, permanentCount, totalCount);
+
+        // Only attempted changes can have succeeded, so the unattempted lists stay out of this.
+        var successCount = validChangeCount
+                           - (transientFailures?.Count ?? 0)
+                           - (permanentWriteFailures?.Count ?? 0);
         return successCount > 0
             ? WriteResult.PartialFailure(retryChanges, error)
             : WriteResult.Failure(retryChanges, error);
     }
 
     private static SubjectPropertyChange[]? MergeRetryChanges(
-        List<SubjectPropertyChange>? transientFailures,
-        List<SubjectPropertyChange>? unresolvedChanges)
+        params List<SubjectPropertyChange>?[] failureLists)
     {
-        if (transientFailures is null && unresolvedChanges is null)
+        var totalCount = 0;
+        foreach (var list in failureLists)
+        {
+            totalCount += list?.Count ?? 0;
+        }
+
+        if (totalCount == 0)
         {
             return null;
         }
 
-        var totalCount = (transientFailures?.Count ?? 0) + (unresolvedChanges?.Count ?? 0);
         var result = new SubjectPropertyChange[totalCount];
         var offset = 0;
-
-        if (transientFailures is not null)
+        foreach (var list in failureLists)
         {
-            transientFailures.CopyTo(result, offset);
-            offset += transientFailures.Count;
-        }
+            if (list is null)
+            {
+                continue;
+            }
 
-        if (unresolvedChanges is not null)
-        {
-            unresolvedChanges.CopyTo(result, offset);
+            list.CopyTo(result, offset);
+            offset += list.Count;
         }
 
         return result;
