@@ -1,3 +1,4 @@
+using System.Text;
 using Xunit;
 
 namespace Namotion.Interceptor.Ads.Tests.Integration.Testing;
@@ -14,6 +15,7 @@ public class SharedAdsServerFixture : IAsyncLifetime
     [
         new TestSymbol("GVL.Temperature", typeof(double), 25.0),
         new TestSymbol("GVL.MachineName", typeof(string), "TestPLC"),
+        new TestSymbol("GVL.WideName", typeof(string), "WidePLC", Encoding.Unicode),
         new TestSymbol("GVL.IsRunning", typeof(bool), true),
         new TestSymbol("GVL.Counter", typeof(int), 42),
         new TestSymbol("GVL.PolledCounter", typeof(int), 0),

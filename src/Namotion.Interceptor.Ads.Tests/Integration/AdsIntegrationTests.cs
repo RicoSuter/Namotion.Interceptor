@@ -269,10 +269,10 @@ public class AdsIntegrationTests
             // one" lets the test proceed mid-registration and fail on a slower machine.
             await AsyncTestHelpers.WaitUntilAsync(
                 () => clientSource.Diagnostics.IsConnected &&
-                      clientSource.Diagnostics.NotificationVariableCount == 3 &&
-                      clientSource.Diagnostics.PolledVariableCount == 1,
+                      clientSource.Diagnostics.NotificationVariableCount == 4 &&
+                      clientSource.Diagnostics.PolledVariableCount == 0,
                 timeout: WaitTimeout,
-                message: "Client should register three notifications and poll the WSTRING property");
+                message: "Client should register a notification for every property");
 
             var notificationCount = clientSource.Diagnostics.NotificationVariableCount;
             var handleCount = clientSource.SubscriptionManager.NotificationHandleCount;
@@ -286,13 +286,11 @@ public class AdsIntegrationTests
             // scheduler thread per registration. Thread growth is logged rather than asserted: at
             // this scale the harness's own thread pool churn swamps the signal.
             //
-            // Not every property is notification-backed: the harness's string symbol is a WSTRING,
-            // which the any-type path cannot marshal, so it is polled. That split is asserted
-            // explicitly because a property silently moving between the two is exactly the
-            // regression this guards, and correctness of the polled value is covered by
-            // ReadInitialState_ShouldPopulateProperties.
-            Assert.Equal(3, notificationCount);
-            Assert.Equal(1, clientSource.Diagnostics.PolledVariableCount);
+            // Every property of this model, including the STRING one, is notification-backed. The
+            // split is asserted explicitly because a property silently moving to polling is exactly
+            // the regression this guards; the WSTRING case has its own test.
+            Assert.Equal(4, notificationCount);
+            Assert.Equal(0, clientSource.Diagnostics.PolledVariableCount);
             Assert.Equal(notificationCount, handleCount);
 
             // Routing still has to work: every property is fed by the one shared subscription.
@@ -440,6 +438,87 @@ public class AdsIntegrationTests
                 timeout: WaitTimeout,
                 message: "An outbound write should still reach the PLC");
         });
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task WideString_ShouldFallBackToPollingAndKeepTheWholeValue()
+    {
+        // Registering a WSTRING through the any-type path decodes 2-byte characters as single-byte
+        // text and stops at the first NUL, yielding one character. It has to poll instead.
+        var model = new WideStringIntegrationTestModel(CreateContext());
+
+        await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientSource.Diagnostics.IsConnected && model.WideName == "WidePLC",
+                timeout: WaitTimeout,
+                message: "The WSTRING property should load its whole value");
+
+            Assert.Equal(0, clientSource.Diagnostics.NotificationVariableCount);
+            Assert.Equal(1, clientSource.Diagnostics.PolledVariableCount);
+
+            _fixture.Server.SetSymbolValue("GVL.WideName", "Umgebung");
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => model.WideName == "Umgebung",
+                timeout: WaitTimeout,
+                message: "The polled WSTRING should keep updating with its whole value");
+        });
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task InitialState_ShouldUseTheSumReadCommand()
+    {
+        // The connector prefers one sum read over N round trips, and falls back per pass when the
+        // controller cannot serve it. Without a server that answers the sum command, every test
+        // exercises only the fallback and the batch path ships untested.
+        var before = _fixture.Server.SumReadCount;
+        var model = new IntegrationTestModel(CreateContext());
+
+        await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientSource.Diagnostics.IsConnected &&
+                      Math.Abs(model.Temperature - 25.0) < 0.001 &&
+                      model.MachineName == "TestPLC" &&
+                      model.Counter == 42,
+                timeout: WaitTimeout,
+                message: "The initial state should load through the sum read");
+
+            // Values arrived, and they arrived through the batch command.
+            Assert.True(
+                _fixture.Server.SumReadCount > before,
+                $"Expected a sum read; the count stayed at {_fixture.Server.SumReadCount}.");
+        });
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task InitialState_WhenTheSumReadIsRefused_ShouldFallBackToIndividualReads()
+    {
+        // A controller that does not support sum commands drives the individual-read path, which is
+        // also where the raw-integer read for an unresolvable PLC type lives.
+        var model = new IntegrationTestModel(CreateContext());
+        _fixture.Server.FailSumReads = true;
+        try
+        {
+            await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
+            {
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => clientSource.Diagnostics.IsConnected &&
+                          Math.Abs(model.Temperature - 25.0) < 0.001 &&
+                          model.MachineName == "TestPLC" &&
+                          model.Counter == 42,
+                    timeout: WaitTimeout,
+                    message: "The initial state should load through individual reads");
+            });
+        }
+        finally
+        {
+            _fixture.Server.FailSumReads = false;
+        }
     }
 
     [Fact]

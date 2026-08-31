@@ -30,6 +30,21 @@ public sealed class AdsTestServer : IAsyncDisposable
     /// Gets the number of device notifications the client has registered, and the number it has
     /// deleted. A client that re-subscribes without releasing leaves the difference on the server.
     /// </summary>
+    /// <summary>
+    /// Gets the number of sum-read commands the server has served, so a test can prove the batch
+    /// path was taken rather than the individual-read fallback.
+    /// </summary>
+    public int SumReadCount => _server?.SumReadCount ?? 0;
+
+    /// <summary>
+    /// Refuses sum reads while set, which drives the connector's individual-read fallback.
+    /// </summary>
+    public bool FailSumReads
+    {
+        get => _server?.FailSumReads ?? false;
+        set { if (_server is not null) _server.FailSumReads = value; }
+    }
+
     public (int Added, int Deleted) NotificationCounts =>
         _server is null ? (0, 0) : (_server.AddedNotificationCount, _server.DeletedNotificationCount);
 
@@ -303,14 +318,15 @@ internal sealed class TestAdsSymbolicServer : AdsSymbolicServer
         // Create a data area for all test symbols
         var globals = new DataArea("Globals", 0x02, 0x1000, 0x10000);
 
-        var addedTypes = new HashSet<Type>();
+        var addedTypes = new HashSet<string>(StringComparer.Ordinal);
 
         // Register types
         foreach (var testSymbol in _testSymbols)
         {
-            if (addedTypes.Add(testSymbol.DataType))
+            var beckhoffType = MapToBeckhoffType(testSymbol);
+            if (addedTypes.Add(beckhoffType.Name))
             {
-                symbolFactory!.AddType(MapToBeckhoffType(testSymbol.DataType));
+                symbolFactory!.AddType(beckhoffType);
             }
         }
 
@@ -319,7 +335,7 @@ internal sealed class TestAdsSymbolicServer : AdsSymbolicServer
         // Register symbols and set initial values
         foreach (var testSymbol in _testSymbols)
         {
-            symbolFactory!.AddSymbol(testSymbol.Path, MapToBeckhoffType(testSymbol.DataType), globals);
+            symbolFactory!.AddSymbol(testSymbol.Path, MapToBeckhoffType(testSymbol), globals);
         }
 
         foreach (var testSymbol in _testSymbols)
@@ -328,6 +344,89 @@ internal sealed class TestAdsSymbolicServer : AdsSymbolicServer
                 testSymbol.InitialValue ?? GetDefaultValue(testSymbol.DataType);
         }
     }
+
+    /// <summary>
+    /// Serves the sum read-write command, so tests exercise the batch path the connector prefers
+    /// instead of always falling through to individual reads.
+    /// </summary>
+    /// <remarks>
+    /// This is the command a symbolic sum read actually uses: each sub-request reads a value by
+    /// handle. The request carries the sub-request count in <paramref name="indexOffset"/>, then one
+    /// 16-byte (indexGroup, indexOffset, readLength, writeLength) header per sub-request, then the
+    /// write payloads. The response is one 8-byte (errorCode, bytesRead) pair per sub-request,
+    /// followed by the read data. Each sub-request is delegated to the base server so that handle
+    /// and symbol resolution stay in one place.
+    /// </remarks>
+    protected override async Task<ResultReadWriteBytes> OnReadWriteAsync(
+        AmsAddress sender, uint invokeId, uint indexGroup, uint indexOffset, int readLength,
+        ReadOnlyMemory<byte> writeData, CancellationToken cancel)
+    {
+        if (indexGroup != (uint)AdsReservedIndexGroup.SumCommandReadWrite)
+        {
+            return await base.OnReadWriteAsync(
+                sender, invokeId, indexGroup, indexOffset, readLength, writeData, cancel)
+                .ConfigureAwait(false);
+        }
+
+        if (FailSumReads)
+        {
+            // Lets a test drive the individual-read fallback, which is what a controller that does
+            // not support sum commands produces.
+            Interlocked.Increment(ref SumReadCount);
+            return new ResultReadWriteBytes(
+                AdsErrorCode.DeviceServiceNotSupported, ReadOnlyMemory<byte>.Empty, invokeId);
+        }
+
+        const int headerSize = 16;
+        var count = (int)indexOffset;
+        if (count <= 0 || writeData.Length < count * headerSize)
+        {
+            return new ResultReadWriteBytes(AdsErrorCode.DeviceInvalidSize, ReadOnlyMemory<byte>.Empty, invokeId);
+        }
+
+        Interlocked.Increment(ref SumReadCount);
+
+        var response = new byte[readLength];
+        var statusOffset = 0;
+        var dataOffset = count * 8;
+        var payloadOffset = count * headerSize;
+
+        for (var index = 0; index < count; index++)
+        {
+            var header = writeData.Span.Slice(index * headerSize, headerSize);
+            var subGroup = BitConverter.ToUInt32(header[..4]);
+            var subOffset = BitConverter.ToUInt32(header.Slice(4, 4));
+            var subReadLength = BitConverter.ToInt32(header.Slice(8, 4));
+            var subWriteLength = BitConverter.ToInt32(header.Slice(12, 4));
+
+            var subWriteData = writeData.Slice(payloadOffset, subWriteLength);
+            payloadOffset += subWriteLength;
+
+            var result = await base.OnReadWriteAsync(
+                sender, invokeId, subGroup, subOffset, subReadLength, subWriteData, cancel)
+                .ConfigureAwait(false);
+
+            var returned = 0;
+            if (result.ErrorCode == AdsErrorCode.NoError)
+            {
+                returned = Math.Min(result.Data.Length, Math.Min(subReadLength, response.Length - dataOffset));
+                result.Data[..returned].Span.CopyTo(response.AsSpan(dataOffset, returned));
+            }
+
+            BitConverter.TryWriteBytes(response.AsSpan(statusOffset, 4), (uint)result.ErrorCode);
+            BitConverter.TryWriteBytes(response.AsSpan(statusOffset + 4, 4), (uint)returned);
+            statusOffset += 8;
+            dataOffset += subReadLength;
+        }
+
+        return new ResultReadWriteBytes(AdsErrorCode.NoError, response, invokeId);
+    }
+
+    /// <summary>Number of sum commands served, so a test can prove the batch path was used.</summary>
+    public int SumReadCount;
+
+    /// <summary>When set, sum reads are refused, which drives the individual-read fallback.</summary>
+    public volatile bool FailSumReads;
 
     /// <inheritdoc/>
     protected override Task<ResultReadDeviceState> OnReadDeviceStateAsync(
@@ -397,16 +496,19 @@ internal sealed class TestAdsSymbolicServer : AdsSymbolicServer
         return AdsErrorCode.DeviceSymbolNotFound;
     }
 
-    private static DataType MapToBeckhoffType(Type type)
+    private static DataType MapToBeckhoffType(TestSymbol symbol)
     {
+        var type = symbol.DataType;
         if (type == typeof(bool)) return new PrimitiveType("BOOL", typeof(bool));
         if (type == typeof(short)) return new PrimitiveType("INT", typeof(short));
         if (type == typeof(int)) return new PrimitiveType("DINT", typeof(int));
         if (type == typeof(float)) return new PrimitiveType("REAL", typeof(float));
         if (type == typeof(double)) return new PrimitiveType("LREAL", typeof(double));
-        if (type == typeof(string)) return new StringType(80, Encoding.Unicode);
 
-        throw new ArgumentException($"Unsupported type: {type.FullName}", nameof(type));
+        // Single-byte STRING(80) unless the symbol asks for Unicode, which yields a WSTRING(80).
+        if (type == typeof(string)) return new StringType(80, symbol.StringEncoding ?? Encoding.ASCII);
+
+        throw new ArgumentException($"Unsupported type: {type.FullName}", nameof(symbol));
     }
 
     private static object? GetDefaultValue(Type type)
