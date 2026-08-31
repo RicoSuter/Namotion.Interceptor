@@ -4,7 +4,11 @@ using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
+using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
+using Opc.Ua;
+using Opc.Ua.Client;
 using static Namotion.Interceptor.OpcUa.Tests.Client.ClientSourceTestFactory;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
@@ -103,6 +107,44 @@ public class HoistedMetricsTests
     }
 
     [Fact]
+    public void WhenSubscriptionMetricsAreReset_ThenTheSkippedBadValueCounterReturnsToZero()
+    {
+        // Arrange
+        var metrics = new SubscriptionMetrics();
+        metrics.RecordSkippedBadValue();
+
+        // Act
+        metrics.Reset();
+
+        // Assert
+        Assert.Equal(0, metrics.SkippedBadValues);
+    }
+
+    [Fact]
+    public async Task WhenTheSubscriptionManagerIsRebuiltForANewListenAttempt_ThenSkippedBadValuesSurvive()
+    {
+        // Arrange: every listen attempt rebuilds the subscription manager, so a counter it owned would
+        // rebase to zero on the retry loop's next attempt, exactly during the reconnect storm in which
+        // a faulted node needs telling apart from a quiet one.
+        await using var source = CreateClientSource();
+        var propertyWriter = new SubjectPropertyWriter(source, NullLogger.Instance);
+
+        await using (var manager = CreateSubscriptionManager(source, propertyWriter))
+        {
+            DeliverBadValue(manager, source);
+        }
+
+        Assert.Equal(1, source.Diagnostics.SkippedBadSubscriptionValues);
+
+        // Act
+        await using var rebuiltManager = CreateSubscriptionManager(source, propertyWriter);
+        DeliverBadValue(rebuiltManager, source);
+
+        // Assert
+        Assert.Equal(2, source.Diagnostics.SkippedBadSubscriptionValues);
+    }
+
+    [Fact]
     public async Task WhenTheConnectorStartsANewEpoch_ThenTheHoistedCountersAreReset()
     {
         // Arrange - without property tracking the pump fails its configuration guard immediately,
@@ -111,6 +153,7 @@ public class HoistedMetricsTests
         source.PollingMetrics.RecordRead();
         source.ReadAfterWriteMetrics.RecordScheduled();
         source.ReconnectionMetrics.RecordAttemptStart();
+        source.SubscriptionMetrics.RecordSkippedBadValue();
 
         // Act
         await StartAndIgnoreTheConfigurationFailureAsync(source);
@@ -119,6 +162,7 @@ public class HoistedMetricsTests
         Assert.Equal(0, source.PollingMetrics.TotalReads);
         Assert.Equal(0, source.ReadAfterWriteMetrics.Scheduled);
         Assert.Equal(0, source.ReconnectionMetrics.TotalAttempts);
+        Assert.Equal(0, source.SubscriptionMetrics.SkippedBadValues);
     }
 
     private static async Task<SessionManager> CreateSessionManagerAsync(
@@ -130,6 +174,7 @@ public class HoistedMetricsTests
             CreateConfiguration(),
             source.PollingMetrics,
             source.ReadAfterWriteMetrics,
+            source.SubscriptionMetrics,
             NullLogger.Instance);
 
         // The polling loop is spawned by the constructor; wait for it so disposal has a task to join
@@ -139,6 +184,52 @@ public class HoistedMetricsTests
             message: "The polling manager should start with the session manager");
 
         return sessionManager;
+    }
+
+    private static SubscriptionManager CreateSubscriptionManager(
+        OpcUaSubjectClientSource source, SubjectPropertyWriter propertyWriter) =>
+        new(
+            source,
+            propertyWriter,
+            pollingManager: null,
+            readAfterWriteManager: null,
+            CreateConfiguration(),
+            source.SubscriptionMetrics,
+            source.ReportBackgroundError,
+            NullLogger.Instance);
+
+    /// <summary>
+    /// Delivers one Bad-status notification for a tracked property through the real skip path.
+    /// </summary>
+    private static void DeliverBadValue(SubscriptionManager manager, OpcUaSubjectClientSource source)
+    {
+        var property = new RegisteredSubject((TestRoot)source.RootSubject)
+            .TryGetProperty(nameof(TestRoot.Name))!;
+        var monitoredItem = new MonitoredItem(NullTelemetryContext.Instance)
+        {
+            StartNodeId = new NodeId("Name", 2),
+            AttributeId = Opc.Ua.Attributes.Value,
+            Handle = property
+        };
+        var subscription = new Subscription(NullTelemetryContext.Instance, new SubscriptionOptions());
+        subscription.AddItem(monitoredItem);
+        manager.TrackMonitoredItem(monitoredItem);
+
+        manager.OnFastDataChange(
+            subscription,
+            new DataChangeNotification
+            {
+                MonitoredItems =
+                [
+                    new MonitoredItemNotification
+                    {
+                        ClientHandle = monitoredItem.ClientHandle,
+                        Value = new DataValue { StatusCode = StatusCodes.BadSensorFailure }
+                    }
+                ],
+                DiagnosticInfos = []
+            },
+            []);
     }
 
     private static async Task StartAndIgnoreTheConfigurationFailureAsync(OpcUaSubjectClientSource source)

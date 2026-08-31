@@ -79,6 +79,17 @@ public class OpcUaStatusCodeClassifierTests
     }
 
     [Fact]
+    public void WhenAPermanentCodeCarriesInfoBits_ThenIsTransientErrorReturnsFalse()
+    {
+        // Arrange: the low 16 bits describe the answer rather than name it, and a server is free to set
+        // them. Matching on the whole 32-bit value would read this as a code the list does not hold.
+        var status = new StatusCode(StatusCodes.BadNodeIdUnknown | 0x0403u);
+
+        // Act & Assert
+        Assert.False(OpcUaStatusCodeClassifier.IsTransientError(status));
+    }
+
+    [Fact]
     public void WhenStatusIsGood_ThenIsTransientErrorReturnsFalse()
     {
         // Arrange

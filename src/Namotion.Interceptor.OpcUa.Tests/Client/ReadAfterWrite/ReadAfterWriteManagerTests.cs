@@ -5,6 +5,7 @@ using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -78,7 +79,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
             property,
             requestedSamplingInterval: 0,
             revisedSamplingInterval: revisedSamplingInterval ?? TimeSpan.FromMinutes(1));
-        manager.OnPropertyWritten(nodeId);
+        manager.OnPropertyWritten(nodeId, sentRevision: 0);
     }
 
     public ReadAfterWriteManagerTests()
@@ -119,7 +120,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
 
         // Act - requested 0 (exception-based), but server revised to 500ms
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
-        _manager.OnPropertyWritten(nodeId);
+        _manager.OnPropertyWritten(nodeId, sentRevision: 1);
 
         // Assert - should have scheduled a read-after-write
         Assert.Equal(1, _metrics.Scheduled);
@@ -134,7 +135,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
 
         // Act - requested 100ms (not exception-based), so not tracked
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 100, TimeSpan.FromMilliseconds(500));
-        _manager.OnPropertyWritten(nodeId);
+        _manager.OnPropertyWritten(nodeId, sentRevision: 1);
 
         // Assert - should NOT have scheduled (sampling interval wasn't 0)
         Assert.Equal(0, _metrics.Scheduled);
@@ -146,12 +147,12 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         // Arrange
         var nodeId = new NodeId("TestNode", 2);
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
-        _manager.OnPropertyWritten(nodeId);
+        _manager.OnPropertyWritten(nodeId, sentRevision: 1);
         Assert.Equal(1, _metrics.Scheduled);
 
         // Act
         _manager.UnregisterProperty(nodeId);
-        _manager.OnPropertyWritten(nodeId); // Should not schedule after unregister
+        _manager.OnPropertyWritten(nodeId, sentRevision: 1); // Should not schedule after unregister
 
         // Assert - still only 1 scheduled (second write ignored)
         Assert.Equal(1, _metrics.Scheduled);
@@ -165,8 +166,8 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
 
         // Act - write twice
-        _manager.OnPropertyWritten(nodeId);
-        _manager.OnPropertyWritten(nodeId);
+        _manager.OnPropertyWritten(nodeId, sentRevision: 1);
+        _manager.OnPropertyWritten(nodeId, sentRevision: 1);
 
         // Assert - one scheduled, one coalesced
         Assert.Equal(1, _metrics.Scheduled);
@@ -179,7 +180,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         // Arrange
         var nodeId = new NodeId("TestNode", 2);
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
-        _manager.OnPropertyWritten(nodeId);
+        _manager.OnPropertyWritten(nodeId, sentRevision: 1);
         Assert.Equal(1, _metrics.Scheduled);
 
         // Act
@@ -187,7 +188,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         Assert.Equal(0, _manager.PendingReadCount);
 
         // Write again - should still be able to schedule (property still tracked)
-        _manager.OnPropertyWritten(nodeId);
+        _manager.OnPropertyWritten(nodeId, sentRevision: 1);
 
         // Assert - second write should schedule
         Assert.Equal(2, _metrics.Scheduled);
@@ -200,14 +201,14 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         // Arrange
         var nodeId = new NodeId("TestNode", 2);
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
-        _manager.OnPropertyWritten(nodeId);
+        _manager.OnPropertyWritten(nodeId, sentRevision: 1);
         Assert.Equal(1, _metrics.Scheduled);
 
         // Act
         _manager.ClearAll();
 
         // Write again - should NOT schedule (property no longer tracked)
-        _manager.OnPropertyWritten(nodeId);
+        _manager.OnPropertyWritten(nodeId, sentRevision: 1);
 
         // Assert - still only 1 scheduled (property removed)
         Assert.Equal(1, _metrics.Scheduled);
@@ -228,7 +229,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
                 {
                     var nodeId = new NodeId($"Node_{threadIndex}_{i}", 2);
                     _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(100));
-                    _manager.OnPropertyWritten(nodeId);
+                    _manager.OnPropertyWritten(nodeId, sentRevision: 1);
                     _manager.UnregisterProperty(nodeId);
                 }
             }))
@@ -314,9 +315,44 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task WhenConversionThrowsAfterASuccess_ThenTheSuccessIsKeptAndUnfinishedReadsFail()
+    public async Task WhenTheSessionIsDownWhenReadsFallDue_ThenTheDrainedReadsAreCountedAsFailed()
     {
         // Arrange
+        var session = new Mock<ISession>();
+        session.SetupGet(value => value.Connected).Returns(false);
+        var metrics = new ReadAfterWriteMetrics();
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(250)),
+            metrics,
+            reportError: static _ => { },
+            NullLogger.Instance);
+
+        RegisterAndSchedule(manager, new NodeId("FirstName", 2), CreateTestProperty(_testSubject));
+        RegisterAndSchedule(manager, new NodeId("LastName", 2), CreateTestProperty(_testSubject));
+
+        // Act
+        await manager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert
+        Assert.Equal(2, metrics.Failed);
+        Assert.Equal(0, metrics.Executed);
+        Assert.Equal(0, manager.PendingReadCount);
+        Assert.False(GetCircuitBreaker(manager).IsOpen);
+        session.Verify(value => value.ReadAsync(
+            It.IsAny<RequestHeader>(),
+            It.IsAny<double>(),
+            It.IsAny<TimestampsToReturn>(),
+            It.IsAny<ReadValueIdCollection>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task WhenOneConversionThrows_ThenTheOtherReadBacksStillApplyAndTheFailureIsReportedOnce()
+    {
+        // Arrange - the throwing value sits in the middle, so an uncontained throw would also
+        // discard the read-back behind it
         var subjects = Enumerable.Range(0, 3)
             .Select(_ => new TestPerson(InterceptorSubjectContext.Create().WithFullPropertyTracking()))
             .ToArray();
@@ -324,7 +360,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         var session = CreateSessionReturning(
             CreateDataValue("first", StatusCodes.Good, timestamp),
             CreateDataValue("throw", StatusCodes.Good, timestamp),
-            CreateDataValue("unreached", StatusCodes.Good, timestamp));
+            CreateDataValue("third", StatusCodes.Good, timestamp));
         var metrics = new ReadAfterWriteMetrics();
         var conversionError = new InvalidOperationException("conversion failed");
         var reportedErrors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
@@ -346,11 +382,13 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         // Act
         await manager.ProcessDueReadsAsync(DateTime.MaxValue);
 
-        // Assert
-        Assert.Equal(1, metrics.Executed);
-        Assert.Equal(2, metrics.Failed);
+        // Assert - the contained failure counts as not applied, not as a read failure
+        Assert.Equal(2, metrics.Executed);
+        Assert.Equal(1, metrics.NotApplied);
+        Assert.Equal(0, metrics.Failed);
         Assert.Equal(1, subjects.Count(subject => subject.FirstName == "first"));
-        Assert.Equal(2, subjects.Count(subject => subject.FirstName == string.Empty));
+        Assert.Equal(1, subjects.Count(subject => subject.FirstName == "third"));
+        Assert.Equal(1, subjects.Count(subject => subject.FirstName == string.Empty));
         Assert.Collection(reportedErrors, error => Assert.Same(conversionError, error));
     }
 
@@ -391,6 +429,73 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         Assert.Equal(0, metrics.Failed);
         Assert.Equal("newer", subject.FirstName);
         Assert.Equal("applied", subject.LastName);
+    }
+
+    [Fact]
+    public async Task WhenAReadBackIsSkippedAsStale_ThenTheDiagnosticsReportIt()
+    {
+        // Arrange - a local write newer than the read-back's answer, so the answer is correctly discarded
+        var subject = new TestPerson(InterceptorSubjectContext.Create().WithFullPropertyTracking());
+        var registeredSubject = new RegisteredSubject(subject);
+        var staleTimestamp = DateTimeOffset.UtcNow.AddMinutes(-1);
+        using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
+        {
+            subject.FirstName = "newer";
+        }
+
+        var session = CreateSessionReturning(
+            CreateDataValue("stale", StatusCodes.Good, staleTimestamp.UtcDateTime));
+        var metrics = new ReadAfterWriteMetrics();
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(250)),
+            metrics,
+            reportError: static _ => { },
+            NullLogger.Instance);
+        var diagnostics = new ReadAfterWriteDiagnostics(manager, metrics);
+
+        RegisterAndSchedule(manager, new NodeId("FirstName", 2),
+            registeredSubject.TryGetProperty(nameof(TestPerson.FirstName))!);
+
+        // Act
+        await manager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert - a skip is a read that succeeded, so it is neither executed, not applied nor failed
+        Assert.Equal(1, diagnostics.TotalSkippedReads);
+        Assert.Equal(0, diagnostics.TotalExecutedReads);
+        Assert.Equal(0, diagnostics.TotalNotAppliedReads);
+        Assert.Equal(0, diagnostics.TotalFailedReads);
+    }
+
+    [Fact]
+    public async Task WhenAReadBackIsNotApplied_ThenTheDiagnosticsReportIt()
+    {
+        // Arrange - the server answers the read, but the value cannot be converted locally
+        var subject = new TestPerson(InterceptorSubjectContext.Create().WithFullPropertyTracking());
+        var session = CreateSessionReturning(
+            CreateDataValue("throw", StatusCodes.Good, DateTime.UtcNow.AddMinutes(1)));
+        var metrics = new ReadAfterWriteMetrics();
+        var conversionError = new InvalidOperationException("conversion failed");
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(250), new ThrowingValueConverter("throw", conversionError)),
+            metrics,
+            reportError: static _ => { },
+            NullLogger.Instance);
+        var diagnostics = new ReadAfterWriteDiagnostics(manager, metrics);
+
+        RegisterAndSchedule(manager, new NodeId("FirstName", 2), CreateTestProperty(subject));
+
+        // Act
+        await manager.ProcessDueReadsAsync(DateTime.MaxValue);
+
+        // Assert - unlike a skip this is a failure, but one contained to the node, not a failed read
+        Assert.Equal(1, diagnostics.TotalNotAppliedReads);
+        Assert.Equal(0, diagnostics.TotalExecutedReads);
+        Assert.Equal(0, diagnostics.TotalSkippedReads);
+        Assert.Equal(0, diagnostics.TotalFailedReads);
     }
 
     [Fact]
@@ -477,7 +582,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
             revisedSamplingInterval: TimeSpan.FromMilliseconds(1));
 
         // Act
-        manager.OnPropertyWritten(nodeId);
+        manager.OnPropertyWritten(nodeId, sentRevision: 0);
         await reported.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await logger.WaitUntilOuterGuardLogsAsync();
 
@@ -498,13 +603,13 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         _manager.RegisterProperty(lastNodeId, CreateTestProperty(_testSubject, nameof(TestPerson.LastName)), 0, TimeSpan.FromMinutes(1));
 
         // Act & Assert
-        _manager.OnPropertyWritten(firstNodeId);
+        _manager.OnPropertyWritten(firstNodeId, sentRevision: 0);
         Assert.Equal(1, _manager.PendingReadCount);
 
-        _manager.OnPropertyWritten(firstNodeId);
+        _manager.OnPropertyWritten(firstNodeId, sentRevision: 0);
         Assert.Equal(1, _manager.PendingReadCount);
 
-        _manager.OnPropertyWritten(lastNodeId);
+        _manager.OnPropertyWritten(lastNodeId, sentRevision: 0);
         Assert.Equal(2, _manager.PendingReadCount);
 
         _manager.UnregisterProperty(firstNodeId);
@@ -513,7 +618,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         _manager.ClearPendingReads();
         Assert.Equal(0, _manager.PendingReadCount);
 
-        _manager.OnPropertyWritten(lastNodeId);
+        _manager.OnPropertyWritten(lastNodeId, sentRevision: 0);
         Assert.Equal(1, _manager.PendingReadCount);
 
         _manager.ClearAll();
@@ -537,7 +642,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
             logger);
         var pendingNodeId = new NodeId("Pending", 2);
         manager.RegisterProperty(pendingNodeId, CreateTestProperty(_testSubject), 0, TimeSpan.FromMinutes(1));
-        manager.OnPropertyWritten(pendingNodeId);
+        manager.OnPropertyWritten(pendingNodeId, sentRevision: 0);
 
         logger.BlockNextLog();
         var registrationTask = Task.Run(() => manager.RegisterProperty(
@@ -568,7 +673,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         // Arrange
         var nodeId = new NodeId("TestNode", 2);
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
-        _manager.OnPropertyWritten(nodeId);
+        _manager.OnPropertyWritten(nodeId, sentRevision: 1);
         Assert.Equal(1, _metrics.Scheduled);
 
         // Act - Dispose should complete without throwing
@@ -576,6 +681,188 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
 
         // Assert - metrics remain stable after disposal
         Assert.Equal(1, _metrics.Scheduled);
+    }
+
+    [Fact]
+    public async Task WhenOneReadBackValueCannotBeApplied_ThenTheRestOfTheBatchIsAppliedAndNoReadFailureIsRecorded()
+    {
+        // Arrange - two read-backs falling due in one batch, the first carrying a value its property
+        // cannot hold. The read itself succeeds, so only the local apply fails.
+        var registeredSubject = new RegisteredSubject(_testSubject);
+        var failingProperty = registeredSubject.TryGetProperty(nameof(TestPerson.FirstName))!;
+        var survivingProperty = registeredSubject.TryGetProperty(nameof(TestPerson.LastName))!;
+
+        var failingNodeId = new NodeId("Failing", 2);
+        var survivingNodeId = new NodeId("Surviving", 2);
+
+        var session = new Mock<ISession>();
+        session.SetupGet(s => s.Connected).Returns(true);
+        session
+            .Setup(s => s.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection nodesToRead, CancellationToken _) =>
+            {
+                var results = new DataValueCollection(nodesToRead.Count);
+                foreach (var node in nodesToRead)
+                {
+                    results.Add(new DataValue
+                    {
+                        // An int cannot be stored in a string property, so applying it throws.
+                        Value = node.NodeId == failingNodeId ? 42 : "from-server",
+                        StatusCode = StatusCodes.Good,
+                        SourceTimestamp = DateTime.UtcNow
+                    });
+                }
+
+                return Task.FromResult(new ReadResponse
+                {
+                    ResponseHeader = new ResponseHeader(),
+                    Results = results,
+                    DiagnosticInfos = []
+                });
+            });
+
+        var metrics = new ReadAfterWriteMetrics();
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(200)),
+            metrics,
+            reportError: static _ => { },
+            NullLogger.Instance);
+
+        manager.RegisterProperty(failingNodeId, failingProperty, requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(1));
+        manager.RegisterProperty(survivingNodeId, survivingProperty, requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(1));
+
+        // Act - the failing read-back is scheduled first, so an uncontained throw takes the other with it
+        manager.OnPropertyWritten(failingNodeId, sentRevision: 0);
+        manager.OnPropertyWritten(survivingNodeId, sentRevision: 0);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => _testSubject.LastName == "from-server",
+            message: "the second read-back of the batch should have been applied");
+
+        Assert.Equal(1, metrics.Executed);
+
+        // The circuit breaker tracks how the server answers reads, and this read was answered
+        Assert.Equal(0, metrics.Failed);
+    }
+
+    /// <summary>
+    /// A connected session that answers every read with the same value and source timestamp.
+    /// </summary>
+    private static Mock<ISession> CreateSessionReturning(object? value, DateTime sourceTimestamp)
+    {
+        var session = new Mock<ISession>();
+        session.SetupGet(s => s.Connected).Returns(true);
+        session
+            .Setup(s => s.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection nodesToRead, CancellationToken _) =>
+            {
+                var results = new DataValueCollection(nodesToRead.Count);
+                for (var i = 0; i < nodesToRead.Count; i++)
+                {
+                    results.Add(new DataValue
+                    {
+                        Value = value,
+                        StatusCode = StatusCodes.Good,
+                        SourceTimestamp = sourceTimestamp
+                    });
+                }
+
+                return Task.FromResult(new ReadResponse
+                {
+                    ResponseHeader = new ResponseHeader(),
+                    Results = results,
+                    DiagnosticInfos = []
+                });
+            });
+
+        return session;
+    }
+
+    [Fact]
+    public async Task WhenTheWrittenChangeCarriedNoRevisionAndALocalWriteFollowed_ThenTheReadBackIsSkipped()
+    {
+        // Arrange - a rollback and a transaction snapshot both reach a source as a change with no
+        // revision, and nothing about them can be ranked by revision, so the write timestamps have to
+        // separate the read-back from a local write that landed after it.
+        var registeredSubject = new RegisteredSubject(_testSubject);
+        var property = registeredSubject.TryGetProperty(nameof(TestPerson.FirstName))!;
+        var nodeId = new NodeId("Revisionless", 2);
+        var session = CreateSessionReturning("from-server", DateTime.UtcNow.AddMinutes(-1));
+
+        var metrics = new ReadAfterWriteMetrics();
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(200)),
+            metrics,
+            reportError: static _ => { },
+            NullLogger.Instance);
+
+        manager.RegisterProperty(nodeId, property, requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(1));
+
+        // Act - the local write commits after the read-back is scheduled, so it is newer than anything
+        // the server's answer can carry.
+        manager.OnPropertyWritten(nodeId, sentRevision: 0);
+        _testSubject.FirstName = "newer-local";
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => metrics.Executed + metrics.Skipped >= 1,
+            message: "the read-back should have run");
+
+        Assert.Equal(1, metrics.Skipped);
+        Assert.Equal("newer-local", _testSubject.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenTheServerAnswersWithoutASourceTimestamp_ThenTheValueIsAppliedAndNoReadFailureIsRecorded()
+    {
+        // Arrange - an omitted SourceTimestamp arrives as DateTime.MinValue with an unspecified kind,
+        // which converts to DateTimeOffset by way of the local time zone and underflows east of UTC.
+        var registeredSubject = new RegisteredSubject(_testSubject);
+        var property = registeredSubject.TryGetProperty(nameof(TestPerson.FirstName))!;
+        var nodeId = new NodeId("Timestampless", 2);
+        var session = CreateSessionReturning("from-server", DateTime.MinValue);
+
+        var metrics = new ReadAfterWriteMetrics();
+        await using var manager = new ReadAfterWriteManager(
+            () => session.Object,
+            new Mock<Connectors.ISubjectSource>().Object,
+            CreateConfiguration(TimeSpan.FromMilliseconds(200)),
+            metrics,
+            reportError: static _ => { },
+            NullLogger.Instance);
+
+        manager.RegisterProperty(nodeId, property, requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(1));
+        _testSubject.FirstName = "local";
+
+        // Act - a revision above every local one, so nothing local outranks the write being verified and
+        // the read-back is applied. Its timestamp is what the conversion has to survive producing.
+        manager.OnPropertyWritten(nodeId, sentRevision: long.MaxValue);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => metrics.Executed + metrics.Skipped + metrics.Failed >= 1,
+            message: "the read-back should have run");
+
+        Assert.Equal("from-server", _testSubject.FirstName);
+
+        // A conversion that throws locally would otherwise discard the batch and count against the
+        // circuit breaker that tracks how the server answers reads.
+        Assert.Equal(0, metrics.Failed);
     }
 
     [Fact]
@@ -591,7 +878,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         var scheduledBefore = _metrics.Scheduled;
 
         // Act - Write after disposal should be ignored, not throw
-        _manager.OnPropertyWritten(nodeId);
+        _manager.OnPropertyWritten(nodeId, sentRevision: 1);
 
         // Assert - metrics unchanged
         Assert.Equal(scheduledBefore, _metrics.Scheduled);
@@ -820,5 +1107,60 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
 
         internal Task WaitUntilOuterGuardLogsAsync() =>
             _outerGuardLogged.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public void WhenReadIsOverdueAndMinimumDelayIsSet_ThenTimerWaitsForTheMinimumDelay()
+    {
+        // Arrange - the reads are already due, which is why the caller is rearming at all
+        var utcNow = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var earliestReadTime = utcNow - TimeSpan.FromSeconds(5);
+
+        // Act
+        var delay = ReadAfterWriteManager.CalculateTimerDelay(earliestReadTime, utcNow, TimeSpan.FromSeconds(30));
+
+        // Assert - arming at zero would refire immediately and spin for the whole cooldown
+        Assert.Equal(TimeSpan.FromSeconds(30), delay);
+    }
+
+    [Fact]
+    public void WhenNothingIsPending_ThenTimerIsInfiniteRegardlessOfMinimumDelay()
+    {
+        // Arrange
+        var utcNow = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+
+        // Act
+        var delay = ReadAfterWriteManager.CalculateTimerDelay(DateTime.MaxValue, utcNow, TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.Equal(Timeout.InfiniteTimeSpan, delay);
+    }
+
+    [Fact]
+    public void WhenReadIsFurtherOutThanMinimumDelay_ThenTimerWaitsForTheRead()
+    {
+        // Arrange
+        var utcNow = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var earliestReadTime = utcNow + TimeSpan.FromSeconds(45);
+
+        // Act
+        var delay = ReadAfterWriteManager.CalculateTimerDelay(earliestReadTime, utcNow, TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(45), delay);
+    }
+
+    [Fact]
+    public void WhenReadIsOverdueAndMinimumDelayIsZero_ThenTimerFiresImmediately()
+    {
+        // Arrange
+        var utcNow = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        var earliestReadTime = utcNow - TimeSpan.FromSeconds(5);
+
+        // Act
+        var delay = ReadAfterWriteManager.CalculateTimerDelay(earliestReadTime, utcNow, TimeSpan.Zero);
+
+        // Assert
+        Assert.Equal(TimeSpan.Zero, delay);
     }
 }

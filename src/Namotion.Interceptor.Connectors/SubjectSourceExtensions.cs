@@ -13,8 +13,17 @@ public static class SubjectSourceExtensions
 
     /// <summary>
     /// Writes changes to the source in batches, respecting the source's maximum batch size.
-    /// Returns a <see cref="WriteResult"/> containing which changes failed.
-    /// Never throws for write failures, errors are reported in the result.
+    /// Returns a <see cref="WriteResult"/> containing which changes failed. A batch that names the changes
+    /// it refused does not stop the ones behind it: they are attempted too and the failures are reported
+    /// together, with every failing batch's error carried and aggregated when more than one batch fails,
+    /// so a later failure cannot be masked by an earlier one. A batch that fails without naming any change
+    /// stops the flush, and it and the remainder are reported failed. Never throws for write failures,
+    /// errors are reported in the result.
+    /// <para>
+    /// Batches are only independent of each other because <paramref name="changes"/> carries at most one
+    /// change per property. With two, a failure of the batch holding the older one while the batch holding
+    /// the newer one succeeds leaves only the older to be retried, and the source settles on it for good.
+    /// </para>
     /// </summary>
     /// <remarks>
     /// This method automatically synchronizes write operations unless the source implements
@@ -66,7 +75,10 @@ public static class SubjectSourceExtensions
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
-        var confirmedCount = 0;
+        // Allocated only once a batch has actually failed, so an all-success flush allocates nothing.
+        List<SubjectPropertyChange>? failedChanges = null;
+        List<Exception>? errors = null;
+        var batchStart = 0;
         try
         {
             var count = changes.Length;
@@ -83,48 +95,82 @@ public static class SubjectSourceExtensions
                     : result;
             }
 
-            // Multi-batch: process sequentially, stop on first failure
-            for (var i = 0; i < count; i += batchSize)
+            for (; batchStart < count; batchStart += batchSize)
             {
-                var currentBatchSize = Math.Min(batchSize, count - i);
-                var batch = changes.Slice(i, currentBatchSize);
+                var currentBatchSize = Math.Min(batchSize, count - batchStart);
+                var batch = changes.Slice(batchStart, currentBatchSize);
 
                 var batchResult = await source.WriteChangesAsync(batch, cancellationToken).ConfigureAwait(false);
-                if (batchResult.Error is not null)
+                if (batchResult.Error is null)
                 {
-                    // The batch's failed changes (the whole batch when unenumerated) plus the unprocessed
-                    // remainder, matched by identity since any subset of a batch can fail.
-                    var batchFailed = batchResult.FailedChanges.IsEmpty
-                        ? batch
-                        : batchResult.FailedChanges.AsMemory();
-                    var remaining = changes.Slice(i + currentBatchSize);
-                    if (remaining.IsEmpty)
-                    {
-                        return WriteResult.PartialFailure(batchFailed, batchResult.Error);
-                    }
-
-                    // The array never escapes, so the ImmutableArray takes ownership without a second copy.
-                    var failedChanges = new SubjectPropertyChange[batchFailed.Length + remaining.Length];
-                    batchFailed.CopyTo(failedChanges);
-                    remaining.CopyTo(failedChanges.AsMemory(batchFailed.Length));
-                    return WriteResult.PartialFailure(
-                        ImmutableCollectionsMarshal.AsImmutableArray(failedChanges), batchResult.Error);
+                    continue;
                 }
 
-                confirmedCount = i + currentBatchSize;
+                // Every failing batch's error is kept: batches fail independently, and reporting only
+                // the first would let a node refusal in an early batch mask the disconnect a later
+                // batch died of, which is the one error an operator can act on.
+                (errors ??= []).Add(batchResult.Error);
+                failedChanges ??= [];
+
+                if (batchResult.FailedChanges.IsEmpty)
+                {
+                    // Naming no change means the source never answered per item, so the call itself
+                    // failed: a timeout, a dropped channel, a faulted session. Each batch behind it
+                    // would buy the same verdict at the price of another transport timeout, with the
+                    // write lock held for all of them, so the rest of the flush is left unattempted
+                    // and reported unconfirmed.
+                    failedChanges.AddRange(changes.Span[batchStart..]);
+                    break;
+                }
+
+                // An enumerated refusal is an answer about named changes, and says nothing about the
+                // batches behind it. One change the source refuses would otherwise starve everything
+                // queued behind it, condemned unattempted on every retry for as long as it fails.
+                failedChanges.AddRange(batchResult.FailedChanges.AsSpan());
+
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    // An unattempted batch is unconfirmed, and a source that is going away will not take it.
+                    failedChanges.AddRange(changes.Span[(batchStart + currentBatchSize)..]);
+                    break;
+                }
             }
 
-            // All batches succeeded (zero allocation)
-            return WriteResult.Success;
+            return errors is null
+                ? WriteResult.Success
+                : CreateFailure(failedChanges!, CombineErrors(errors));
         }
         catch (Exception ex)
         {
-            // Batches confirmed before the throw are written and must not be condemned; only the
-            // throwing batch (outcome unknown) and the unprocessed remainder are unconfirmed.
-            return confirmedCount == 0
-                ? WriteResult.Failure(changes, ex)
-                : WriteResult.PartialFailure(changes.Slice(confirmedCount), ex);
+            // The throwing batch's outcome is unknown and the remainder was never attempted, so both are
+            // unconfirmed. Batches attempted before it keep the verdict they already got: slicing from
+            // here would condemn those that succeeded after an earlier batch failed.
+            var unconfirmed = changes.Slice(batchStart);
+            if (failedChanges is null)
+            {
+                return WriteResult.Failure(unconfirmed, ex);
+            }
+
+            // Consumers log only the reported error, so reporting the recorded ones alone would drop the
+            // throw with its stack. errors is set together with failedChanges, so it is non-null.
+            failedChanges.AddRange(unconfirmed.Span);
+            errors!.Add(ex);
+            return CreateFailure(failedChanges, CombineErrors(errors));
         }
+    }
+
+    private static Exception CombineErrors(List<Exception> errors)
+    {
+        // An AggregateException renders every inner exception with its stack, so nothing is lost when
+        // batches fail differently; a lone error is reported as itself to keep the common case readable.
+        return errors.Count == 1 ? errors[0] : new AggregateException(errors);
+    }
+
+    private static WriteResult CreateFailure(List<SubjectPropertyChange> failedChanges, Exception error)
+    {
+        // The array never escapes, so the ImmutableArray takes ownership without a second copy.
+        return WriteResult.Failure(
+            ImmutableCollectionsMarshal.AsImmutableArray(failedChanges.ToArray()), error);
     }
 
     /// <summary>

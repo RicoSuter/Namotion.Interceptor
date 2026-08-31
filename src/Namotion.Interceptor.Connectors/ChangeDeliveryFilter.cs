@@ -106,9 +106,10 @@ internal static class ChangeDeliveryFilter
         // Revision 0 orders against nothing, so staleness is unprovable and the change is delivered: a
         // redundant write costs one message, a wrong drop is permanent. No committed change arrives this
         // way, since every published change comes from a terminal and carries a revision, including a
-        // derived recomputation. The batch collapses manufacture it deliberately though, via
-        // WithoutRevision when arrival order rather than commit order decided the survivor, and this line
-        // is what makes that safe: such a survivor must never be ranked against the property's marker.
+        // derived recomputation. Two collapses manufacture it deliberately though, the buffered flush
+        // collapse in ChangeMerger and the parking collapse in SubjectSourceBase, via WithoutRevision
+        // when arrival order rather than commit order decided the survivor, and this line is what makes
+        // that safe: such a survivor must never be ranked against the property's marker.
         //
         // Inequality rather than equality, so that a path which stamps a change without advancing the
         // property delivers instead of dropping.

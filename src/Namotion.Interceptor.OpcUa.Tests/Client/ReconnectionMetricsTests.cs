@@ -167,6 +167,7 @@ public class ReconnectionMetricsTests
             configuration,
             source.PollingMetrics,
             source.ReadAfterWriteMetrics,
+            source.SubscriptionMetrics,
             NullLogger.Instance);
     }
 

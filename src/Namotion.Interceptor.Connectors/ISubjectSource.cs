@@ -40,7 +40,8 @@ public interface ISubjectSource : ISubjectConnector
     /// Implement <see cref="ISupportsConcurrentWrites"/> to opt-out of automatic synchronization.
     /// Do not retain <paramref name="changes"/> after the returned task completes: the caller may
     /// reuse or mutate the underlying buffer.
-    /// When reporting an error, enumerate the failed changes; see <see cref="WriteResult.FailedChanges"/>.
+    /// When reporting an error, enumerate the changes this source refused, and leave the list empty
+    /// only when the call itself failed; see <see cref="WriteResult.FailedChanges"/>.
     /// <para>
     /// Build the payload from <paramref name="changes"/> alone, never by reading subject properties.
     /// Under transactions the built-in writer calls this on the committing flow, where property reads

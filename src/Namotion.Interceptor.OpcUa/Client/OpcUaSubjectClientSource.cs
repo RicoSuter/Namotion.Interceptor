@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Connection;
@@ -49,6 +50,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     internal PollingMetrics PollingMetrics { get; } = new();
 
     internal ReadAfterWriteMetrics ReadAfterWriteMetrics { get; } = new();
+
+    internal SubscriptionMetrics SubscriptionMetrics { get; } = new();
 
     internal ThroughputCounter IncomingThroughput => Metrics.Incoming!;
     internal ThroughputCounter OutgoingThroughput => Metrics.Outgoing!;
@@ -151,6 +154,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         Metrics.RegisterResettable(ReconnectionMetrics);
         Metrics.RegisterResettable(PollingMetrics);
         Metrics.RegisterResettable(ReadAfterWriteMetrics);
+        Metrics.RegisterResettable(SubscriptionMetrics);
 
         Diagnostics = new OpcUaClientDiagnostics(this, Metrics);
     }
@@ -174,9 +178,13 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
 
-        _sessionManager = new SessionManager(
-            this, propertyWriter, _configuration, PollingMetrics, ReadAfterWriteMetrics, _logger);
-        _writer = new OutboundWriter(_sessionManager, _configuration, OpcUaNodeIdKey, OutgoingThroughput, _logger);
+        var sessionManager = new SessionManager(
+            this, propertyWriter, _configuration, PollingMetrics, ReadAfterWriteMetrics, SubscriptionMetrics, _logger);
+        _sessionManager = sessionManager;
+        _writer = new OutboundWriter(
+            () => sessionManager.CurrentSession,
+            sessionManager.ReadAfterWriteManager,
+            _configuration, OpcUaNodeIdKey, OutgoingThroughput, _logger);
 
         try
         {
@@ -296,7 +304,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             var resultCount = Math.Min(readResponse.Results.Count, readValues.Count);
             for (var i = 0; i < resultCount; i++)
             {
-                if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
+                if (StatusCode.IsNotBad(readResponse.Results[i].StatusCode))
                 {
                     var dataValue = readResponse.Results[i];
                     result[ownedProperties[offset + i].Property] = dataValue;
@@ -304,16 +312,33 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             }
         }
 
-        _logger.LogInformation("Successfully read {Count} OPC UA nodes from server.", itemCount);
+        _logger.LogInformation("Read {Count} of {Requested} OPC UA nodes from server.", result.Count, itemCount);
         return () =>
         {
+            var applied = 0;
+            ExceptionDispatchInfo? firstFailure = null;
             foreach (var (property, dataValue) in result)
             {
-                var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
-                property.SetValueFromSource(this, dataValue.SourceTimestamp, null, value);
+                try
+                {
+                    var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
+                    property.SetValueFromSource(this, dataValue.SourceTimestamp.ToUtcDateTimeOffset(), null, value);
+                    applied++;
+                }
+                catch (Exception e)
+                {
+                    // Contained per property, so one rejected value cannot discard the rest of the
+                    // snapshot, but rethrown below so the load still fails: every caller answers a
+                    // failed load with its own teardown and error report, and a load that certified a
+                    // partially applied snapshot as successful would hide the failure from the source
+                    // diagnostics for good.
+                    firstFailure ??= ExceptionDispatchInfo.Capture(e);
+                    _logger.LogError(e, "Failed to apply the loaded value for {PropertyName}.", property.Name);
+                }
             }
 
-            _logger.LogInformation("Updated {Count} properties with OPC UA node values.", itemCount);
+            _logger.LogInformation("Applied {Count} of {Loaded} OPC UA node values.", applied, result.Count);
+            firstFailure?.Throw();
         };
     }
 
@@ -656,7 +681,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     {
         if (_writer is null)
         {
-            return WriteResult.Failure(changes, new InvalidOperationException("OPC UA client not started."));
+            return WriteResult.CallFailed(new InvalidOperationException("OPC UA client not started."));
         }
 
         return await _writer.WriteChangesAsync(changes, cancellationToken).ConfigureAwait(false);

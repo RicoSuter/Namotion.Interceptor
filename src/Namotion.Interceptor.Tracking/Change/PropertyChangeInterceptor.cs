@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reactive.Subjects;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
@@ -182,6 +183,14 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             return;
         }
 
+        // Every published change comes from a write terminal, which stamps a revision. A zero here means a
+        // write interceptor set IsWritten without going through the terminal, which also skips SetWriteState,
+        // so that property's supersession, echo suppression and read-after-write ranking are all blind from
+        // this point on. Debug only: this cannot fire in the shipped Release assembly, so it documents the
+        // invariant for this repo's own runs rather than detecting the case in a consumer application.
+        Debug.Assert(context.Revision != 0,
+            "Published change carries no revision; a write interceptor set IsWritten without calling the write terminal.");
+
         var change = SubjectPropertyChange.Create(
             context.Property,
             context.Origin,
@@ -225,6 +234,10 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         {
             return;
         }
+
+        // Same invariant as the main publish path: a published change always carries a terminal-stamped revision.
+        Debug.Assert(context.Revision != 0,
+            "Published change carries no revision; a write interceptor set IsWritten without calling the write terminal.");
 
         var finalValue = context.GetFinalValue();
         var change = SubjectPropertyChange.Create(

@@ -132,8 +132,7 @@ internal sealed class ChangeMerger : IDisposable
         // subject's lock, and the dictionary key pins the collapse to one property of one subject.
         for (var i = changes.Length - 1; i >= 0; i--)
         {
-            // By reference: a by-value copy of this struct is a 144 byte block move that the JIT emits a
-            // bulk write barrier for, because the struct carries object fields.
+            // By reference: this struct is more than a dozen words wide, and every change is read here.
             ref readonly var change = ref changes[i];
 
             // Single lookup per change: the ref is only read and written before the next add.
