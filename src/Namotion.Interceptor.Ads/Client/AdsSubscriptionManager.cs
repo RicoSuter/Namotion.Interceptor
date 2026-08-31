@@ -62,7 +62,10 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         public readonly List<ISymbol> Symbols;
         public readonly List<(PropertyReference Reference, string SymbolPath)> Entries;
         public readonly SumSymbolRead? SumRead;
-        public volatile bool UseFallback; // only mutated by the polling thread
+        /// <summary>Latched only for a failure the sum command can never recover from, so a
+        /// transient one degrades a single pass rather than every pass for the snapshot's life.
+        /// Only mutated by the polling thread.</summary>
+        public volatile bool UseFallback;
 
         public PollingSnapshot(List<ISymbol> symbols, List<(PropertyReference, string)> entries, SumSymbolRead? sumRead)
         {
@@ -370,34 +373,56 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         AdsConnectionManager connectionManager)
     {
         var notificationSettings = new NotificationSettings(AdsTransMode.OnChange, cycleTime, maxDelay);
-        var symbols = group.Select(entry => entry.Symbol).ToList();
 
-        // Keyed by the instance path of the very symbols handed to WhenNotification, so the lookup
-        // cannot disagree with what the notification echoes back.
-        var routes = new Dictionary<string, (PropertyReference Reference, string SymbolPath)>(StringComparer.Ordinal);
+        // One route per distinct symbol, carrying every property mapped to it. Two properties can
+        // share a symbol path, and the handle bag the reactive extension builds keys by symbol in a
+        // plain dictionary, so handing it the same symbol twice throws and takes the whole group down.
+        var routes = new Dictionary<string, List<(PropertyReference Reference, string SymbolPath)>>(StringComparer.Ordinal);
+        var symbols = new List<ISymbol>(group.Count);
         foreach (var entry in group)
         {
-            routes[entry.Symbol.InstancePath] = (entry.Reference, entry.SymbolPath);
+            if (!routes.TryGetValue(entry.Symbol.InstancePath, out var targets))
+            {
+                targets = [];
+                routes[entry.Symbol.InstancePath] = targets;
+                symbols.Add(entry.Symbol);
+            }
+
+            targets.Add((entry.Reference, entry.SymbolPath));
         }
+
+        // Recorded before subscribing, because the reactive extension registers the handles inside
+        // Subscribe and reports a failure to onError synchronously, before Subscribe returns. Doing
+        // this afterwards would reinstate every property the error handler had just demoted.
+        foreach (var entry in group)
+        {
+            _notificationProperties[entry.Reference] = entry.SymbolPath;
+        }
+
+        Interlocked.Increment(ref _notificationSubscriptionCount);
+        var groupDemoted = 0;
 
         var subscription = connection
             .WhenNotification(symbols, notificationSettings)
             .Subscribe(
                 notification =>
                 {
-                    if (!routes.TryGetValue(notification.Symbol.InstancePath, out var route))
+                    if (!routes.TryGetValue(notification.Symbol.InstancePath, out var targets))
                     {
                         return;
                     }
 
-                    try
+                    foreach (var (reference, symbolPath) in targets)
                     {
-                        OnValueReceived(route.Reference, notification.Value, notification.TimeStamp, propertyWriter, source);
-                    }
-                    catch (Exception exception)
-                    {
-                        connectionManager.LogFirstOccurrence("NotificationCallback", exception,
-                            "Failed to process notification for symbol '{SymbolPath}'.", route.SymbolPath);
+                        try
+                        {
+                            OnValueReceived(reference, notification.Value, notification.TimeStamp, propertyWriter, source);
+                        }
+                        catch (Exception exception)
+                        {
+                            connectionManager.LogFirstOccurrence("NotificationCallback", exception,
+                                "Failed to process notification for symbol '{SymbolPath}'.", symbolPath);
+                        }
                     }
                 },
                 exception =>
@@ -406,9 +431,15 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                     // limit is reached or a symbol does not support one, reports it here rather than
                     // by throwing from Subscribe. Without this handler Rx swallows it, the
                     // subscription looks live, and the properties silently never update again.
+                    // The registration is all-or-nothing, so the whole group falls back together.
                     connectionManager.LogFirstOccurrence("NotificationRegistration", exception,
                         "Notification group of {Count} symbols failed to register. Falling back to polling.",
-                        group.Count);
+                        symbols.Count);
+
+                    if (Interlocked.Exchange(ref groupDemoted, 1) == 0)
+                    {
+                        Interlocked.Decrement(ref _notificationSubscriptionCount);
+                    }
 
                     foreach (var entry in group)
                     {
@@ -416,13 +447,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                     }
                 });
 
-        foreach (var entry in group)
-        {
-            _notificationProperties[entry.Reference] = entry.SymbolPath;
-        }
-
         _subscriptions.Add(subscription);
-        Interlocked.Increment(ref _notificationSubscriptionCount);
     }
 
     /// <summary>
@@ -478,13 +503,13 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                 var readResult = await snapshot.SumRead.ReadAsync(cancellationToken).ConfigureAwait(false);
                 if (readResult.ErrorCode != AdsErrorCode.NoError || readResult.Values is null)
                 {
-                    // Any sum-read failure falls back, as the initial state load already does.
-                    // Narrowing this to DeviceServiceNotSupported left every other failure repeating
-                    // forever, and put the raw-integer path, which lives behind the fallback, out of
-                    // reach of the enums it exists for.
+                    // Any failure falls back for this pass, as the initial state load already does.
+                    // Only a capability failure latches: DeviceBusy or a timeout says nothing about
+                    // whether the next sum read works, and latching on one would drop the whole
+                    // snapshot to per-symbol round trips permanently.
                     connectionManager.LogFirstOccurrence("BatchPoll", null,
                         "Batch polling failed with {ErrorCode}, falling back to individual reads.", readResult.ErrorCode);
-                    snapshot.UseFallback = true;
+                    snapshot.UseFallback = readResult.ErrorCode == AdsErrorCode.DeviceServiceNotSupported;
                 }
                 else
                 {
@@ -506,10 +531,12 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 // Includes the value-building throw for a symbol whose PLC type will not resolve,
-                // which is not an AdsException at all and previously escaped the whole poll loop.
+                // which is not an AdsException at all and would otherwise escape the poll loop.
+                // That one is a property of the symbol set, so it latches; a transient ADS error
+                // thrown from the same call does not.
                 connectionManager.LogFirstOccurrence("BatchPoll", exception,
                     "Batch polling threw, falling back to individual reads.");
-                snapshot.UseFallback = true;
+                snapshot.UseFallback = !AdsErrorClassifier.IsTransientException(exception);
             }
         }
 
@@ -650,7 +677,9 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             }
         }
 
-        // Underlying integer, as the notification side does; the converter rebuilds the enum.
+        // Underlying integer; the converter rebuilds the enum. Polling and the initial state load
+        // only: a notification carries a value the type system already had to build, so an
+        // unresolvable type cannot be recovered here.
         return await ReadRawIntegerAsync(
             connection, symbolPath,
             ((IBitSize)symbol).ByteSize, cancellationToken).ConfigureAwait(false);
@@ -683,7 +712,14 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             var stored = _rawIntegerHandles.GetOrAdd(symbolPath, handle);
             if (stored != handle)
             {
-                connection.TryDeleteVariableHandle(handle);
+                var deleteResult = connection.TryDeleteVariableHandle(handle);
+                if (deleteResult != AdsErrorCode.NoError)
+                {
+                    _logger.LogDebug(
+                        "Failed to release the duplicate ADS handle for '{SymbolPath}': {ErrorCode}.",
+                        symbolPath, deleteResult);
+                }
+
                 handle = stored;
             }
         }
@@ -744,7 +780,13 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             {
                 try
                 {
-                    connection.TryDeleteVariableHandle(handle);
+                    var deleteResult = connection.TryDeleteVariableHandle(handle);
+                    if (deleteResult != AdsErrorCode.NoError)
+                    {
+                        _logger.LogDebug(
+                            "Failed to release the ADS handle for '{SymbolPath}': {ErrorCode}.",
+                            symbolPath, deleteResult);
+                    }
                 }
                 catch (Exception exception)
                 {

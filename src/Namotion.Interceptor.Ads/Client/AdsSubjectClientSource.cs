@@ -506,7 +506,12 @@ public sealed class AdsSubjectClientSource : SubjectSourceBase, IAsyncDisposable
             }
             finally
             {
-                connection.TryDeleteVariableHandle(handle);
+                var deleteResult = connection.TryDeleteVariableHandle(handle);
+                if (deleteResult != AdsErrorCode.NoError)
+                {
+                    _logger.LogDebug(
+                        "Failed to release the ADS handle for '{SymbolPath}': {ErrorCode}.", symbolPath, deleteResult);
+                }
             }
         }
         catch (Exception exception)

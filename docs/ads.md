@@ -356,7 +356,9 @@ Writes never use `SumSymbolWrite`. A sum write addresses by index group and offs
 
 ### Individual read fallback
 
-If `SumSymbolRead` returns `DeviceServiceNotSupported`, or the symbols cannot be resolved by the type system, the connector falls back to one `ReadValue` per symbol. The round trip count is then fixed, so the reads are issued concurrently rather than one at a time, bounded by `MaxConcurrentReads`. This applies both to the initial state load and to each polling pass.
+Any `SumSymbolRead` failure falls back to one `ReadValue` per symbol, whether it returns an error, throws, or the symbols cannot be resolved by the type system. The round trip count is then fixed, so the reads are issued concurrently rather than one at a time, bounded by `MaxConcurrentReads`. This applies both to the initial state load and to each polling pass.
+
+Only a failure the sum command cannot recover from latches, in practice `DeviceServiceNotSupported`, in which case the polling snapshot stops attempting sum reads until it is rebuilt. A transient failure such as `DeviceBusy` or a timeout degrades that one pass, because it says nothing about whether the next sum read succeeds.
 
 ### Symbols whose PLC type will not resolve
 
@@ -556,18 +558,18 @@ The TwinCAT connector hooks into the interceptor lifecycle system (see [Subject 
 
 When a subject is detached from the object graph:
 
-- ADS notification subscriptions for the subject's properties are disposed
+- The subject's properties stop being notification-backed. The subscription itself is shared by every property in its notification-settings group, so it is not disposed here; a notification that still arrives is dropped because the property is no longer registered, and the group is torn down as a unit on the next re-scan
 - Properties are removed from the batch polling collection (and polling is marked dirty)
-- Symbol-to-property and property-to-symbol cache entries are removed
+- Property-to-symbol-path cache entries are removed
 - Source ownership is released
 
 ### Automatic Cleanup on Property Release
 
 When an individual property is released:
 
-1. ADS notification subscription is disposed (if notification mode)
+1. The property stops being notification-backed, without disposing the group's shared subscription (see above)
 2. Property is removed from the polled collection (if polling mode)
-3. Bidirectional symbol-path lookups are cleared
+3. The property-to-symbol-path lookup is cleared
 
 ## Architecture
 
@@ -616,6 +618,18 @@ The following items are known limitations of the current implementation. They ar
 ### No active health probing
 
 The connector relies on the `AdsClient`'s internal connection state machine for reconnection. If the `AdsClient` instance itself becomes unresponsive (e.g., due to a Beckhoff SDK bug or ADS router restart), no `ConnectionStateChanged` event fires and the system stays disconnected. `RunRescanLoopAsync` already wakes on the `HealthCheckInterval` and would be the natural place to add active health probing, for example a periodic `ReadStateAsync` to detect a dead `AdsClient` and recreate it.
+
+### Open work
+
+Reviewed and deliberately deferred rather than fixed, so they are visible to whoever picks this up next.
+
+| Item | Why it is deferred |
+|---|---|
+| The embedded router is started fire-and-forget (`_ = _router.StartAsync(...)` in `AdsEmbeddedRouter`) with no readiness wait and no error surface. If AMS TCP port 48898 is already taken, typically because TwinCAT is installed, the lease looks valid and every connect fails with an opaque timeout instead. | Fixing it properly means designing a readiness handshake and deciding what a failed router should do to the sources depending on it. That is a design change, not a patch. |
+| `AdsEmbeddedRouter.DefaultLocalNetId()` derives the local net id from a UDP socket "connected" to `8.8.8.8`. It throws with no default route and picks the internet-facing NIC, which need not be the PLC-facing one. | Same design discussion as above. Set `LocalAmsNetId` explicitly to avoid it. |
+| Only the first lease's `LocalAmsNetId` takes effect. The router is process-wide and reference-counted, so a second source configured with a different local net id silently gets the first one. | Documented here instead of changed, since per-source routers would forfeit the pooling the design depends on. |
+| The TwinCAT symbol and type system is not documented as thread-safe, and `Instance.DataType` resolves lazily without synchronisation. The connector touches symbols from the write path, the re-scan thread, the polling thread, and up to `MaxConcurrentReads` parallel read tasks. | Nothing in this repository can make a third-party type system thread-safe. Set `MaxConcurrentReads = 1` if you suspect it. |
+| `Namotion.Interceptor.Ads.Tests` has no public-API snapshot test, unlike every sibling connector. | Repo-convention chore, better done in its own change so the generated baseline is reviewable on its own. |
 
 ### Null value write behavior
 

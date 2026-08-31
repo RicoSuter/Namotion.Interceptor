@@ -325,6 +325,39 @@ public class AdsIntegrationTests
 
     [Fact]
     [Trait("Category", "Integration")]
+    public async Task Notifications_WithTwoPropertiesOnOneSymbol_ShouldRegisterAndFeedBoth()
+    {
+        // Registration is all-or-nothing per group, so a group that contains the same symbol twice
+        // fails entirely and demotes every property in it, including the unrelated ones.
+        var model = new DuplicateSymbolIntegrationTestModel(CreateContext());
+
+        await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientSource.Diagnostics.IsConnected &&
+                      clientSource.Diagnostics.NotificationVariableCount == 3,
+                timeout: WaitTimeout,
+                message: "All three properties should be notification-backed");
+
+            // Nothing fell back, and the counts do not double-count a demoted property.
+            Assert.Equal(0, clientSource.Diagnostics.PolledVariableCount);
+            Assert.Equal(1, clientSource.SubscriptionManager.NotificationSubscriptionCount);
+
+            _fixture.Server.SetSymbolValue("GVL.Temperature", 63.5);
+            _fixture.Server.SetSymbolValue("GVL.Counter", 909);
+
+            // Both properties on the shared symbol are fed from the one notification.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => Math.Abs(model.Temperature - 63.5) < 0.001 &&
+                      Math.Abs(model.TemperatureMirror - 63.5) < 0.001 &&
+                      model.Counter == 909,
+                timeout: WaitTimeout,
+                message: "Both properties on the shared symbol, and the unrelated one, should update");
+        });
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
     public async Task BatchPolling_PolledProperty_ReceivesUpdates()
     {
         // Arrange

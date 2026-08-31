@@ -33,8 +33,26 @@ internal sealed class EmbeddedRouterPool
     {
         lock (_gate)
         {
+            var created = _router is null;
             _router ??= _factory(localNetId);
-            _router.AddRoute(route);
+
+            try
+            {
+                _router.AddRoute(route);
+            }
+            catch
+            {
+                // Without this the router stays assigned at a refcount of 0, so Release can never
+                // free it and the AMS TCP port is held for the life of the process.
+                if (created)
+                {
+                    _router.Dispose();
+                    _router = null;
+                }
+
+                throw;
+            }
+
             _refCount++;
             return new Lease(this, _router.LoopbackPort, _router.LocalNetId);
         }
@@ -99,7 +117,16 @@ internal static class AdsEmbeddedRouter
             _ = _router.StartAsync(_cts.Token);
         }
 
-        public void AddRoute(Route route) => _router.TryAddRoute(route);
+        public void AddRoute(Route route)
+        {
+            // The bool is the only signal: a refused route throws nothing, and the failure would
+            // otherwise surface much later as a connect that never succeeds, pointing nowhere.
+            if (!_router.TryAddRoute(route))
+            {
+                throw new InvalidOperationException(
+                    $"The embedded AMS router refused the route to '{route.Address}'.");
+            }
+        }
 
         public void Dispose()
         {
