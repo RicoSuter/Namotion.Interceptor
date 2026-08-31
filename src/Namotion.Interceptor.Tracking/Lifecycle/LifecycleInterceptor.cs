@@ -11,8 +11,6 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
 {
     private readonly IInterceptorSubjectContext _context;
     private readonly OwnershipGraph _graph;
-    private readonly ReleaseTraversal _release;
-    private readonly AttachTraversal _attach;
     private readonly LifecycleNotifier _notifier;
     private readonly PropertyAdmission _admission;
 
@@ -46,8 +44,6 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         _context = context;
         _notifier = new LifecycleNotifier(context, this);
         _graph = new OwnershipGraph(context, this);
-        _attach = new AttachTraversal(_notifier, _graph);
-        _release = new ReleaseTraversal(_notifier, _graph);
         _admission = new PropertyAdmission(_notifier, _graph);
     }
 
@@ -363,6 +359,14 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     {
         LifecycleNotifier.ThrowIfOtherContext((InterceptorSubjectContext)_context);
         using var logicalContextScope = InterceptorExecutor.EnterLogicalContext((InterceptorSubjectContext)_context);
+        var registrationExecutor = (InterceptorExecutor)registration.Subject.Executor;
+        if (registrationExecutor.CurrentAttachmentPhase == AttachmentPhase.Detaching &&
+            !_graph.IsOwned(registration.Subject))
+        {
+            registration.Publish(registrationExecutor);
+            return true;
+        }
+
         var reservations = LifecycleScratch.RentOwnershipReservations();
         try
         {
@@ -502,29 +506,11 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         var executor = subject.Executor;
         executor.TryGetAttachment(out var initialContext, out var initialAnchor, out _);
         InterceptorSubjectExtensions.ValidateRootAnchor(initialContext, initialAnchor, context, anchor);
-        if (initialContext is not null)
+        if (anchor == SubjectAttachmentAnchorKind.Provisional &&
+            initialContext is not null &&
+            ((InterceptorExecutor)executor).CurrentAttachmentPhase == AttachmentPhase.Stable)
         {
-            var anchorUpdated = false;
-            using (EnterGate())
-            {
-                executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out _);
-                InterceptorSubjectExtensions.ValidateRootAnchor(attachedContext, currentAnchor, context, anchor);
-                if (attachedContext is not null)
-                {
-                    if (anchor != SubjectAttachmentAnchorKind.Provisional)
-                    {
-                        using var change = _attach.Prepare(subject, anchor, [], [], []);
-                        _graph.Publish(change);
-                    }
-
-                    anchorUpdated = true;
-                }
-            }
-
-            if (anchorUpdated)
-            {
-                return;
-            }
+            return;
         }
 
         var visited = LifecycleScratch.RentSubjectSet();
@@ -535,8 +521,8 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         {
             while (true)
             {
-                var participants = _attach.Capture(
-                    subject, visited, snapshots, propertyNames);
+                var participants = StructuralSnapshotBuilder.CaptureComponent(
+                    subject, _context, _graph.State, visited, snapshots, propertyNames);
                 if (!_graph.TryReserveParticipants(participants, reservations, subject))
                 {
                     throw new InvalidOperationException(
@@ -564,8 +550,8 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                             executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out _);
                             InterceptorSubjectExtensions.ValidateRootAnchor(
                                 attachedContext, currentAnchor, context, anchor);
-                            using var change = _attach.Prepare(
-                                subject, anchor, snapshots, propertyNames, reservations);
+                            using var change = _graph.PrepareAttach(
+                                subject, anchor, snapshots, propertyNames, reservations, _notifier);
                             journal = journalCapture.Complete();
                             _graph.Publish(change);
                         }
@@ -614,7 +600,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         {
             executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
             InterceptorSubjectExtensions.ValidateDetach(attachedContext, anchor, context);
-            using var change = _release.Prepare(subject, executor);
+            using var change = _graph.PrepareDetach(subject, executor, _notifier);
             journal = journalCapture.Complete();
             _graph.Publish(change);
         }
@@ -626,6 +612,22 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     }
 
     internal OwnershipGraph Graph => _graph;
+
+    internal void CompleteDetachments(
+        ImmutableArray<OwnershipGraph.DetachmentPlan> detachments)
+    {
+        using (EnterGate())
+        {
+            foreach (var detachment in detachments)
+            {
+                if (!_graph.IsOwned(detachment.Executor.Subject))
+                {
+                    detachment.Executor.FinalizeDetachment(
+                        detachment.Context, detachment.Revision);
+                }
+            }
+        }
+    }
 
     internal void FailNextJournalCompletionForTests(Exception failure) =>
         _notifier.FailNextJournalCompletionForTests(failure);

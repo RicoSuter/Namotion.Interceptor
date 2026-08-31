@@ -441,7 +441,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 throw LifecycleConflictException.Retryable(_subject);
             }
 
-            var transition = new AttachmentTransition(this);
+            var transition = new AttachmentTransition(this, current);
             _activeAttachmentTransition = transition;
             _attachment = current.WithPhase(phase);
             return transition;
@@ -470,17 +470,50 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
                 throw LifecycleConflictException.Retryable(_subject);
             }
 
-            var preparedState = new AttachmentState(
-                context,
-                anchor,
-                current.Revision + 1,
-                AttachmentPhase.Stable,
-                current.StructuralLeaseCount);
-            var transition = new AttachmentTransition(this, preparedState);
+            var isDetaching = context is null && current.Context is not null;
+            var preparedState = isDetaching
+                ? new AttachmentState(
+                    current.Context,
+                    SubjectAttachmentAnchorKind.None,
+                    current.Revision + 1,
+                    AttachmentPhase.Detaching,
+                    current.StructuralLeaseCount)
+                : new AttachmentState(
+                    context,
+                    anchor,
+                    current.Revision + 1,
+                    AttachmentPhase.Stable,
+                    current.StructuralLeaseCount);
+            var transition = new AttachmentTransition(this, current, preparedState, isDetaching);
             _activeAttachmentTransition = transition;
             _attachment = current.WithPhase(
-                context is null ? AttachmentPhase.Detaching : AttachmentPhase.Attaching);
+                isDetaching ? AttachmentPhase.Detaching : AttachmentPhase.Attaching);
             return transition;
+        }
+    }
+
+    internal void FinalizeDetachment(
+        InterceptorSubjectContext context,
+        long expectedRevision)
+    {
+        lock (_attachmentLock)
+        {
+            var current = _attachment;
+            if (current.Revision != expectedRevision ||
+                current.Phase != AttachmentPhase.Detaching ||
+                !ReferenceEquals(current.Context, context) ||
+                current.Anchor != SubjectAttachmentAnchorKind.None ||
+                _activeAttachmentTransition is not null)
+            {
+                return;
+            }
+
+            _attachment = new AttachmentState(
+                null,
+                SubjectAttachmentAnchorKind.None,
+                current.Revision + 1,
+                AttachmentPhase.Stable,
+                0);
         }
     }
 
@@ -525,7 +558,7 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
             }
 
             _activeAttachmentTransition = null;
-            _attachment = _attachment.WithPhase(AttachmentPhase.Stable);
+            _attachment = transition.OriginalState;
         }
     }
 
@@ -938,18 +971,32 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     {
         private InterceptorExecutor? _executor;
 
-        internal AttachmentTransition(InterceptorExecutor executor)
+        internal AttachmentTransition(InterceptorExecutor executor, AttachmentState originalState)
         {
             _executor = executor;
+            OriginalState = originalState;
         }
 
-        internal AttachmentTransition(InterceptorExecutor executor, AttachmentState preparedState)
+        internal AttachmentTransition(
+            InterceptorExecutor executor,
+            AttachmentState originalState,
+            AttachmentState preparedState,
+            bool isPreparedDetachment)
         {
             _executor = executor;
+            OriginalState = originalState;
             PreparedState = preparedState;
+            IsPreparedDetachment = isPreparedDetachment;
         }
+
+        internal AttachmentState OriginalState { get; }
 
         internal AttachmentState? PreparedState { get; }
+
+        internal bool IsPreparedDetachment { get; }
+
+        internal InterceptorExecutor Executor => _executor
+            ?? throw new ObjectDisposedException(nameof(AttachmentTransition));
 
         internal void Commit(
             InterceptorSubjectContext? context,

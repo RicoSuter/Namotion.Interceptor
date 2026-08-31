@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -138,7 +139,7 @@ public class DerivedPropertyConcurrencyTests
     }
 
     [Fact]
-    public async Task WhenSubjectAttachedAndDetachedRapidly_ThenNoStaleBacklinksAndGCEligible()
+    public async Task WhenSubjectAttachedAndDetachedRapidlyAndConflictsAreRetried_ThenNoStaleBacklinks()
     {
         for (var i = 0; i < DefaultIterations; i++)
         {
@@ -156,14 +157,14 @@ public class DerivedPropertyConcurrencyTests
             {
                 barrier.SignalAndWait();
                 var newTires = new[] { new Tire(context), car.Tires[1], car.Tires[2], car.Tires[3] };
-                car.Tires = newTires;
+                SetTiresRetryingLifecycleConflict(car, newTires);
             });
 
             var t2 = Task.Run(() =>
             {
                 barrier.SignalAndWait();
                 var newTires = new[] { car.Tires[0], new Tire(context), car.Tires[2], car.Tires[3] };
-                car.Tires = newTires;
+                SetTiresRetryingLifecycleConflict(car, newTires);
             });
 
             await Task.WhenAll(t1, t2);
@@ -172,6 +173,24 @@ public class DerivedPropertyConcurrencyTests
             var expected = car.Tires.Average(t => t.Pressure);
             Assert.Equal(expected, car.AveragePressure);
         }
+    }
+
+    private static void SetTiresRetryingLifecycleConflict(Car car, Tire[] tires)
+    {
+        for (var attempt = 0; attempt < 1000; attempt++)
+        {
+            try
+            {
+                car.Tires = tires;
+                return;
+            }
+            catch (LifecycleConflictException)
+            {
+                // A detaching record rejects the old attachment epoch until its journal finishes.
+            }
+        }
+
+        throw new TimeoutException("The structural write did not observe a stable attachment epoch.");
     }
 
     [Fact]

@@ -381,11 +381,11 @@ public class StructuralWriteLockOrderTests
 
     [Fact]
     [Trait("Category", "Concurrency")]
-    public void WhenProtectorAdmissionFollowsRemovalPublication_ThenItUsesTheNewAttachmentEpoch()
+    public void WhenProtectorAdmissionRacesADetachingJournal_ThenItUsesTheNewEpochAfterFinalClear()
     {
         // Arrange
-        var published = new ManualResetEventSlim(false);
-        var detachedWriteCompleted = new ManualResetEventSlim(false);
+        var journalEntered = new ManualResetEventSlim(false);
+        var allowJournalToComplete = new ManualResetEventSlim(false);
         var context = CreateContext();
         var lifecycle = context.TryGetLifecycleInterceptor()!;
         var root = new Person(context) { FirstName = "root" };
@@ -396,8 +396,8 @@ public class StructuralWriteLockOrderTests
         {
             if (change.IsContextDetach && ReferenceEquals(change.Subject, child))
             {
-                published.Set();
-                WaitFor(detachedWriteCompleted, "the detached-epoch write");
+                journalEntered.Set();
+                WaitFor(allowJournalToComplete, "the detaching journal to resume");
             }
         };
         Exception? removalException = null;
@@ -415,17 +415,21 @@ public class StructuralWriteLockOrderTests
 
         // Act
         remover.Start();
-        WaitFor(published, "the removal publication");
+        WaitFor(journalEntered, "the removal journal");
         var writeException = Record.Exception(() => child.Father = grandchild);
-        detachedWriteCompleted.Set();
+        Assert.Same(context, child.TryGetContext());
+        Assert.Equal(AttachmentPhase.Detaching,
+            ((InterceptorExecutor)((IInterceptorSubject)child).Executor).CurrentAttachmentPhase);
+        allowJournalToComplete.Set();
 
         // Assert
         Assert.True(remover.Join(WriteProtocolAcceptance.RendezvousTimeout), "the removal never completed");
         Assert.Null(removalException);
-        Assert.Null(writeException);
+        Assert.IsType<LifecycleConflictException>(writeException);
         Assert.Null(child.TryGetContext());
         Assert.Null(grandchild.TryGetContext());
 
+        child.Father = grandchild;
         root.Father = child;
         Assert.Same(context, child.TryGetContext());
         Assert.Same(context, grandchild.TryGetContext());

@@ -332,6 +332,16 @@ internal sealed class LifecycleNotifier(
         }
     }
 
+    internal void FinalizeDetachmentsAfterJournal(
+        ImmutableArray<OwnershipGraph.DetachmentPlan> detachments)
+    {
+        if (!detachments.IsEmpty)
+        {
+            CurrentBuilder!.Entries.Add(
+                () => originatingLifecycle.CompleteDetachments(detachments));
+        }
+    }
+
     private void RecordEvent(bool attach, SubjectLifecycleChange change)
     {
         var handlers = CurrentBuilder is { } builder

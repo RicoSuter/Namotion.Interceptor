@@ -96,22 +96,35 @@ internal sealed class OwnershipGraph
         _state = new GraphState(state.Owned, state.Snapshots.SetItem(property, snapshot), state.DeferredSweep);
     }
 
-    internal sealed class PreparedTopologyChange(
-        OwnershipGraph owner,
-        GraphState publication,
-        ImmutableArray<InterceptorExecutor.AttachmentTransition> attachmentUpdates,
-        bool refreshCollection = false) : IDisposable
+    internal sealed class PreparedTopologyChange : IDisposable
     {
+        private readonly OwnershipGraph _owner;
+        private readonly GraphState _publication;
+        private readonly ImmutableArray<InterceptorExecutor.AttachmentTransition> _attachmentUpdates;
         private bool _isPublished;
 
-        internal bool RefreshCollection { get; } = refreshCollection;
+        internal PreparedTopologyChange(
+            OwnershipGraph owner,
+            GraphState publication,
+            ImmutableArray<InterceptorExecutor.AttachmentTransition> attachmentUpdates,
+            LifecycleNotifier notifier,
+            bool refreshCollection = false)
+        {
+            _owner = owner;
+            _publication = publication;
+            _attachmentUpdates = attachmentUpdates;
+            RefreshCollection = refreshCollection;
+            notifier.FinalizeDetachmentsAfterJournal(CreateDetachmentPlans(attachmentUpdates));
+        }
 
-        internal GraphState Publication => publication;
+        internal bool RefreshCollection { get; }
+
+        internal GraphState Publication => _publication;
 
         internal void Publish()
         {
-            owner._state = publication;
-            foreach (var update in attachmentUpdates)
+            _owner._state = _publication;
+            foreach (var update in _attachmentUpdates)
             {
                 update.PublishPrepared();
             }
@@ -123,13 +136,36 @@ internal sealed class OwnershipGraph
         {
             if (!_isPublished)
             {
-                foreach (var update in attachmentUpdates)
+                foreach (var update in _attachmentUpdates)
                 {
                     update.Dispose();
                 }
             }
         }
+
+        private static ImmutableArray<DetachmentPlan> CreateDetachmentPlans(
+            ImmutableArray<InterceptorExecutor.AttachmentTransition> updates)
+        {
+            ImmutableArray<DetachmentPlan>.Builder? detachments = null;
+            foreach (var update in updates)
+            {
+                if (update.IsPreparedDetachment)
+                {
+                    (detachments ??= ImmutableArray.CreateBuilder<DetachmentPlan>()).Add(new DetachmentPlan(
+                        update.Executor,
+                        update.OriginalState.Context!,
+                        update.PreparedState!.Revision));
+                }
+            }
+
+            return detachments?.ToImmutable() ?? [];
+        }
     }
+
+    internal readonly record struct DetachmentPlan(
+        InterceptorExecutor Executor,
+        InterceptorSubjectContext Context,
+        long Revision);
 
     internal PreparedTopologyChange PrepareWrite(
         PropertyReference property,
@@ -207,6 +243,7 @@ internal sealed class OwnershipGraph
             this,
             prepared._state,
             prepared.PrepareAttachmentUpdates(reservations),
+            notifier,
             refreshCollection);
     }
 
@@ -250,7 +287,8 @@ internal sealed class OwnershipGraph
         return new PreparedTopologyChange(
             this,
             prepared._state,
-            prepared.PrepareAttachmentUpdates(reservations));
+            prepared.PrepareAttachmentUpdates(reservations),
+            notifier);
     }
 
     internal PreparedTopologyChange PrepareAttach(
@@ -275,13 +313,29 @@ internal sealed class OwnershipGraph
                 entry.Key,
                 executor,
                 (InterceptorSubjectContext)Context,
-                ReferenceEquals(entry.Key, root) ? anchor : currentAnchor,
-                entry.Value);
+                ReferenceEquals(entry.Key, root) ? anchor : currentAnchor);
         }
 
         if (!prepared.IsOwned(root))
         {
-            prepared.AttachPreparedRoot(root, reservations[root].Executor, reservations, notifier);
+            var executor = reservations[root].Executor;
+            var ownership = prepared.AddPreparedOwnership(root, executor);
+            var change = notifier.CompleteChange(new SubjectLifecycleChange
+            {
+                Subject = root,
+                ReferenceCount = 0,
+                IsContextAttach = true
+            }, ownership.Properties, ownership.Parents, StructuralSnapshot.Empty);
+            notifier.InvokePreparedAddedLifecycleHandlers(
+                root,
+                ownership.LifecycleHandler,
+                executor,
+                change,
+                () => prepared.SeedPreparedChildren(root, reservations, notifier));
+            notifier.RaiseSubjectAttached(change, executor);
+            notifier.AttachSubjectProperties(
+                root, ownership.PropertyHandler, executor, ownership.Properties,
+                prepared._state.Snapshots, prepared._state);
         }
         else
         {
@@ -291,19 +345,18 @@ internal sealed class OwnershipGraph
         return new PreparedTopologyChange(
             this,
             prepared._state,
-            prepared.PrepareAttachmentUpdates(reservations));
+            prepared.PrepareAttachmentUpdates(reservations),
+            notifier);
     }
 
     internal PreparedTopologyChange PrepareDetach(
         IInterceptorSubject subject, InterceptorExecutor executor, LifecycleNotifier notifier)
     {
         var prepared = new OwnershipGraph(this);
+        var ownership = prepared.TryGetOwnership(subject)
+            ?? throw new InvalidOperationException("An attached subject is missing from its ownership graph.");
         prepared.SetAnchor(subject, SubjectAttachmentAnchorKind.None, executor: executor);
-        if (prepared.TryGetOwnership(subject) is not { } ownership)
-        {
-            prepared.ReleaseClaim(subject, executor);
-        }
-        else if (!prepared.IsReachableFromRoot(subject, null, includeProtectors: true))
+        if (!prepared.IsReachableFromRoot(subject, null, includeProtectors: true))
         {
             prepared.ReleasePrepared(subject, ownership, null, null, notifier);
         }
@@ -315,7 +368,8 @@ internal sealed class OwnershipGraph
         return new PreparedTopologyChange(
             this,
             prepared._state,
-            prepared.PrepareAttachmentUpdates(null));
+            prepared.PrepareAttachmentUpdates(null),
+            notifier);
     }
 
     private void SeedPreparedChildren(
@@ -342,31 +396,6 @@ internal sealed class OwnershipGraph
         {
             LifecycleScratch.Return(children);
         }
-    }
-
-    private void AttachPreparedRoot(
-        IInterceptorSubject subject,
-        InterceptorExecutor executor,
-        Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
-        LifecycleNotifier notifier)
-    {
-        var ownership = AddPreparedOwnership(subject, executor);
-        var change = new SubjectLifecycleChange
-        {
-            Subject = subject,
-            ReferenceCount = 0,
-            IsContextAttach = true
-        };
-        change = notifier.CompleteChange(change, ownership.Properties, ownership.Parents, StructuralSnapshot.Empty);
-        notifier.InvokePreparedAddedLifecycleHandlers(
-            subject,
-            ownership.LifecycleHandler,
-            executor,
-            change,
-            () => SeedPreparedChildren(subject, reservations, notifier));
-        notifier.RaiseSubjectAttached(change, executor);
-        notifier.AttachSubjectProperties(
-            subject, ownership.PropertyHandler, executor, ownership.Properties, _state.Snapshots, _state);
     }
 
     private ImmutableArray<InterceptorExecutor.AttachmentTransition> PrepareAttachmentUpdates(
@@ -396,7 +425,7 @@ internal sealed class OwnershipGraph
                     (InterceptorSubjectContext?)currentContext,
                     target.Context,
                     target.Anchor,
-                    target.Reservation ?? reservation));
+                    reservation));
             }
 
             return updates.ToImmutable();
@@ -534,8 +563,7 @@ internal sealed class OwnershipGraph
                     subject,
                     executor,
                     (InterceptorSubjectContext)Context,
-                    SubjectAttachmentAnchorKind.None,
-                    reservation);
+                    SubjectAttachmentAnchorKind.None);
             }
 
             ownership = AddPreparedOwnership(subject, executor);
@@ -670,7 +698,8 @@ internal sealed class OwnershipGraph
                 property is { } parentProperty ? GetSnapshot(parentProperty) : StructuralSnapshot.Empty);
             notifier.RaiseSubjectDetaching(change);
             notifier.InvokeRemovedLifecycleHandlers(subject, ownership.LifecycleHandler, change);
-            ReleaseClaim(subject, ownership.Executor!);
+            RecordPreparedAttachment(
+                subject, ownership.Executor!, null, SubjectAttachmentAnchorKind.None);
 
             foreach (var (childProperty, occurrence) in children)
             {
@@ -830,7 +859,8 @@ internal sealed class OwnershipGraph
             return new PreparedTopologyChange(
                 this,
                 prepared._state,
-                prepared.PrepareAttachmentUpdates(null));
+                prepared.PrepareAttachmentUpdates(null),
+                notifier);
         }
         finally
         {
@@ -1038,9 +1068,6 @@ internal sealed class OwnershipGraph
         return anchor != SubjectAttachmentAnchorKind.None && ReferenceEquals(attachedContext, Context);
     }
 
-    private void ReleaseClaim(IInterceptorSubject subject, InterceptorExecutor executor) =>
-        RecordPreparedAttachment(subject, executor, null, SubjectAttachmentAnchorKind.None, null);
-
     private void SetAnchor(
         IInterceptorSubject subject,
         SubjectAttachmentAnchorKind anchor,
@@ -1064,22 +1091,21 @@ internal sealed class OwnershipGraph
                 subject,
                 executor,
                 (InterceptorSubjectContext)Context,
-                anchor,
-                reservation);
+                anchor);
         }
     }
 
     private void RecordPreparedAttachment(
         IInterceptorSubject subject, InterceptorExecutor executor, InterceptorSubjectContext? context,
-        SubjectAttachmentAnchorKind anchor, OwnershipReservationToken? reservation)
+        SubjectAttachmentAnchorKind anchor)
     {
         (_preparedAttachments ??= new(ReferenceEqualityComparer.Instance))[subject] =
-            new PreparedAttachmentTarget(executor, context, anchor, reservation);
+            new PreparedAttachmentTarget(executor, context, anchor);
     }
 
     private sealed record PreparedAttachmentTarget(
         InterceptorExecutor Executor, InterceptorSubjectContext? Context,
-        SubjectAttachmentAnchorKind Anchor, OwnershipReservationToken? Reservation);
+        SubjectAttachmentAnchorKind Anchor);
 
 
     public bool TryReserveParticipants(

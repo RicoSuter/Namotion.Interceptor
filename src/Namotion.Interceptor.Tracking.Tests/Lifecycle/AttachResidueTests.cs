@@ -236,5 +236,9 @@ public class AttachResidueTests
         Assert.Contains("the rollback was refused", detachException.Message);
         Assert.Null(((IInterceptorSubject)holder).TryGetContext());
         Assert.Null(((IInterceptorSubject)child).TryGetContext());
+        Assert.Equal(AttachmentPhase.Stable,
+            ((InterceptorExecutor)((IInterceptorSubject)holder).Executor).CurrentAttachmentPhase);
+        Assert.Equal(AttachmentPhase.Stable,
+            ((InterceptorExecutor)((IInterceptorSubject)child).Executor).CurrentAttachmentPhase);
     }
 }

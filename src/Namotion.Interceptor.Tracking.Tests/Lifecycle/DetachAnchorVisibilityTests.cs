@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Parent;
 
 namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
@@ -20,11 +22,15 @@ public class DetachAnchorVisibilityTests
         simulation.Component = component;
 
         SubjectAttachmentAnchorKind? anchorDuringDetach = null;
+        IInterceptorSubjectContext? contextDuringDetach = null;
+        AttachmentPhase? phaseDuringDetach = null;
         context.AddService(new DelegateLifecycleHandler(change =>
         {
             if (ReferenceEquals(change.Subject, component) && !change.IsContextAttach)
             {
                 anchorDuringDetach = change.Subject.Executor.AttachmentAnchor;
+                contextDuringDetach = change.Subject.TryGetContext();
+                phaseDuringDetach = ((InterceptorExecutor)change.Subject.Executor).CurrentAttachmentPhase;
             }
         }));
 
@@ -32,8 +38,14 @@ public class DetachAnchorVisibilityTests
         simulation.Component = null;
 
         // Assert: ownership is dropped before any detach callback runs, but the anchor is what
-        // decides root-ness, and an edge-held child never had one.
+        // decides root-ness, and an edge-held child never had one. The same detaching record and
+        // final-clear protocol serves structural releases and explicit anchor removal.
         Assert.Equal(SubjectAttachmentAnchorKind.None, anchorDuringDetach);
+        Assert.Same(context, contextDuringDetach);
+        Assert.Equal(AttachmentPhase.Detaching, phaseDuringDetach);
+        Assert.Null(((IInterceptorSubject)component).TryGetContext());
+        Assert.Equal(AttachmentPhase.Stable,
+            ((InterceptorExecutor)((IInterceptorSubject)component).Executor).CurrentAttachmentPhase);
     }
 
     [Fact]
@@ -45,11 +57,15 @@ public class DetachAnchorVisibilityTests
         simulation.AttachToContext(context);
 
         SubjectAttachmentAnchorKind? anchorDuringDetach = null;
+        IInterceptorSubjectContext? contextDuringDetach = null;
+        AttachmentPhase? phaseDuringDetach = null;
         context.AddService(new DelegateLifecycleHandler(change =>
         {
             if (ReferenceEquals(change.Subject, simulation) && !change.IsContextAttach)
             {
                 anchorDuringDetach = change.Subject.Executor.AttachmentAnchor;
+                contextDuringDetach = change.Subject.TryGetContext();
+                phaseDuringDetach = ((InterceptorExecutor)change.Subject.Executor).CurrentAttachmentPhase;
             }
         }));
 
@@ -57,8 +73,38 @@ public class DetachAnchorVisibilityTests
         simulation.DetachFromContext(context);
 
         // Assert: the detach clears the anchor before releasing, so a handler never sees a departing
-        // root reported as one, and it stays cleared once the detach returns.
+        // root reported as one. Its exact context remains available in the detaching record until
+        // every callback has drained, then the final publication clears it.
         Assert.Equal(SubjectAttachmentAnchorKind.None, anchorDuringDetach);
+        Assert.Same(context, contextDuringDetach);
+        Assert.Equal(AttachmentPhase.Detaching, phaseDuringDetach);
         Assert.Equal(SubjectAttachmentAnchorKind.None, ((IInterceptorSubject)simulation).Executor.AttachmentAnchor);
+        Assert.Null(((IInterceptorSubject)simulation).TryGetContext());
+        Assert.Equal(AttachmentPhase.Stable,
+            ((InterceptorExecutor)((IInterceptorSubject)simulation).Executor).CurrentAttachmentPhase);
+    }
+
+    [Fact]
+    public void WhenAStaleDetachmentFinalizerFindsNewSupport_ThenItDoesNotClearTheAttachment()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var simulation = new Simulation(context) { Name = "Root" };
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var executor = (InterceptorExecutor)((IInterceptorSubject)simulation).Executor;
+        executor.TryGetAttachment(out _, out _, out var revision);
+        var staleDetachment = new OwnershipGraph.DetachmentPlan(
+            executor, (InterceptorSubjectContext)context, revision);
+
+        // Act
+        var exception = Record.Exception(() => lifecycle.CompleteDetachments([staleDetachment]));
+
+        // Assert: a delayed finalizer is conditional on graph absence. New ownership wins without
+        // throwing from the cleanup path or clearing the subject's newer supported attachment.
+        Assert.Null(exception);
+        Assert.Same(context, simulation.TryGetContext());
+        Assert.Equal(SubjectAttachmentAnchorKind.Provisional,
+            ((IInterceptorSubject)simulation).Executor.AttachmentAnchor);
+        Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
     }
 }
