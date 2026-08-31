@@ -255,7 +255,7 @@ public class AdsIntegrationTests
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task Notifications_SharingSettings_ShouldUseOneSubscriptionNotOnePerProperty()
+    public async Task Notifications_ShouldNotCostAThreadPerProperty()
     {
         // The reactive WhenNotification extension allocates a dedicated EventLoopScheduler, and so an
         // OS thread, per call. Subscribing per property therefore cost one thread per property and
@@ -271,17 +271,19 @@ public class AdsIntegrationTests
                 message: "Client should connect and register more than one notification");
 
             var notificationCount = clientSource.Diagnostics.NotificationVariableCount;
-            var subscriptionCount = clientSource.SubscriptionManager.NotificationSubscriptionCount;
+            var handleCount = clientSource.SubscriptionManager.NotificationHandleCount;
             var threadGrowth = Process.GetCurrentProcess().Threads.Count - threadsBefore;
 
             _output.WriteLine(
-                $"Notifications={notificationCount}, subscriptions={subscriptionCount}, thread growth={threadGrowth}");
+                $"Notifications={notificationCount}, handles={handleCount}, thread growth={threadGrowth}");
 
-            // All properties share the default cycle time and max delay, so they form one settings
-            // group and must be served by a single subscription. Asserted on the subscription count
-            // rather than on threads, which are too noisy at this scale to discriminate.
+            // One device notification handle per property, all delivered through a single event on
+            // the client's receive thread. The reactive extension would instead allocate a dedicated
+            // scheduler thread per registration.
+            // Thread growth is logged rather than asserted: at this scale the harness's own thread
+            // pool churn swamps the signal. The handle count is the structural invariant.
             Assert.True(notificationCount > 1, "Expected more than one notification property.");
-            Assert.Equal(1, subscriptionCount);
+            Assert.Equal(notificationCount, handleCount);
 
             // Routing still has to work: every property is fed by the one shared subscription.
             _fixture.Server.SetSymbolValue("GVL.Temperature", 77.25);
@@ -296,10 +298,10 @@ public class AdsIntegrationTests
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task Notifications_WithDifferentCycleTimes_ShouldNotShareASubscription()
+    public async Task Notifications_WithDifferentCycleTimes_ShouldEachBeRegistered()
     {
-        // Grouping must key on the settings the PLC is actually given. Collapsing everything into
-        // one subscription would silently apply one property's cycle time to the others.
+        // Each property is registered with the settings it asks for, so a per-property cycle time
+        // cannot be silently replaced by another property's.
         var model = new MixedCycleTimeIntegrationTestModel(CreateContext());
 
         await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
@@ -310,8 +312,8 @@ public class AdsIntegrationTests
                 timeout: WaitTimeout,
                 message: "Client should register all three notifications");
 
-            // Two on the default cycle time, one on 500 ms.
-            Assert.Equal(2, clientSource.SubscriptionManager.NotificationSubscriptionCount);
+            // Each property carries its own notification settings, so all three are registered.
+            Assert.Equal(3, clientSource.SubscriptionManager.NotificationHandleCount);
 
             _fixture.Server.SetSymbolValue("GVL.Temperature", 12.5);
             _fixture.Server.SetSymbolValue("GVL.Counter", 4321);
@@ -327,8 +329,8 @@ public class AdsIntegrationTests
     [Trait("Category", "Integration")]
     public async Task Notifications_WithTwoPropertiesOnOneSymbol_ShouldRegisterAndFeedBoth()
     {
-        // Registration is all-or-nothing per group, so a group that contains the same symbol twice
-        // fails entirely and demotes every property in it, including the unrelated ones.
+        // Two properties on one symbol path must both register and both receive values; neither
+        // may displace the other's routing.
         var model = new DuplicateSymbolIntegrationTestModel(CreateContext());
 
         await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
@@ -339,9 +341,9 @@ public class AdsIntegrationTests
                 timeout: WaitTimeout,
                 message: "All three properties should be notification-backed");
 
-            // Nothing fell back, and the counts do not double-count a demoted property.
+            // Nothing fell back, and each property holds its own registration on the shared symbol.
             Assert.Equal(0, clientSource.Diagnostics.PolledVariableCount);
-            Assert.Equal(1, clientSource.SubscriptionManager.NotificationSubscriptionCount);
+            Assert.Equal(3, clientSource.SubscriptionManager.NotificationHandleCount);
 
             _fixture.Server.SetSymbolValue("GVL.Temperature", 63.5);
             _fixture.Server.SetSymbolValue("GVL.Counter", 909);
@@ -353,6 +355,51 @@ public class AdsIntegrationTests
                       model.Counter == 909,
                 timeout: WaitTimeout,
                 message: "Both properties on the shared symbol, and the unrelated one, should update");
+        });
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task Notifications_AcrossRescans_ShouldReleaseThePreviousRegistrations()
+    {
+        // A re-scan disposes the notification subscriptions and re-registers. If disposal does not
+        // release the PLC-side registrations, every re-scan stacks another full set on the
+        // controller until it hits its own notification limit, which is precisely the failure
+        // MaxNotifications exists to avoid.
+        var model = new IntegrationTestModel(CreateContext());
+
+        await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientSource.Diagnostics.IsConnected && clientSource.Diagnostics.NotificationVariableCount > 0,
+                timeout: WaitTimeout,
+                message: "Client should connect and register notifications");
+
+            var afterFirst = _fixture.Server.NotificationCounts;
+
+            const int rescans = 3;
+            for (var i = 0; i < rescans; i++)
+            {
+                var before = _fixture.Server.NotificationCounts.Added;
+                clientSource.RequestRescan("Test-triggered rescan.");
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => _fixture.Server.NotificationCounts.Added > before,
+                    timeout: WaitTimeout,
+                    message: "The rescan should re-register notifications");
+            }
+
+            var afterRescans = _fixture.Server.NotificationCounts;
+            var added = afterRescans.Added - afterFirst.Added;
+            var deleted = afterRescans.Deleted - afterFirst.Deleted;
+            _output.WriteLine($"Across {rescans} rescans: added={added}, deleted={deleted}");
+
+            // Every registration a rescan replaces must be released, or the outstanding count grows
+            // without bound. Allowing one set of slack covers the registrations still live at the end.
+            var outstanding = added - deleted;
+            Assert.True(
+                outstanding <= clientSource.SubscriptionManager.NotificationHandleCount,
+                $"Leaked device notifications: {added} added, {deleted} deleted, {outstanding} outstanding "
+                + $"for {clientSource.SubscriptionManager.NotificationHandleCount} held handles.");
         });
     }
 

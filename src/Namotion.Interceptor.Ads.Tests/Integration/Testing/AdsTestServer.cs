@@ -27,6 +27,13 @@ public sealed class AdsTestServer : IAsyncDisposable
     private CancellationTokenSource _routerCts = new();
 
     /// <summary>
+    /// Gets the number of device notifications the client has registered, and the number it has
+    /// deleted. A client that re-subscribes without releasing leaves the difference on the server.
+    /// </summary>
+    public (int Added, int Deleted) NotificationCounts =>
+        _server is null ? (0, 0) : (_server.AddedNotificationCount, _server.DeletedNotificationCount);
+
+    /// <summary>
     /// Gets the AMS Net ID string for client configuration.
     /// </summary>
     public string AmsNetIdString => AmsNetIdValue;
@@ -230,6 +237,31 @@ internal sealed class TestAdsSymbolicServer : AdsSymbolicServer
         : base(port, name, configuration, loggerFactory)
     {
         _testSymbols = symbols;
+    }
+
+    /// <summary>Device notifications the client has registered, counted so a test can prove that
+    /// re-subscribing releases the previous registrations rather than stacking new ones on the PLC.</summary>
+    public int AddedNotificationCount;
+
+    /// <summary>Device notifications the client has deleted.</summary>
+    public int DeletedNotificationCount;
+
+    /// <inheritdoc/>
+    protected override Task<ResultHandle> OnAddDeviceNotificationAsync(
+        AmsAddress target, uint invokeId, uint indexGroup, uint indexOffset, int cbLength,
+        AmsAddress source, NotificationSettings settings, CancellationToken cancel)
+    {
+        Interlocked.Increment(ref AddedNotificationCount);
+        return base.OnAddDeviceNotificationAsync(
+            target, invokeId, indexGroup, indexOffset, cbLength, source, settings, cancel);
+    }
+
+    /// <inheritdoc/>
+    protected override Task<ResultAds> OnDeleteDeviceNotificationAsync(
+        AmsAddress target, uint invokeId, uint handle, CancellationToken cancel)
+    {
+        Interlocked.Increment(ref DeletedNotificationCount);
+        return base.OnDeleteDeviceNotificationAsync(target, invokeId, handle, cancel);
     }
 
     /// <inheritdoc/>

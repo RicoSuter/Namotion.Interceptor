@@ -48,7 +48,6 @@ public class AdsSubscriptionManagerTests
         Assert.Equal(0, manager.NotificationCount);
         Assert.Equal(0, manager.PolledCount);
         Assert.False(manager.IsPollingCollectionDirty);
-        Assert.NotNull(manager.Subscriptions);
     }
 
     [Fact]

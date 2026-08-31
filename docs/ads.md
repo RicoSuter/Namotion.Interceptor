@@ -360,6 +360,14 @@ Any `SumSymbolRead` failure falls back to one `ReadValue` per symbol, whether it
 
 Only a failure the sum command cannot recover from latches, in practice `DeviceServiceNotSupported`, in which case the polling snapshot stops attempting sum reads until it is rebuilt. A transient failure such as `DeviceBusy` or a timeout degrades that one pass, because it says nothing about whether the next sum read succeeds.
 
+### Notifications
+
+A notification is registered per property through the raw ADS API, and the connector holds the handle it gets back. Every registration is delivered through a single `AdsNotificationEx` handler on the client's receive thread, so the notification count does not drive the thread count.
+
+Holding the handles is what makes the release explicit. Nothing else deletes a device notification, so a re-scan that only forgot them would leave the previous registrations standing on the controller. With re-scans firing on connection restore, PLC state change and symbol version change, a long-lived connection would accumulate them until the PLC hit its own notification limit.
+
+A registration the PLC refuses falls that property back to polling on its own, so one symbol that cannot carry a notification does not affect any other.
+
 ### Symbols whose PLC type will not resolve
 
 The TwinCAT type system cannot resolve a PLC enum whose definition was not loaded. Such a symbol is read as its underlying integer, picked by byte size, and written through the any-type path, which marshals from the .NET runtime type. The first failure is remembered per symbol path, so the doomed typed read happens once rather than every cycle, and handles are cached and dropped on a failed read, since a handle does not survive a reconnect or a download.
@@ -558,7 +566,7 @@ The TwinCAT connector hooks into the interceptor lifecycle system (see [Subject 
 
 When a subject is detached from the object graph:
 
-- The subject's properties stop being notification-backed. The subscription itself is shared by every property in its notification-settings group, so it is not disposed here; a notification that still arrives is dropped because the property is no longer registered, and the group is torn down as a unit on the next re-scan
+- The subject's properties stop being notification-backed. The device notifications themselves are released when the subscription set is cleared, on the next re-scan or at shutdown; a notification arriving in between is dropped because the property is no longer registered
 - Properties are removed from the batch polling collection (and polling is marked dirty)
 - Property-to-symbol-path cache entries are removed
 - Source ownership is released
@@ -567,7 +575,7 @@ When a subject is detached from the object graph:
 
 When an individual property is released:
 
-1. The property stops being notification-backed, without disposing the group's shared subscription (see above)
+1. The property stops being notification-backed (see above for when its device notification is released)
 2. Property is removed from the polled collection (if polling mode)
 3. The property-to-symbol-path lookup is cleared
 

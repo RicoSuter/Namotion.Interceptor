@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Reactive.Disposables;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Ads.Mapping;
@@ -27,9 +26,8 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     // Caches keyed by PropertyReference (stable) not RegisteredSubjectProperty (can become stale)
     private readonly ConcurrentDictionary<PropertyReference, string> _propertyToSymbol
         = new(PropertyReference.Comparer);
-    /// <summary>Properties served by a notification, mapped to their symbol path. Holds no
-    /// disposable: one subscription now serves a whole settings group, so it is owned by
-    /// <see cref="_subscriptions"/> and torn down as a unit.</summary>
+    /// <summary>Properties served by a notification, mapped to their symbol path. The handles
+    /// themselves live in <see cref="_notificationHandles"/>, which is what releases them.</summary>
     private readonly ConcurrentDictionary<PropertyReference, string> _notificationProperties
         = new(PropertyReference.Comparer);
     private readonly ConcurrentDictionary<PropertyReference, string> _polledProperties
@@ -80,7 +78,6 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// </summary>
     internal bool IsPollingCollectionDirty =>
         Volatile.Read(ref _pollingCollectionVersion) != Volatile.Read(ref _pollingSnapshotVersion);
-    private readonly CompositeDisposable _subscriptions = new();
 
     private int _disposed; // 0 = false, 1 = true
 
@@ -101,21 +98,25 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// </summary>
     internal int NotificationCount => _notificationProperties.Count;
 
-    /// <summary>Number of live notification subscriptions, one per settings group rather than one
-    /// per property. Exposed so a test can assert the grouping actually happens.</summary>
-    internal int NotificationSubscriptionCount => Volatile.Read(ref _notificationSubscriptionCount);
+    /// <summary>Device notification handles currently held. Exposed so a test can assert that a
+    /// re-scan releases the previous registrations rather than stacking new ones on the PLC.</summary>
+    internal int NotificationHandleCount => _notificationHandles.Count;
 
-    private int _notificationSubscriptionCount;
+    /// <summary>Device notification handles this manager registered, mapped to the property that
+    /// owns each. Held so the registrations can be released; nothing else frees them.</summary>
+    private readonly ConcurrentDictionary<uint, (PropertyReference Reference, string SymbolPath)> _notificationHandles = new();
+
+    // Captured for the notification handler, which the ADS client raises with no context of its own.
+    // Reassigned on every listen attempt along with the registrations they serve.
+    private SubjectPropertyWriter? _propertyWriter;
+    private ISubjectSource? _source;
+    private AdsConnectionManager? _connectionManager;
+    private IAdsConnection? _notificationConnection;
 
     /// <summary>
     /// Gets the number of properties using batch polling.
     /// </summary>
     internal int PolledCount => _polledProperties.Count;
-
-    /// <summary>
-    /// Gets the composite disposable containing all subscriptions (for orchestrator to return from StartListeningAsync).
-    /// </summary>
-    internal CompositeDisposable Subscriptions => _subscriptions;
 
     /// <summary>
     /// Registers notification subscriptions and batch polling for the given property-symbol mappings.
@@ -135,8 +136,21 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             _configuration.DefaultCycleTime,
             _configuration.MaxNotifications);
 
-        var notificationGroups =
-            new Dictionary<(int CycleTime, int MaxDelay), List<(PropertyReference Reference, string SymbolPath, ISymbol Symbol)>>();
+        // Captured before registering, because the handler can fire as soon as the first handle exists.
+        _propertyWriter = propertyWriter;
+        _source = source;
+        _connectionManager = connectionManager;
+
+        if (!ReferenceEquals(_notificationConnection, connection))
+        {
+            if (_notificationConnection is not null)
+            {
+                _notificationConnection.AdsNotificationEx -= OnAdsNotificationEx;
+            }
+
+            connection.AdsNotificationEx += OnAdsNotificationEx;
+            _notificationConnection = connection;
+        }
 
         var mappingByReference = new Dictionary<PropertyReference, AdsPropertyMapping>(PropertyReference.Comparer);
         foreach (var (property, _, mapping) in mappings)
@@ -157,40 +171,16 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             if (effectiveMode == AdsReadMode.Notification)
             {
                 var mapping = mappingByReference[property.Reference];
-                var symbol = TryGetSymbol(symbolLoader, symbolPath);
-                if (symbol is null)
+                if (!TryRegisterNotification(property, symbolPath, mapping, connection, connectionManager))
                 {
-                    connectionManager.LogFirstOccurrence("SymbolNotFound", null,
-                        "Symbol '{SymbolPath}' not found in PLC. Skipping notification.", symbolPath);
-                    continue;
+                    // Keeps updating rather than silently freezing at its last value.
+                    _polledProperties[property.Reference] = symbolPath;
                 }
-
-                // Grouped by the settings the PLC actually needs, because one subscription is created
-                // per group: WhenNotification allocates a dedicated EventLoopScheduler thread per call,
-                // so subscribing per property costs one OS thread per property.
-                var settingsKey = (
-                    CycleTime: mapping.CycleTime ?? _configuration.DefaultCycleTime,
-                    MaxDelay: mapping.MaxDelay ?? _configuration.DefaultMaxDelay);
-
-                if (!notificationGroups.TryGetValue(settingsKey, out var group))
-                {
-                    group = [];
-                    notificationGroups[settingsKey] = group;
-                }
-
-                group.Add((property.Reference, symbolPath, symbol));
             }
             else
             {
                 _polledProperties[property.Reference] = symbolPath;
             }
-        }
-
-        foreach (var (settingsKey, group) in notificationGroups)
-        {
-            RegisterNotificationGroup(
-                group, settingsKey.CycleTime, settingsKey.MaxDelay,
-                connection, propertyWriter, source, connectionManager);
         }
 
         // Mark dirty so the next PollValuesAsync call rebuilds the polling snapshot
@@ -210,15 +200,22 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         // still holds for a symbol nothing reads again is leaked for the life of the connection.
         ReleaseRawIntegerHandles(connection);
 
+        // Likewise: nothing else deletes a device notification, so a re-scan that only forgets the
+        // handles leaves the previous registrations standing on the controller.
+        ReleaseNotifications(connection ?? _notificationConnection);
+
+        if (_notificationConnection is not null)
+        {
+            _notificationConnection.AdsNotificationEx -= OnAdsNotificationEx;
+            _notificationConnection = null;
+        }
+
         // Mark polling dirty and clear snapshot so in-flight polls stop immediately
         Interlocked.Increment(ref _pollingCollectionVersion);
         _pollingSnapshot = PollingSnapshot.Empty;
 
-        // Dispose existing subscriptions (CompositeDisposable.Clear disposes contained items)
-        _subscriptions.Clear();
         _propertyToSymbol.Clear();
         _notificationProperties.Clear();
-        Volatile.Write(ref _notificationSubscriptionCount, 0);
         _polledProperties.Clear();
     }
 
@@ -363,110 +360,109 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// recreates them all on every rescan. Notifications are routed back to their property by the
     /// instance path of the very symbols handed to the call.
     /// </remarks>
-    private void RegisterNotificationGroup(
-        List<(PropertyReference Reference, string SymbolPath, ISymbol Symbol)> group,
-        int cycleTime,
-        int maxDelay,
+    /// <summary>
+    /// Registers one device notification and records its handle. Returns false when the PLC refuses
+    /// it, so the caller can fall the property back to polling.
+    /// </summary>
+    /// <remarks>
+    /// Registered through the raw ADS API rather than the reactive <c>WhenNotification</c> extension,
+    /// for two reasons. That extension allocates a dedicated <c>EventLoopScheduler</c>, and therefore
+    /// an OS thread, per call, and disposing a batched subscription does not send
+    /// <c>DeleteDeviceNotification</c>, so every re-scan would leave the previous registrations
+    /// standing on the controller until it hit its own notification limit. Holding the handle makes
+    /// the release explicit, and a single <see cref="IAdsNotifications.AdsNotificationEx"/> handler
+    /// serves every symbol.
+    /// </remarks>
+    private bool TryRegisterNotification(
+        RegisteredSubjectProperty property,
+        string symbolPath,
+        AdsPropertyMapping mapping,
         IAdsConnection connection,
-        SubjectPropertyWriter? propertyWriter,
-        ISubjectSource source,
         AdsConnectionManager connectionManager)
     {
-        var notificationSettings = new NotificationSettings(AdsTransMode.OnChange, cycleTime, maxDelay);
+        var notificationSettings = new NotificationSettings(
+            AdsTransMode.OnChange,
+            mapping.CycleTime ?? _configuration.DefaultCycleTime,
+            mapping.MaxDelay ?? _configuration.DefaultMaxDelay);
 
-        // One route per distinct symbol, carrying every property mapped to it. Two properties can
-        // share a symbol path, and the handle bag the reactive extension builds keys by symbol in a
-        // plain dictionary, so handing it the same symbol twice throws and takes the whole group down.
-        var routes = new Dictionary<string, List<(PropertyReference Reference, string SymbolPath)>>(StringComparer.Ordinal);
-        var symbols = new List<ISymbol>(group.Count);
-        foreach (var entry in group)
+        try
         {
-            if (!routes.TryGetValue(entry.Symbol.InstancePath, out var targets))
+            var errorCode = connection.TryAddDeviceNotificationEx(
+                symbolPath, notificationSettings, null, property.Type, null, out var handle);
+
+            if (errorCode != AdsErrorCode.NoError)
             {
-                targets = [];
-                routes[entry.Symbol.InstancePath] = targets;
-                symbols.Add(entry.Symbol);
+                connectionManager.LogFirstOccurrence("NotificationRegistration", null,
+                    "The PLC refused a notification for '{SymbolPath}': {ErrorCode}. Falling back to polling.",
+                    symbolPath, errorCode);
+                return false;
             }
 
-            targets.Add((entry.Reference, entry.SymbolPath));
+            _notificationHandles[handle] = (property.Reference, symbolPath);
+            _notificationProperties[property.Reference] = symbolPath;
+            return true;
         }
-
-        // Recorded before subscribing, because the reactive extension registers the handles inside
-        // Subscribe and reports a failure to onError synchronously, before Subscribe returns. Doing
-        // this afterwards would reinstate every property the error handler had just demoted.
-        foreach (var entry in group)
+        catch (Exception exception)
         {
-            _notificationProperties[entry.Reference] = entry.SymbolPath;
+            connectionManager.LogFirstOccurrence("NotificationRegistration", exception,
+                "Failed to register a notification for '{SymbolPath}'. Falling back to polling.", symbolPath);
+            return false;
         }
-
-        Interlocked.Increment(ref _notificationSubscriptionCount);
-        var groupDemoted = 0;
-
-        var subscription = connection
-            .WhenNotification(symbols, notificationSettings)
-            .Subscribe(
-                notification =>
-                {
-                    if (!routes.TryGetValue(notification.Symbol.InstancePath, out var targets))
-                    {
-                        return;
-                    }
-
-                    foreach (var (reference, symbolPath) in targets)
-                    {
-                        try
-                        {
-                            OnValueReceived(reference, notification.Value, notification.TimeStamp, propertyWriter, source);
-                        }
-                        catch (Exception exception)
-                        {
-                            connectionManager.LogFirstOccurrence("NotificationCallback", exception,
-                                "Failed to process notification for symbol '{SymbolPath}'.", symbolPath);
-                        }
-                    }
-                },
-                exception =>
-                {
-                    // A PLC that refuses to register the notifications, because its own notification
-                    // limit is reached or a symbol does not support one, reports it here rather than
-                    // by throwing from Subscribe. Without this handler Rx swallows it, the
-                    // subscription looks live, and the properties silently never update again.
-                    // The registration is all-or-nothing, so the whole group falls back together.
-                    connectionManager.LogFirstOccurrence("NotificationRegistration", exception,
-                        "Notification group of {Count} symbols failed to register. Falling back to polling.",
-                        symbols.Count);
-
-                    if (Interlocked.Exchange(ref groupDemoted, 1) == 0)
-                    {
-                        Interlocked.Decrement(ref _notificationSubscriptionCount);
-                    }
-
-                    foreach (var entry in group)
-                    {
-                        DemoteToPolling(entry.Reference, entry.SymbolPath);
-                    }
-                });
-
-        _subscriptions.Add(subscription);
     }
 
     /// <summary>
-    /// Moves a property from notifications to polling after its notification failed, so it keeps
-    /// updating rather than silently freezing at its last value.
+    /// Routes one device notification to the property that registered its handle. Raised on the ADS
+    /// client's receive thread, for every registered symbol.
     /// </summary>
-    private void DemoteToPolling(PropertyReference propertyReference, string symbolPath)
+    private void OnAdsNotificationEx(object? sender, AdsNotificationExEventArgs args)
     {
-        if (Volatile.Read(ref _disposed) == 1)
+        var source = _source;
+        if (source is null || !_notificationHandles.TryGetValue(args.Handle, out var route))
         {
+            // A notification already in flight when its handle was released, or after teardown.
             return;
         }
 
-        // The group's subscription has already terminated: onError completes the observable, so no
-        // further notification arrives for any of its members.
-        _notificationProperties.TryRemove(propertyReference, out _);
+        try
+        {
+            OnValueReceived(route.Reference, args.Value, args.TimeStamp, _propertyWriter, source);
+        }
+        catch (Exception exception)
+        {
+            _connectionManager?.LogFirstOccurrence("NotificationCallback", exception,
+                "Failed to process notification for symbol '{SymbolPath}'.", route.SymbolPath);
+        }
+    }
 
-        _polledProperties[propertyReference] = symbolPath;
-        Interlocked.Increment(ref _pollingCollectionVersion);
+    /// <summary>
+    /// Releases every device notification this manager registered. Without it a re-scan leaves the
+    /// previous registrations standing on the controller.
+    /// </summary>
+    private void ReleaseNotifications(IAdsConnection? connection)
+    {
+        foreach (var handle in _notificationHandles.Keys)
+        {
+            if (!_notificationHandles.TryRemove(handle, out var route) || connection is null)
+            {
+                continue;
+            }
+
+            try
+            {
+                var errorCode = connection.TryDeleteDeviceNotification(handle);
+                if (errorCode != AdsErrorCode.NoError)
+                {
+                    _logger.LogDebug(
+                        "Failed to release the notification for '{SymbolPath}': {ErrorCode}.",
+                        route.SymbolPath, errorCode);
+                }
+            }
+            catch (Exception exception)
+            {
+                _logger.LogDebug(exception,
+                    "Failed to release the notification for '{SymbolPath}'.", route.SymbolPath);
+            }
+        }
     }
 
     /// <summary>
@@ -857,10 +853,16 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
-            // No connection to release against here; the PLC drops a session's handles when the
-            // connection closes, which is what happens next.
+            // No connection to release against here; the PLC drops a session's handles and
+            // notifications when the connection closes, which is what happens next.
+            if (_notificationConnection is not null)
+            {
+                _notificationConnection.AdsNotificationEx -= OnAdsNotificationEx;
+                _notificationConnection = null;
+            }
+
+            _notificationHandles.Clear();
             _rawIntegerHandles.Clear();
-            _subscriptions.Dispose();
         }
 
         return ValueTask.CompletedTask;
