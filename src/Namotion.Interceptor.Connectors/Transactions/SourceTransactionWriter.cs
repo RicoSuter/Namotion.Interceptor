@@ -161,7 +161,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
 
         // FailedChanges is complete (see WriteChangesInBatchesAsync), so everything else reached the
         // source. RevertState is the source itself: every written change belongs to it.
-        var writeResult = await source.WriteChangesInBatchesAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
+        var writeResult = await WriteThroughSourceAsync(source, buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
         if (writeResult.Error is null)
         {
             MarkSnapshotSlots(snapshot.Span, indices, count, source);
@@ -269,6 +269,27 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
         return new SourceRevertResult(failed, errors);
     }
 
+    /// <summary>
+    /// Writes through the source and, when it holds back writes the source refused for a session,
+    /// discards the held write for every property this write delivered. A transaction write reaches
+    /// the source without passing the pump, so it is a path on which the source can prove it now takes
+    /// a property it refused; without the discard the held value would survive the newer one delivered
+    /// here, be released when the connection is replaced, and put the source back on the superseded
+    /// value, which it then reports and the model follows.
+    /// </summary>
+    private static async ValueTask<WriteResult> WriteThroughSourceAsync(
+        ISubjectSource source, ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    {
+        var retryQueue = (source as SubjectSourceBase)?.WriteRetryQueue;
+
+        // Read before the write is issued, since the connection can be replaced while it is in flight.
+        var connectionGeneration = retryQueue?.ConnectionGeneration ?? 0;
+
+        var result = await source.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+        retryQueue?.DiscardHeldWritesFor(changes.Span, result.FailedChanges, connectionGeneration);
+        return result;
+    }
+
     private static HashSet<PropertyReference> ToPropertySet(IReadOnlyList<SubjectPropertyChange> changes)
     {
         var set = new HashSet<PropertyReference>(changes.Count, PropertyReference.Comparer);
@@ -372,7 +393,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
     {
         var sourceChanges = group.Changes;
         var memory = new ReadOnlyMemory<SubjectPropertyChange>(sourceChanges.ToArray());
-        var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
+        var result = await WriteThroughSourceAsync(source, memory, cancellationToken).ConfigureAwait(false);
 
         if (result.Error is not null)
         {
@@ -413,7 +434,7 @@ internal sealed class SourceTransactionWriter : ITransactionWriter
                 .ToArray();
 
             var memory = new ReadOnlyMemory<SubjectPropertyChange>(rollbackChanges);
-            var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
+            var result = await WriteThroughSourceAsync(source, memory, cancellationToken).ConfigureAwait(false);
 
             if (result.Error is not null)
             {

@@ -689,6 +689,11 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     internal void OnCurrentSessionChanged(ISession? previousSession, ISession? currentSession)
     {
+        // Every session transition passes through here, including the ones no lost-connection report
+        // precedes, such as the manual reconnect a subscription that stopped publishing triggers. A
+        // refusal is scoped to the session that gave it, so this is where it stops applying.
+        RetryRefusedWrites();
+
         var handler = CurrentSessionChanged;
         if (handler is null)
         {

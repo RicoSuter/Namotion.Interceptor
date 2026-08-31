@@ -4,10 +4,10 @@ using Opc.Ua;
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
 /// <summary>
-/// Tests for the shared OPC UA status code classifier. One permanent list backs every
-/// callsite, so a single classifier covers the write and subscription-health paths.
-/// Verifies that the classifier treats codes consistently regardless of the operation
-/// context they appear in.
+/// Tests for the shared OPC UA status code classifier, which answers two questions off two lists:
+/// whether a code is transient, which subscription health acts on, and whether a Write is refused for
+/// the rest of the session, which the write path acts on. The lists differ because the dispositions
+/// do; where they disagree is pinned here.
 /// </summary>
 public class OpcUaStatusCodeClassifierTests
 {
@@ -97,6 +97,82 @@ public class OpcUaStatusCodeClassifierTests
 
         // Act & Assert
         Assert.False(OpcUaStatusCodeClassifier.IsTransientError(status));
+    }
+
+    [Theory]
+    // Schema and type codes: permanent within a session by spec.
+    [InlineData(StatusCodes.BadAttributeIdInvalid)]
+    [InlineData(StatusCodes.BadTypeMismatch)]
+    [InlineData(StatusCodes.BadWriteNotSupported)]
+    // State-dependent codes: decided by address-space membership, role permissions and AccessLevel,
+    // which a server keeps for a session but can also change mid-session; a reconnect re-attempts
+    // everything either way.
+    [InlineData(StatusCodes.BadNodeIdUnknown)]
+    [InlineData(StatusCodes.BadUserAccessDenied)]
+    [InlineData(StatusCodes.BadNotWritable)]
+    // Request-decided codes: re-sending the identical change cannot change the answer.
+    [InlineData(StatusCodes.BadNodeIdInvalid)]
+    [InlineData(StatusCodes.BadIndexRangeInvalid)]
+    // Channel-bound: answered per node from AccessRestrictions against the channel's security mode,
+    // which cannot change without the reconnect that ends the hold.
+    [InlineData(StatusCodes.BadSecurityModeInsufficient)]
+    public void WhenAWriteIsRefusedForTheSession_ThenIsRefusedUntilReconnectReturnsTrue(uint statusCode)
+    {
+        // Arrange
+        var status = new StatusCode(statusCode);
+
+        // Act
+        var isRefused = OpcUaStatusCodeClassifier.IsRefusedUntilReconnect(status);
+
+        // Assert
+        Assert.True(isRefused);
+    }
+
+    [Theory]
+    [InlineData(StatusCodes.BadTimeout)]
+    [InlineData(StatusCodes.BadCommunicationError)]
+    [InlineData(StatusCodes.BadServerNotConnected)]
+    [InlineData(StatusCodes.BadOutOfService)]
+    [InlineData(StatusCodes.BadTooManyOperations)]
+    [InlineData(StatusCodes.BadSessionIdInvalid)]
+    [InlineData(StatusCodes.BadSecureChannelClosed)]
+    [InlineData(StatusCodes.BadDeviceFailure)]
+    public void WhenAWriteFailsTransiently_ThenIsRefusedUntilReconnectReturnsFalse(uint statusCode)
+    {
+        // Arrange
+        var status = new StatusCode(statusCode);
+
+        // Act
+        var isRefused = OpcUaStatusCodeClassifier.IsRefusedUntilReconnect(status);
+
+        // Assert
+        Assert.False(isRefused);
+    }
+
+    [Theory]
+    [InlineData(StatusCodes.Good)]
+    [InlineData(StatusCodes.Uncertain)]
+    public void WhenAWriteStatusIsNotBad_ThenIsRefusedUntilReconnectReturnsFalse(uint statusCode)
+    {
+        // Arrange
+        var status = new StatusCode(statusCode);
+
+        // Act
+        var isRefused = OpcUaStatusCodeClassifier.IsRefusedUntilReconnect(status);
+
+        // Assert
+        Assert.False(isRefused);
+    }
+
+    [Fact]
+    public void WhenARefusalCodeCarriesInfoBits_ThenIsRefusedUntilReconnectReturnsTrue()
+    {
+        // Arrange: the low 16 bits describe the answer rather than name it, and a server is free to set
+        // them. Matching on the whole 32-bit value would read this as a code the list does not hold.
+        var status = new StatusCode(StatusCodes.BadUserAccessDenied | 0x0403u);
+
+        // Act & Assert
+        Assert.True(OpcUaStatusCodeClassifier.IsRefusedUntilReconnect(status));
     }
 
     [Fact]

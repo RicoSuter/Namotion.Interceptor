@@ -26,6 +26,12 @@ internal sealed class OutboundWriter
     // flush warning.
     private long _lastRefusedWriteLogTimestamp;
 
+    // Throttled rather than deduplicated per session: on the pump path a session-scoped refusal is
+    // held and not re-sent, so the warning quiets by itself, and what can repeat, a transaction
+    // writing the property again or a source configured without a queue, is kept to one line per
+    // window. This is the only log line that names the refused nodes.
+    private long _lastRefusedNodeLogTimestamp;
+
     public OutboundWriter(
         Func<ISession?> sessionProvider,
         ReadAfterWriteManager? readAfterWriteManager,
@@ -165,15 +171,47 @@ internal sealed class OutboundWriter
 
         var span = allChanges.Span;
         var failedChanges = new List<SubjectPropertyChange>(refusedCount + (conversionFailures?.Count ?? 0));
+        List<SubjectPropertyChange>? refusedChanges = null;
+        List<NodeId>? refusedNodeIds = null;
         for (var i = 0; i < results.Count; i++)
         {
-            if (!StatusCode.IsGood(results[i]))
+            var status = results[i];
+            if (!StatusCode.IsGood(status))
             {
                 // Attributed through the index recorded when this request position was built, never by
                 // re-deriving the selection: the selection consults live registry state, which a
                 // concurrent detach can change between building the request and processing the answer,
                 // and a skewed walk would pin a status on the wrong change.
-                failedChanges.Add(span[request.ChangeIndices[i]]);
+                var change = span[request.ChangeIndices[i]];
+                failedChanges.Add(change);
+
+                // A separate question from the subscription path's transient classification, and not
+                // its complement: that path asks whether a code can heal in-session, this one asks
+                // whether re-sending the identical Write can help. It cannot, but the access-scoped
+                // codes are still the server's to flip mid-session; the next write to the property
+                // observes a grant, succeeds and discards what is held, which is what keeps the hold
+                // from outliving it.
+                if (OpcUaStatusCodeClassifier.IsRefusedUntilReconnect(status))
+                {
+                    (refusedChanges ??= []).Add(change);
+                    (refusedNodeIds ??= []).Add(request.WriteValues[i].NodeId);
+                }
+            }
+        }
+
+        if (refusedNodeIds is not null)
+        {
+            var now = Environment.TickCount64;
+            if (now - _lastRefusedNodeLogTimestamp >= RefusedWriteLogIntervalMilliseconds)
+            {
+                _lastRefusedNodeLogTimestamp = now;
+
+                // The message names only what the server answered, because what becomes of the writes
+                // is decided elsewhere: the retry queue holds a pump write back unless the session
+                // moved on mid-flight or buffering is off, and a transaction write is never held.
+                _logger.LogWarning(
+                    "OPC UA write: {Count} node(s) refused with a status re-sending cannot change on this session: {NodeIds}. Diagnostics.HeldWrites reports the writes currently held back.",
+                    refusedNodeIds.Count, refusedNodeIds);
             }
         }
 
@@ -204,7 +242,11 @@ internal sealed class OutboundWriter
             failedChanges.AddRange(conversionFailures);
         }
 
-        return WriteResult.Failure(failedChanges.ToArray(), error);
+        var result = WriteResult.Failure(failedChanges.ToArray(), error);
+
+        return refusedChanges is null
+            ? result
+            : result.WithRefusedUntilReconnect([..refusedChanges]);
     }
 
     private static Exception CombineErrors(List<Exception> errors)

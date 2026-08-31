@@ -245,6 +245,36 @@ public class OutboundWriterTests
     }
 
     [Fact]
+    public async Task WhenTheServerRefusesANodeForTheSession_ThenTheChangeIsNamedRefusedUntilReconnect()
+    {
+        // Arrange: what decides BadUserAccessDenied is fixed for the session, so re-sending the change
+        // on it cannot succeed and stalls everything queued behind it.
+        var (writer, change) = CreateWriter(AnswerWith(StatusCodes.BadUserAccessDenied));
+
+        // Act
+        var result = await writer.WriteChangesAsync(new[] { change }, CancellationToken.None);
+
+        // Assert: named as refused and still listed as failed, which is what makes a transaction
+        // count it unwritten and roll it back.
+        Assert.Equal(change.Property, Assert.Single(result.RefusedUntilReconnect).Property);
+        Assert.Equal(change.Property, Assert.Single(result.FailedChanges).Property);
+    }
+
+    [Fact]
+    public async Task WhenTheServerRefusesANodeTransiently_ThenNoChangeIsNamedRefusedUntilReconnect()
+    {
+        // Arrange
+        var (writer, change) = CreateWriter(AnswerWith(StatusCodes.BadOutOfService));
+
+        // Act
+        var result = await writer.WriteChangesAsync(new[] { change }, CancellationToken.None);
+
+        // Assert: holding it back would delay a write the next attempt could well have taken
+        Assert.Empty(result.RefusedUntilReconnect);
+        Assert.Equal(change.Property, Assert.Single(result.FailedChanges).Property);
+    }
+
+    [Fact]
     public async Task WhenWriteSourceTimestampIsDisabled_ThenTheWriteCarriesNoSourceTimestamp()
     {
         // Arrange: the escape hatch for a server that answers BadWriteNotSupported to the combination

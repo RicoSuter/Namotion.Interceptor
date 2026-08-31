@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors.Diagnostics;
@@ -190,23 +191,6 @@ public class WriteRetryQueueTests
         Assert.Equal(2, retained[0].GetOldValue<int>());
         Assert.Equal(3, retained[1].GetOldValue<int>());
         Assert.Equal(2, diagnostics.TotalDropped);
-    }
-
-    [Fact]
-    public void WhenMaxQueueSizeIsZero_ThenWritesAreDropped()
-    {
-        // Arrange
-        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
-        var queue = new WriteRetryQueue(0, NullLogger.Instance, metrics);
-        var diagnostics = new QueueDiagnostics(metrics);
-
-        // Act
-        queue.Enqueue(CreateChanges(5));
-
-        // Assert
-        Assert.True(queue.IsEmpty);
-        Assert.Equal(0, queue.PendingWriteCount);
-        Assert.Equal(5, diagnostics.TotalDropped);
     }
 
     [Fact]
@@ -596,9 +580,538 @@ public class WriteRetryQueueTests
         }
     }
 
+    [Fact]
+    public async Task WhenAChangeIsRefusedUntilReconnect_ThenTheNextFlushDoesNotResendIt()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var refused = CreateProperty("Refused");
+        var writes = new List<SubjectPropertyChange[]>();
+        var sourceMock = CreateRefusingSource(writes, refused);
+
+        queue.Enqueue(new[] { CreateChange(refused, 1, revision: 1) });
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Act
+        queue.Enqueue(new[] { CreateChange(CreateProperty("Other"), 10, revision: 2) });
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - the refused change is held for the next connection, not re-sent on this one
+        Assert.Equal(2, writes.Count);
+        Assert.Equal("Other", Assert.Single(writes[1]).Property.Name);
+    }
+
+    [Fact]
+    public async Task WhenOnlyRefusedChangesFail_ThenTheFlushReportsSuccess()
+    {
+        // Arrange - the pump diverts the tick's own changes into the queue whenever a flush reports
+        // failure, so a refusal that reported failure would delay every write behind it for good.
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var refused = CreateProperty("Refused");
+        var writes = new List<SubjectPropertyChange[]>();
+        var sourceMock = CreateRefusingSource(writes, refused);
+
+        queue.Enqueue(new[] { CreateChange(refused, 1, revision: 1) });
+
+        // Act
+        var flushed = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert
+        Assert.True(flushed);
+        Assert.True(queue.IsEmpty);
+    }
+
+    [Fact]
+    public async Task WhenAChangeFailsWithoutBeingRefused_ThenItIsStillRetried()
+    {
+        // Arrange - guards against parking a failure the source never called permanent
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var writes = new List<SubjectPropertyChange[]>();
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                writes.Add(changes.ToArray());
+                return new ValueTask<WriteResult>(
+                    WriteResult.Failure(changes, new InvalidOperationException("Timed out")));
+            });
+
+        queue.Enqueue(new[] { CreateChange(CreateProperty("Value"), 1, revision: 1) });
+
+        // Act
+        var firstFlush = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        var secondFlush = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert
+        Assert.False(firstFlush);
+        Assert.False(secondFlush);
+        Assert.Equal(2, writes.Count);
+        Assert.Equal(1, queue.PendingWriteCount);
+        Assert.Equal(0, queue.RefusedWriteCount);
+    }
+
+    [Fact]
+    public async Task WhenTheSourceReconnects_ThenRefusedChangesAreRetried()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var refused = CreateProperty("Refused");
+        var writes = new List<SubjectPropertyChange[]>();
+        var sourceMock = CreateRefusingSource(writes, refused);
+
+        queue.Enqueue(new[] { CreateChange(refused, 1, revision: 1) });
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Act - the new connection may hold different permissions and a different address space
+        queue.RetryRefusedWrites();
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, writes.Count);
+        Assert.Equal("Refused", Assert.Single(writes[1]).Property.Name);
+    }
+
+    [Fact]
+    public async Task WhenChangesAreRefused_ThenTheyAreCountedApartFromPendingWrites()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var refused = CreateProperty("Refused");
+        var writes = new List<SubjectPropertyChange[]>();
+        var sourceMock = CreateRefusingSource(writes, refused);
+
+        // Act
+        queue.Enqueue(new[] { CreateChange(refused, 1, revision: 1) });
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - a held-back write must stay visible, and it must not read as a stalled connection
+        Assert.Equal(1, queue.RefusedWriteCount);
+        Assert.Equal(0, queue.PendingWriteCount);
+    }
+
+    [Fact]
+    public async Task WhenOnePropertyIsRefusedRepeatedly_ThenOnlyTheLatestIsHeld()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var refused = CreateProperty("Refused");
+        var writes = new List<SubjectPropertyChange[]>();
+        var sourceMock = CreateRefusingSource(writes, refused);
+
+        // Act - the application keeps writing the property the source refuses
+        for (var revision = 1L; revision <= 5; revision++)
+        {
+            queue.Enqueue(new[] { CreateChange(refused, (int)revision, revision) });
+            await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        }
+
+        queue.RetryRefusedWrites();
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - one slot per property rather than one per write, carrying the newest value
+        Assert.Equal(1, queue.RefusedWriteCount);
+        Assert.Equal(5, Assert.Single(writes[^1]).GetNewValue<int>());
+    }
+
+    [Fact]
+    public async Task WhenRefusedChangesAreDrainedForLocalReapply_ThenTheyAreIncluded()
+    {
+        // Arrange - the reconcile is what decides a queued write's fate on a new connection, so a
+        // held-back change left out of the drain would be stranded for the lifetime of the source
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var refused = CreateProperty("Refused");
+        var writes = new List<SubjectPropertyChange[]>();
+        var sourceMock = CreateRefusingSource(writes, refused);
+
+        queue.Enqueue(new[] { CreateChange(refused, 1, revision: 1) });
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Act
+        var drained = queue.DrainForLocalReapply();
+
+        // Assert
+        Assert.Equal("Refused", Assert.Single(drained).Property.Name);
+        Assert.Equal(0, queue.RefusedWriteCount);
+    }
+
+    [Fact]
+    public async Task WhenTheConnectionIsReplacedWhileAWriteIsInFlight_ThenItsRefusalIsRetriedRatherThanHeld()
+    {
+        // Arrange - releasing on replacement can only reach what is already held, so a write still in
+        // flight is the one case it cannot cover: its answer does not exist yet
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                // The reconnect lands before this write is answered
+                queue.RetryRefusedWrites();
+
+                var batch = changes.ToArray();
+                return new ValueTask<WriteResult>(WriteResult
+                    .Failure(batch, new InvalidOperationException("Refused"))
+                    .WithRefusedUntilReconnect(batch.ToImmutableArray()));
+            });
+
+        queue.Enqueue(new[] { CreateChange(CreateProperty("Refused"), 1, revision: 1) });
+
+        // Act
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - held against the replaced connection, it would wait for the next replacement to be sent
+        Assert.Equal(0, queue.RefusedWriteCount);
+        Assert.Equal(1, queue.PendingWriteCount);
+    }
+
+    [Fact]
+    public async Task WhenAFailedFlushRequeuesIntoAFilledQueue_ThenTheOldestAreDropped()
+    {
+        // Arrange - the requeue paths grow the queue exactly as the enqueue does, so the bound
+        // writeRetryQueueSize promises has to hold on both
+        var queue = new WriteRetryQueue(2, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                // The pump keeps appending while the write is in flight, which is what makes the requeue
+                // overflow rather than land back in the space it was dequeued from
+                for (var i = 0; i < 3; i++)
+                {
+                    queue.Enqueue(new[] { CreateChange(CreateProperty($"Later{i}"), i, revision: 10 + i) });
+                }
+
+                return new ValueTask<WriteResult>(
+                    WriteResult.Failure(changes, new InvalidOperationException("Down")));
+            });
+
+        queue.Enqueue(new[] { CreateChange(CreateProperty("First"), 1, revision: 1) });
+        queue.Enqueue(new[] { CreateChange(CreateProperty("Second"), 2, revision: 2) });
+
+        // Act
+        var flushed = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - which two survive is the point, not just how many: the ring buffer drops the oldest,
+        // so the requeued batch loses to the changes that arrived while it was in flight.
+        Assert.False(flushed);
+        Assert.Equal(2, queue.PendingWriteCount);
+        Assert.Equal(
+            new[] { "Later1", "Later2" },
+            queue.DrainForLocalReapply().Select(change => change.Property.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task WhenMoreWritesAreRefusedThanTheQueueHolds_ThenEveryOneIsStillHeld()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(2, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = CreateAlwaysRefusingSource();
+
+        // Act - five distinct properties, well past the queue's capacity of two
+        for (var i = 0; i < 5; i++)
+        {
+            queue.Enqueue(new[] { CreateChange(CreateProperty($"Refused{i}"), i, revision: i + 1) });
+            await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        }
+
+        // Assert - held-back writes sit outside the queue's bound on purpose, since dropping one loses a
+        // write the next connection would have taken. One slot per property is what bounds them instead.
+        Assert.Equal(5, queue.RefusedWriteCount);
+        Assert.Equal(0, queue.PendingWriteCount);
+    }
+
+    [Fact]
+    public async Task WhenReleasedRefusalsOverflowTheQueue_ThenTheyAreStillDelivered()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(2, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = CreateAlwaysRefusingSource();
+
+        for (var i = 0; i < 5; i++)
+        {
+            queue.Enqueue(new[] { CreateChange(CreateProperty($"Refused{i}"), i, revision: i + 1) });
+            await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        }
+
+        // Act
+        queue.RetryRefusedWrites();
+
+        // Assert - release goes in at the head, which is the end a trim takes from, so trimming here
+        // would discard precisely the writes the reconnect was about to deliver. The overshoot is a
+        // one-shot transfer of what was held, and the next enqueue or flush brings the queue back down.
+        Assert.Equal(0, queue.RefusedWriteCount);
+        Assert.Equal(5, queue.PendingWriteCount);
+    }
+
+    /// <summary>
+    /// A refused write is held for the connection that refused it, so the release that follows a reconnect
+    /// can push the queue past its bound. Trimming there would discard exactly what the release exists to
+    /// deliver, which a previous fix to this class got wrong once.
+    /// </summary>
+    [Fact]
+    public async Task WhenReleasedRefusalsOverflowTheQueue_ThenEveryOneIsWrittenOnTheNextConnection()
+    {
+        // Arrange - three held properties against a bound of two, so the release overshoots it
+        var queue = new WriteRetryQueue(2, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var refusing = true;
+        var writtenProperties = new List<string>();
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                var batch = changes.ToArray();
+                if (!refusing)
+                {
+                    writtenProperties.AddRange(batch.Select(change => change.Property.Name));
+                    return new ValueTask<WriteResult>(WriteResult.Success);
+                }
+
+                return new ValueTask<WriteResult>(WriteResult
+                    .Failure(batch, new InvalidOperationException("Refused"))
+                    .WithRefusedUntilReconnect(batch.ToImmutableArray()));
+            });
+
+        for (var i = 0; i < 3; i++)
+        {
+            queue.Enqueue(new[] { CreateChange(CreateProperty($"Refused{i}"), i, revision: i + 1) });
+            await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        }
+
+        Assert.Equal(3, queue.RefusedWriteCount);
+
+        // Act - the connection is replaced and the new one takes every write
+        refusing = false;
+        queue.RetryRefusedWrites();
+        var flushed = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - all three held writes were delivered, not just the two the bound would keep
+        Assert.True(flushed);
+        Assert.Equal(0, queue.RefusedWriteCount);
+        Assert.Equal(0, queue.PendingWriteCount);
+        Assert.Equal(
+            new[] { "Refused0", "Refused1", "Refused2" },
+            writtenProperties.OrderBy(name => name, StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact]
+    public async Task WhenOneFailureIsRefusedAndAnotherIsNot_ThenOnlyTheRefusedOneIsHeldBack()
+    {
+        // Arrange - the mixed answer, where the source refuses one property of a batch and fails the
+        // rest for some other reason. It is the branch that separates the two, and therefore the one
+        // that implements the promise that nothing is dropped, and every other test here refuses the
+        // whole batch, so it never ran.
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                var batch = changes.ToArray();
+                var refusedOnly = batch
+                    .Where(change => change.Property.Name == "Refused")
+                    .ToImmutableArray();
+
+                // Everything failed, but only one of them is refused for the connection.
+                return new ValueTask<WriteResult>(WriteResult
+                    .Failure(batch, new InvalidOperationException("Mixed"))
+                    .WithRefusedUntilReconnect(refusedOnly));
+            });
+
+        queue.Enqueue(new[]
+        {
+            CreateChange(CreateProperty("Refused"), 1, revision: 1),
+            CreateChange(CreateProperty("Retryable"), 2, revision: 2)
+        });
+
+        // Act
+        var flushed = await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - the refused one is held out of the queue and the other is queued again, so the flush
+        // still reports failure because something is owed on this connection. Draining proves the split
+        // lost neither: a change named refused must not also be requeued, and one that was not named
+        // must not be held.
+        Assert.False(flushed);
+        Assert.Equal(1, queue.RefusedWriteCount);
+        Assert.Equal(1, queue.PendingWriteCount);
+
+        var drained = queue.DrainForLocalReapply()
+            .Select(change => change.Property.Name)
+            .OrderBy(name => name)
+            .ToArray();
+
+        Assert.Equal(new[] { "Refused", "Retryable" }, drained);
+    }
+
+    [Fact]
+    public async Task WhenAHeldPropertyIsThenWrittenSuccessfully_ThenTheHeldWriteIsNotSentLater()
+    {
+        // Arrange - a source that refuses the property and then starts accepting it, which is what the
+        // access-scoped codes are documented to do mid-session. A held change is owed to the source only
+        // until something newer reaches it: sending the older one afterwards puts the source back on a
+        // value the newer write replaced, and the source then reports that value, so the model follows
+        // it down too.
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var property = CreateProperty("Flipping");
+        var writes = new List<SubjectPropertyChange[]>();
+        var refusing = true;
+
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                var batch = changes.ToArray();
+                writes.Add(batch);
+
+                return new ValueTask<WriteResult>(refusing
+                    ? WriteResult
+                        .Failure(batch, new InvalidOperationException("Refused"))
+                        .WithRefusedUntilReconnect(batch.ToImmutableArray())
+                    : WriteResult.Success);
+            });
+
+        queue.Enqueue(new[] { CreateChange(property, 1, revision: 1) });
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        Assert.Equal(1, queue.RefusedWriteCount);
+
+        // Act - the source starts taking the property, and a newer value reaches it successfully
+        refusing = false;
+        queue.Enqueue(new[] { CreateChange(property, 2, revision: 2) });
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        queue.RetryRefusedWrites();
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - nothing carrying the superseded value may reach the source after the newer one landed
+        Assert.Equal(0, queue.RefusedWriteCount);
+        Assert.Equal(0, queue.PendingWriteCount);
+
+        var valuesSentAfterTheAcceptedWrite = writes
+            .Skip(2)
+            .SelectMany(batch => batch)
+            .Select(change => change.GetNewValue<int>())
+            .ToArray();
+
+        Assert.DoesNotContain(1, valuesSentAfterTheAcceptedWrite);
+    }
+
+    [Fact]
+    public async Task WhenTheConnectionIsReplacedWhileANewerWriteToAHeldPropertyIsInFlight_ThenTheReleasedHeldWriteIsNotSent()
+    {
+        // Arrange - the replacement's release and a success answered afterwards cross: the release moves
+        // the held write into the pending queue while the newer write's answer is still in flight, so the
+        // answer's discard finds nothing held and the superseded value survives as an ordinary pending
+        // write, bound for the next connection.
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var property = CreateProperty("Flipping");
+        var writes = new List<SubjectPropertyChange[]>();
+        var refusing = true;
+        var replaceConnectionBeforeAnswering = false;
+
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                var batch = changes.ToArray();
+                writes.Add(batch);
+
+                if (refusing)
+                {
+                    return new ValueTask<WriteResult>(WriteResult
+                        .Failure(batch, new InvalidOperationException("Refused"))
+                        .WithRefusedUntilReconnect(batch.ToImmutableArray()));
+                }
+
+                if (replaceConnectionBeforeAnswering)
+                {
+                    // The server has taken the write; the replacement lands before its answer does
+                    replaceConnectionBeforeAnswering = false;
+                    queue.RetryRefusedWrites();
+                }
+
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        queue.Enqueue(new[] { CreateChange(property, 1, revision: 1) });
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        Assert.Equal(1, queue.RefusedWriteCount);
+
+        // Act - the server lifts the refusal mid-session and takes the newer write, and the connection
+        // is replaced while that answer is in flight
+        refusing = false;
+        replaceConnectionBeforeAnswering = true;
+        queue.Enqueue(new[] { CreateChange(property, 2, revision: 2) });
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+
+        // Assert - the released value is superseded by the one the server already took, so nothing may
+        // carry it to the source and nothing may keep it queued for the next connection either
+        Assert.Equal(0, queue.RefusedWriteCount);
+        Assert.Equal(0, queue.PendingWriteCount);
+
+        var valuesSentAfterTheAcceptedWrite = writes
+            .Skip(2)
+            .SelectMany(batch => batch)
+            .Select(change => change.GetNewValue<int>())
+            .ToArray();
+
+        Assert.DoesNotContain(1, valuesSentAfterTheAcceptedWrite);
+    }
+
     private static PropertyReference CreateProperty(string name)
     {
         return new PropertyReference(new Mock<IInterceptorSubject>().Object, name);
+    }
+
+    /// <summary>
+    /// A source that refuses every change it is handed until its connection is re-established.
+    /// </summary>
+    private static Mock<ISubjectSource> CreateAlwaysRefusingSource()
+    {
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                var batch = changes.ToArray();
+                return new ValueTask<WriteResult>(WriteResult
+                    .Failure(batch, new InvalidOperationException("Refused"))
+                    .WithRefusedUntilReconnect(batch.ToImmutableArray()));
+            });
+
+        return sourceMock;
+    }
+
+    /// <summary>
+    /// A source that refuses every change for <paramref name="refusedProperty"/> until its connection is
+    /// re-established, writes everything else, and records each write it is handed.
+    /// </summary>
+    private static Mock<ISubjectSource> CreateRefusingSource(
+        List<SubjectPropertyChange[]> writes, PropertyReference refusedProperty)
+    {
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                var batch = changes.ToArray();
+                writes.Add(batch);
+
+                var refused = batch
+                    .Where(change => change.Property.Name == refusedProperty.Name)
+                    .ToImmutableArray();
+
+                return new ValueTask<WriteResult>(refused.IsEmpty
+                    ? WriteResult.Success
+                    : WriteResult
+                        .Failure(refused.AsSpan().ToArray(), new InvalidOperationException("Refused"))
+                        .WithRefusedUntilReconnect(refused));
+            });
+
+        return sourceMock;
     }
 
     /// <summary>

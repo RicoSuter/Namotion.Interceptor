@@ -92,12 +92,18 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             // readable after Dispose.
             _ = metrics.OutboundRetries.Register(
                 () => writeRetryQueue.PendingWriteCount, capacity: writeRetryQueueSize);
+
+            // Capacity null deliberately: the held set sits outside writeRetryQueueSize. The field
+            // comment on WriteRetryQueue._refusedWrites is canonical for what bounds it instead.
+            _ = metrics.HeldWrites.Register(
+                () => writeRetryQueue.RefusedWriteCount, capacity: null);
         }
         else
         {
             // Registered as disabled rather than left unregistered: an unregistered QueueMetrics
             // reports a null capacity, which reads as unbounded, the opposite of the truth.
             _ = metrics.OutboundRetries.Register(static () => 0, capacity: 0);
+            _ = metrics.HeldWrites.Register(static () => 0, capacity: 0);
         }
 
         _propertyWriter = new SubjectPropertyWriter(this, logger, metrics.InboundBuffer);
@@ -108,9 +114,9 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// </summary>
     /// <remarks>
     /// A derived source must not register on <see cref="Diagnostics.ConnectorMetrics.OutboundChanges"/>,
-    /// <see cref="SourceMetrics.OutboundRetries"/> or <see cref="SourceMetrics.InboundBuffer"/>: this
-    /// base owns all three, and a second live registration makes
-    /// <see cref="Diagnostics.QueueMetrics.Register"/> throw.
+    /// <see cref="SourceMetrics.OutboundRetries"/>, <see cref="SourceMetrics.HeldWrites"/> or
+    /// <see cref="SourceMetrics.InboundBuffer"/>: this base owns all four, and a second live
+    /// registration makes <see cref="Diagnostics.QueueMetrics.Register"/> throw.
     /// </remarks>
     protected new SourceMetrics Metrics { get; }
 
@@ -386,12 +392,20 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         // Write current changes
         try
         {
+            // Read before the write is issued, since the connection can be replaced while it is in flight.
+            var connectionGeneration = WriteRetryQueue.ConnectionGeneration;
             var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+
+            // This is the path a write to a held property takes, because holding it keeps the queue empty
+            // and the flush above therefore short-circuits. A property that goes through here has to stop
+            // being held, or the older value is delivered on the next connection and replaces it.
+            WriteRetryQueue.DiscardHeldWritesFor(changes.Span, result.FailedChanges, connectionGeneration);
+
             if (!result.IsFullySuccessful)
             {
                 _logger.LogWarning(result.Error, "Failed to write {Count} changes to source, queuing for retry.",
                     result.FailedChanges.Length);
-                WriteRetryQueue.Enqueue(result.FailedChanges.AsMemory());
+                WriteRetryQueue.EnqueueFailures(in result, connectionGeneration);
             }
         }
         catch (OperationCanceledException)
@@ -675,7 +689,22 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     protected void ReportConnectionLost()
     {
         _propertyWriter.InvalidateGeneration();
+        RetryRefusedWrites();
         TransitionStateTo(SourceState.Synchronizing);
+    }
+
+    /// <summary>
+    /// Puts every write the source refused for the lifetime of a connection back in line for retry.
+    /// Call it whenever the connection this source talks over is replaced.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ReportConnectionLost"/> already does this, which covers a connector that only reports
+    /// the outage. A connector whose connection can also be replaced without an outage it reported has
+    /// to call this itself, or its refusals outlive the connection they were scoped to.
+    /// </remarks>
+    protected void RetryRefusedWrites()
+    {
+        WriteRetryQueue?.RetryRefusedWrites();
     }
 
     /// <summary>

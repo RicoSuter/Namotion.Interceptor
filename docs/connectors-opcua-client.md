@@ -663,6 +663,14 @@ Round-trip identity is preserved for the common cross-parent DAG: if the server-
 
 When a batch write to the OPC UA server partially fails, the client reports an `OpcUaWriteException` stating how many of the attempted writes failed; the refused changes themselves are enumerated in the returned `WriteResult`, which is what the retry queue restores. The write retry queue (see [Resilience](#write-retry-queue-during-disconnection)) handles transient failures automatically during disconnection, but writes that fail while connected surface this exception.
 
+### Writes refused for a session
+
+Nine status codes mark a Write refusal as one that re-sending the identical change cannot fix. `BadAttributeIdInvalid`, `BadTypeMismatch` and `BadWriteNotSupported` are permanent by spec. `BadNodeIdUnknown`, `BadUserAccessDenied` and `BadNotWritable` follow from address-space membership, role permissions and the `AccessLevel` attribute, which the server keeps for a session but is also free to change mid-session; a write to the same property that then succeeds discards the held one, so a permission granted mid-session is not undone by an old held value. `BadNodeIdInvalid` and `BadIndexRangeInvalid` are decided by the request itself. `BadSecurityModeInsufficient` is answered per node, from the node's access restrictions checked against the secure channel's security mode, which only a reconnect can change. Changes refused with one of these are held back rather than re-sent on every write cycle, and released back to the queue on the next session, which can bring a different address space and different permissions. See [Connectors: Writes Refused Until Reconnect](connectors.md#writes-refused-until-reconnect) for why re-sending them stalls the whole write path.
+
+Nothing is dropped and nothing is configurable: a held-back change is still owed to the server. The session transition does not send it, it releases it into the pending retry queue, and that queue is flushed the next time the pump hands the source a change (or by the reconcile a full pump-level reconnect runs). On an idle model a released write can therefore sit undelivered until the next local write of any property; until then it counts in `Diagnostics.OutboundRetries.Depth` and no longer in `HeldWrites.Depth`. Refused nodes are named at warning level, throttled to one line per five seconds; on the pump path the warning quiets by itself, because a held write is not re-sent. The warning states what the server answered rather than what became of the writes, because holding is decided downstream of it: the retry queue re-queues a refusal answered over a session already replaced, holds nothing when write buffering is disabled, and never holds a transaction write, since a refused transaction write is rolled back by its transaction instead, while a successful one discards any held write it supersedes. `Diagnostics.HeldWrites.Depth` reports how many changes are currently held back.
+
+The list is deliberately not the one `OpcUaStatusCodeClassifier` uses for subscriptions, which drops a monitored item and forfeits its in-session recovery routes and therefore excludes the access-scoped codes.
+
 ## Diagnostics
 
 `IOpcUaSubjectClientSource.Diagnostics` exposes a live facade of type `OpcUaClientDiagnostics`. Resolve it once and poll (see [Resolving the Client Source](#resolving-the-client-source)).
@@ -682,6 +690,8 @@ This client measures both throughput directions, so `Throughput.IncomingPerSecon
 | `SubscriptionCount` | Active OPC UA subscriptions. |
 | `MonitoredItemCount` | Monitored items across all subscriptions. |
 | `SkippedBadSubscriptionValues` | Values delivered by a subscription that were skipped because the server marked them Bad. The property keeps its last value, so a rising count is what tells a faulted node from a quiet one. The polled equivalent is `Polling.TotalFailedReads`, and like it this counts from the moment the source started listening, surviving a reconnection but not a restart. |
+
+Writes the server refused for the session are not client-specific: the shared `HeldWrites` block reports them, and a depth that stays above zero across reconnections is a node the server will not take. See [Writes refused for a session](#writes-refused-for-a-session).
 
 `Reconnects` is the reconnection history. Every counter is monotonic since `StartTime`, so a reconnect storm is visible as `TotalAttempts` climbing without `TotalSucceeded` keeping up. `LastConnectionTime` is the exception listed first below: it is not a counter and deliberately survives the epoch reset, because it records a discrete past event rather than an amount accumulated during the run.
 
