@@ -104,7 +104,7 @@ public sealed class WebSocketSubjectServer : SubjectConnectorBase, IFaultInjecta
                         Metrics.MarkOperational();
 
                         using var changeQueueProcessor = _handler.CreateChangeQueueProcessor(
-                            _logger, Metrics.OutboundChanges.AddDropped);
+                            _logger, Metrics.OutboundChanges.CreateDropReporter());
 
                         // Declared after the processor so it is released first, which is what lets the
                         // next restart register its own: a second Register while one is still live throws.

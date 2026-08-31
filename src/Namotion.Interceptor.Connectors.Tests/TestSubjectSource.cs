@@ -16,8 +16,7 @@ public sealed class TestSubjectSource : SubjectSourceBase
         ILogger logger,
         TimeSpan? bufferTime = null,
         TimeSpan? retryTime = null,
-        int writeRetryQueueSize = 1000,
-        TimeSpan? teardownFlushTimeout = null)
+        int writeRetryQueueSize = 1000)
         : base(context, logger, bufferTime, retryTime, writeRetryQueueSize)
     {
         _subject = subject;

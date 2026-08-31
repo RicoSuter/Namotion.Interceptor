@@ -143,14 +143,6 @@ public class MqttClientConfiguration
     public int WriteRetryQueueSize { get; init; } = 1000;
 
     /// <summary>
-    /// Gets or sets how long a stop may block while the last buffered batch is written. Connectors stop
-    /// one after another under the host's shared <c>HostOptions.ShutdownTimeout</c>, 30 seconds by
-    /// default, so enough of them blocked on unreachable endpoints still exhaust it. Zero discards the
-    /// batch instead.
-    /// </summary>
-    public TimeSpan TeardownFlushTimeout { get; init; } = ChangeQueueProcessor.DefaultTeardownFlushTimeout;
-    
-    /// <summary>
     /// Gets or sets the value converter for serialization/deserialization. Default is JSON.
     /// </summary>
     public IMqttValueConverter ValueConverter { get; init; } = new JsonMqttValueConverter();
@@ -212,11 +204,6 @@ public class MqttClientConfiguration
         if (WriteRetryQueueSize < 0)
         {
             throw new ArgumentException($"WriteRetryQueueSize must be non-negative, got: {WriteRetryQueueSize}", nameof(WriteRetryQueueSize));
-        }
-
-        if (TeardownFlushTimeout < TimeSpan.Zero)
-        {
-            throw new ArgumentException($"TeardownFlushTimeout must be non-negative, got: {TeardownFlushTimeout}", nameof(TeardownFlushTimeout));
         }
 
         if (ValueConverter is null)

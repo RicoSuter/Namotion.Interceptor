@@ -50,7 +50,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         TimeSpan? bufferTime = null,
         TimeSpan? retryTime = null,
         int writeRetryQueueSize = 1000,
-        TimeSpan? teardownFlushTimeout = null,
         ThroughputCounter? incomingThroughput = null,
         ThroughputCounter? outgoingThroughput = null)
         : this(context, logger, bufferTime, retryTime, writeRetryQueueSize,

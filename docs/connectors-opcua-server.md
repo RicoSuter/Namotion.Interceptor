@@ -100,11 +100,12 @@ await server.StartAsync(cancellationToken);
 | `ValueConverter` | `OpcUaValueConverter` | *required* | Converts between C# properties and OPC UA values |
 | `Mapper` | `IPropertyMapper<OpcUaPropertyMapping>` | OpcUaCompositeMapper | Maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
 | `BufferTime` | `TimeSpan?` | 8ms | Time window to buffer incoming property changes before publishing to clients |
-| `TeardownFlushTimeout` | `TimeSpan` | 5s | Max wait for the buffered outbound batch on stop, 0 to discard it (see [Flushing On Stop](connectors.md#flushing-on-stop)) |
 | `TelemetryContext` | `ITelemetryContext` | NullTelemetryContext | Telemetry integration for logging and diagnostics |
 | `AutoAcceptUntrustedCertificates` | `bool` | false | Accept untrusted client certificates (testing/development only) |
 | `CleanCertificateStore` | `bool` | true | Remove old certificates from the application certificate store on startup |
 | `CertificateStoreBasePath` | `string` | "pki" | Base directory for certificate stores. Change to isolate stores for parallel test execution |
+
+Final outbound delivery on stop uses the internal five-second safety bound described in [Flushing On Stop](connectors.md#flushing-on-stop). It cannot be configured per connector.
 
 ## Security
 

@@ -15,12 +15,6 @@ public class ChangeQueueProcessor : IDisposable
 {
     internal static readonly TimeSpan TeardownFlushBound = TimeSpan.FromSeconds(5);
 
-    /// <summary>
-    /// The teardown flush bound a processor uses when none is given. Public so a connector configuration
-    /// states this default rather than restating the value.
-    /// </summary>
-    public static readonly TimeSpan DefaultTeardownFlushTimeout = TeardownFlushBound;
-
     private const int ClosedDelivery = -1;
 
     private readonly Func<PropertyReference, bool> _propertyFilter;
@@ -102,17 +96,11 @@ public class ChangeQueueProcessor : IDisposable
     /// <param name="dropHandler">Optional handler invoked only when bounded-queue overflow drops
     /// changes. Use this to report the count to queue diagnostics without adding work to successful
     /// enqueue or dequeue operations.</param>
-    /// <param name="teardownFlushTimeout">How long the teardown drain may block, or null for
-    /// <see cref="DefaultTeardownFlushTimeout"/>. Connectors stop one after another under the host's
-    /// shared <c>HostOptions.ShutdownTimeout</c>, 30 seconds by default, so enough of them blocked on
-    /// unreachable endpoints still exhaust it. <see cref="TimeSpan.Zero"/> discards the batch
-    /// instead.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
     /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
     /// the first flush, where it would end delivery for this processor's lifetime. Also thrown when
     /// <paramref name="maxQueueDepth"/> is zero or negative and <paramref name="bufferTime"/> is
-    /// greater than zero, since a bound has to leave room for at least one change, and when
-    /// <paramref name="teardownFlushTimeout"/> is negative.</exception>
+    /// greater than zero, since a bound has to leave room for at least one change.</exception>
     public ChangeQueueProcessor(
         object? source,
         IInterceptorSubjectContext context,
@@ -122,8 +110,7 @@ public class ChangeQueueProcessor : IDisposable
         TimeSpan? bufferTime,
         int? maxQueueDepth,
         ILogger logger,
-        Action<long>? dropHandler = null,
-        TimeSpan? teardownFlushTimeout = null)
+        Action<long>? dropHandler = null)
     {
         _source = source;
         _propertyFilter = propertyFilter;
@@ -137,7 +124,6 @@ public class ChangeQueueProcessor : IDisposable
         try
         {
             ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
-            ValidateTeardownFlushTimeout(teardownFlushTimeout);
 
             _maxQueueDepth = maxQueueDepth;
             _deliveryRule = ValidateRule(deliveryRule);
@@ -167,7 +153,6 @@ public class ChangeQueueProcessor : IDisposable
         int? maxQueueDepth,
         ILogger logger,
         Action<long>? dropHandler = null,
-        TimeSpan? teardownFlushTimeout = null,
         bool writeHandlerOwnsChanges = false,
         Action? terminalHandler = null,
         Func<CancellationToken, ValueTask>? completionHandler = null)
@@ -187,7 +172,6 @@ public class ChangeQueueProcessor : IDisposable
         try
         {
             ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
-            ValidateTeardownFlushTimeout(teardownFlushTimeout);
 
             _maxQueueDepth = maxQueueDepth;
             _subscription = subscription;
@@ -212,19 +196,6 @@ public class ChangeQueueProcessor : IDisposable
                 "queue, or a buffer time of zero for the immediate path, which writes each change as it is " +
                 "dequeued and buffers nothing.");
         }
-    }
-
-    internal static TimeSpan ValidateTeardownFlushTimeout(TimeSpan? teardownFlushTimeout)
-    {
-        var timeout = teardownFlushTimeout ?? DefaultTeardownFlushTimeout;
-        if (timeout < TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(teardownFlushTimeout), timeout,
-                "A teardown flush timeout must not be negative. Pass TimeSpan.Zero to skip the drain " +
-                "and discard whatever is still buffered when the processor stops.");
-        }
-
-        return timeout;
     }
 
     // Rejects every unnamed value, not just zero: the delivery decision throws on an unknown rule from
