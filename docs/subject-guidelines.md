@@ -156,6 +156,31 @@ public partial class John : IMale
 
 Attributes belong on the interface member, not the implementation. See [Interface Default Properties](generator.md#interface-default-properties) in the generator documentation.
 
+### Lazily Self-Initialising Properties Holding Subjects
+
+A property that is not `partial` is not intercepted, so it carries no ownership edge even when its type holds subjects.
+
+```csharp
+[InterceptorSubject]
+public partial class Machine
+{
+    // ❌ Compiles and reads fine, tracks nothing. Not partial, so not intercepted, so no
+    // ownership edge: the axes are never attached, never registered and never given a lifecycle
+    // callback, the getter is not even called during attach, and nothing warns.
+    // public Axis[] Axes => _axes ??= [new Axis()];
+
+    // ✅ Declare it partial and fill it in the constructor
+    public partial Axis[] Axes { get; set; }
+
+    public Machine()
+    {
+        Axes = [new Axis()];
+    }
+}
+```
+
+A generated `partial` property cannot be lazy either, because the generator writes the getter. See [Structural Properties and Lazy Getters](tracking.md#structural-properties-and-lazy-getters) for the two shapes where a lazy getter is supported, and why `??=` is required there rather than merely allowed.
+
 ### Abstract Properties
 
 Abstract properties can't be partial.

@@ -424,7 +424,7 @@ The lifecycle interceptor is fully thread-safe. Multiple threads can concurrentl
 
 2. **Must be fast**: The lock is held during invocation, so blocking operations will degrade performance across the entire system. Keep handlers to prompt in-memory bookkeeping such as dictionary operations.
 
-3. **Dispatch long-running work**: If you need to perform I/O, network calls, or other slow operations, dispatch to an external queue and process asynchronously:
+3. **Dispatch long-running work, and never wait for it**: If you need I/O, network calls or other slow operations, hand them to an external queue and return. Waiting for the dispatched work is what turns a slow handler into a deadlock, see [Never Wait for Topology Work on Another Thread](#never-wait-for-topology-work-on-another-thread) below.
 
 ```csharp
 // Good: Fast dispatch to queue
@@ -433,16 +433,104 @@ lifecycleInterceptor.SubjectDetaching += change =>
     _cleanupQueue.Enqueue(change.Subject); // Returns immediately
 };
 
-// Bad: Blocking I/O in handler
+// Bad: the event is an Action, so this is an async void lambda. It returns at the first await
+// and the rest runs later on a pool thread, outside the lifecycle's ordering, where a thrown
+// exception has nobody to observe it.
 lifecycleInterceptor.SubjectDetaching += async change =>
 {
-    await database.DeleteAsync(change.Subject); // Blocks the lock!
+    await database.DeleteAsync(change.Subject);
 };
 ```
 
 4. **Thread-safe operations**: Use thread-safe data structures like `ConcurrentDictionary` with atomic operations (`TryRemove`, `TryAdd`) rather than check-then-act patterns.
 
 > **Tip**: Multiple handlers can be ordered using `[RunsBefore]`, `[RunsAfter]`, `[RunsFirst]`, and `[RunsLast]` attributes. See [Service Ordering](interceptor.md#service-ordering) for details.
+
+### Never Wait for Topology Work on Another Thread
+
+Topology changes on one context are serialized behind a single gate, and that gate is held across the whole write chain, every lifecycle callback and every structural getter the lifecycle reads. Code running inside one of those must not hand **structural** work to another thread and then block waiting for that thread: the worker cannot take the gate until the enclosing operation finishes, and the operation cannot finish until the worker returns.
+
+Five places run inside the gate and can do it:
+
+- a downstream `IWriteInterceptor`
+- an `ILifecycleHandler`
+- an `IPropertyLifecycleHandler`
+- a `SubjectAttached` or `SubjectDetaching` handler
+- a structural property's getter, which the lifecycle reads while attaching the subject
+
+Four of the five deadlock on older versions as well; only the downstream write interceptor is new. This is a long-standing rule being written down, not a new restriction.
+
+What the rule does not cover:
+
+- **Scalar writes.** Only structural properties, the ones whose declared type can hold subjects, take the gate. Dispatching a scalar write to another thread and waiting for it is fine.
+- **Same-thread re-entry.** The gate is reentrant, so re-entering the same context on the same thread stays legal.
+- **Fetching in parallel.** Fetch on as many threads as you like, then assign on the thread already inside the operation, or after it returns. Parallelising the assignments themselves never bought anything anyway: they serialize on the gate whichever thread runs them.
+
+A waiter that finds the gate holder blocked throughout a short window throws `LifecycleContractViolationException` after about 200 ms, naming the pattern and the alternative. Behind it sits a 15-second bound for a wait that cannot be observed, such as one inside unmanaged code, with a different message that points at a slow callback rather than at a dispatch. Older versions hang silently instead.
+
+```csharp
+// Wrong: the assignment inside Task.Run needs the gate this interceptor is holding, so the
+// worker waits for the interceptor and the interceptor waits for the worker.
+public class LoadAxesInterceptor : IWriteInterceptor
+{
+    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    {
+        next(ref context);
+
+        if (context.Property.Name == nameof(Machine.Controller) &&
+            context.Property.Subject is Machine machine)
+        {
+            // The worker throws LifecycleContractViolationException after about 200 ms,
+            // and Wait() rethrows it here wrapped in an AggregateException.
+            Task.Run(() => machine.Axes = BrowseAxes(machine)).Wait();
+        }
+    }
+}
+```
+
+```csharp
+// Right: hand the work off and let the write finish. The worker browses and assigns once the
+// gate is free, which is also the only place the browse itself may block.
+public class LoadAxesInterceptor : IWriteInterceptor
+{
+    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    {
+        next(ref context);
+
+        if (context.Property.Name == nameof(Machine.Controller) &&
+            context.Property.Subject is Machine machine)
+        {
+            _pendingBrowses.Enqueue(machine); // returns immediately
+        }
+    }
+}
+```
+
+A structural getter is the same trap in a shape that does not look like a handler at all, because the lifecycle reads it while holding the gate. This is the [dynamic property](registry.md#add-properties) form, the other being a hand-written subject supplying its own metadata:
+
+```csharp
+// Wrong: the lifecycle reads this getter while attaching the subject. If LoadAxesAsync writes
+// structural properties on a worker this deadlocks; if it merely blocks, it breaks the same
+// "fast, waits on nothing" contract and a concurrent write reports it.
+registered.AddProperty("Axes", typeof(Axis[]),
+    getValue: _ => _axes ??= LoadAxesAsync().Result,
+    setValue: (_, value) => _axes = (Axis[])value!);
+
+// Right: load first, register second. The getter only hands back what is already there.
+_axes = await LoadAxesAsync();
+registered.AddProperty("Axes", typeof(Axis[]),
+    getValue: _ => _axes,
+    setValue: (_, value) => _axes = (Axis[])value!);
+```
+
+Fetching in parallel and assigning afterwards is fine and is what most callers want, as long as neither half runs inside a lifecycle operation:
+
+```csharp
+var axes = await Task.WhenAll(controllers.Select(BrowseAxesAsync));
+machine.Axes = [.. axes.SelectMany(a => a)];
+```
+
+> **Internal design:** For why this cannot be rejected up front and how the report is decided, see [Lock Ordering](design/tracking-lifecycle.md#lock-ordering).
 
 ### Reference Counting
 
@@ -518,6 +606,62 @@ If `Root.A = null`:
 - B and C detach as well, because the only thing keeping them attached is each other
 
 Attachment follows reachability from a root rather than a reference count, so a closed cycle with no way in is released like any other unreachable subgraph. A subject that was explicitly attached stays until it is explicitly detached.
+
+### Structural Properties and Lazy Getters
+
+A property contributes to the object graph only when it is **intercepted** and its declared type can hold subjects. Interception exists only for `partial` properties and for dynamic properties added through the registry, so this tracks nothing at all:
+
+```csharp
+[InterceptorSubject]
+public partial class Car
+{
+    private Tire[]? _tires;
+
+    // Not partial, so not intercepted, so no ownership edge. The tires are never attached, never
+    // registered and never given a lifecycle callback, the getter is not even called during
+    // attach, and nothing warns.
+    public Tire[] Tires => _tires ??= [new Tire()];
+}
+```
+
+This shape is unsupported, and it fails silently: there is no exception and no diagnostic. Declare the property `partial` and fill it in the constructor instead:
+
+```csharp
+[InterceptorSubject]
+public partial class Car
+{
+    public partial Tire[] Tires { get; set; }
+
+    public Car()
+    {
+        Tires = [new Tire()];
+    }
+}
+```
+
+A generated `partial` property cannot be lazy in the first place, because the generator writes the getter. Two shapes do supply a getter of their own and can therefore be lazy: a hand-written `IInterceptorSubject` that builds its own `SubjectPropertyMetadata` (see [hand-written base classes](generator.md#hand-written-base-classes-and-subclasses)) and a dynamic property registered through [`AddProperty`](registry.md#add-properties).
+
+**Where a lazy structural getter is supported, `??=` is required rather than merely allowed.** The framework reads a structural getter more than once per operation: twice when the subject enters the graph, once more on every structural write to that property, and twice again on each re-attach. A getter that answers with a fresh graph each call is a contract violation.
+
+```csharp
+// Correct: the same instance on every read.
+registered.AddProperty("Tires", typeof(Tire[]),
+    getValue: _ => _tires ??= [new Tire()],
+    setValue: (_, value) => _tires = (Tire[])value!);
+
+// Wrong: a new graph on every read.
+registered.AddProperty("Tires", typeof(Tire[]),
+    getValue: _ => new[] { new Tire() },
+    setValue: (_, value) => _tires = (Tire[])value!);
+```
+
+Caching from inside the getter is safe, including when the getter writes its value back through the property's own intercepted setter: the first read happens during the attach's discovery pass, before the subject is attached and before any callback scope is open, so the store is invisible to interception.
+
+An unstable getter costs a permanently stranded subject. Discovery claims the first value and seeding commits the second, so the first is left unregistered, with a reference count of 0, attached to the context so it cannot join another graph, and unreachable so nothing can ever detach it. No exception is raised.
+
+Do not create the value lazily from a lifecycle callback either: a callback may not write a structural property and throws `LifecycleContractViolationException` if it tries. Construction time is the supported place for a default child.
+
+> **Internal design:** For the exact read points and what the stranded state looks like in the graph, see [Structural Getters](design/tracking-lifecycle.md#structural-getters).
 
 ## Parent-Child Relationship Tracking
 

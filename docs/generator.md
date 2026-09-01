@@ -160,6 +160,8 @@ public partial Room? Current { get; set; }       // fine: the backing field is t
 
 With `WithDerivedPropertyChangeDetection()` enabled, the lazily constructing shape throws `LifecycleContractViolationException` when the getter is evaluated. Without it nothing evaluates the getter, so the subject is silently untracked instead. Scalar derived properties are unaffected either way.
 
+The same lazily constructing shape without `[Derived]` is quieter still: a non-partial property is not intercepted at all, so nothing ever evaluates it and no rule can reject it. See [Structural Properties and Lazy Getters](tracking.md#structural-properties-and-lazy-getters) for where a lazy getter is supported and why it has to cache.
+
 ### Interface Default Properties
 
 The generator automatically discovers and includes interface default implementations in the property metadata:
