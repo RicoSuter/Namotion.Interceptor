@@ -230,27 +230,24 @@ public class ChangeQueueProcessor : IDisposable
         var processingTask = Task.Run(
             () => ProcessCoreAsync(processingTokenSource.Token, teardownTokenSource.Token),
             CancellationToken.None);
-        var externallyCancelled = false;
-        try
+        // The wait handle is signalled before token callbacks run, so a later blocking callback cannot delay teardown.
+        var cancellationSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellationWait = ThreadPool.RegisterWaitForSingleObject(
+            cancellationToken.WaitHandle,
+            static (state, _) => ((TaskCompletionSource)state!).TrySetResult(),
+            cancellationSignal,
+            Timeout.InfiniteTimeSpan,
+            executeOnlyOnce: true);
+        var completedTask = await Task.WhenAny(processingTask, cancellationSignal.Task).ConfigureAwait(false);
+        cancellationWait.Unregister(null);
+        if (completedTask == processingTask)
         {
-            await processingTask.WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException exception) when (
-            cancellationToken.IsCancellationRequested && exception.CancellationToken == cancellationToken)
-        {
-            externallyCancelled = true;
-        }
-        finally
-        {
-            if (!externallyCancelled)
+            try { await processingTask.ConfigureAwait(false); }
+            finally
             {
                 processingTokenSource.Dispose();
                 teardownTokenSource.Dispose();
             }
-        }
-
-        if (!externallyCancelled)
-        {
             return;
         }
 
@@ -621,13 +618,10 @@ public class ChangeQueueProcessor : IDisposable
     public void Dispose()
     {
         var previousState = Interlocked.Exchange(ref _disposed, DisposedState);
-        if (previousState == DisposedState)
+        if (previousState != DisposedState)
         {
-            InvokeTerminalHandlerOnce();
-            return;
+            _ownedSubscription?.Dispose();
         }
-
-        _ownedSubscription?.Dispose();
 
         ReportTerminalDrops(CloseDeliveryAndDrain());
         InvokeTerminalHandlerOnce();

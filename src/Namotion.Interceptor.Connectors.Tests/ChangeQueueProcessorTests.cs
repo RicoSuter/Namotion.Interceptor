@@ -795,12 +795,6 @@ public class ChangeQueueProcessorTests
         string? newValue,
         long revision = 0)
     {
-        // Use reflection to access the private _changes queue
-        var changesField = typeof(ChangeQueueProcessor)
-            .GetField("_changes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-        var queue = (System.Collections.Concurrent.ConcurrentQueue<SubjectPropertyChange>)changesField!.GetValue(processor)!;
-
         var change = SubjectPropertyChange.Create(
             property,
             ChangeOrigin.Local,
@@ -810,7 +804,15 @@ public class ChangeQueueProcessorTests
             newValue,
             revision);
 
-        queue.Enqueue(change);
+        GetChanges(processor).Enqueue(change);
+    }
+
+    private static ConcurrentQueue<SubjectPropertyChange> GetChanges(ChangeQueueProcessor processor)
+    {
+        var changesField = typeof(ChangeQueueProcessor)
+            .GetField("_changes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        return (ConcurrentQueue<SubjectPropertyChange>)changesField!.GetValue(processor)!;
     }
 
     private static async Task TriggerFlushAsync(ChangeQueueProcessor processor)
@@ -1384,6 +1386,99 @@ public class ChangeQueueProcessorTests
     }
 
     [Fact]
+    public async Task WhenTwoDisposalsOverlap_ThenEachReturnClosesDirectAdmission()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var filterEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFilter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completionReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var monitorHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowSecondDispose = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondDisposeReturned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseMonitor = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writeHandlerCalls = 0;
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            subscription: subscription,
+            propertyFilter: _ =>
+            {
+                filterEntered.TrySetResult();
+                releaseFilter.Task.GetAwaiter().GetResult();
+                return true;
+            },
+            writeHandler: (_, _) =>
+            {
+                Interlocked.Increment(ref writeHandlerCalls);
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            completionHandler: _ =>
+            {
+                completionReached.TrySetResult();
+                return ValueTask.CompletedTask;
+            });
+
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() =>
+        {
+            releaseFilter.TrySetResult();
+            allowSecondDispose.TrySetResult();
+            releaseMonitor.TrySetResult();
+        });
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        subject.FirstName = "late";
+        await filterEntered.Task.WaitAsync(TestTimeout);
+
+        var monitorOwner = Task.Run(() =>
+        {
+            lock (GetChanges(processor))
+            {
+                monitorHeld.TrySetResult();
+                allowSecondDispose.Task.GetAwaiter().GetResult();
+                processor.Dispose();
+                secondDisposeReturned.TrySetResult();
+                releaseMonitor.Task.GetAwaiter().GetResult();
+            }
+        });
+        await monitorHeld.Task.WaitAsync(TestTimeout);
+        var firstDispose = Task.Run(processor.Dispose);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => IsDisposed(processor),
+            message: "The first disposer should publish terminal state before admission closes.");
+        var cancelling = Task.CompletedTask;
+
+        try
+        {
+            // Act
+            allowSecondDispose.TrySetResult();
+            await secondDisposeReturned.Task.WaitAsync(TestTimeout);
+            releaseFilter.TrySetResult();
+            cancelling = cancellation.CancelAsync();
+            await completionReached.Task.WaitAsync(TestTimeout);
+
+            // Assert
+            Assert.Equal(0, Volatile.Read(ref writeHandlerCalls));
+        }
+        finally
+        {
+            releaseFilter.TrySetResult();
+            allowSecondDispose.TrySetResult();
+            releaseMonitor.TrySetResult();
+            await Task.WhenAll(monitorOwner, firstDispose, cancelling, processing).WaitAsync(TestTimeout);
+        }
+    }
+
+    [Fact]
     public async Task WhenCoreSetupThrows_ThenASecondProcessingLifetimeCanStart()
     {
         // Arrange
@@ -1770,6 +1865,69 @@ public class ChangeQueueProcessorTests
         {
             releaseCancellationCallback.TrySetResult();
             releaseWrite.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task WhenALaterExternalCancellationCallbackBlocks_ThenStoppingRemainsBounded()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellationCallbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCancellationCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: async (_, _) =>
+            {
+                writeEntered.TrySetResult();
+                await releaseWrite.Task.ConfigureAwait(false);
+            },
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() =>
+        {
+            releaseWrite.TrySetResult();
+            releaseCancellationCallback.TrySetResult();
+        });
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        subject.FirstName = "immediate";
+        await writeEntered.Task.WaitAsync(TestTimeout);
+        Assert.False(processing.IsCompleted);
+        using var blockingRegistration = cancellation.Token.Register(() =>
+        {
+            cancellationCallbackEntered.TrySetResult();
+            releaseCancellationCallback.Task.GetAwaiter().GetResult();
+        });
+        var cancelling = Task.Run(cancellation.Cancel);
+
+        try
+        {
+            // Act
+            await cancellationCallbackEntered.Task.WaitAsync(TestTimeout);
+            await processing.WaitAsync(TeardownWaitTimeout);
+
+            // Assert
+            Assert.False(releaseCancellationCallback.Task.IsCompleted);
+            Assert.Equal(1, processor.DropCount);
+        }
+        finally
+        {
+            releaseCancellationCallback.TrySetResult();
+            releaseWrite.TrySetResult();
+            await Task.WhenAll(cancelling, processing).WaitAsync(TestTimeout);
         }
     }
 
