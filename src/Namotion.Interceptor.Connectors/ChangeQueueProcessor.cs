@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking;
@@ -242,59 +241,27 @@ public class ChangeQueueProcessor : IDisposable
             throw new ObjectDisposedException(nameof(ChangeQueueProcessor));
         }
 
-        var processingTokenSource = new CancellationTokenSource();
-        var teardownTokenSource = new CancellationTokenSource();
-        var teardownStarted = new TaskCompletionSource<ExceptionDispatchInfo?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var processingTask = Task.Run(
-            () => ProcessCoreAsync(processingTokenSource.Token, teardownTokenSource.Token, teardownStarted),
-            CancellationToken.None);
-
-        var completedTask = await Task.WhenAny(processingTask, teardownStarted.Task, cancellationSignal.Task).ConfigureAwait(false);
-        cancellationWait.Unregister(null);
-        if (completedTask == processingTask)
-        {
-            try { await processingTask.ConfigureAwait(false); }
-            finally
-            {
-                processingTokenSource.Dispose();
-                teardownTokenSource.Dispose();
-            }
-            return;
-        }
-
-        var processingCancellationTask = processingTokenSource.CancelAsync();
-        var teardownCancellationTask = Task.CompletedTask;
-        using var teardownDelayCancellation = new CancellationTokenSource();
-        var teardownDelay = Task.Delay(TeardownFlushBound, teardownDelayCancellation.Token);
+        var run = new BoundedTeardownRun(TeardownFlushBound);
         try
         {
-            if (await Task.WhenAny(processingTask, teardownDelay).ConfigureAwait(false) == processingTask)
+            var outcome = await run.RunAsync(() => ProcessCoreAsync(run), cancellationSignal.Task).ConfigureAwait(false);
+            if (outcome.AbandonedAtBound)
             {
-                await teardownDelayCancellation.CancelAsync().ConfigureAwait(false);
-                await processingTask.ConfigureAwait(false);
-            }
-            else
-            {
-                teardownCancellationTask = teardownTokenSource.CancelAsync();
+                // The abandoned core still holds its batch, so ownership is settled here before the
+                // caller learns anything: closed admission claims and counts whatever is outstanding.
                 Dispose();
-                if (completedTask == teardownStarted.Task)
-                {
-                    (await teardownStarted.Task.ConfigureAwait(false))?.Throw();
-                }
+                outcome.Fault?.Throw();
             }
         }
         finally
         {
-            ObserveLateLifetimeInBackground(
-                processingTask,
-                processingCancellationTask,
-                teardownCancellationTask,
-                processingTokenSource,
-                teardownTokenSource);
+            // Held for the whole run rather than released once the stop is observed. The callback only
+            // sets an already-settled source after that point, so the extra lifetime is inert.
+            cancellationWait.Unregister(null);
         }
     }
 
-    private async Task ProcessCoreAsync(CancellationToken processingToken, CancellationToken teardownToken, TaskCompletionSource<ExceptionDispatchInfo?> teardownStarted)
+    private async Task ProcessCoreAsync(BoundedTeardownRun run)
     {
         try
         {
@@ -308,12 +275,12 @@ public class ChangeQueueProcessor : IDisposable
                     var flushFailureReported = false;
                     try
                     {
-                        while (await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
+                        while (await periodicTimer.WaitForNextTickAsync(run.ProcessingToken).ConfigureAwait(false))
                         {
                             // Catch per tick so a consumer callback cannot permanently stop delivery while dequeueing continues.
                             try
                             {
-                                await TryFlushAsync(processingToken).ConfigureAwait(false);
+                                await TryFlushAsync(run.ProcessingToken).ConfigureAwait(false);
                                 flushFailureReported = false;
                             }
                             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -341,7 +308,7 @@ public class ChangeQueueProcessor : IDisposable
 
             try
             {
-                while (_subscription.TryDequeue(out var change, processingToken))
+                while (_subscription.TryDequeue(out var change, run.ProcessingToken))
                 {
                     var wasQueuedBeforeStart = queuedBeforeStart > 0;
                     if (wasQueuedBeforeStart)
@@ -379,7 +346,7 @@ public class ChangeQueueProcessor : IDisposable
                         }
 
                         _immediateBuffer[0] = change;
-                        await WriteChangesAsync(_immediateBuffer, processingToken).ConfigureAwait(false);
+                        await WriteChangesAsync(_immediateBuffer, run.ProcessingToken).ConfigureAwait(false);
                     }
                     else
                     {
@@ -389,23 +356,23 @@ public class ChangeQueueProcessor : IDisposable
             }
             catch (Exception exception)
             {
-                teardownStarted.TrySetResult(ExceptionDispatchInfo.Capture(exception));
+                run.MarkFinalizationStarted(exception);
                 throw;
             }
             finally
             {
-                teardownStarted.TrySetResult(null);
+                run.MarkFinalizationStarted();
                 periodicTimer?.Dispose();
                 await flushTask.ConfigureAwait(false);
                 try
                 {
-                    await TryFlushAsync(teardownToken).ConfigureAwait(false);
+                    await TryFlushAsync(run.TeardownToken).ConfigureAwait(false);
                 }
                 finally
                 {
                     if (_completionHandler is not null)
                     {
-                        await _completionHandler(teardownToken).ConfigureAwait(false);
+                        await _completionHandler(run.TeardownToken).ConfigureAwait(false);
                     }
                 }
             }
@@ -418,25 +385,6 @@ public class ChangeQueueProcessor : IDisposable
                 DisposeMerger();
             }
         }
-    }
-
-    private static void ObserveLateLifetimeInBackground(
-        Task processingTask,
-        Task processingCancellationTask,
-        Task teardownCancellationTask,
-        CancellationTokenSource processingTokenSource,
-        CancellationTokenSource teardownTokenSource)
-    {
-        _ = Task.WhenAll(processingTask, processingCancellationTask, teardownCancellationTask).ContinueWith(
-            task =>
-            {
-                _ = task.Exception;
-                processingTokenSource.Dispose();
-                teardownTokenSource.Dispose();
-            },
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
     }
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
