@@ -321,5 +321,4 @@ public partial class OpcUaRegistrationTests
         Assert.StartsWith("OpcUaVariable:", first.OpcUaVariableKey);
         Assert.StartsWith("OpcUaVariable:", second.OpcUaVariableKey);
     }
-
 }
