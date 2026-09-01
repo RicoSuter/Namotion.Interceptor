@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
@@ -20,7 +19,6 @@ public class ChangeQueueProcessor : IDisposable
     /// </summary>
     internal static readonly TimeSpan TeardownFlushBound = TimeSpan.FromSeconds(5);
 
-    private const int ClosedDelivery = -1;
     private const int IdleState = 0;
     private const int ProcessingState = 1;
     private const int DisposedState = 2;
@@ -31,18 +29,18 @@ public class ChangeQueueProcessor : IDisposable
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
     private readonly ChangeDeliveryRule _deliveryRule;
-    private readonly Action<long>? _dropHandler;
     private readonly bool _writeHandlerOwnsChanges;
     private Action? _terminalHandler;
     private readonly Func<CancellationToken, ValueTask>? _completionHandler;
     private readonly Func<int, bool>? _mergedDeliveryAdmission;
 
-    // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
-    private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
+    // Owns every accepted change and its outcome; see OutboundDeliveryLedger for the invariant.
+    private readonly OutboundDeliveryLedger _ledger;
 
-    private readonly int? _maxQueueDepth;
-    private long _dropCount;
-    private int _deliveryState;
+    // Reentrant, and separate from the ledger: a competing Dispose waits here for the callback to
+    // finish, while callback reentry sees the handler already taken and does not recurse.
+    private readonly Lock _terminalHandlerGate = new();
+
     private int _flushGate; // 0 = free, 1 = flushing
     private int _lifecycleState;
 
@@ -56,14 +54,14 @@ public class ChangeQueueProcessor : IDisposable
     /// Number of changes dropped due to bounded-queue overflow or ordinary write failure, plus changes
     /// whose delivery was still locally unconfirmed when terminal ownership closed.
     /// </summary>
-    public long DropCount => Interlocked.Read(ref _dropCount);
+    public long DropCount => _ledger.DropCount;
 
     /// <summary>
     /// Gets the number of changes currently buffered. Approximate: read without a lock while the
     /// pump is running. Normally 0 on the immediate path, except while a cancelled delivery is being
     /// handed to terminal accounting during teardown.
     /// </summary>
-    public int QueueDepth => _changes.Count;
+    public int QueueDepth => _ledger.Depth;
 
     // Scratch state used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
@@ -124,15 +122,14 @@ public class ChangeQueueProcessor : IDisposable
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
-        _dropHandler = dropHandler;
         _writeHandlerOwnsChanges = false;
-        _mergedDeliveryAdmission = TryAdmitMergedDelivery;
 
         try
         {
             ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
 
-            _maxQueueDepth = maxQueueDepth;
+            _ledger = new OutboundDeliveryLedger(maxQueueDepth, dropHandler, logger, TeardownFlushBound);
+            _mergedDeliveryAdmission = _ledger.TryAdmitOrCountTerminal;
             _deliveryRule = ValidateRule(deliveryRule);
 
             _changeMerger = new ChangeMerger();
@@ -170,15 +167,14 @@ public class ChangeQueueProcessor : IDisposable
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
-        _dropHandler = dropHandler;
         _writeHandlerOwnsChanges = writeHandlerOwnsChanges;
         _terminalHandler = terminalHandler;
         _completionHandler = completionHandler;
-        _mergedDeliveryAdmission = writeHandlerOwnsChanges ? null : TryAdmitMergedDelivery;
 
         ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
 
-        _maxQueueDepth = maxQueueDepth;
+        _ledger = new OutboundDeliveryLedger(maxQueueDepth, dropHandler, logger, TeardownFlushBound);
+        _mergedDeliveryAdmission = writeHandlerOwnsChanges ? null : _ledger.TryAdmitOrCountTerminal;
         _subscription = subscription;
         _deliveryRule = ValidateRule(deliveryRule);
         _changeMerger = new ChangeMerger();
@@ -387,11 +383,7 @@ public class ChangeQueueProcessor : IDisposable
                     }
                     else
                     {
-                        _changes.Enqueue(change);
-                        if (_maxQueueDepth is int maxQueueDepth && _changes.Count > maxQueueDepth)
-                        {
-                            DropOverflow(maxQueueDepth);
-                        }
+                        _ledger.Enqueue(change);
                     }
                 }
             }
@@ -447,62 +439,6 @@ public class ChangeQueueProcessor : IDisposable
             TaskScheduler.Default);
     }
 
-    private bool TryAdmitDelivery(int count) =>
-        Interlocked.CompareExchange(ref _deliveryState, count, 0) == 0;
-
-    private bool TryAdmitMergedDelivery(int count)
-    {
-        var admitted = TryAdmitDelivery(count);
-        if (!admitted)
-        {
-            ReportTerminalDrops(count);
-        }
-
-        return admitted;
-    }
-
-    private int CloseDeliveryAndDrain()
-    {
-        // Cancellation requeue and failure accounting must settle before close observes the delivery
-        // state and queue together, or close could miss their ownership transition.
-        lock (_changes)
-        {
-            var count = Math.Max(0, Interlocked.Exchange(ref _deliveryState, ClosedDelivery));
-            while (_changes.TryDequeue(out _))
-            {
-                count++;
-            }
-
-            return count;
-        }
-    }
-
-    private void ReportTerminalDrops(int count)
-    {
-        if (count <= 0)
-        {
-            return;
-        }
-
-        Interlocked.Add(ref _dropCount, count);
-        _ = Task.Run(() =>
-        {
-            InvokeDropHandler(count);
-            try
-            {
-                _logger.LogWarning(
-                    "Gave up waiting after {Timeout} for {Count} changes to be written while stopping. " +
-                    "A write handler may already have completed them remotely or may still complete them.",
-                    TeardownFlushBound,
-                    count);
-            }
-            catch
-            {
-                // Reporting is best effort after ownership has already been settled.
-            }
-        });
-    }
-
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
     private async ValueTask WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
@@ -527,55 +463,28 @@ public class ChangeQueueProcessor : IDisposable
         }
 
         var count = changes.Length;
-        if (!deliveryAdmitted && !TryAdmitDelivery(count))
+        if (!deliveryAdmitted && !_ledger.TryAdmitOrCountTerminal(count))
         {
-            ReportTerminalDrops(count);
             return;
         }
 
         try
         {
             await _writeHandler(changes, cancellationToken).ConfigureAwait(false);
-            Interlocked.CompareExchange(ref _deliveryState, 0, count);
+            _ledger.CompleteDelivery(count);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            lock (_changes)
-            {
-                if (Interlocked.CompareExchange(ref _deliveryState, 0, count) == count)
-                {
-                    foreach (var change in changes.Span)
-                    {
-                        _changes.Enqueue(change);
-                    }
-                }
-            }
-
+            _ledger.ReturnCancelledDelivery(changes.Span, count);
             throw;
         }
         catch (Exception exception)
         {
-            var counted = false;
-            lock (_changes)
+            if (_ledger.TryCountFailedDelivery(count))
             {
-                if (Interlocked.CompareExchange(ref _deliveryState, 0, count) == count)
-                {
-                    Interlocked.Add(ref _dropCount, count);
-                    counted = true;
-                }
-            }
-
-            if (counted)
-            {
-                InvokeDropHandler(count);
                 _logger.LogError(exception, "Failed to write changes.");
             }
         }
-    }
-
-    private void InvokeDropHandler(long count)
-    {
-        try { _dropHandler?.Invoke(count); } catch { }
     }
 
     // Report only the first consecutive failure and guard the consumer-supplied logger.
@@ -588,26 +497,6 @@ public class ChangeQueueProcessor : IDisposable
 
         alreadyReported = true;
         try { _logger.LogError(exception, "Failed to flush changes."); } catch { }
-    }
-
-    /// <summary>
-    /// Drops the oldest buffered changes until the queue is back within <paramref name="maxQueueDepth"/>,
-    /// incrementing <see cref="DropCount"/> for each. Best-effort: a concurrent flush may drain the queue
-    /// below the bound first, in which case fewer drops occur.
-    /// </summary>
-    private void DropOverflow(int maxQueueDepth)
-    {
-        var droppedCount = 0L;
-        while (_changes.Count > maxQueueDepth && _changes.TryDequeue(out _))
-        {
-            Interlocked.Increment(ref _dropCount);
-            droppedCount++;
-        }
-
-        if (droppedCount > 0)
-        {
-            InvokeDropHandler(droppedCount);
-        }
     }
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
@@ -627,7 +516,7 @@ public class ChangeQueueProcessor : IDisposable
         {
             // Drain the concurrent queue into the scratch buffer under exclusive flush
             _flushChanges.Clear();
-            while (_changes.TryDequeue(out var change))
+            while (_ledger.TryDequeue(out var change))
             {
                 _flushChanges.Add(change);
             }
@@ -688,7 +577,7 @@ public class ChangeQueueProcessor : IDisposable
             _ownedSubscription?.Dispose();
         }
 
-        ReportTerminalDrops(CloseDeliveryAndDrain());
+        _ledger.CountTerminalDrops(_ledger.CloseAndDrain());
         if (previousState == IdleState)
         {
             DisposeMerger();
@@ -698,10 +587,10 @@ public class ChangeQueueProcessor : IDisposable
 
     private void InvokeTerminalHandlerOnce()
     {
-        lock (_changes)
+        lock (_terminalHandlerGate)
         {
-            // Exchange inside the reentrant delivery monitor: competing threads wait for callback
-            // completion, while callback reentry sees null and does not recurse or retry an exception.
+            // Exchange inside the gate: competing threads wait for callback completion, while callback
+            // reentry sees null and does not recurse or retry an exception.
             Interlocked.Exchange(ref _terminalHandler, null)?.Invoke();
         }
     }

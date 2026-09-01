@@ -814,15 +814,26 @@ public class ChangeQueueProcessorTests
             newValue,
             revision);
 
-        GetChanges(processor).Enqueue(change);
+        GetLedger(processor).Enqueue(change);
     }
 
-    private static ConcurrentQueue<SubjectPropertyChange> GetChanges(ChangeQueueProcessor processor)
+    private static OutboundDeliveryLedger GetLedger(ChangeQueueProcessor processor)
     {
-        var changesField = typeof(ChangeQueueProcessor)
-            .GetField("_changes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var ledgerField = typeof(ChangeQueueProcessor)
+            .GetField("_ledger", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
-        return (ConcurrentQueue<SubjectPropertyChange>)changesField!.GetValue(processor)!;
+        return (OutboundDeliveryLedger)ledgerField!.GetValue(processor)!;
+    }
+
+    // Typed as Lock rather than object on purpose: locking a boxed Lock takes a Monitor on the box and
+    // synchronizes with nothing, so the staged overlap below would silently stop being an overlap.
+    private static Lock GetOwnershipGate(ChangeQueueProcessor processor)
+    {
+        var ledger = GetLedger(processor);
+        var gateField = typeof(OutboundDeliveryLedger)
+            .GetField("_ownership", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        return (Lock)gateField!.GetValue(ledger)!;
     }
 
     private static async Task TriggerFlushAsync(ChangeQueueProcessor processor)
@@ -1735,7 +1746,7 @@ public class ChangeQueueProcessorTests
 
         var monitorOwner = Task.Run(() =>
         {
-            lock (GetChanges(processor))
+            lock (GetOwnershipGate(processor))
             {
                 monitorHeld.TrySetResult();
                 allowSecondDispose.Task.GetAwaiter().GetResult();
