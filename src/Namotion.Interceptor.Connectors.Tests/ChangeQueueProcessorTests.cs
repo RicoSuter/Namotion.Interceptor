@@ -15,6 +15,16 @@ public class ChangeQueueProcessorTests
     private static readonly TimeSpan TeardownWaitTimeout = TimeSpan.FromSeconds(10);
 
     [Fact]
+    public void WhenReadingTheTeardownFlushBound_ThenItMatchesTheDocumentedContract()
+    {
+        // Act
+        var bound = ChangeQueueProcessor.TeardownFlushBound;
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(5), bound);
+    }
+
+    [Fact]
     public async Task WhenMultipleChangesToSameProperty_ThenOnlyLastValueIsWritten()
     {
         // Arrange
@@ -1113,6 +1123,61 @@ public class ChangeQueueProcessorTests
     }
 
     [Fact]
+    public async Task WhenDisposedProcessorIsStartedAgainDuringLiveFlush_ThenMergerRemainsOwnedByLiveRun()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ReadOnlyMemory<SubjectPropertyChange> activeChanges = default;
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: async (changes, _) =>
+            {
+                activeChanges = changes;
+                writeEntered.TrySetResult();
+                await releaseWrite.Task.ConfigureAwait(false);
+            },
+            bufferTime: TimeSpan.FromMilliseconds(10),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() => releaseWrite.TrySetResult());
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        subject.FirstName = "live";
+        await writeEntered.Task.WaitAsync(TestTimeout);
+        Assert.True(activeChanges.Span[0].TryGetNewValue<string>(out var valueBeforeRestart));
+        Assert.Equal("live", valueBeforeRestart);
+
+        try
+        {
+            // Act
+            processor.Dispose();
+            await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+                processor.ProcessAsync(CancellationToken.None));
+
+            // Assert
+            Assert.True(activeChanges.Span[0].TryGetNewValue<string>(out var valueAfterRestart));
+            Assert.Equal("live", valueAfterRestart);
+        }
+        finally
+        {
+            releaseWrite.TrySetResult();
+            await cancellation.CancelAsync();
+            await processing.WaitAsync(TestTimeout);
+        }
+    }
+
+    [Fact]
     public async Task WhenABufferedChangeFinishesFilteringAfterTheDeadline_ThenTheHandlerIsNotInvoked()
     {
         // Arrange
@@ -1253,6 +1318,7 @@ public class ChangeQueueProcessorTests
         var completionReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var ownerRetired = false;
         var lateHandoffAdmitted = false;
+        var writeHandlerInvoked = false;
 
         using var processor = new ChangeQueueProcessor(
             source: new object(),
@@ -1265,6 +1331,7 @@ public class ChangeQueueProcessorTests
             },
             writeHandler: (_, _) =>
             {
+                writeHandlerInvoked = true;
                 lateHandoffAdmitted = !Volatile.Read(ref ownerRetired);
                 return ValueTask.CompletedTask;
             },
@@ -1299,12 +1366,63 @@ public class ChangeQueueProcessorTests
 
             // Assert
             Assert.True(ownerRetiredBeforeDisposeReturned);
+            Assert.True(writeHandlerInvoked);
             Assert.False(lateHandoffAdmitted);
         }
         finally
         {
             releaseFilter.TrySetResult();
         }
+    }
+
+    [Fact]
+    public async Task WhenHandlerOwnedWriteThrows_ThenPeriodicFlushingContinues()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var writeAttempts = 0;
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            subscription: subscription,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) =>
+            {
+                if (Interlocked.Increment(ref writeAttempts) == 1)
+                {
+                    throw new InvalidOperationException("first delegated write failed");
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMilliseconds(10),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            writeHandlerOwnsChanges: true);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        subject.FirstName = "first";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Volatile.Read(ref writeAttempts) == 1,
+            message: "The first delegated write was not attempted.");
+
+        // Act
+        subject.FirstName = "second";
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Volatile.Read(ref writeAttempts) == 2,
+            timeout: TimeSpan.FromSeconds(2),
+            message: "Periodic flushing stopped after the delegated handler threw.");
+
+        await cancellation.CancelAsync();
+        await processing.WaitAsync(TestTimeout);
     }
 
     [Fact]

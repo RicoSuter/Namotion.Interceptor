@@ -398,7 +398,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 machine.Speed = 100; // Queued if disconnected, written immediately if connected
 ```
 
-`Diagnostics.OutboundRetries` reports this queue: `Depth` is what is parked right now, `Capacity` echoes `WriteRetryQueueSize`, and `TotalDropped` counts what the queue threw away since `StartTime`. With `WriteRetryQueueSize = 0` read `TotalDropped` as a floor rather than the whole loss: it still counts writes discarded because there is no queue to park them in, but not the connect-window drain, which has no ownership filter and so cannot attribute its discards to one source. See [Known Limitations](connectors.md#known-limitations).
+`Diagnostics.OutboundRetries` reports this queue: `Depth` is what is parked right now, `Capacity` echoes `WriteRetryQueueSize`, and `TotalDropped` counts capacity eviction, failed or terminally unconfirmed writes, and owned connect-window writes that cannot be retained since `StartTime`. A capacity of 0 retains nothing but still counts those owned writes. Writes made before the source claims their property remain unattributable; see [Known Limitations](connectors.md#known-limitations).
 
 ### Polling Fallback for Unsupported Nodes
 
@@ -699,7 +699,7 @@ This client measures both throughput directions, so `Throughput.IncomingPerSecon
 
 The sub-block counters survive a reconnect. `PollingManager` and `ReadAfterWriteManager` are rebuilt on every connect attempt, including failed ones, but their counters are owned by the source, so they do not rebase to zero during the reconnect storm that is exactly when they matter.
 
-`OutboundRetries.TotalDropped` is a floor rather than the whole outbound loss when the client is configured with `WriteRetryQueueSize = 0`: see [Write Retry Queue During Disconnection](#write-retry-queue-during-disconnection).
+For outbound retry capacity, depth, and drop accounting, including capacity 0, see [Write Retry Queue During Disconnection](#write-retry-queue-during-disconnection).
 
 ## Direct Session Access
 

@@ -52,14 +52,15 @@ public class ChangeQueueProcessor : IDisposable
     internal ChangeDeliveryRule DeliveryRule => _deliveryRule;
 
     /// <summary>
-    /// Number of changes dropped due to bounded-queue overflow, ordinary write failure, or terminal
-    /// delivery closure.
+    /// Number of changes dropped due to bounded-queue overflow or ordinary write failure, plus changes
+    /// whose delivery was still locally unconfirmed when terminal ownership closed.
     /// </summary>
     public long DropCount => Interlocked.Read(ref _dropCount);
 
     /// <summary>
     /// Gets the number of changes currently buffered. Approximate: read without a lock while the
-    /// pump is running. Always 0 when the processor is on its immediate path (no buffer time).
+    /// pump is running. Normally 0 on the immediate path, except while a cancelled delivery is being
+    /// handed to terminal accounting during teardown.
     /// </summary>
     public int QueueDepth => _changes.Count;
 
@@ -223,8 +224,15 @@ public class ChangeQueueProcessor : IDisposable
             throw new InvalidOperationException("The processor is already running.");
         }
 
-        if (previousState == DisposedState || Volatile.Read(ref _disposed) == DisposedState)
+        if (previousState == DisposedState)
         {
+            throw new ObjectDisposedException(nameof(ChangeQueueProcessor));
+        }
+
+        if (Volatile.Read(ref _disposed) == DisposedState)
+        {
+            // Dispose raced the Idle-to-Processing transition before the processing task was created,
+            // so no live run remains to release the merger in its finally block.
             DisposeMerger();
             throw new ObjectDisposedException(nameof(ChangeQueueProcessor));
         }
@@ -257,10 +265,13 @@ public class ChangeQueueProcessor : IDisposable
 
         var processingCancellationTask = processingTokenSource.CancelAsync();
         var teardownCancellationTask = Task.CompletedTask;
+        using var teardownDelayCancellation = new CancellationTokenSource();
+        var teardownDelay = Task.Delay(TeardownFlushBound, teardownDelayCancellation.Token);
         try
         {
-            if (await Task.WhenAny(processingTask, Task.Delay(TeardownFlushBound)).ConfigureAwait(false) == processingTask)
+            if (await Task.WhenAny(processingTask, teardownDelay).ConfigureAwait(false) == processingTask)
             {
+                await teardownDelayCancellation.CancelAsync().ConfigureAwait(false);
                 await processingTask.ConfigureAwait(false);
             }
             else
@@ -459,7 +470,7 @@ public class ChangeQueueProcessor : IDisposable
             {
                 _logger.LogWarning(
                     "Gave up waiting after {Timeout} for {Count} changes to be written while stopping. " +
-                    "A write handler that ignores cancellation may still complete them.",
+                    "A write handler may already have completed them remotely or may still complete them.",
                     TeardownFlushBound,
                     count);
             }
@@ -478,7 +489,18 @@ public class ChangeQueueProcessor : IDisposable
     {
         if (_writeHandlerOwnsChanges)
         {
-            await _writeHandler(changes, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await _writeHandler(changes, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "Failed to hand changes to their delivery owner.");
+            }
             return;
         }
 

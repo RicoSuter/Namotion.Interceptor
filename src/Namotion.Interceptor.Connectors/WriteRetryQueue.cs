@@ -114,6 +114,11 @@ internal sealed class WriteRetryQueue : IDisposable
 
         try
         {
+            if (IsEmpty)
+            {
+                return true;
+            }
+
             return await FlushCoreAsync(source, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -174,7 +179,16 @@ internal sealed class WriteRetryQueue : IDisposable
             }
 
             var result = await source.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
-            _metrics.AddDropped(SettleWrite(result.FailedChanges.AsSpan(), changes.Length, append: false).Dropped);
+            var settlement = SettleWrite(result.FailedChanges.AsSpan(), changes.Length, append: false);
+            _metrics.AddDropped(settlement.Dropped);
+            if (result.Error is not null && !settlement.Retired)
+            {
+                _logger.LogWarning(result.Error,
+                    "Failed to write {Count} changes to source; {PendingCount} writes are queued for retry and {DroppedCount} were dropped.",
+                    result.FailedChanges.Length,
+                    settlement.PendingCount,
+                    settlement.Dropped);
+            }
         }
         finally
         {
@@ -204,24 +218,24 @@ internal sealed class WriteRetryQueue : IDisposable
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     private async ValueTask<bool> FlushCoreAsync(ISubjectSource source, CancellationToken cancellationToken)
     {
-        if (_scratchBuffer.Length < MaxBatchSize)
-        {
-            var newSize = Math.Min(_scratchBuffer.Length * 2, MaxBatchSize);
-            _scratchBuffer = new SubjectPropertyChange[newSize];
-        }
-
         var totalFlushed = 0;
         while (true)
         {
             int count;
             lock (_lock)
             {
-                count = Math.Min(_scratchBuffer.Length, _pendingWrites.Count);
-                if (count == 0)
+                if (_pendingWrites.Count == 0)
                 {
                     break;
                 }
 
+                if (_scratchBuffer.Length < MaxBatchSize)
+                {
+                    var newSize = Math.Min(_scratchBuffer.Length * 2, MaxBatchSize);
+                    _scratchBuffer = new SubjectPropertyChange[newSize];
+                }
+
+                count = Math.Min(_scratchBuffer.Length, _pendingWrites.Count);
                 _pendingWrites.CopyTo(0, _scratchBuffer, 0, count);
                 _pendingWrites.RemoveRange(0, count);
                 Volatile.Write(ref _count, _pendingWrites.Count);

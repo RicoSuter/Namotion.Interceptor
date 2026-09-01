@@ -1317,6 +1317,19 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
+    public void WhenRetryCapacityIsNegative_ThenConstructionThrows()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var subject = new Person(context);
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new TestSubjectSource(subject, context, NullLogger.Instance, writeRetryQueueSize: -1));
+        Assert.Equal("writeRetryQueueSize", exception.ParamName);
+    }
+
+    [Fact]
     public async Task WhenTheSourceStopsWithRetryCapacityZero_ThenEveryOwnedWriteIsCounted()
     {
         // Arrange
@@ -1665,7 +1678,7 @@ public class SubjectSourceBaseTests
 
         // Assert
         Assert.True(retryOwnerRetiredAtStop);
-        Assert.True(stopwatch.Elapsed < TeardownWaitTimeout,
+        Assert.True(stopwatch.Elapsed < ChangeQueueProcessor.TeardownFlushBound + TimeSpan.FromSeconds(2),
             $"Stopping took {stopwatch.Elapsed}, which indicates a second teardown window.");
         Assert.Equal(0, source.Diagnostics.OutboundChanges.TotalDropped);
         Assert.Equal(processorDeadlineAlreadyConsumed ? 2 : 1,
