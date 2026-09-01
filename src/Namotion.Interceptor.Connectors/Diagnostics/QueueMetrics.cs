@@ -79,7 +79,15 @@ public sealed class QueueMetrics
     public void AddDropped(long count)
         => AddDropped(count, epoch: null);
 
-    internal Action<long> CreateDropReporter()
+    /// <summary>
+    /// Creates a drop reporter bound to the current metrics epoch.
+    /// </summary>
+    /// <remarks>
+    /// Reports arriving after the metrics are reset are ignored, preventing asynchronous work from a
+    /// previous connector execution from contributing to the new execution's totals.
+    /// </remarks>
+    /// <returns>An epoch-bound callback that records a positive number of dropped items.</returns>
+    public Action<long> CreateDropReporter()
     {
         var epoch = Volatile.Read(ref _snapshot).Epoch;
         return count => AddDropped(count, epoch);

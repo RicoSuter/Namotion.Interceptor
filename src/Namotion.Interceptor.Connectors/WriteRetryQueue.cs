@@ -33,8 +33,14 @@ internal sealed class WriteRetryQueue : IDisposable
     private long _lastFlushWarningTimestamp;
     private bool _hasFlushWarnings;
 
+    /// <summary>
+    /// Gets a value indicating whether the write queue is empty.
+    /// </summary>
     public bool IsEmpty => Volatile.Read(ref _count) == 0;
 
+    /// <summary>
+    /// Gets the number of pending writes in the queue.
+    /// </summary>
     public int PendingWriteCount => Volatile.Read(ref _count);
 
     // Metrics is required rather than optional, so no construction site can drop writes uncounted.
@@ -49,6 +55,10 @@ internal sealed class WriteRetryQueue : IDisposable
         _metrics = metrics;
     }
 
+    /// <summary>
+    /// Enqueues writes for retry. When the queue exceeds its capacity, the oldest writes are dropped.
+    /// This operation is thread-safe.
+    /// </summary>
     public void Enqueue(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
         if (_maxQueueSize is 0)
@@ -112,6 +122,10 @@ internal sealed class WriteRetryQueue : IDisposable
         }
     }
 
+    /// <summary>
+    /// Flushes older pending writes, then attempts the supplied writes while retaining exact ownership
+    /// until they are confirmed, parked for retry, or counted as dropped.
+    /// </summary>
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
     public async ValueTask WriteAsync(
         ISubjectSource source,
@@ -275,6 +289,10 @@ internal sealed class WriteRetryQueue : IDisposable
         }
     }
 
+    /// <summary>
+    /// Retires the queue, rejects future writes, and counts every write still owned by the queue as dropped.
+    /// Calling this method more than once has no additional effect.
+    /// </summary>
     public void Retire()
     {
         int stranded;
@@ -327,5 +345,8 @@ internal sealed class WriteRetryQueue : IDisposable
         return droppedCount;
     }
 
+    /// <summary>
+    /// Disposes the queue by retiring it and accounting for every unconfirmed write.
+    /// </summary>
     public void Dispose() => Retire();
 }

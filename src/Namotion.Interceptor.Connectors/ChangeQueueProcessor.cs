@@ -13,6 +13,10 @@ namespace Namotion.Interceptor.Connectors;
 /// </summary>
 public class ChangeQueueProcessor : IDisposable
 {
+    /// <summary>
+    /// How long final delivery and the source retry handoff may block. The bound is fixed per connector;
+    /// the host's shared <c>HostOptions.ShutdownTimeout</c> remains the consumer-configurable budget.
+    /// </summary>
     internal static readonly TimeSpan TeardownFlushBound = TimeSpan.FromSeconds(5);
 
     private const int ClosedDelivery = -1;
