@@ -837,13 +837,29 @@ public class ChangeQueueProcessorTests
 
     private static int GetProcessorState(ChangeQueueProcessor processor)
     {
-        var disposedField = typeof(ChangeQueueProcessor)
-            .GetField("_disposed", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var lifecycleStateField = typeof(ChangeQueueProcessor)
+            .GetField("_lifecycleState", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
-        return (int)disposedField!.GetValue(processor)!;
+        return (int)lifecycleStateField!.GetValue(processor)!;
     }
 
     private static bool IsDisposed(ChangeQueueProcessor processor) => GetProcessorState(processor) == 2;
+
+    private static SubjectPropertyChange[] GetImmediateBuffer(ChangeQueueProcessor processor)
+    {
+        var immediateBufferField = typeof(ChangeQueueProcessor)
+            .GetField("_immediateBuffer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        return (SubjectPropertyChange[])immediateBufferField!.GetValue(processor)!;
+    }
+
+    private static object? GetChangeMerger(ChangeQueueProcessor processor)
+    {
+        var changeMergerField = typeof(ChangeQueueProcessor)
+            .GetField("_changeMerger", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        return changeMergerField!.GetValue(processor);
+    }
 
     [Fact]
     public async Task WhenChangeQueuedBeforeProcessingIsSuperseded_ThenOnlyCurrentValueIsWritten()
@@ -893,6 +909,41 @@ public class ChangeQueueProcessorTests
         // Cleanup
         await cancellation.CancelAsync();
         await processing;
+    }
+
+    [Fact]
+    public async Task WhenImmediateProcessingStops_ThenReusableBufferIsCleared()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        var writeReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) =>
+            {
+                writeReached.TrySetResult();
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        subject.FirstName = "retained";
+        await writeReached.Task.WaitAsync(TestTimeout);
+
+        // Act
+        await cancellation.CancelAsync();
+        await processing.WaitAsync(TestTimeout);
+
+        // Assert
+        Assert.Equal(default, GetImmediateBuffer(processor)[0]);
     }
 
     [Fact]
@@ -1426,6 +1477,100 @@ public class ChangeQueueProcessorTests
     }
 
     [Fact]
+    public async Task WhenDropHandlerThrowsAfterWriteFailure_ThenProcessingContinues()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        using var cancellation = new CancellationTokenSource();
+        var writeAttempts = 0;
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) =>
+            {
+                if (Interlocked.Increment(ref writeAttempts) == 1)
+                {
+                    return ValueTask.FromException(new WriteFailureException());
+                }
+
+                cancellation.Cancel();
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            dropHandler: _ =>
+            {
+                subject.LastName = "second";
+                throw new DropHandlerException();
+            });
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act
+        subject.FirstName = "first";
+        await processing.WaitAsync(TestTimeout);
+
+        // Assert
+        Assert.Equal(2, Volatile.Read(ref writeAttempts));
+    }
+
+    [Fact]
+    public async Task WhenOverflowDropHandlerThrows_ThenConsumerContinues()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        using var cancellation = new CancellationTokenSource();
+        var filterCalls = 0;
+        var dropHandlerCalls = 0;
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ =>
+            {
+                if (Interlocked.Increment(ref filterCalls) == 3)
+                {
+                    cancellation.Cancel();
+                }
+
+                return true;
+            },
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            bufferTime: TimeSpan.FromMinutes(5),
+            maxQueueDepth: 1,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            dropHandler: _ =>
+            {
+                if (Interlocked.Increment(ref dropHandlerCalls) == 1)
+                {
+                    subject.LastName = "third";
+                    throw new DropHandlerException();
+                }
+            });
+        var processing = processor.ProcessAsync(cancellation.Token);
+        subject.FirstName = "first";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processor.QueueDepth == 1,
+            message: "The first change should reach the bounded processor queue.");
+
+        // Act
+        subject.FirstName = "second";
+        await processing.WaitAsync(TestTimeout);
+
+        // Assert
+        Assert.Equal(3, Volatile.Read(ref filterCalls));
+        Assert.Equal(2, Volatile.Read(ref dropHandlerCalls));
+    }
+
+    [Fact]
     public async Task WhenTerminalRetirementIsRunning_ThenDisposeWaitsAndDoesNotInvokeItAgain()
     {
         // Arrange
@@ -1501,6 +1646,37 @@ public class ChangeQueueProcessorTests
 
         // Assert
         Assert.Equal(1, terminalInvocationCount);
+    }
+
+    [Fact]
+    public void WhenIdleTerminalHandlerThrows_ThenMergerIsDisposed()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var processor = new ChangeQueueProcessor(
+            source: new object(),
+            subscription: subscription,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            terminalHandler: () => throw new TerminalHandlerException());
+
+        try
+        {
+            // Act & Assert
+            Assert.Throws<TerminalHandlerException>(processor.Dispose);
+            Assert.Null(GetChangeMerger(processor));
+        }
+        finally
+        {
+            (GetChangeMerger(processor) as IDisposable)?.Dispose();
+        }
     }
 
     [Fact]
@@ -1616,6 +1792,95 @@ public class ChangeQueueProcessorTests
         // Act & Assert
         await Assert.ThrowsAsync<CoreSetupException>(() => processor.ProcessAsync(CancellationToken.None));
         await processor.ProcessAsync(new CancellationToken(canceled: true)).WaitAsync(TestTimeout);
+    }
+
+    [Fact]
+    public async Task WhenCancellationWaitRegistrationFails_ThenAnotherProcessingLifetimeCanStart()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+        var disposedSource = new CancellationTokenSource();
+        var disposedToken = disposedSource.Token;
+        _ = disposedToken.WaitHandle;
+        disposedSource.Dispose();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => processor.ProcessAsync(disposedToken));
+        await processor.ProcessAsync(new CancellationToken(canceled: true)).WaitAsync(TestTimeout);
+    }
+
+    [Fact]
+    public async Task WhenFilteringThrowsWhilePeriodicWriteWaitsForCancellation_ThenTeardownStarts()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        var filterCalls = 0;
+        var filterFailed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ =>
+            {
+                if (Interlocked.Increment(ref filterCalls) == 2)
+                {
+                    filterFailed.TrySetResult();
+                    throw new FilterException();
+                }
+
+                return true;
+            },
+            writeHandler: async (_, processingToken) =>
+            {
+                writeEntered.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, processingToken).ConfigureAwait(false);
+            },
+            bufferTime: TimeSpan.FromMilliseconds(10),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        subject.FirstName = "first";
+        await writeEntered.Task.WaitAsync(TestTimeout);
+        subject.LastName = "second";
+        await filterFailed.Task.WaitAsync(TestTimeout);
+
+        try
+        {
+            // Act & Assert
+            await Assert.ThrowsAsync<FilterException>(() => processing.WaitAsync(TestTimeout));
+        }
+        finally
+        {
+            if (!processing.IsCompleted)
+            {
+                await cancellation.CancelAsync();
+            }
+
+            try
+            {
+                await processing.WaitAsync(TestTimeout);
+            }
+            catch (FilterException)
+            {
+                // Expected after the caller cancellation used to release the pre-fix implementation.
+            }
+        }
     }
 
     [Fact]
@@ -2213,6 +2478,14 @@ public class ChangeQueueProcessorTests
     }
 
     private sealed class CoreSetupException : Exception;
+
+    private sealed class DropHandlerException : Exception;
+
+    private sealed class FilterException : Exception;
+
+    private sealed class TerminalHandlerException : Exception;
+
+    private sealed class WriteFailureException : Exception;
 
     private sealed class BlockingDataSubject(
         IInterceptorSubjectContext context,

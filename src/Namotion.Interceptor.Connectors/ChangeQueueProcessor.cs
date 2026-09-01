@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking;
@@ -43,7 +44,7 @@ public class ChangeQueueProcessor : IDisposable
     private long _dropCount;
     private int _deliveryState;
     private int _flushGate; // 0 = free, 1 = flushing
-    private int _disposed;
+    private int _lifecycleState;
 
     /// <summary>
     /// The rule this processor decides supersession with. Exposed so a connector can pin which rule it
@@ -218,39 +219,41 @@ public class ChangeQueueProcessor : IDisposable
     /// <returns>The task.</returns>
     public async Task ProcessAsync(CancellationToken cancellationToken)
     {
-        var previousState = Interlocked.CompareExchange(ref _disposed, ProcessingState, IdleState);
-        if (previousState == ProcessingState)
-        {
-            throw new InvalidOperationException("The processor is already running.");
-        }
-
-        if (previousState == DisposedState)
-        {
-            throw new ObjectDisposedException(nameof(ChangeQueueProcessor));
-        }
-
-        if (Volatile.Read(ref _disposed) == DisposedState)
-        {
-            // Dispose raced the Idle-to-Processing transition before the processing task was created,
-            // so no live run remains to release the merger in its finally block.
-            DisposeMerger();
-            throw new ObjectDisposedException(nameof(ChangeQueueProcessor));
-        }
-
-        var processingTokenSource = new CancellationTokenSource();
-        var teardownTokenSource = new CancellationTokenSource();
-        var processingTask = Task.Run(
-            () => ProcessCoreAsync(processingTokenSource.Token, teardownTokenSource.Token),
-            CancellationToken.None);
-        // The wait handle is signalled before token callbacks run, so a later blocking callback cannot delay teardown.
         var cancellationSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // The wait handle is signalled before token callbacks run, so a later blocking callback cannot delay teardown.
         var cancellationWait = ThreadPool.RegisterWaitForSingleObject(
             cancellationToken.WaitHandle,
             static (state, _) => ((TaskCompletionSource)state!).TrySetResult(),
             cancellationSignal,
             Timeout.InfiniteTimeSpan,
             executeOnlyOnce: true);
-        var completedTask = await Task.WhenAny(processingTask, cancellationSignal.Task).ConfigureAwait(false);
+        var previousState = Interlocked.CompareExchange(ref _lifecycleState, ProcessingState, IdleState);
+        if (previousState != IdleState)
+        {
+            cancellationWait.Unregister(null);
+            throw previousState == ProcessingState
+                ? new InvalidOperationException("The processor is already running.")
+                : new ObjectDisposedException(nameof(ChangeQueueProcessor));
+        }
+
+        if (Volatile.Read(ref _lifecycleState) == DisposedState)
+        {
+            // Dispose raced the Idle-to-Processing transition before the processing task was created,
+            // so no live run remains to release the merger in its finally block.
+            cancellationWait.Unregister(null);
+            DisposeMerger();
+            throw new ObjectDisposedException(nameof(ChangeQueueProcessor));
+        }
+
+        var processingTokenSource = new CancellationTokenSource();
+        var teardownTokenSource = new CancellationTokenSource();
+        var teardownStarted = new TaskCompletionSource<ExceptionDispatchInfo?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var processingTask = Task.Run(
+            () => ProcessCoreAsync(processingTokenSource.Token, teardownTokenSource.Token, teardownStarted),
+            CancellationToken.None);
+
+        var completedTask = await Task.WhenAny(processingTask, teardownStarted.Task, cancellationSignal.Task).ConfigureAwait(false);
         cancellationWait.Unregister(null);
         if (completedTask == processingTask)
         {
@@ -278,11 +281,15 @@ public class ChangeQueueProcessor : IDisposable
             {
                 teardownCancellationTask = teardownTokenSource.CancelAsync();
                 Dispose();
+                if (completedTask == teardownStarted.Task)
+                {
+                    (await teardownStarted.Task.ConfigureAwait(false))?.Throw();
+                }
             }
         }
         finally
         {
-            ObserveLateLifetimeAsync(
+            ObserveLateLifetimeInBackground(
                 processingTask,
                 processingCancellationTask,
                 teardownCancellationTask,
@@ -291,7 +298,7 @@ public class ChangeQueueProcessor : IDisposable
         }
     }
 
-    private async Task ProcessCoreAsync(CancellationToken processingToken, CancellationToken teardownToken)
+    private async Task ProcessCoreAsync(CancellationToken processingToken, CancellationToken teardownToken, TaskCompletionSource<ExceptionDispatchInfo?> teardownStarted)
     {
         try
         {
@@ -368,7 +375,7 @@ public class ChangeQueueProcessor : IDisposable
                         }
 
                         _immediateBuffer[0] = change;
-                        await DeliverAsync(_immediateBuffer, processingToken).ConfigureAwait(false);
+                        await WriteChangesAsync(_immediateBuffer, processingToken).ConfigureAwait(false);
                     }
                     else
                     {
@@ -380,8 +387,14 @@ public class ChangeQueueProcessor : IDisposable
                     }
                 }
             }
+            catch (Exception exception)
+            {
+                teardownStarted.TrySetResult(ExceptionDispatchInfo.Capture(exception));
+                throw;
+            }
             finally
             {
+                teardownStarted.TrySetResult(null);
                 periodicTimer?.Dispose();
                 await flushTask.ConfigureAwait(false);
                 try
@@ -399,14 +412,15 @@ public class ChangeQueueProcessor : IDisposable
         }
         finally
         {
-            if (Interlocked.CompareExchange(ref _disposed, IdleState, ProcessingState) == DisposedState)
+            _immediateBuffer[0] = default;
+            if (Interlocked.CompareExchange(ref _lifecycleState, IdleState, ProcessingState) == DisposedState)
             {
                 DisposeMerger();
             }
         }
     }
 
-    private static void ObserveLateLifetimeAsync(
+    private static void ObserveLateLifetimeInBackground(
         Task processingTask,
         Task processingCancellationTask,
         Task teardownCancellationTask,
@@ -465,7 +479,7 @@ public class ChangeQueueProcessor : IDisposable
         Interlocked.Add(ref _dropCount, count);
         _ = Task.Run(() =>
         {
-            try { _dropHandler?.Invoke(count); } catch { }
+            InvokeDropHandler(count);
             try
             {
                 _logger.LogWarning(
@@ -482,7 +496,7 @@ public class ChangeQueueProcessor : IDisposable
     }
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
-    private async ValueTask DeliverAsync(
+    private async ValueTask WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken,
         bool deliveryAdmitted = false)
@@ -545,10 +559,15 @@ public class ChangeQueueProcessor : IDisposable
 
             if (counted)
             {
-                _dropHandler?.Invoke(count);
+                InvokeDropHandler(count);
                 _logger.LogError(exception, "Failed to write changes.");
             }
         }
+    }
+
+    private void InvokeDropHandler(long count)
+    {
+        try { _dropHandler?.Invoke(count); } catch { }
     }
 
     /// <summary>
@@ -567,7 +586,7 @@ public class ChangeQueueProcessor : IDisposable
 
         if (droppedCount > 0)
         {
-            _dropHandler?.Invoke(droppedCount);
+            InvokeDropHandler(droppedCount);
         }
     }
 
@@ -606,7 +625,7 @@ public class ChangeQueueProcessor : IDisposable
 
             if (mergedChanges.Length > 0)
             {
-                await DeliverAsync(
+                await WriteChangesAsync(
                     mergedChanges,
                     cancellationToken,
                     deliveryAdmitted: !_writeHandlerOwnsChanges).ConfigureAwait(false);
@@ -619,7 +638,7 @@ public class ChangeQueueProcessor : IDisposable
                 // Clear buffers to allow GC of SubjectPropertyChange objects
                 _flushChanges.Clear();
 
-                if (merged && Volatile.Read(ref _disposed) != DisposedState)
+                if (merged && Volatile.Read(ref _lifecycleState) != DisposedState)
                 {
                     // Only when there was a batch. An idle tick has nothing to release, and resetting
                     // anyway would feed the merger a zero-width batch: at the default buffer time that is
@@ -643,18 +662,18 @@ public class ChangeQueueProcessor : IDisposable
     /// </summary>
     public void Dispose()
     {
-        var previousState = Interlocked.Exchange(ref _disposed, DisposedState);
+        var previousState = Interlocked.Exchange(ref _lifecycleState, DisposedState);
         if (previousState != DisposedState)
         {
             _ownedSubscription?.Dispose();
         }
 
         ReportTerminalDrops(CloseDeliveryAndDrain());
-        InvokeTerminalHandlerOnce();
         if (previousState == IdleState)
         {
             DisposeMerger();
         }
+        InvokeTerminalHandlerOnce();
     }
 
     private void InvokeTerminalHandlerOnce()
