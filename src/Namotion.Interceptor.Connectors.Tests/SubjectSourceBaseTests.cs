@@ -16,6 +16,11 @@ namespace Namotion.Interceptor.Connectors.Tests;
 
 public class SubjectSourceBaseTests
 {
+    // Generous on purpose. These waits synchronize on a write actually reaching the handler, so the
+    // budget only has to outlast scheduling, not describe how long the write should take. A tight one
+    // fails whenever the whole solution runs in parallel and the thread pool is sized for a CI runner.
+    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+
     [Fact]
     public async Task WhenStartingSourceAndPushingChanges_ThenUpdatesAreInCorrectOrder()
     {
@@ -367,7 +372,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert
@@ -401,7 +406,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert: the later capture wins, and it is delivered rather than ranked against the marker.
@@ -444,7 +449,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert: the later capture wins here too, and survives the reconcile's supersession check.
@@ -632,7 +637,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert
@@ -696,7 +701,7 @@ public class SubjectSourceBaseTests
         subject.FirstName = "Test";
 
         // Wait for the write to be attempted
-        await tcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await tcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - service processed the write (exception was logged, not thrown)
@@ -734,7 +739,7 @@ public class SubjectSourceBaseTests
         subject.FirstName = "Test";
 
         // Wait for the write to be attempted
-        await tcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await tcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - write was attempted (OperationCanceledException propagated up)
@@ -783,12 +788,12 @@ public class SubjectSourceBaseTests
         subject.FirstName = "First";
 
         // Wait for first write to be attempted before triggering second
-        await firstCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await firstCallTcs.Task.WaitAsync(TestTimeout);
 
         // Second change - will succeed and flush the queued item
         subject.FirstName = "Second";
 
-        await secondCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await secondCallTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - both writes were attempted (first failed and was retried)
@@ -825,7 +830,7 @@ public class SubjectSourceBaseTests
 
         subject.FirstName = "Test";
 
-        await tcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await tcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - OperationCanceledException was thrown (propagates up)
@@ -873,11 +878,11 @@ public class SubjectSourceBaseTests
         subject.FirstName = "First";
 
         // Wait for first write to be attempted before triggering second
-        await firstCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await firstCallTcs.Task.WaitAsync(TestTimeout);
 
         subject.FirstName = "Second";
 
-        await secondCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await secondCallTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - changes were enqueued and retried
@@ -932,13 +937,13 @@ public class SubjectSourceBaseTests
 
         // First change - will return WriteResult.Failure, should be enqueued for retry
         subject.FirstName = "FailedValue";
-        await firstCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await firstCallTcs.Task.WaitAsync(TestTimeout);
 
         // Second change - triggers retry queue flush (retrying first), then writes second
         subject.FirstName = "SecondValue";
 
         // Wait for retry flush + new write (3 total calls)
-        await thirdCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await thirdCallTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert
@@ -976,7 +981,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - change was re-applied locally and sent to server
@@ -1005,7 +1010,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - the local write is restored and sent rather than silently discarded
@@ -1035,7 +1040,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - re-applied
@@ -1063,7 +1068,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - the local write wins over the value the load brought in
@@ -1090,7 +1095,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - re-applied (reference equality)
@@ -1118,7 +1123,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - the local write wins over the collection the load brought in
@@ -1151,7 +1156,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert
@@ -1183,7 +1188,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - the load moved both properties, and both local writes are restored and sent
@@ -1214,7 +1219,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - null == null -> non-conflicting, re-applied
@@ -1242,7 +1247,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - the local write wins rather than being discarded as a conflict
@@ -1330,7 +1335,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - broken change failed, but LastName was still re-applied
@@ -1439,7 +1444,7 @@ public class SubjectSourceBaseTests
 
         // Act
         await source.StartAsync(CancellationToken.None);
-        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await writeTcs.Task.WaitAsync(TestTimeout);
         await source.StopAsync(CancellationToken.None);
 
         // Assert - the change was sent to the source (flush branch), not dropped
