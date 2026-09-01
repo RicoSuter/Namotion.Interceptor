@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Reflection;
 using Microsoft.Extensions.Logging.Abstractions;
 using MQTTnet;
+using MQTTnet.Exceptions;
 using MQTTnet.Formatter;
 using MQTTnet.Packets;
 using MQTTnet.Protocol;
@@ -291,10 +292,7 @@ public partial class MqttServerLivenessTests
         }
         finally
         {
-            if (client.IsConnected)
-            {
-                await client.DisconnectAsync();
-            }
+            await DisconnectForTeardownAsync(client);
 
             await server.StopAsync(CancellationToken.None);
         }
@@ -386,10 +384,7 @@ public partial class MqttServerLivenessTests
                 await staleCallback.WaitAsync(TimeSpan.FromSeconds(10));
             }
 
-            if (subscriber.IsConnected)
-            {
-                await subscriber.DisconnectAsync();
-            }
+            await DisconnectForTeardownAsync(subscriber);
 
             await server.StopAsync(CancellationToken.None);
         }
@@ -531,15 +526,9 @@ public partial class MqttServerLivenessTests
                 await stopTask.WaitAsync(TimeSpan.FromSeconds(10));
             }
 
-            if (publisher.IsConnected)
-            {
-                await publisher.DisconnectAsync();
-            }
+            await DisconnectForTeardownAsync(publisher);
 
-            if (subscriber.IsConnected)
-            {
-                await subscriber.DisconnectAsync();
-            }
+            await DisconnectForTeardownAsync(subscriber);
 
             await server.StopAsync(CancellationToken.None);
         }
@@ -778,6 +767,30 @@ public partial class MqttServerLivenessTests
         }
 
         throw new InvalidOperationException("The MQTT broker does not expose its disposal state.");
+    }
+
+    /// <summary>
+    /// Disconnects a client during test teardown. These tests deliberately retire the broker while
+    /// clients are still attached, so by the time teardown runs the socket may already be gone and the
+    /// DISCONNECT packet fails to send. IsConnected cannot guard against it: it is a snapshot that can
+    /// go stale between the check and the send. Teardown failures must not decide the test, so the
+    /// transport-level failure is swallowed here while every assertion above stays untouched.
+    /// </summary>
+    private static async Task DisconnectForTeardownAsync(IMqttClient client)
+    {
+        if (!client.IsConnected)
+        {
+            return;
+        }
+
+        try
+        {
+            await client.DisconnectAsync();
+        }
+        catch (MqttCommunicationException)
+        {
+            // The broker is already gone, which is what the test asserted in the first place.
+        }
     }
 
     private static int GetFreeTcpPort()

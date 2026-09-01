@@ -356,6 +356,27 @@ public class SubjectSourceExtensionsTests
         Assert.Contains("Property5", failedNames);
     }
 
+    /// <summary>
+    /// Records a new maximum seen by several callers at once. A plain read-modify-write loses updates
+    /// when the writes overlap, which is the very situation these tests manufacture: the concurrent case
+    /// can then observe two of its three overlapping calls and fail for no reason, and the serialized
+    /// case can drop the evidence that serialization leaked.
+    /// </summary>
+    private static void RecordMaximum(ref int maximum, int candidate)
+    {
+        var observed = Volatile.Read(ref maximum);
+        while (candidate > observed)
+        {
+            var previous = Interlocked.CompareExchange(ref maximum, candidate, observed);
+            if (previous == observed)
+            {
+                return;
+            }
+
+            observed = previous;
+        }
+    }
+
     [Fact]
     public async Task WriteChangesInBatchesAsync_RegularSource_SerializesWrites()
     {
@@ -370,7 +391,7 @@ public class SubjectSourceExtensionsTests
             .Returns(async (ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken ct) =>
             {
                 var current = Interlocked.Increment(ref concurrentCalls);
-                maxConcurrentCalls = Math.Max(maxConcurrentCalls, current);
+                RecordMaximum(ref maxConcurrentCalls, current);
 
                 // Wait a bit to allow potential concurrent calls to overlap
                 await Task.Delay(50, ct);
@@ -407,7 +428,7 @@ public class SubjectSourceExtensionsTests
         var source = new ConcurrentTestSource(async () =>
         {
             var current = Interlocked.Increment(ref concurrentCalls);
-            maxConcurrentCalls = Math.Max(maxConcurrentCalls, current);
+            RecordMaximum(ref maxConcurrentCalls, current);
 
             // Signal when all 3 calls have started
             if (current >= 3)
@@ -432,10 +453,11 @@ public class SubjectSourceExtensionsTests
             source.WriteChangesInBatchesAsync(changes, CancellationToken.None).AsTask()
         };
 
-        // Wait for all calls to start (or timeout)
-        var allStartedTask = allStarted.Task;
-        var timeoutTask = Task.Delay(1000);
-        await Task.WhenAny(allStartedTask, timeoutTask);
+        // Wait for all three calls to be in flight, and fail here if they never are. Letting a bounded
+        // wait expire silently opens the gate below while the calls are still queued, and the assertion
+        // then fails because they ran one after another rather than because the source refused to run
+        // them together.
+        await allStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
         // Allow all to complete
         canContinue.SetResult();
