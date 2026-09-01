@@ -52,7 +52,7 @@ When health status transitions (e.g., Healthy→Degraded), the subject publishes
 
 Several patterns already exist that would implement this interface:
 
-Built-in connectors publish `IsOperational == true` only after their protocol-specific serving observation and `IsOperational == false` after a reported outage. Before their first liveness observation, the value can be `null`; health mapping should treat that as unknown rather than as an explicit outage.
+Built-in connectors publish `IsOperational == true` only after their protocol-specific serving observation and `IsOperational == false` after a reported outage or once they stop. The value is `null` only while a connector runs before its first liveness observation; health mapping should treat that as unknown rather than as an explicit outage.
 
 | Subject | Current Health Reporting | Maps To |
 |---------|------------------------|---------|

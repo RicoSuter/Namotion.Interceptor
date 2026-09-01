@@ -127,7 +127,7 @@ public class OpcUaServerDiagnosticsTests
         // Assert
         Assert.IsType<InvalidOperationException>(server.Diagnostics.LastError);
         Assert.NotNull(server.Diagnostics.StartTime);
-        Assert.Null(server.Diagnostics.IsOperational);
+        Assert.False(server.Diagnostics.IsOperational);
     }
 
     /// <summary>

@@ -47,7 +47,7 @@ public class MqttServerDiagnosticsTests
         // Assert
         Assert.IsType<FormatException>(server.Diagnostics.LastError);
         Assert.NotNull(server.Diagnostics.StartTime);
-        Assert.Null(server.Diagnostics.IsOperational);
+        Assert.False(server.Diagnostics.IsOperational);
     }
 
     [Fact]

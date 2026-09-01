@@ -8,7 +8,8 @@ namespace Namotion.Interceptor.Connectors.Diagnostics;
 /// answered by <see cref="ISubjectSource.State"/>, so read them together: a reported network outage is
 /// <see cref="IsOperational"/> false, while a connected source still loading is
 /// <see cref="IsOperational"/> true with a state of
-/// <see cref="Monitoring.SourceState.Synchronizing"/>. See docs/connectors-monitoring.md.
+/// <see cref="Monitoring.SourceState.Synchronizing"/>. A connector that does not measure liveness
+/// reads <see cref="IsOperational"/> null while it runs. See docs/connectors-monitoring.md.
 /// </remarks>
 public class ConnectorDiagnostics
 {
@@ -26,17 +27,17 @@ public class ConnectorDiagnostics
     }
 
     /// <summary>
-    /// Gets a value indicating whether the transport is up and serving, or <c>null</c> when liveness
-    /// is unavailable because the connector has not reported it. What that means is defined by each
-    /// connector and documented on its own diagnostics type. It does not mean the model is in sync:
-    /// see the remarks on this type.
+    /// Gets a value indicating whether the transport is up and serving, or <c>null</c> while the
+    /// connector is running and has not reported liveness. A stopped connector always reads
+    /// <c>false</c>. What being up means is defined by each connector and documented on its own
+    /// diagnostics type. It does not mean the model is in sync: see the remarks on this type.
     /// </summary>
     public bool? IsOperational => _metrics.IsOperational;
 
     /// <summary>
-    /// Gets when <see cref="IsOperational"/> last changed, or <c>null</c> until the first liveness
-    /// report establishes a value and timestamp. Moves whenever the flag moves, so the pair reads as
-    /// "up since T" or "down since T".
+    /// Gets when <see cref="IsOperational"/> last changed, or <c>null</c> while liveness is still
+    /// unavailable. Moves whenever the value moves, so the pair reads as "up since T" or "down since
+    /// T", and clears with the value when a new epoch starts.
     /// </summary>
     public DateTimeOffset? OperationalChangeTime => _metrics.OperationalChangeTime;
 

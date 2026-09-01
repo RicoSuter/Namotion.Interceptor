@@ -142,7 +142,7 @@ public class ConnectorMetricsTests
     }
 
     [Fact]
-    public void WhenUnmonitoredConnectorIsStopped_ThenLivenessStaysNullAndLateReportsAreIgnored()
+    public void WhenUnmonitoredConnectorIsStopped_ThenLivenessBecomesFalseAndLateReportsAreIgnored()
     {
         // Arrange
         var metrics = new ConnectorMetrics();
@@ -152,7 +152,25 @@ public class ConnectorMetricsTests
         metrics.MarkStopped();
         metrics.MarkOperational();
 
-        // Assert
+        // Assert: a stopped connector is known not to be serving even though it never measured that.
+        Assert.False(diagnostics.IsOperational);
+        Assert.NotNull(diagnostics.OperationalChangeTime);
+    }
+
+    [Fact]
+    public void WhenMonitoredConnectorIsRestarted_ThenLivenessReturnsToUnavailable()
+    {
+        // Arrange
+        var metrics = new ConnectorMetrics();
+        var diagnostics = new ConnectorDiagnostics(metrics);
+        metrics.MarkOperational();
+        metrics.MarkStopped();
+
+        // Act
+        metrics.MarkStarted();
+
+        // Assert: the new epoch reports nothing observed rather than the previous epoch's value and a
+        // timestamp from before it began.
         Assert.Null(diagnostics.IsOperational);
         Assert.Null(diagnostics.OperationalChangeTime);
     }

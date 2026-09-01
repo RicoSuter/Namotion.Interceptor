@@ -6,10 +6,10 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// What the WebSocket server reports about its transport, on top of the shared connector diagnostics.
 /// </summary>
 /// <remarks>
-/// A value of <c>true</c> means the listener is accepting connections; <c>false</c> means it
-/// explicitly reports that it is not accepting connections, and <c>null</c> means the server has
-/// not published liveness yet. Neither throughput direction is measured, so both rates are
-/// <c>null</c> rather than 0.
+/// A value of <c>true</c> means the listener is accepting connections and <c>false</c> means it is
+/// not, either because the server reported that or because it has stopped. It reads <c>null</c> only
+/// while the server runs before its first liveness report. Neither throughput direction is measured,
+/// so both rates are <c>null</c> rather than 0.
 /// </remarks>
 public sealed class WebSocketServerDiagnostics : ConnectorDiagnostics
 {
