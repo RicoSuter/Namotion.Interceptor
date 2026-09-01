@@ -20,7 +20,7 @@ public class OpcUaServerDiagnosticsTests
     /// here is what a fresh <c>ConnectorMetrics</c> reports.
     /// </summary>
     [Fact]
-    public void WhenNeverStarted_ThenTheServerReportsNotOperational()
+    public void WhenNeverStarted_ThenTheServerReportsUnavailableLiveness()
     {
         // Arrange
         using var server = CreateServer();
@@ -30,7 +30,7 @@ public class OpcUaServerDiagnosticsTests
         int activeSessionCount = diagnostics.ActiveSessionCount;
 
         // Assert
-        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.IsOperational);
         Assert.Null(diagnostics.OperationalChangeTime);
         Assert.Null(diagnostics.StartTime);
         Assert.Null(diagnostics.LastError);
@@ -127,7 +127,7 @@ public class OpcUaServerDiagnosticsTests
         // Assert
         Assert.IsType<InvalidOperationException>(server.Diagnostics.LastError);
         Assert.NotNull(server.Diagnostics.StartTime);
-        Assert.False(server.Diagnostics.IsOperational);
+        Assert.Null(server.Diagnostics.IsOperational);
     }
 
     /// <summary>

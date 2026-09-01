@@ -218,7 +218,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
         if (_clientSource is { } source)
         {
             var diagnostics = source.Diagnostics;
-            IsConnected = diagnostics.IsOperational;
+            IsConnected = diagnostics.IsOperational == true;
             IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
             OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
             MonitoredItemCount = diagnostics.MonitoredItemCount;
