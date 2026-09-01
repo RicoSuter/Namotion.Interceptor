@@ -6,7 +6,8 @@ namespace Namotion.Interceptor.Mqtt.Server;
 /// What the MQTT server reports about its transport, on top of the shared connector diagnostics.
 /// </summary>
 /// <remarks>
-/// <see cref="ConnectorDiagnostics.IsOperational"/> means the broker is listening. Neither
+/// When <see cref="ConnectorDiagnostics.IsOperational"/> has a value, it means the broker is
+/// listening. A <c>null</c> value means the server has not published liveness yet. Neither
 /// throughput direction is measured, so both rates are <c>null</c> rather than 0.
 /// </remarks>
 public sealed class MqttServerDiagnostics : ConnectorDiagnostics

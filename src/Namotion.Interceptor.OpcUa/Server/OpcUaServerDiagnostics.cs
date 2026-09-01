@@ -6,8 +6,9 @@ namespace Namotion.Interceptor.OpcUa.Server;
 /// What the OPC UA server reports about its transport, on top of the shared connector diagnostics.
 /// </summary>
 /// <remarks>
-/// <see cref="ConnectorDiagnostics.IsOperational"/> means the server has started and is accepting
-/// client connections. <see cref="ConnectorDiagnostics.OperationalChangeTime"/> moves on every
+/// When <see cref="ConnectorDiagnostics.IsOperational"/> has a value, it means the server has
+/// started and is accepting client connections. A <c>null</c> value means the server has not
+/// published liveness yet. <see cref="ConnectorDiagnostics.OperationalChangeTime"/> moves on every
 /// internal restart, where <see cref="ConnectorDiagnostics.StartTime"/> marks the hosted service's
 /// own start and does not.
 /// </remarks>
