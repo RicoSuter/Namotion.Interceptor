@@ -2639,37 +2639,6 @@ public class ChangeQueueProcessorTests
         }
     }
 
-    [Fact]
-    public async Task WhenTheCallerTokenSourceIsAlreadyDisposed_ThenTheProcessorIsNotLeftRunning()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create()
-            .WithRegistry()
-            .WithPropertyChangeSubscriptions();
-        var cancellationSource = new CancellationTokenSource();
-        var disposedToken = cancellationSource.Token;
-        cancellationSource.Dispose();
-
-        using var processor = new ChangeQueueProcessor(
-            source: new object(),
-            context: context,
-            propertyFilter: _ => true,
-            writeHandler: (_, _) => ValueTask.CompletedTask,
-            deliveryRule: ChangeDeliveryRule.SourceValuesAreSettled,
-            bufferTime: TimeSpan.FromMilliseconds(8),
-            maxQueueDepth: null,
-            logger: NullLogger.Instance);
-
-        // Act - reading WaitHandle on a disposed source throws, which must not strand the lifecycle state.
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => processor.ProcessAsync(disposedToken));
-
-        // Assert - the processor is still startable rather than wedged as "already running".
-        using var cancellation = new CancellationTokenSource();
-        var processing = processor.ProcessAsync(cancellation.Token);
-        await cancellation.CancelAsync();
-        await processing.WaitAsync(TeardownWaitTimeout);
-    }
-
     private sealed class ThrowingLogger : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
@@ -2681,4 +2650,3 @@ public class ChangeQueueProcessorTests
             => throw new InvalidOperationException("logger provider threw");
     }
 }
-

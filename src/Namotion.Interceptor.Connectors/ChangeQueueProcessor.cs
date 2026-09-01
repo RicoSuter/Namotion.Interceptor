@@ -314,10 +314,7 @@ public class ChangeQueueProcessor : IDisposable
                     {
                         while (await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
                         {
-                            // Per tick rather than around the loop. A catch outside the loop ends delivery for
-                            // this processor's lifetime on the first throw, while the dequeue loop keeps filling
-                            // a queue the connectors leave unbounded. Anything the flush reaches can throw: the
-                            // write handler, the drop handler, the logger, the property filter.
+                            // Catch per tick so a consumer callback cannot permanently stop delivery while dequeueing continues.
                             try
                             {
                                 await TryFlushAsync(processingToken).ConfigureAwait(false);
@@ -329,12 +326,10 @@ public class ChangeQueueProcessor : IDisposable
                             }
                         }
                     }
+                    catch (OperationCanceledException) { }
                     catch (Exception exception)
                     {
-                        if (exception is not OperationCanceledException)
-                        {
-                            ReportFlushFailure(exception, ref flushFailureReported);
-                        }
+                        ReportFlushFailure(exception, ref flushFailureReported);
                     }
                 })
                 : Task.CompletedTask;
@@ -583,9 +578,7 @@ public class ChangeQueueProcessor : IDisposable
         try { _dropHandler?.Invoke(count); } catch { }
     }
 
-    // Once per run of failures: at the default buffer time an unreported one would log about 125 times a
-    // second for as long as the fault lasts. The logger itself is guarded because it is consumer supplied
-    // and this is the handler that keeps a failing flush from ending delivery.
+    // Report only the first consecutive failure and guard the consumer-supplied logger.
     private void ReportFlushFailure(Exception exception, ref bool alreadyReported)
     {
         if (alreadyReported)
