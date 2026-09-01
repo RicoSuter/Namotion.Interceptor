@@ -11,16 +11,17 @@ public class WriteRetryQueueTests
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
 
     [Fact]
-    public async Task WhenACurrentWriteWaitsBehindAnOlderRetryAtRetirement_ThenBothAreCountedOnce()
+    public async Task WhenRetryOwnershipIsDisposedWithACurrentWriteWaiting_ThenBothCompleteAndAreCountedOnce()
     {
         // Arrange
         var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
         var diagnostics = new QueueDiagnostics(metrics);
-        using var queue = new WriteRetryQueue(100, NullLogger.Instance, metrics);
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, metrics);
         var source = new Mock<ISubjectSource>();
         var olderWriteStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseOlderWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var currentWriteStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var waiterCancellation = new CancellationTokenSource();
         source.Setup(item => item.WriteChangesAsync(
                 It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
             .Returns(async (ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
@@ -38,19 +39,36 @@ public class WriteRetryQueueTests
                 return WriteResult.Success;
             });
         queue.Enqueue(CreateChanges(1, startId: 0));
-        var olderFlush = queue.FlushAsync(source.Object, CancellationToken.None);
+        var olderFlush = queue.FlushAsync(source.Object, CancellationToken.None).AsTask();
         await olderWriteStarted.Task.WaitAsync(TestTimeout);
-        var currentWrite = queue.WriteAsync(source.Object, CreateChanges(1, startId: 1), CancellationToken.None);
+        var currentWrite = queue.WriteAsync(
+            source.Object,
+            CreateChanges(1, startId: 1),
+            waiterCancellation.Token).AsTask();
 
-        // Act
-        queue.Retire();
-        releaseOlderWrite.TrySetResult();
-        await olderFlush.AsTask().WaitAsync(TestTimeout);
-        await currentWrite.AsTask().WaitAsync(TestTimeout);
+        try
+        {
+            // Act
+            queue.Dispose();
+            releaseOlderWrite.TrySetResult();
+            await olderFlush.WaitAsync(TestTimeout);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => currentWrite.IsCompleted,
+                timeout: TestTimeout,
+                message: "The registered waiter should complete after the semaphore holder exits.");
+            await currentWrite;
 
-        // Assert
-        Assert.False(currentWriteStarted.Task.IsCompleted);
-        Assert.Equal(2, diagnostics.TotalDropped);
+            // Assert
+            Assert.False(currentWriteStarted.Task.IsCompleted);
+            Assert.Equal(2, diagnostics.TotalDropped);
+        }
+        finally
+        {
+            releaseOlderWrite.TrySetResult();
+            await waiterCancellation.CancelAsync();
+            await Task.WhenAll(olderFlush, currentWrite).WaitAsync(TestTimeout);
+            queue.Dispose();
+        }
     }
 
     [Fact]

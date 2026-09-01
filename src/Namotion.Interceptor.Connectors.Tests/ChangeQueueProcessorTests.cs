@@ -823,13 +823,15 @@ public class ChangeQueueProcessorTests
         await task;
     }
 
-    private static bool IsDisposed(ChangeQueueProcessor processor)
+    private static int GetProcessorState(ChangeQueueProcessor processor)
     {
         var disposedField = typeof(ChangeQueueProcessor)
             .GetField("_disposed", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
-        return (int)disposedField!.GetValue(processor)! == 2;
+        return (int)disposedField!.GetValue(processor)!;
     }
+
+    private static bool IsDisposed(ChangeQueueProcessor processor) => GetProcessorState(processor) == 2;
 
     [Fact]
     public async Task WhenChangeQueuedBeforeProcessingIsSuperseded_ThenOnlyCurrentValueIsWritten()
@@ -1049,7 +1051,7 @@ public class ChangeQueueProcessorTests
     }
 
     [Fact]
-    public async Task WhenAnImmediateWriteIgnoresCancellation_ThenStoppingEndsAtTheBoundAndCountsItOnce()
+    public async Task WhenAnImmediateWriteIgnoresCancellation_ThenDeadlineIsTerminalAndCountsItOnce()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -1098,9 +1100,14 @@ public class ChangeQueueProcessorTests
         }
 
         await writeFinished.Task.WaitAsync(TestTimeout);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => GetProcessorState(processor) != 1,
+            message: "The late processor core should leave its running state after the write completes.");
 
         // Assert
         Assert.Equal(1, processor.DropCount);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+            processor.ProcessAsync(new CancellationToken(canceled: true)));
     }
 
     [Fact]

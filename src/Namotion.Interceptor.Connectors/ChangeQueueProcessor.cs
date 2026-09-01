@@ -48,7 +48,8 @@ public class ChangeQueueProcessor : IDisposable
     internal ChangeDeliveryRule DeliveryRule => _deliveryRule;
 
     /// <summary>
-    /// Number of changes dropped due to bounded-queue overflow or terminal delivery closure.
+    /// Number of changes dropped due to bounded-queue overflow, ordinary write failure, or terminal
+    /// delivery closure.
     /// </summary>
     public long DropCount => Interlocked.Read(ref _dropCount);
 
@@ -92,9 +93,10 @@ public class ChangeQueueProcessor : IDisposable
     /// increments <see cref="DropCount"/>, so the newest change is retained. Read only on the buffered
     /// path, so a processor with a buffer time of zero never touches the queue this bounds.</param>
     /// <param name="logger">The logger.</param>
-    /// <param name="dropHandler">Optional handler invoked only when bounded-queue overflow drops
-    /// changes. Use this to report the count to queue diagnostics without adding work to successful
-    /// enqueue or dequeue operations.</param>
+    /// <param name="dropHandler">Optional handler invoked when bounded-queue overflow, an ordinary
+    /// write failure, or terminal delivery closure drops changes. Terminal closure reporting may be
+    /// dispatched asynchronously. Use this to report the count to queue diagnostics without adding
+    /// work to successful enqueue or dequeue operations.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
     /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
     /// the first flush, where it would end delivery for this processor's lifetime. Also thrown when
@@ -228,19 +230,27 @@ public class ChangeQueueProcessor : IDisposable
         var processingTask = Task.Run(
             () => ProcessCoreAsync(processingTokenSource.Token, teardownTokenSource.Token),
             CancellationToken.None);
-        var cancellationTask = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-        if (await Task.WhenAny(processingTask, cancellationTask).ConfigureAwait(false) == processingTask)
+        var externallyCancelled = false;
+        try
         {
-            try
-            {
-                await processingTask.ConfigureAwait(false);
-            }
-            finally
+            await processingTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception) when (
+            cancellationToken.IsCancellationRequested && exception.CancellationToken == cancellationToken)
+        {
+            externallyCancelled = true;
+        }
+        finally
+        {
+            if (!externallyCancelled)
             {
                 processingTokenSource.Dispose();
                 teardownTokenSource.Dispose();
             }
+        }
 
+        if (!externallyCancelled)
+        {
             return;
         }
 
@@ -255,8 +265,7 @@ public class ChangeQueueProcessor : IDisposable
             else
             {
                 teardownCancellationTask = teardownTokenSource.CancelAsync();
-                ReportTerminalDrops(CloseDeliveryAndDrain());
-                InvokeTerminalHandlerOnce();
+                Dispose();
             }
         }
         finally
@@ -614,6 +623,7 @@ public class ChangeQueueProcessor : IDisposable
         var previousState = Interlocked.Exchange(ref _disposed, DisposedState);
         if (previousState == DisposedState)
         {
+            InvokeTerminalHandlerOnce();
             return;
         }
 

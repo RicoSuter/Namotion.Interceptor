@@ -108,7 +108,7 @@ internal sealed class WriteRetryQueue : IDisposable
         }
         finally
         {
-            ReleaseFlush();
+            _flushSemaphore.Release();
         }
     }
 
@@ -164,7 +164,7 @@ internal sealed class WriteRetryQueue : IDisposable
         }
         finally
         {
-            ReleaseFlush();
+            _flushSemaphore.Release();
         }
     }
 
@@ -185,12 +185,6 @@ internal sealed class WriteRetryQueue : IDisposable
 
             return false;
         }
-    }
-
-    private void ReleaseFlush()
-    {
-        try { _flushSemaphore.Release(); }
-        catch (ObjectDisposedException) { }
     }
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
@@ -333,9 +327,5 @@ internal sealed class WriteRetryQueue : IDisposable
         return droppedCount;
     }
 
-    public void Dispose()
-    {
-        Retire();
-        _flushSemaphore.Dispose();
-    }
+    public void Dispose() => Retire();
 }
