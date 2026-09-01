@@ -107,8 +107,10 @@ public class ConnectorMetrics
     public void MarkNotOperational() => SetOperational(false, terminal: false);
 
     /// <summary>
-    /// Reports that the connector has stopped for good and latches that for the rest of the epoch,
-    /// until the next <see cref="MarkStarted"/>.
+    /// Reports that the connector has stopped for good and terminally latches liveness for the rest
+    /// of the epoch, until the next <see cref="MarkStarted"/>. Converts an observed <c>true</c> value
+    /// to <c>false</c>, preserves an existing <c>false</c> value or unavailable <c>null</c>, and rejects
+    /// later liveness reports until the next start.
     /// </summary>
     /// <remarks>
     /// Terminal because a liveness transition detected off the pump thread can otherwise land after

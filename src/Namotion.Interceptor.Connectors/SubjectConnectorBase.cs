@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
 /// Abstract base for every connector, client or server, owning the diagnostics lifecycle so that a
-/// connector cannot forget to report that it stopped serving.
+/// connector cannot forget to terminally latch liveness when it stops serving.
 /// </summary>
 /// <remarks>
 /// <see cref="ExecuteAsync"/> is sealed and derived classes override <see cref="RunAsync"/> instead.

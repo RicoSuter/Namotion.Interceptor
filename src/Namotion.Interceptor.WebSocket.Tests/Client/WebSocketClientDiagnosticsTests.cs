@@ -32,7 +32,7 @@ public class WebSocketClientDiagnosticsTests
     /// counter this connector does not feed, which would report a misleading zero.
     /// </summary>
     [Fact]
-    public async Task WhenNeverConnected_ThenTheSourceReportsNotOperationalAndNoThroughput()
+    public async Task WhenNeverConnected_ThenTheSourceReportsUnavailableLivenessAndNoThroughput()
     {
         // Arrange
         await using var source = CreateClientSource();

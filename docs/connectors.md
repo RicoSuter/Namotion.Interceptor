@@ -925,8 +925,8 @@ What the base provides around that call:
 | Stamps the start epoch that every `Total` counter and `StartTime` are measured from, clears `LastError`, and resets the registered metrics | `MarkStarted()`, once per `ExecuteAsync` entry |
 | Records a fault that escapes `RunAsync` into `LastError` | the catch around the `RunAsync` call |
 | Leaves an expected shutdown unrecorded, so a graceful stop does not overwrite the genuine error that made the connector fail | the `OperationCanceledException` filter on the stopping token |
-| Forces liveness false when `RunAsync` exits, on every path | `MarkStopped()` in the `finally` |
-| Forces liveness false on disposal, because `BackgroundService.Dispose` cancels the token without awaiting `ExecuteAsync` | the `Dispose` override |
+| Terminally latches liveness when `RunAsync` exits, converting observed `true` to `false`, preserving existing `false` or unavailable `null`, and rejecting late reports until `MarkStarted()` | `MarkStopped()` in the `finally` |
+| Terminally latches liveness on disposal with the same tri-state behavior, because `BackgroundService.Dispose` cancels the token without awaiting `ExecuteAsync` | the `Dispose` override |
 | Runs one restart-loop iteration under its own `ConnectorRunAttempt`, publishing it while the body runs and clearing it before disposal, so an injected kill cancels exactly the iteration that is running and one arriving between iterations finds nothing to cancel | `RunAttemptAsync()`, paired with `ForceKillCurrentAttemptAsync()` |
 
 What a server author must implement:

@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Connectors.Diagnostics;
 /// </summary>
 /// <remarks>
 /// This answers what the transport is doing. Whether the model can be trusted is a separate question
-/// answered by <see cref="ISubjectSource.State"/>, so read them together: a network outage is
+/// answered by <see cref="ISubjectSource.State"/>, so read them together: a reported network outage is
 /// <see cref="IsOperational"/> false, while a connected source still loading is
 /// <see cref="IsOperational"/> true with a state of
 /// <see cref="Monitoring.SourceState.Synchronizing"/>. See docs/connectors-monitoring.md.

@@ -20,7 +20,7 @@ public class WebSocketServerDiagnosticsTests
     /// here is what a fresh <c>ConnectorMetrics</c> and an idle handler report.
     /// </summary>
     [Fact]
-    public void WhenNeverStarted_ThenTheServerReportsNotOperational()
+    public void WhenNeverStarted_ThenTheServerReportsUnavailableLiveness()
     {
         // Arrange
         using var server = CreateServer();
