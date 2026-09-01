@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Parent;
 
@@ -42,6 +43,36 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     // inside the chain. Always taken through EnterGate, never directly, so the
     // one-transaction-per-thread rule below sees every acquisition.
     private readonly Lock _gate = new();
+
+    // The one deadlock this design cannot prevent is a gate holder waiting for topology work it
+    // dispatched to another thread: it cannot release the gate until that work finishes and that
+    // work cannot start until the gate is released. Only a thread holding no gate at all ever waits
+    // here, because the rule above rejects a second transaction and a reentrant acquisition never
+    // blocks, so a wait that never ends is that deadlock rather than a lock-ordering one, and is
+    // turned into an exception instead of a hang.
+    //
+    // A waiter tells the deadlock from ordinary contention by looking at the holder rather than at
+    // the clock: a gate holder is contractually doing fast work and waiting on nothing, so a holder
+    // parked in a wait is the deadlock while a holder running is a legitimately long hold, such as
+    // the whole-graph attach that runs under the gate. One sample is noise, since a holder dips into
+    // a wait for benign reasons, so the verdict needs the holder blocked across every sample of a
+    // window: long enough that a momentary dip cannot fill it, short enough that the report arrives
+    // in a fraction of a second rather than in the seconds a large attach legitimately takes.
+    private const int HolderSampleIntervalMilliseconds = 20;
+    private const int BlockedHolderSampleCount = 10;
+
+    // The backstop for what the holder check cannot see, such as a holder blocked inside unmanaged
+    // code or in a state the runtime reports as running. Sized against the longest legitimate hold
+    // and not the typical one, which is a single write at microseconds: attaching a quarter of a
+    // million subjects measures at a few seconds, so the bound keeps several times that. It stays
+    // under the deadlines a harness uses to call a run hung, so a stuck thread reports itself with
+    // this message before anything above it reports a bare timeout.
+    private const int GateWaitTimeoutMilliseconds = 15_000;
+
+    // The thread inside a topology transaction of this lifecycle, null when there is none. Written
+    // under the gate and read without it, by a waiter that is diagnosing its own wait rather than
+    // deciding anything: a stale read costs one sample of a window that needs all of them.
+    private Thread? _gateHolder;
 
     // How many topology gates the current thread holds, across every lifecycle. Gates have no
     // order among themselves, so a thread holding one and blocking on another deadlocks against a
@@ -121,6 +152,9 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// <summary>
     /// Enters the topology gate, rejecting a second transaction on a different lifecycle before it
     /// can block. Re-entering the gate this thread already holds is legal and load-bearing.
+    /// A thread that has to wait watches the holder, so the one deadlock this design cannot prevent,
+    /// a gate holder waiting for topology work it dispatched to another thread, ends in a named
+    /// exception on the dispatched thread rather than in a permanent hang.
     /// </summary>
     private GateScope EnterGate()
     {
@@ -134,9 +168,14 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                 "the second operation until the enclosing one completes.");
         }
 
-        _gate.Enter();
+        if (!_gate.TryEnter(HolderSampleIntervalMilliseconds))
+        {
+            WaitForGate();
+        }
+
         if (_heldGateCount++ == 0)
         {
+            _gateHolder = Thread.CurrentThread;
             // Past the rejection above, a nonzero count means this thread already holds this very
             // gate, so a reentrant acquisition is not a new transaction.
             Interlocked.Increment(ref _transactionsInFlight);
@@ -157,6 +196,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             // so a reader that registers after this point reads a settled count and is told to
             // decide for itself rather than to wait for a transaction that has ended.
             Interlocked.Decrement(ref _transactionsInFlight);
+            _gateHolder = null;
         }
 
         _gate.Exit();
@@ -168,6 +208,81 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             // not yet published its entry, which is then neither drained nor refused.
             RunWithheldRecalculations();
         }
+    }
+
+    // Its own method, and never inlined, so EnterGate keeps its stack frame: inlined, this method's
+    // locals and the message building are set up on every successful acquisition too.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void WaitForGate()
+    {
+        var deadline = Environment.TickCount64 + GateWaitTimeoutMilliseconds;
+        Thread? blockedHolder = null;
+        var blockedSamples = 0;
+
+        while (true)
+        {
+            // Sampled before the wait rather than after it, so the window is the wait itself and a
+            // holder that releases the gate during it is seen as gone on the next pass.
+            var holder = Volatile.Read(ref _gateHolder);
+            if (holder is not null && (holder.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0)
+            {
+                // Per holder, not per wait: a gate handed from one thread to the next is a queue
+                // draining, and each new holder starts its own window.
+                blockedSamples = ReferenceEquals(holder, blockedHolder) ? blockedSamples + 1 : 1;
+                blockedHolder = holder;
+                if (blockedSamples >= BlockedHolderSampleCount)
+                {
+                    ThrowHolderBlocked();
+                }
+            }
+            else
+            {
+                blockedHolder = null;
+                blockedSamples = 0;
+            }
+
+            if (_gate.TryEnter(HolderSampleIntervalMilliseconds))
+            {
+                return;
+            }
+
+            if (Environment.TickCount64 >= deadline)
+            {
+                ThrowGateWaitTimedOut();
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowHolderBlocked()
+    {
+        throw new LifecycleContractViolationException(
+            "Deadlocked waiting for the topology gate of this context. The thread holding it is not " +
+            "working but blocked in a wait, which is the deadlock this framework cannot prevent: the " +
+            "thread inside the topology transaction dispatched this work to another thread and is " +
+            "waiting for it, so it cannot release the gate until this work finishes and this work " +
+            "cannot start until it releases the gate. Topology changes on one context are serialized, " +
+            "and a dispatch through Task.Run, the thread pool or a queue is invisible here, so this " +
+            "cannot be detected any earlier than by watching the holder. Never wait for structural " +
+            "work on another thread from inside a structural write, a lifecycle callback or an " +
+            "interceptor: complete the enclosing operation first and run the work after it returns, " +
+            "or hand it off without waiting. A holder blocked for any other reason, on a sleep, on " +
+            "input or output or on another lock, breaks the same contract that this code is fast " +
+            "and waits on nothing. Nothing was read and nothing was changed.");
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowGateWaitTimedOut()
+    {
+        throw new LifecycleContractViolationException(
+            $"Timed out after {GateWaitTimeoutMilliseconds / 1000} seconds waiting for the topology gate " +
+            "of this context, which another thread has held for that whole time while never being seen " +
+            "blocked. The likely cause is a lifecycle callback or an interceptor that genuinely ran " +
+            "that long, which breaks the contract that they are fast; a whole-graph attach of a very " +
+            "large graph is the only legitimate hold that approaches this. The other explanation is a " +
+            "gate holder waiting for topology work it dispatched to another thread, in a wait that " +
+            "cannot be observed from here, such as one inside unmanaged code. Nothing was read and " +
+            "nothing was changed.");
     }
 
     /// <summary>Releases what <see cref="EnterGate"/> took. A struct, so the using costs nothing.</summary>
