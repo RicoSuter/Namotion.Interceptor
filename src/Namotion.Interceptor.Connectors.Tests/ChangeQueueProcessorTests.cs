@@ -2514,4 +2514,171 @@ public class ChangeQueueProcessorTests
         public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) =>
             throw new NotSupportedException();
     }
+
+    [Fact]
+    public async Task WhenTheFilterThrowsWhileTheHandlerBlocks_ThenStoppingStillEndsAtTheBound()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var filterCalls = 0;
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => Interlocked.Increment(ref filterCalls) >= 2
+                ? throw new InvalidOperationException("filter refused the property")
+                : true,
+            writeHandler: async (_, _) =>
+            {
+                writeEntered.TrySetResult();
+                await releaseWrite.Task.ConfigureAwait(false);
+            },
+            deliveryRule: ChangeDeliveryRule.SourceValuesAreSettled,
+            bufferTime: TimeSpan.FromMilliseconds(8),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() => releaseWrite.TrySetResult());
+
+        // The caller never cancels: the deadline has to arm from finalization itself.
+        var processing = processor.ProcessAsync(CancellationToken.None);
+        subject.FirstName = "buffered";
+        await writeEntered.Task.WaitAsync(TestTimeout);
+
+        try
+        {
+            // Act
+            subject.LastName = "throws";
+
+            // Assert
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => processing.WaitAsync(TeardownWaitTimeout));
+            Assert.Equal("filter refused the property", failure.Message);
+        }
+        finally
+        {
+            releaseWrite.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheDropHandlerThrowsOnAFailedWrite_ThenLaterChangesAreStillDelivered()
+    {
+        // Arrange
+        await AssertFlushSurvivesAFailingWriteAsync(
+            logger: NullLogger.Instance,
+            dropHandler: _ => throw new InvalidOperationException("drop handler threw"));
+    }
+
+    [Fact]
+    public async Task WhenTheLoggerThrowsOnAFailedWrite_ThenLaterChangesAreStillDelivered()
+    {
+        // Arrange
+        await AssertFlushSurvivesAFailingWriteAsync(logger: new ThrowingLogger(), dropHandler: null);
+    }
+
+    // Both callbacks reach the flush through the same path, so they share the assertion: the periodic
+    // flush must survive a throwing tick rather than ending delivery for the processor's lifetime.
+    private static async Task AssertFlushSurvivesAFailingWriteAsync(ILogger logger, Action<long>? dropHandler)
+    {
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        var failingWriteAttempted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var deliveredCount = 0;
+        var failNextWrite = true;
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) =>
+            {
+                if (Volatile.Read(ref failNextWrite))
+                {
+                    failingWriteAttempted.TrySetResult();
+                    throw new InvalidOperationException("write failed");
+                }
+
+                Interlocked.Increment(ref deliveredCount);
+                return ValueTask.CompletedTask;
+            },
+            deliveryRule: ChangeDeliveryRule.SourceValuesAreSettled,
+            bufferTime: TimeSpan.FromMilliseconds(8),
+            maxQueueDepth: null,
+            logger: logger,
+            dropHandler: dropHandler);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act
+        subject.FirstName = "fails";
+        await failingWriteAttempted.Task.WaitAsync(TestTimeout);
+        Volatile.Write(ref failNextWrite, false);
+        subject.LastName = "delivered";
+
+        // Assert - while the pump is still running, so the finalization flush cannot mask a dead loop.
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => Volatile.Read(ref deliveredCount) > 0,
+                message: "The periodic flush stopped delivering after a throwing tick.");
+        }
+        finally
+        {
+            await cancellation.CancelAsync();
+            try { await processing.WaitAsync(TeardownWaitTimeout); } catch (TimeoutException) { }
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheCallerTokenSourceIsAlreadyDisposed_ThenTheProcessorIsNotLeftRunning()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var cancellationSource = new CancellationTokenSource();
+        var disposedToken = cancellationSource.Token;
+        cancellationSource.Dispose();
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (_, _) => ValueTask.CompletedTask,
+            deliveryRule: ChangeDeliveryRule.SourceValuesAreSettled,
+            bufferTime: TimeSpan.FromMilliseconds(8),
+            maxQueueDepth: null,
+            logger: NullLogger.Instance);
+
+        // Act - reading WaitHandle on a disposed source throws, which must not strand the lifecycle state.
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => processor.ProcessAsync(disposedToken));
+
+        // Assert - the processor is still startable rather than wedged as "already running".
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+        await cancellation.CancelAsync();
+        await processing.WaitAsync(TeardownWaitTimeout);
+    }
+
+    private sealed class ThrowingLogger : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+            => throw new InvalidOperationException("logger provider threw");
+    }
 }
+

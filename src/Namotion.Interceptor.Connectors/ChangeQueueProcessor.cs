@@ -309,18 +309,31 @@ public class ChangeQueueProcessor : IDisposable
             var flushTask = periodicTimer is not null
                 ? Task.Run(async () =>
                 {
+                    var flushFailureReported = false;
                     try
                     {
                         while (await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
                         {
-                            await TryFlushAsync(processingToken).ConfigureAwait(false);
+                            // Per tick rather than around the loop. A catch outside the loop ends delivery for
+                            // this processor's lifetime on the first throw, while the dequeue loop keeps filling
+                            // a queue the connectors leave unbounded. Anything the flush reaches can throw: the
+                            // write handler, the drop handler, the logger, the property filter.
+                            try
+                            {
+                                await TryFlushAsync(processingToken).ConfigureAwait(false);
+                                flushFailureReported = false;
+                            }
+                            catch (Exception exception) when (exception is not OperationCanceledException)
+                            {
+                                ReportFlushFailure(exception, ref flushFailureReported);
+                            }
                         }
                     }
                     catch (Exception exception)
                     {
                         if (exception is not OperationCanceledException)
                         {
-                            _logger.LogError(exception, "Failed to flush changes.");
+                            ReportFlushFailure(exception, ref flushFailureReported);
                         }
                     }
                 })
@@ -568,6 +581,20 @@ public class ChangeQueueProcessor : IDisposable
     private void InvokeDropHandler(long count)
     {
         try { _dropHandler?.Invoke(count); } catch { }
+    }
+
+    // Once per run of failures: at the default buffer time an unreported one would log about 125 times a
+    // second for as long as the fault lasts. The logger itself is guarded because it is consumer supplied
+    // and this is the handler that keeps a failing flush from ending delivery.
+    private void ReportFlushFailure(Exception exception, ref bool alreadyReported)
+    {
+        if (alreadyReported)
+        {
+            return;
+        }
+
+        alreadyReported = true;
+        try { _logger.LogError(exception, "Failed to flush changes."); } catch { }
     }
 
     /// <summary>
