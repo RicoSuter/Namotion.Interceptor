@@ -93,7 +93,7 @@ public class RegistryHandlerOrderTests
     }
 
     [Fact]
-    public void WhenSubtreeIsDetached_ThenAncestorsAreAlreadyDeregisteredButParentLinkRemains()
+    public void WhenSubtreeIsDetached_ThenAncestorsAndTheirParentLinksAreAlreadyCleared()
     {
         // Arrange
         var context = CreateContext("registry-after-tracking");
@@ -104,11 +104,10 @@ public class RegistryHandlerOrderTests
         // Act
         root.Child = null;
 
-        // Assert: detach is deliberately not the mirror of attach. A subject's own handler runs
-        // before the context handlers that deregister it, but its ancestors were processed further
-        // up the descent and are already gone, so a consumer needing ancestor state while detaching
-        // has to capture it at attach.
-        Assert.Equal(1, child.ParentLinkCountDuringDetach);
+        // Assert: detach is deliberately not the mirror of attach. Each ancestor publishes its empty full
+        // relationship group before context inheritance descends, so the child's incoming parent link and
+        // ancestor registrations are already gone by the time its own lifecycle handler runs.
+        Assert.Equal(0, child.ParentLinkCountDuringDetach);
         Assert.Empty(child.AncestorsVisibleDuringDetach);
     }
 }
