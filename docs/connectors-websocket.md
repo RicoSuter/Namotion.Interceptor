@@ -436,7 +436,7 @@ Both built-in WebSocket connectors implement liveness monitoring and report thro
 
 Neither connector measures throughput, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are both `null` rather than `0.0`.
 
-The client's diagnostics are a plain `SourceDiagnostics` with no WebSocket specific additions. `OutboundRetries.Capacity` echoes `WriteRetryQueueSize`, and is `0` when the queue is disabled; in that configuration read `TotalDropped` as a floor rather than the whole loss (see [Known Limitations](connectors.md#known-limitations)). The built-in client registers the `ClaimedPropertyCount` gauge, so it reports a measured value, including zero.
+The client's diagnostics are a plain `SourceDiagnostics` with no WebSocket specific additions. `OutboundRetries.Capacity` echoes `WriteRetryQueueSize`; at capacity 0 no writes are retained, but failed, terminally unconfirmed, and owned connect-window writes are still counted in `TotalDropped`. Writes made before the source claims their property remain unattributable; see [Known Limitations](connectors.md#known-limitations). The built-in client registers the `ClaimedPropertyCount` gauge, so it reports a measured value, including zero.
 
 The standalone server's diagnostics are a `WebSocketServerDiagnostics`, which adds two members:
 

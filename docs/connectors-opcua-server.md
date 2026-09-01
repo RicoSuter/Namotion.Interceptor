@@ -105,6 +105,8 @@ await server.StartAsync(cancellationToken);
 | `CleanCertificateStore` | `bool` | true | Remove old certificates from the application certificate store on startup |
 | `CertificateStoreBasePath` | `string` | "pki" | Base directory for certificate stores. Change to isolate stores for parallel test execution |
 
+Final outbound delivery on stop uses the internal five-second safety bound described in [Flushing On Stop](connectors.md#flushing-on-stop). It cannot be configured per connector.
+
 ## Security
 
 ### Security Policies

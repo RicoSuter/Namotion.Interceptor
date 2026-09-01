@@ -215,6 +215,7 @@ namespace Namotion.Interceptor.Connectors.Diagnostics
     {
         public QueueMetrics(string name = "queue") { }
         public void AddDropped(long count) { }
+        public System.Action<long> CreateDropReporter() { }
         public System.IDisposable Register(System.Func<int> depth, int? capacity) { }
     }
     public class SourceDiagnostics : Namotion.Interceptor.Connectors.Diagnostics.ConnectorDiagnostics
