@@ -280,7 +280,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         this,
                         subscription,
                         propertyReference => propertyReference.TryGetSource(out var source) && source == this,
-                        WriteChangesViaRetryQueueAsync,
+                        (changes, token) => WriteRetryQueue.WriteAsync(this, changes, token),
                         DeliveryRule,
                         _bufferTime,
                         maxQueueDepth: null,
@@ -338,11 +338,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             TransitionStateTo(SourceState.Stopped);
         }
     }
-
-    private ValueTask WriteChangesViaRetryQueueAsync(
-        ReadOnlyMemory<SubjectPropertyChange> changes,
-        CancellationToken cancellationToken) =>
-        WriteRetryQueue.WriteAsync(this, changes, cancellationToken);
 
     /// <summary>
     /// Parks owned writes into the retry queue at intervals while the initial state loads, so a slow

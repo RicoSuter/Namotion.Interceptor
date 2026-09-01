@@ -828,7 +828,7 @@ public class ChangeQueueProcessorTests
         var disposedField = typeof(ChangeQueueProcessor)
             .GetField("_disposed", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
-        return (int)disposedField!.GetValue(processor)! != 0;
+        return (int)disposedField!.GetValue(processor)! == 2;
     }
 
     [Fact]

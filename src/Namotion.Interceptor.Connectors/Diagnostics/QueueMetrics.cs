@@ -95,10 +95,12 @@ public sealed class QueueMetrics
         lock (_snapshotLock)
         {
             var current = _snapshot;
-            if (epoch is null || current.Epoch == epoch)
+            if (epoch is not null && current.Epoch != epoch)
             {
-                Volatile.Write(ref _snapshot, current with { Accumulated = current.Accumulated + count });
+                return;
             }
+
+            Volatile.Write(ref _snapshot, current with { Accumulated = current.Accumulated + count });
         }
     }
 
@@ -134,20 +136,13 @@ public sealed class QueueMetrics
         }
     }
 
-    private sealed class Registration : IDisposable
+    private sealed class Registration(QueueMetrics owner, Func<int> depth, int? capacity) : IDisposable
     {
-        private QueueMetrics? _owner;
+        private QueueMetrics? _owner = owner;
 
-        internal Registration(QueueMetrics owner, Func<int> depth, int? capacity)
-        {
-            _owner = owner;
-            Depth = depth;
-            Capacity = capacity;
-        }
+        internal Func<int> Depth { get; } = depth;
 
-        internal Func<int> Depth { get; }
-
-        internal int? Capacity { get; }
+        internal int? Capacity { get; } = capacity;
 
         public void Dispose() => Interlocked.Exchange(ref _owner, null)?.Release(this);
     }

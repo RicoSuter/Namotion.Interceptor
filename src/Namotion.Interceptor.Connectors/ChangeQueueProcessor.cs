@@ -16,6 +16,9 @@ public class ChangeQueueProcessor : IDisposable
     internal static readonly TimeSpan TeardownFlushBound = TimeSpan.FromSeconds(5);
 
     private const int ClosedDelivery = -1;
+    private const int IdleState = 0;
+    private const int ProcessingState = 1;
+    private const int DisposedState = 2;
 
     private readonly Func<PropertyReference, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
@@ -25,8 +28,7 @@ public class ChangeQueueProcessor : IDisposable
     private readonly ChangeDeliveryRule _deliveryRule;
     private readonly Action<long>? _dropHandler;
     private readonly bool _writeHandlerOwnsChanges;
-    private readonly Action? _terminalHandler;
-    private readonly object? _terminalHandlerGate;
+    private Action? _terminalHandler;
     private readonly Func<CancellationToken, ValueTask>? _completionHandler;
     private readonly Func<int, bool>? _mergedDeliveryAdmission;
 
@@ -36,11 +38,8 @@ public class ChangeQueueProcessor : IDisposable
     private readonly int? _maxQueueDepth;
     private long _dropCount;
     private int _deliveryState;
-    private int _processingActive;
-    private int _mergerDisposed;
-    private bool _terminalHandlerInvoked;
     private int _flushGate; // 0 = free, 1 = flushing
-    private int _disposed; // 0 = not disposed, 1 = disposed (use Interlocked for thread-safe check)
+    private int _disposed;
 
     /// <summary>
     /// The rule this processor decides supersession with. Exposed so a connector can pin which rule it
@@ -61,13 +60,13 @@ public class ChangeQueueProcessor : IDisposable
 
     // Scratch state used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
-    private readonly ChangeMerger _changeMerger = new();
+    private ChangeMerger? _changeMerger;
 
     // Reusable single-item buffer for the no-buffer (immediate) path
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
 
     private readonly PropertyChangeQueueSubscription _subscription;
-    private readonly bool _ownsSubscription;
+    private readonly PropertyChangeQueueSubscription? _ownedSubscription;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChangeQueueProcessor"/> class.
@@ -128,12 +127,13 @@ public class ChangeQueueProcessor : IDisposable
             _maxQueueDepth = maxQueueDepth;
             _deliveryRule = ValidateRule(deliveryRule);
 
+            _changeMerger = new ChangeMerger();
             _subscription = context.CreatePropertyChangeQueueSubscription();
-            _ownsSubscription = true;
+            _ownedSubscription = _subscription;
         }
         catch
         {
-            _changeMerger.Dispose();
+            _changeMerger?.Dispose();
             throw;
         }
     }
@@ -165,24 +165,15 @@ public class ChangeQueueProcessor : IDisposable
         _dropHandler = dropHandler;
         _writeHandlerOwnsChanges = writeHandlerOwnsChanges;
         _terminalHandler = terminalHandler;
-        _terminalHandlerGate = terminalHandler is null ? null : new object();
         _completionHandler = completionHandler;
         _mergedDeliveryAdmission = writeHandlerOwnsChanges ? null : TryAdmitMergedDelivery;
 
-        try
-        {
-            ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
+        ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
 
-            _maxQueueDepth = maxQueueDepth;
-            _subscription = subscription;
-            _ownsSubscription = false;
-            _deliveryRule = ValidateRule(deliveryRule);
-        }
-        catch
-        {
-            _changeMerger.Dispose();
-            throw;
-        }
+        _maxQueueDepth = maxQueueDepth;
+        _subscription = subscription;
+        _deliveryRule = ValidateRule(deliveryRule);
+        _changeMerger = new ChangeMerger();
     }
 
     // Only on the buffered path: a buffer time of zero writes each change as it is dequeued and never
@@ -220,65 +211,62 @@ public class ChangeQueueProcessor : IDisposable
     /// <returns>The task.</returns>
     public async Task ProcessAsync(CancellationToken cancellationToken)
     {
-        if (Interlocked.CompareExchange(ref _processingActive, 1, 0) != 0)
+        var previousState = Interlocked.CompareExchange(ref _disposed, ProcessingState, IdleState);
+        if (previousState == ProcessingState)
         {
             throw new InvalidOperationException("The processor is already running.");
         }
 
-        if (Volatile.Read(ref _disposed) != 0)
+        if (previousState == DisposedState || Volatile.Read(ref _disposed) == DisposedState)
         {
-            Volatile.Write(ref _processingActive, 0);
-            DisposeMergerOnce();
+            DisposeMerger();
             throw new ObjectDisposedException(nameof(ChangeQueueProcessor));
         }
 
         var processingTokenSource = new CancellationTokenSource();
         var teardownTokenSource = new CancellationTokenSource();
-        var lifetimeTransferred = false;
-        Task? processingCancellationTask = null;
-        Task? teardownCancellationTask = null;
         var processingTask = Task.Run(
             () => ProcessCoreAsync(processingTokenSource.Token, teardownTokenSource.Token),
             CancellationToken.None);
-
-        try
+        var cancellationTask = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        if (await Task.WhenAny(processingTask, cancellationTask).ConfigureAwait(false) == processingTask)
         {
-            var cancellationTask = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-            if (await Task.WhenAny(processingTask, cancellationTask).ConfigureAwait(false) == processingTask)
-            {
-                await processingTask.ConfigureAwait(false);
-                return;
-            }
-
-            lifetimeTransferred = true;
-            processingCancellationTask = processingTokenSource.CancelAsync();
             try
             {
-                await processingTask.WaitAsync(TeardownFlushBound).ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                teardownCancellationTask = teardownTokenSource.CancelAsync();
-                CountTimedOutDelivery(CloseDeliveryAndDrain());
-                InvokeTerminalHandlerOnce();
+                await processingTask.ConfigureAwait(false);
             }
             finally
-            {
-                _ = ObserveLateLifetimeAsync(
-                    processingTask,
-                    processingCancellationTask,
-                    teardownCancellationTask,
-                    processingTokenSource,
-                    teardownTokenSource);
-            }
-        }
-        finally
-        {
-            if (!lifetimeTransferred)
             {
                 processingTokenSource.Dispose();
                 teardownTokenSource.Dispose();
             }
+
+            return;
+        }
+
+        var processingCancellationTask = processingTokenSource.CancelAsync();
+        var teardownCancellationTask = Task.CompletedTask;
+        try
+        {
+            if (await Task.WhenAny(processingTask, Task.Delay(TeardownFlushBound)).ConfigureAwait(false) == processingTask)
+            {
+                await processingTask.ConfigureAwait(false);
+            }
+            else
+            {
+                teardownCancellationTask = teardownTokenSource.CancelAsync();
+                ReportTerminalDrops(CloseDeliveryAndDrain());
+                InvokeTerminalHandlerOnce();
+            }
+        }
+        finally
+        {
+            ObserveLateLifetimeAsync(
+                processingTask,
+                processingCancellationTask,
+                teardownCancellationTask,
+                processingTokenSource,
+                teardownTokenSource);
         }
     }
 
@@ -348,14 +336,12 @@ public class ChangeQueueProcessor : IDisposable
                     {
                         // Client changes preserve every intermediate value without a merge. Servers must
                         // still avoid serving a value that their subject has already superseded.
-                        if (_deliveryRule == ChangeDeliveryRule.SourceValuesAreSettled)
+                        if (_deliveryRule == ChangeDeliveryRule.SourceValuesAreSettled &&
+                            !ChangeDeliveryFilter.TryAcceptForDelivery(in change, _deliveryRule))
                         {
-                            if (!ChangeDeliveryFilter.TryAcceptForDelivery(in change, _deliveryRule))
-                            {
-                                continue;
-                            }
+                            continue;
                         }
-                        else
+                        if (_deliveryRule == ChangeDeliveryRule.SourceValuesMayBeStale)
                         {
                             ChangeDeliveryFilter.MarkPropertyAsPublishedToSource(in change);
                         }
@@ -392,54 +378,44 @@ public class ChangeQueueProcessor : IDisposable
         }
         finally
         {
-            Volatile.Write(ref _processingActive, 0);
-            if (Volatile.Read(ref _disposed) != 0)
+            if (Interlocked.CompareExchange(ref _disposed, IdleState, ProcessingState) == DisposedState)
             {
-                DisposeMergerOnce();
+                DisposeMerger();
             }
         }
     }
 
-    private static async Task ObserveLateLifetimeAsync(
+    private static void ObserveLateLifetimeAsync(
         Task processingTask,
-        Task? processingCancellationTask,
-        Task? teardownCancellationTask,
+        Task processingCancellationTask,
+        Task teardownCancellationTask,
         CancellationTokenSource processingTokenSource,
         CancellationTokenSource teardownTokenSource)
     {
-        try
-        {
-            await Task.WhenAll(
-                processingTask,
-                processingCancellationTask ?? Task.CompletedTask,
-                teardownCancellationTask ?? Task.CompletedTask).ConfigureAwait(false);
-        }
-        catch { }
-        finally
-        {
-            processingTokenSource.Dispose();
-            teardownTokenSource.Dispose();
-        }
+        _ = Task.WhenAll(processingTask, processingCancellationTask, teardownCancellationTask).ContinueWith(
+            task =>
+            {
+                _ = task.Exception;
+                processingTokenSource.Dispose();
+                teardownTokenSource.Dispose();
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private bool TryAdmitDelivery(int count) =>
         Interlocked.CompareExchange(ref _deliveryState, count, 0) == 0;
 
-    private bool TryCompleteDelivery(int count) =>
-        Interlocked.CompareExchange(ref _deliveryState, 0, count) == count;
-
-    private int CloseDelivery() =>
-        Math.Max(0, Interlocked.Exchange(ref _deliveryState, ClosedDelivery));
-
     private bool TryAdmitMergedDelivery(int count)
     {
-        if (TryAdmitDelivery(count))
+        var admitted = TryAdmitDelivery(count);
+        if (!admitted)
         {
-            return true;
+            ReportTerminalDrops(count);
         }
 
-        CountTimedOutDelivery(count);
-        return false;
+        return admitted;
     }
 
     private int CloseDeliveryAndDrain()
@@ -448,7 +424,7 @@ public class ChangeQueueProcessor : IDisposable
         // state and queue together, or close could miss their ownership transition.
         lock (_changes)
         {
-            var count = CloseDelivery();
+            var count = Math.Max(0, Interlocked.Exchange(ref _deliveryState, ClosedDelivery));
             while (_changes.TryDequeue(out _))
             {
                 count++;
@@ -458,7 +434,7 @@ public class ChangeQueueProcessor : IDisposable
         }
     }
 
-    private void CountTimedOutDelivery(int count)
+    private void ReportTerminalDrops(int count)
     {
         if (count <= 0)
         {
@@ -487,7 +463,8 @@ public class ChangeQueueProcessor : IDisposable
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
     private async ValueTask DeliverAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool deliveryAdmitted = false)
     {
         if (_writeHandlerOwnsChanges)
         {
@@ -496,31 +473,22 @@ public class ChangeQueueProcessor : IDisposable
         }
 
         var count = changes.Length;
-        if (!TryAdmitDelivery(count))
+        if (!deliveryAdmitted && !TryAdmitDelivery(count))
         {
-            CountTimedOutDelivery(count);
+            ReportTerminalDrops(count);
             return;
         }
 
-        await DeliverAdmittedAsync(changes, cancellationToken).ConfigureAwait(false);
-    }
-
-    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
-    private async ValueTask DeliverAdmittedAsync(
-        ReadOnlyMemory<SubjectPropertyChange> changes,
-        CancellationToken cancellationToken)
-    {
-        var count = changes.Length;
         try
         {
             await _writeHandler(changes, cancellationToken).ConfigureAwait(false);
-            TryCompleteDelivery(count);
+            Interlocked.CompareExchange(ref _deliveryState, 0, count);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             lock (_changes)
             {
-                if (TryCompleteDelivery(count))
+                if (Interlocked.CompareExchange(ref _deliveryState, 0, count) == count)
                 {
                     foreach (var change in changes.Span)
                     {
@@ -536,7 +504,7 @@ public class ChangeQueueProcessor : IDisposable
             var counted = false;
             lock (_changes)
             {
-                if (TryCompleteDelivery(count))
+                if (Interlocked.CompareExchange(ref _deliveryState, 0, count) == count)
                 {
                     Interlocked.Add(ref _dropCount, count);
                     counted = true;
@@ -599,21 +567,17 @@ public class ChangeQueueProcessor : IDisposable
             }
 
             merged = true;
-            var mergedChanges = _changeMerger.Merge(
+            var mergedChanges = _changeMerger!.Merge(
                 CollectionsMarshal.AsSpan(_flushChanges),
                 _deliveryRule,
                 _mergedDeliveryAdmission);
 
             if (mergedChanges.Length > 0)
             {
-                if (_writeHandlerOwnsChanges)
-                {
-                    await _writeHandler(mergedChanges, cancellationToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    await DeliverAdmittedAsync(mergedChanges, cancellationToken).ConfigureAwait(false);
-                }
+                await DeliverAsync(
+                    mergedChanges,
+                    cancellationToken,
+                    deliveryAdmitted: !_writeHandlerOwnsChanges).ConfigureAwait(false);
             }
         }
         finally
@@ -623,13 +587,13 @@ public class ChangeQueueProcessor : IDisposable
                 // Clear buffers to allow GC of SubjectPropertyChange objects
                 _flushChanges.Clear();
 
-                if (merged && Volatile.Read(ref _disposed) == 0)
+                if (merged && Volatile.Read(ref _disposed) != DisposedState)
                 {
                     // Only when there was a batch. An idle tick has nothing to release, and resetting
                     // anyway would feed the merger a zero-width batch: at the default buffer time that is
                     // roughly 125 of them a second, which drives its trim and shrink policies off how long
                     // the source has been quiet rather than off how wide its flushes actually are.
-                    _changeMerger.Reset();
+                    _changeMerger!.Reset();
                 }
             }
             finally
@@ -647,51 +611,32 @@ public class ChangeQueueProcessor : IDisposable
     /// </summary>
     public void Dispose()
     {
-        // Atomic check-and-set to prevent double-dispose race condition
-        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        var previousState = Interlocked.Exchange(ref _disposed, DisposedState);
+        if (previousState == DisposedState)
         {
             return;
         }
 
-        if (_ownsSubscription)
-        {
-            _subscription.Dispose();
-        }
+        _ownedSubscription?.Dispose();
 
-        CountTimedOutDelivery(CloseDeliveryAndDrain());
+        ReportTerminalDrops(CloseDeliveryAndDrain());
         InvokeTerminalHandlerOnce();
-        if (Volatile.Read(ref _processingActive) == 0)
+        if (previousState == IdleState)
         {
-            DisposeMergerOnce();
+            DisposeMerger();
         }
     }
 
     private void InvokeTerminalHandlerOnce()
     {
-        if (_terminalHandlerGate is not { } gate)
+        lock (_changes)
         {
-            return;
-        }
-
-        lock (gate)
-        {
-            if (_terminalHandlerInvoked)
-            {
-                return;
-            }
-
-            // Publish once inside the reentrant monitor before invoking: competing threads wait for
-            // completion, callback reentry does not recurse, and an exception cannot trigger a retry.
-            _terminalHandlerInvoked = true;
-            _terminalHandler!.Invoke();
+            // Exchange inside the reentrant delivery monitor: competing threads wait for callback
+            // completion, while callback reentry sees null and does not recurse or retry an exception.
+            Interlocked.Exchange(ref _terminalHandler, null)?.Invoke();
         }
     }
 
-    private void DisposeMergerOnce()
-    {
-        if (Interlocked.Exchange(ref _mergerDisposed, 1) == 0)
-        {
-            _changeMerger.Dispose();
-        }
-    }
+    // Called only before processing starts or after its final flush, so nulling cannot race merger use.
+    private void DisposeMerger() => Interlocked.Exchange(ref _changeMerger, null)?.Dispose();
 }

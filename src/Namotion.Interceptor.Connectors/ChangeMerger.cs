@@ -85,12 +85,7 @@ internal sealed class ChangeMerger : IDisposable
     {
         if (_buffer is null)
         {
-            // Reachable after disposal: ChangeQueueProcessor.Dispose releases the buffer once it wins the
-            // flush gate, and the periodic flush task can outlive that and tick again on whatever was
-            // enqueued in between. Returning empty skips the write handler, which is what a disposed
-            // processor owes its caller anyway. Without the guard the buffer read below throws out of
-            // TryFlushAsync, past the periodic loop's own try, which logs "Failed to flush changes." and
-            // ends the loop for good.
+            // Merge is empty after explicit disposal; Reset and Dispose are idempotent too.
             return ReadOnlyMemory<SubjectPropertyChange>.Empty;
         }
 
@@ -245,9 +240,6 @@ internal sealed class ChangeMerger : IDisposable
     /// </summary>
     public void Reset()
     {
-        // No known interleaving reaches this after disposal, since the only caller runs under the same
-        // flush gate the disposer needs to release the buffer. Kept so every member of this class is a
-        // no-op once disposed rather than this one alone throwing.
         if (_buffer is null)
         {
             return;
@@ -315,9 +307,7 @@ internal sealed class ChangeMerger : IDisposable
 
         _propertyIndices.Clear();
 
-        // The same prefix as Reset: this runs either after a Reset, where the count is zero, or instead
-        // of it when the processor was disposed mid flush, where the count still bounds what that flush
-        // wrote. Everything past it was cleared when the buffer was rented.
+        // Clear exactly the prefix Merge filled before returning the rental.
         Array.Clear(_buffer, 0, _count);
         ArrayPool<SubjectPropertyChange>.Shared.Return(_buffer);
         _buffer = null!;
