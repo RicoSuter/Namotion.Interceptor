@@ -58,7 +58,7 @@ public partial class MqttServerLivenessTests
         // Act
         await server.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(
-            () => server.Diagnostics.IsOperational,
+            () => server.Diagnostics.IsOperational == true,
             message: "The broker should report operational once it is listening.");
 
         // Assert
@@ -86,7 +86,7 @@ public partial class MqttServerLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => server.Diagnostics.IsOperational,
+                () => server.Diagnostics.IsOperational == true,
                 message: "The broker should report operational once it is listening.");
 
             // Act
@@ -119,7 +119,7 @@ public partial class MqttServerLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => server.Diagnostics.IsOperational,
+                () => server.Diagnostics.IsOperational == true,
                 message: "The broker should report operational once it is listening.");
 
             var firstOperationalTime = server.Diagnostics.OperationalChangeTime;
@@ -129,7 +129,7 @@ public partial class MqttServerLivenessTests
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
-                () => server.Diagnostics.IsOperational &&
+                () => server.Diagnostics.IsOperational == true &&
                       server.Diagnostics.OperationalChangeTime != firstOperationalTime,
                 message: "The broker should report operational again after restarting.");
         }
@@ -185,7 +185,7 @@ public partial class MqttServerLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => server.Diagnostics.IsOperational,
+                () => server.Diagnostics.IsOperational == true,
                 message: "The first broker run should become operational.");
 
             var firstBroker = GetCurrentBroker(server);
@@ -212,7 +212,7 @@ public partial class MqttServerLivenessTests
             // Act
             await server.StartAsync(CancellationToken.None);
             await AsyncTestHelpers.WaitUntilAsync(
-                () => server.Diagnostics.IsOperational,
+                () => server.Diagnostics.IsOperational == true,
                 message: "The second broker run should become operational.");
 
             // Assert
@@ -232,7 +232,7 @@ public partial class MqttServerLivenessTests
         // Arrange
         await using var server = CreateServer();
         await server.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+        await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational == true);
         var staleHandler = GetInstalledHandler<ClientConnectedEventArgs>(
             GetCurrentBroker(server), "ClientConnectedEvent");
         await server.StopAsync(CancellationToken.None);
@@ -262,13 +262,13 @@ public partial class MqttServerLivenessTests
         await server.StartAsync(CancellationToken.None);
         try
         {
-            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational == true);
             var staleHandler = GetInstalledHandler<ClientDisconnectedEventArgs>(
                 GetCurrentBroker(server), "ClientDisconnectedEvent");
 
             await server.StopAsync(CancellationToken.None);
             await server.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational == true);
 
             var options = new MqttClientOptionsBuilder()
                 .WithTcpServer("127.0.0.1", brokerPort)
@@ -337,7 +337,7 @@ public partial class MqttServerLivenessTests
         Task? staleCallback = null;
         try
         {
-            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational == true);
             var staleHandler = GetInstalledHandler<InterceptingPublishEventArgs>(
                 GetCurrentBroker(server), "InterceptingPublishEvent");
             var staleArgs = CreatePublishEventArgs("Old", publishCancellation.Token);
@@ -346,7 +346,7 @@ public partial class MqttServerLivenessTests
 
             await server.StopAsync(CancellationToken.None);
             await server.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational == true);
 
             var subscriberOptions = new MqttClientOptionsBuilder()
                 .WithTcpServer("127.0.0.1", brokerPort)
@@ -453,7 +453,7 @@ public partial class MqttServerLivenessTests
         Task? stopTask = null;
         try
         {
-            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational == true);
             var broker = GetCurrentBroker(server);
             var subscriberOptions = new MqttClientOptionsBuilder()
                 .WithTcpServer("127.0.0.1", brokerPort)
@@ -547,7 +547,7 @@ public partial class MqttServerLivenessTests
         Task? staleCallback = null;
         try
         {
-            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational == true);
             var broker = GetCurrentBroker(server);
             var staleHandler = GetInstalledHandler<InterceptingPublishEventArgs>(
                 broker, "InterceptingPublishEvent");
@@ -591,7 +591,7 @@ public partial class MqttServerLivenessTests
         Task? admittedCallback = null;
         try
         {
-            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational == true);
             var broker = GetCurrentBroker(server);
             var handler = GetInstalledHandler<InterceptingPublishEventArgs>(
                 broker, "InterceptingPublishEvent");
@@ -615,7 +615,7 @@ public partial class MqttServerLivenessTests
             Assert.Equal("Old", root.Name);
 
             await server.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational);
+            await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational == true);
             var replacementHandler = GetInstalledHandler<InterceptingPublishEventArgs>(
                 GetCurrentBroker(server), "InterceptingPublishEvent");
             await replacementHandler(CreatePublishEventArgs("New"));

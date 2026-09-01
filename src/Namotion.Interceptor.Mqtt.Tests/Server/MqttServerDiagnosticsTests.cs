@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.Mqtt.Tests.Server;
 public class MqttServerDiagnosticsTests
 {
     [Fact]
-    public async Task WhenNeverStarted_ThenTheServerReportsNotOperationalAndNoThroughput()
+    public async Task WhenNeverStarted_ThenTheServerReportsUnavailableLivenessAndNoThroughput()
     {
         // Arrange
         await using var server = CreateServer(new MqttServerConfiguration());
@@ -24,7 +24,7 @@ public class MqttServerDiagnosticsTests
         var diagnostics = server.Diagnostics;
 
         // Assert
-        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.IsOperational);
         Assert.Null(diagnostics.OperationalChangeTime);
         Assert.Null(diagnostics.StartTime);
         Assert.Null(diagnostics.LastError);

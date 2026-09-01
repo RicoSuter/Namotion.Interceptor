@@ -95,7 +95,7 @@ public class OpcUaConcurrencyTests
             logger.Log("Stopping server...");
             await server.StopAsync();
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !client.Source.Diagnostics.IsOperational,
+                () => client.Source.Diagnostics.IsOperational == false,
                 timeout: TimeSpan.FromSeconds(90),
                 message: "Client should detect disconnection");
             logger.Log("Client detected disconnection");

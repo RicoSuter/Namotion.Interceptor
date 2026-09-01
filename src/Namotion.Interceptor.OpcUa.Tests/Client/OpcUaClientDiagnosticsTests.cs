@@ -37,7 +37,7 @@ public class OpcUaClientDiagnosticsTests
         NodeId? sessionId = diagnostics.SessionId;
 
         // Assert
-        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.IsOperational);
         Assert.Null(diagnostics.OperationalChangeTime);
         Assert.Null(diagnostics.LastError);
         Assert.Null(diagnostics.StartTime);
