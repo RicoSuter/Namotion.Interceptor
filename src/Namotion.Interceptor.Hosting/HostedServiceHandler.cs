@@ -19,6 +19,12 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
     private readonly BufferBlock<Func<CancellationToken, Task>> _actions = new();
     private readonly HashSet<IHostedService> _hostedServices = [];
 
+    // A second owner for the cleanup a queued start carries in its closure: the pump abandons
+    // whatever is still buffered when it exits, and an unreleased hold blocks every wait on the tree
+    // forever while an unfinished completion blocks its awaiter just as long.
+    private readonly HashSet<PendingStart> _pendingStarts = [];
+    private volatile bool _stopped;
+
     public HostedServiceHandler(Func<ILogger?> loggerResolver)
     {
         _loggerResolver = loggerResolver;
@@ -74,22 +80,30 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
 
     private async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger ??= _loggerResolver();
-
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
+            _logger ??= _loggerResolver();
+
+            while (!stoppingToken.IsCancellationRequested)
             {
-                var action = await _actions.ReceiveAsync(stoppingToken);
-                await action(stoppingToken);
-            }
-            catch (Exception exception)
-            {
-                if (exception is not OperationCanceledException)
+                try
                 {
-                    _logger?.LogError(exception, "Failed to execute hosted service action.");
+                    var action = await _actions.ReceiveAsync(stoppingToken);
+                    await action(stoppingToken);
+                }
+                catch (Exception exception)
+                {
+                    if (exception is not OperationCanceledException)
+                    {
+                        _logger?.LogError(exception, "Failed to execute hosted service action.");
+                    }
                 }
             }
+        }
+        finally
+        {
+            _stopped = true;
+            ReleaseAbandonedStarts();
         }
     }
 
@@ -241,8 +255,19 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
     }
 
     private void PostStartService(
-        IHostedService hostedService, TaskCompletionSource? tcs, IDisposable[]? startupHolds = null)
+        IHostedService hostedService, TaskCompletionSource? tcs, IDisposable[] startupHolds)
     {
+        var pending = Track(startupHolds, tcs);
+
+        // Read after the add, which is what makes it decisive: the add happens inside the lock the
+        // sweep takes after setting _stopped, so lock release and acquire order that write ahead of
+        // this read.
+        if (_stopped)
+        {
+            Abandon(pending);
+            return;
+        }
+
         _actions.Post(async token =>
         {
             try
@@ -259,29 +284,121 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
             }
             finally
             {
-                // In a finally, so a start that throws or is cancelled releases its hold too.
-                // Leaking a hold would block every synchronization wait on the tree forever - a
-                // hang rather than a wrong answer, which is the safer direction, but still a hang.
-                if (startupHolds is not null)
+                // In a finally, so a start that throws or is cancelled releases its holds too. The
+                // completion is already set by the paths above.
+                if (Claim(pending))
                 {
-                    foreach (var hold in startupHolds)
-                    {
-                        try
-                        {
-                            hold.Dispose();
-                        }
-                        catch (Exception holdException)
-                        {
-                            // One deferrer throwing must not strand the others: a leaked hold blocks
-                            // every wait on that tree forever. Logged rather than swallowed, since
-                            // this used to surface through the action loop.
-                            _logger?.LogError(
-                                holdException, "Releasing a startup completion hold threw and was ignored.");
-                        }
-                    }
+                    ReleaseHolds(pending!);
                 }
             }
         });
+    }
+
+    /// <summary>
+    /// Records what a queued start would leave behind if it never ran, or null when there is nothing
+    /// to clean up. That is the common case, a fire-and-forget attach in an application with no
+    /// deferrer, and it costs one length check and no lock.
+    /// </summary>
+    private PendingStart? Track(IDisposable[] startupHolds, TaskCompletionSource? completion)
+    {
+        if (startupHolds.Length == 0 && completion is null)
+        {
+            return null;
+        }
+
+        var pending = new PendingStart(startupHolds, completion);
+        lock (_pendingStarts)
+        {
+            _pendingStarts.Add(pending);
+        }
+
+        return pending;
+    }
+
+    /// <summary>
+    /// Takes ownership of a pending start's cleanup: only the caller that removes it cleans up, so
+    /// the sweep and the queued action can never both do it.
+    /// </summary>
+    private bool Claim(PendingStart? pending)
+    {
+        if (pending is null)
+        {
+            return false;
+        }
+
+        lock (_pendingStarts)
+        {
+            return _pendingStarts.Remove(pending);
+        }
+    }
+
+    private void Abandon(PendingStart? pending)
+    {
+        if (Claim(pending))
+        {
+            ReleaseHolds(pending!);
+            pending!.Completion?.TrySetCanceled();
+        }
+    }
+
+    private void ReleaseHolds(PendingStart pending)
+    {
+        foreach (var hold in pending.StartupHolds)
+        {
+            try
+            {
+                hold.Dispose();
+            }
+            catch (Exception holdException)
+            {
+                // One deferrer throwing must not strand the others, so the log is guarded too.
+                try
+                {
+                    _logger?.LogError(
+                        holdException, "Releasing a startup completion hold threw and was ignored.");
+                }
+                catch
+                {
+                    // ignored
+                }
+            }
+        }
+    }
+
+    /// <summary>Cleans up after every start that was posted but will never run.</summary>
+    private void ReleaseAbandonedStarts()
+    {
+        PendingStart[] abandoned;
+        lock (_pendingStarts)
+        {
+            if (_pendingStarts.Count == 0)
+            {
+                return;
+            }
+
+            // Clearing under the same lock claims all of them at once, so a queued action racing
+            // this finds its entry gone and leaves the cleanup here.
+            abandoned = [.. _pendingStarts];
+            _pendingStarts.Clear();
+        }
+
+        foreach (var pending in abandoned)
+        {
+            ReleaseHolds(pending);
+            pending.Completion?.TrySetCanceled();
+        }
+
+        _logger?.LogWarning(
+            "Cleaned up after {Count} attached service start(s) that will no longer run.",
+            abandoned.Length);
+    }
+
+    /// <summary>What a queued start leaves behind if the pump never dequeues it.</summary>
+    private sealed class PendingStart(IDisposable[] startupHolds, TaskCompletionSource? completion)
+    {
+        public IDisposable[] StartupHolds { get; } = startupHolds;
+
+        public TaskCompletionSource? Completion { get; } = completion;
     }
 
     private void PostStopService(IHostedService hostedService, TaskCompletionSource? tcs)
@@ -305,6 +422,9 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
 
     public void Dispose()
     {
+        // Cancelling is all that is needed: the pump sweeps from its own finally, after the action it
+        // is awaiting has finished. Sweeping here would race that action and release the holds of a
+        // start still running, opening the completion gate early.
         _stoppingCts?.Cancel();
     }
 }
