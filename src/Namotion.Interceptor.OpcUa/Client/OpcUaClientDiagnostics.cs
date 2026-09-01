@@ -7,9 +7,9 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// What the OPC UA client reports about its session, on top of the shared source diagnostics.
 /// </summary>
 /// <remarks>
-/// When <see cref="ConnectorDiagnostics.IsOperational"/> has a value, it means the client has a
-/// live session with its subscriptions set up. A <c>null</c> value means the client has not
-/// published liveness yet. It stays false for the whole address space browse and subscription
+/// A value of <c>true</c> means the client has a live session with its subscriptions set up;
+/// <c>false</c> means it explicitly reports that it is not serving, and <c>null</c> means the client
+/// has not published liveness yet. It stays false for the whole address space browse and subscription
 /// creation, which on a large server takes minutes, and drops whenever the session is lost, killed
 /// or torn down. True does not mean the model is in sync: while the initial value read runs the
 /// source state is
