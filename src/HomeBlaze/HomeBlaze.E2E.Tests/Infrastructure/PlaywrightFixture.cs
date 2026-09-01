@@ -12,7 +12,7 @@ public class PlaywrightFixture : IAsyncLifetime
     private IPlaywright? _playwright;
     private IBrowser? _browser;
     private WebTestingHostFactory<App>? _factory;
-    private readonly List<IBrowserContext> _contexts = [];
+    private IBrowserContext? _context;
 
     public IBrowser Browser => _browser ?? throw new InvalidOperationException("Browser not initialized");
 
@@ -36,11 +36,11 @@ public class PlaywrightFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        foreach (var context in _contexts)
+        if (_context is not null)
         {
-            await context.CloseAsync();
+            await _context.CloseAsync();
+            _context = null;
         }
-        _contexts.Clear();
 
         if (_browser != null)
         {
@@ -53,13 +53,22 @@ public class PlaywrightFixture : IAsyncLifetime
 
     /// <summary>
     /// Creates a new browser context and page for isolated test execution.
-    /// The context is tracked and disposed when the fixture is torn down.
+    /// Closes the previous test's context, so only one is ever open.
     /// </summary>
     public async Task<IPage> CreatePageAsync()
     {
-        var context = await Browser.NewContextAsync();
-        _contexts.Add(context);
-        return await context.NewPageAsync();
+        // An open context keeps its page's Blazor circuit alive, and the host renders every connected
+        // circuit on each state change. Holding one per test for the whole run left the last tests
+        // contending with two dozen idle circuits, which was enough on a two core runner for a freshly
+        // loaded page to miss the clicks sent to it. Tests here run one at a time and take one page
+        // each, so the previous context is finished with by the time the next one is asked for.
+        if (_context is not null)
+        {
+            await _context.CloseAsync();
+        }
+
+        _context = await Browser.NewContextAsync();
+        return await _context.NewPageAsync();
     }
 }
 
