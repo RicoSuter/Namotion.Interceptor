@@ -180,7 +180,7 @@ namespace Namotion.Interceptor.Connectors.Diagnostics
     public class ConnectorDiagnostics
     {
         public ConnectorDiagnostics(Namotion.Interceptor.Connectors.Diagnostics.ConnectorMetrics metrics) { }
-        public bool IsOperational { get; }
+        public bool? IsOperational { get; }
         public System.Exception? LastError { get; }
         public System.DateTimeOffset? OperationalChangeTime { get; }
         public Namotion.Interceptor.Connectors.Diagnostics.QueueDiagnostics OutboundChanges { get; }
@@ -221,7 +221,7 @@ namespace Namotion.Interceptor.Connectors.Diagnostics
     public class SourceDiagnostics : Namotion.Interceptor.Connectors.Diagnostics.ConnectorDiagnostics
     {
         public SourceDiagnostics(Namotion.Interceptor.Connectors.Diagnostics.SourceMetrics metrics) { }
-        public int ClaimedPropertyCount { get; }
+        public int? ClaimedPropertyCount { get; }
         public Namotion.Interceptor.Connectors.Diagnostics.QueueDiagnostics InboundBuffer { get; }
         public Namotion.Interceptor.Connectors.Diagnostics.QueueDiagnostics OutboundRetries { get; }
     }

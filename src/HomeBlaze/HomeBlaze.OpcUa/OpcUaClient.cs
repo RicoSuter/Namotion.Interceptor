@@ -87,7 +87,8 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     public partial string? StatusMessage { get; set; }
 
     /// <summary>
-    /// Whether the client is currently connected. Null when not running.
+    /// Whether the client is currently connected. Null when not running or before the client has
+    /// reported its liveness.
     /// </summary>
     [State]
     public partial bool? IsConnected { get; set; }

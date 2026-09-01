@@ -299,9 +299,9 @@ public MySource() => Diagnostics = new SourceDiagnostics(_metrics);
 
 The `SourceMetrics` instance is the writable side and stays private to the source: it is what the source calls `MarkStarted()`, `MarkOperational()`, `ReportError()` and the queue registrations on, and nothing outside the source can reach it through the returned view. See [Connector Diagnostics](#connector-diagnostics).
 
-A direct source must register `ClaimedPropertyCount` and all queue gauges: `OutboundChanges`, `OutboundRetries`, and `InboundBuffer`. Give a disabled queue a capacity of `0`; use a `null` capacity only when the queue is actually unbounded. If the source owns custom `IResettableMetrics` instances, register each one once before `MarkStarted()` so its totals join the run's first epoch.
+A direct source may register `ClaimedPropertyCount`; registering it is required only when the source must expose a non-null ownership count. A registered gauge can measure zero, while an unregistered gauge remains `null`. A direct source must register all queue gauges it owns: `OutboundChanges`, `OutboundRetries`, and `InboundBuffer`. Give a disabled queue a capacity of `0`; use a `null` capacity only when the queue is actually unbounded. If the source owns custom `IResettableMetrics` instances, register each one once before `MarkStarted()` so its totals join the run's first epoch.
 
-Deriving from `SubjectSourceBase` instead gets both members, the start epoch, the recording of a failed connect attempt, and the drop of liveness on the way out. **Raising liveness is the derived class's job**: the base never calls `MarkOperational()`, because each protocol becomes usable at a different point and that point is what `IsOperational` means for that connector. A source that never calls it reports not operational for its entire life while its `State` reaches `Synchronized`. The three in-tree clients show where to put the call: the MQTT client raises it once `ConnectAsync` returns, the WebSocket client once the server's Welcome has been accepted, and the OPC UA client only once a session it has already created is confirmed usable, which is several steps later and which step depends on how that session came about (see [OPC UA Client](connectors-opcua-client.md#diagnostics)). Each drops it again from the path that detects the loss.
+Deriving from `SubjectSourceBase` instead gets both members, the start epoch, the recording of a failed connect attempt, and the terminal handling of any liveness the derived source has published. **Publishing liveness is the derived class's job**: the base never calls `MarkOperational()` or `MarkNotOperational()`, because each protocol becomes usable or unavailable at different points and those points are what `IsOperational` means for that connector. Calling either method opts the source into liveness reporting. A simple source that calls neither exposes `IsOperational == null` for as long as it runs, while its `State` can still reach `Synchronized`, and `false` once it stops. The three in-tree clients show where to put the calls: the MQTT client reports serving once `ConnectAsync` returns, the WebSocket client once the server's Welcome has been accepted, and the OPC UA client only once a session it has already created is confirmed usable, which is several steps later and which step depends on how that session came about (see [OPC UA Client](connectors-opcua-client.md#diagnostics)). Each reports the explicit down value from the path that detects the loss.
 
 `StateChangeTime` and `LastSynchronizedAt` are both required, and neither can answer the other's question. `StateChangeTime` moves on every transition, so read with `State` it says how long the current state has lasted: `Synchronizing` plus T reads as stale since T. `LastSynchronizedAt` is stamped only on the way into `Synchronized` and never cleared, so it says whether a good period ever began, and it cannot say when synchronization was lost.
 
@@ -647,8 +647,8 @@ Every connector reports what its transport is doing through `ISubjectConnector.D
 
 ```
 ConnectorDiagnostics
-  IsOperational          bool               the transport is up and serving
-  OperationalChangeTime  DateTimeOffset?    when IsOperational last changed, null until it first does
+  IsOperational          bool?              null = running and not measured, true = serving, false = down
+  OperationalChangeTime  DateTimeOffset?    when IsOperational last changed, null until it first does in this run
   LastError              Exception?         the most recent error in either direction, null if there has been none
   StartTime              DateTimeOffset?    when the current run began, the epoch for every Total below
   Throughput
@@ -660,12 +660,12 @@ ConnectorDiagnostics
     TotalDropped         long               items thrown away since StartTime
 
 SourceDiagnostics : ConnectorDiagnostics
-  ClaimedPropertyCount   int                properties this source currently owns
+  ClaimedPropertyCount   int?               null = not measured, otherwise properties currently owned
   OutboundRetries        writes parked for retry, same three members
   InboundBuffer          inbound updates held while the initial state loads, same three members
 ```
 
-`IsOperational` is the one liveness spelling every connector uses. What it means is decided per connector and documented on that connector's own diagnostics type: for a client it is roughly "connected and usable", for a server "listening and accepting connections". It is not a claim about the model being in sync, which is a separate question answered by `ISubjectSource.State`; see [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
+`IsOperational` is the one optional liveness spelling every connector uses. `true` means the connector reports serving and `false` means it reports down. `null` means the connector is running and has not reported liveness, so it appears only between a start and the connector's first report, and never on a connector that has stopped: the base publishes `false` on the way out whether or not the connector measures liveness itself. What the explicit values mean is decided per connector and documented on that connector's own diagnostics type: for a client it is roughly "connected and usable", for a server "listening and accepting connections". It is not a claim about the model being in sync, which is a separate question answered by `ISubjectSource.State`; see [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
 
 Direction is stated once, from the subject tree's point of view, and means the same for clients and servers: incoming is changes flowing into the tree, outgoing is changes flowing out of it. Both rates are averaged over a 60-second sliding window. A `null` rate means the connector does not measure that direction at all, decided at construction and never changing, which is different from a measured `0.0`.
 
@@ -921,11 +921,11 @@ What the base provides around that call:
 
 | Behaviour | Where |
 |---|---|
-| Stamps the start epoch that every `Total` counter and `StartTime` are measured from, clears `LastError`, and resets the registered metrics | `MarkStarted()`, once per `ExecuteAsync` entry |
+| Stamps the start epoch that every `Total` counter and `StartTime` are measured from, clears `LastError`, returns liveness to `null` so the new run carries nothing from the previous one, and resets the registered metrics | `MarkStarted()`, once per `ExecuteAsync` entry |
 | Records a fault that escapes `RunAsync` into `LastError` | the catch around the `RunAsync` call |
 | Leaves an expected shutdown unrecorded, so a graceful stop does not overwrite the genuine error that made the connector fail | the `OperationCanceledException` filter on the stopping token |
-| Forces liveness false when `RunAsync` exits, on every path | `MarkStopped()` in the `finally` |
-| Forces liveness false on disposal, because `BackgroundService.Dispose` cancels the token without awaiting `ExecuteAsync` | the `Dispose` override |
+| Publishes liveness `false` when `RunAsync` exits, on every path, and rejects late reports until the next `MarkStarted()` | `MarkStopped()` in the `finally` |
+| Publishes liveness `false` on disposal, because `BackgroundService.Dispose` cancels the token without awaiting `ExecuteAsync` | the `Dispose` override |
 | Runs one restart-loop iteration under its own `ConnectorRunAttempt`, publishing it while the body runs and clearing it before disposal, so an injected kill cancels exactly the iteration that is running and one arriving between iterations finds nothing to cancel | `RunAttemptAsync()`, paired with `ForceKillCurrentAttemptAsync()` |
 
 What a server author must implement:

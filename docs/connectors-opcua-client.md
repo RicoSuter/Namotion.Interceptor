@@ -651,11 +651,13 @@ When a batch write to the OPC UA server partially fails, the client throws an `O
 
 `OpcUaClientDiagnostics` derives from `SourceDiagnostics`, whose members, buffer semantics and read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to this client.
 
-**`IsOperational` here means the client has a live session with its subscriptions set up.** It stays false for the whole address space browse and subscription creation, which on a large server takes minutes. Which step raises it depends on how the session came about: the first health check tick on an initial connect, the completed subscription transfer on an SDK reconnect, and the completed state reload on a manual reconnect. It drops whenever the session is lost, killed or torn down, and whenever a connect attempt ends, so a client sitting in its retry delay never reports itself as serving.
+**`IsOperational` here means the client has a live session with its subscriptions set up.** This built-in client implements liveness monitoring, but `IsOperational` is `null` before its first protocol-specific observation. It then publishes false for the whole address space browse and subscription creation, which on a large server takes minutes. Which step raises it depends on how the session came about: the first health check tick on an initial connect, the completed subscription transfer on an SDK reconnect, and the completed state reload on a manual reconnect. It drops whenever the session is lost, killed or torn down, and whenever a connect attempt ends, so a client sitting in its retry delay reports an explicit false rather than serving.
 
 It is not a claim that the model is in sync, and the two are not ordered against each other: the initial value read can run either side of the rise on an initial connect, and on a manual reconnect the reload always finishes first. While that read runs, `ISubjectSource.State` is `Synchronizing`, so reading it together with `IsOperational` is how a dropped network is told apart from a connected client that is still loading. See [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
 
 This client measures both throughput directions, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are never `null` here.
+
+This built-in client registers the `ClaimedPropertyCount` gauge, so it reports the measured number of currently owned properties, including zero.
 
 | Member | Meaning |
 |---|---|

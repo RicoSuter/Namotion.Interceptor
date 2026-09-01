@@ -340,7 +340,7 @@ new MqttClientConfiguration
 
 ## Diagnostics
 
-Both MQTT connectors report through the shared model: the member tree, the three buffers, `LastError` stickiness and the read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to MQTT.
+Both built-in MQTT connectors implement liveness monitoring and report through the shared model: the member tree, the three buffers, `LastError` stickiness and the read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). Before the first protocol-specific liveness observation, `IsOperational` can be `null`; after that observation, the connectors publish explicit `true` or `false` values. What follows is what is specific to MQTT.
 
 **`IsOperational` for the client means the connection to the broker is up.** It is set as soon as the connect returns, before the property subscriptions are established, so on the first connect it leads them by the duration of the subscribe. After a reconnect it is raised only once resubscription and the initial-state reload have both succeeded, because a client that reconnected but could not resubscribe is not serving anything. It drops on every disconnect, including one the connection monitor is about to recover from, and on teardown.
 
@@ -348,7 +348,7 @@ Both MQTT connectors report through the shared model: the member tree, the three
 
 Neither connector measures throughput, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are both `null` rather than `0.0`.
 
-The client's diagnostics are a plain `SourceDiagnostics` with no MQTT specific additions. `OutboundRetries.Capacity` echoes `WriteRetryQueueSize`; at capacity 0 no writes are retained, but failed, terminally unconfirmed, and owned connect-window writes are still counted in `TotalDropped`. Writes made before the source claims their property remain unattributable; see [Known Limitations](connectors.md#known-limitations). `ClaimedPropertyCount` rises as topics are claimed during the subscribe step of the connect, which runs before the initial state is loaded, and falls as subjects detach.
+The client's diagnostics are a plain `SourceDiagnostics` with no MQTT specific additions. `OutboundRetries.Capacity` echoes `WriteRetryQueueSize`; at capacity 0 no writes are retained, but failed, terminally unconfirmed, and owned connect-window writes are still counted in `TotalDropped`. Writes made before the source claims their property remain unattributable; see [Known Limitations](connectors.md#known-limitations). The built-in client registers the `ClaimedPropertyCount` gauge, so it reports a measured value, including zero. The count rises as topics are claimed during the subscribe step of the connect, which runs before the initial state is loaded, and falls as subjects detach.
 
 The server's diagnostics are an `MqttServerDiagnostics`, which adds one member:
 

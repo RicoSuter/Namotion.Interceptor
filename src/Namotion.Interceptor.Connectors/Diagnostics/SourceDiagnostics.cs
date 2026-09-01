@@ -20,10 +20,11 @@ public class SourceDiagnostics : ConnectorDiagnostics
     }
 
     /// <summary>
-    /// Gets how many properties this source currently owns. A gauge, not a counter: it rises as the
-    /// source claims properties and falls as subjects detach.
+    /// Gets how many properties this source currently owns, or <c>null</c> when the count is
+    /// unavailable. A gauge, not a counter: it rises as the source claims properties and falls as
+    /// subjects detach. A throwing count provider is sampled as unavailable.
     /// </summary>
-    public int ClaimedPropertyCount => _metrics.ClaimedPropertyCount;
+    public int? ClaimedPropertyCount => _metrics.ClaimedPropertyCount;
 
     /// <summary>
     /// Gets the queue of outbound writes awaiting retry. A growing depth means the external system

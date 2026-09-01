@@ -27,11 +27,11 @@ public class SourceMetrics : ConnectorMetrics
 
     /// <summary>
     /// Points the claimed-property gauge at the source's ownership manager. A source that registers
-    /// nothing reports 0.
+    /// nothing reports an unavailable count.
     /// </summary>
     /// <remarks>
-    /// The delegate must return a non-negative count, must not throw (a throwing delegate is treated
-    /// as reporting 0) and must not take a lock owned by this library, because a diagnostics read can
+    /// The delegate must return a non-negative count, must not throw (a throwing delegate is sampled
+    /// as unavailable) and must not take a lock owned by this library, because a diagnostics read can
     /// happen while a monitor holds its own lock.
     /// </remarks>
     public void RegisterClaimedProperties(Func<int> count)
@@ -41,14 +41,14 @@ public class SourceMetrics : ConnectorMetrics
         Volatile.Write(ref _claimedPropertyCount, count);
     }
 
-    internal int ClaimedPropertyCount
+    internal int? ClaimedPropertyCount
     {
         get
         {
             var count = Volatile.Read(ref _claimedPropertyCount);
             if (count is null)
             {
-                return 0;
+                return null;
             }
 
             try
@@ -57,7 +57,7 @@ public class SourceMetrics : ConnectorMetrics
             }
             catch
             {
-                return 0;
+                return null;
             }
         }
     }

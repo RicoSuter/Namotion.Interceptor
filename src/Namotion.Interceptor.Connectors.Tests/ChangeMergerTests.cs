@@ -341,7 +341,7 @@ public class ChangeMergerTests
 
         // Warm up: the JIT, the property index capacity, the pooled buffer and the sticky written-out
         // mark are all one-time costs that would otherwise land inside the measurement.
-        for (var warmup = 0; warmup < 5; warmup++)
+        for (var warmup = 0; warmup < AllocationWarmupRounds; warmup++)
         {
             merger.Merge(changes, ChangeDeliveryRule.SourceValuesMayBeStale);
             merger.Reset();
@@ -574,7 +574,7 @@ public class ChangeMergerTests
         using var merger = new ChangeMerger();
         var changes = CreateWideBatch(changeCount: 4096, distinctProperties: 8);
 
-        for (var warmup = 0; warmup < 5; warmup++)
+        for (var warmup = 0; warmup < AllocationWarmupRounds; warmup++)
         {
             merger.Merge(changes);
             merger.Reset();
@@ -589,6 +589,13 @@ public class ChangeMergerTests
         // Assert
         Assert.Equal(0, allocated);
     }
+
+    // Deep enough that the measured call runs fully promoted code. Tier-0 has runtime work billed to
+    // the calling thread, and a five round warmup left the single measured call still in tier-0, which
+    // is what made these tests report a few thousand stray bytes under CI load. The count is kept
+    // congruent to the old one modulo the buffer's four batch trim cycle, so the measured call still
+    // lands off a re-rent exactly as it did at five rounds.
+    private const int AllocationWarmupRounds = 101;
 
     private const int PropertyIndexMaximum = 1024;
 
