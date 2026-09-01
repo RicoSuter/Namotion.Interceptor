@@ -263,6 +263,11 @@ public class ChangeQueueProcessor : IDisposable
 
     private async Task ProcessCoreAsync(BoundedTeardownRun run)
     {
+        // Captured once: the token getters check disposal on every call, which the per-change loop
+        // should not repeat, and the capture keeps this method off the run's disposal timing entirely.
+        var processingToken = run.ProcessingToken;
+        var teardownToken = run.TeardownToken;
+
         try
         {
             // Connect-window staleness is positional: changes arriving after this snapshot are steady state.
@@ -275,12 +280,12 @@ public class ChangeQueueProcessor : IDisposable
                     var flushFailureReported = false;
                     try
                     {
-                        while (await periodicTimer.WaitForNextTickAsync(run.ProcessingToken).ConfigureAwait(false))
+                        while (await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
                         {
                             // Catch per tick so a consumer callback cannot permanently stop delivery while dequeueing continues.
                             try
                             {
-                                await TryFlushAsync(run.ProcessingToken).ConfigureAwait(false);
+                                await TryFlushAsync(processingToken).ConfigureAwait(false);
                                 flushFailureReported = false;
                             }
                             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -308,7 +313,7 @@ public class ChangeQueueProcessor : IDisposable
 
             try
             {
-                while (_subscription.TryDequeue(out var change, run.ProcessingToken))
+                while (_subscription.TryDequeue(out var change, processingToken))
                 {
                     var wasQueuedBeforeStart = queuedBeforeStart > 0;
                     if (wasQueuedBeforeStart)
@@ -346,7 +351,7 @@ public class ChangeQueueProcessor : IDisposable
                         }
 
                         _immediateBuffer[0] = change;
-                        await WriteChangesAsync(_immediateBuffer, run.ProcessingToken).ConfigureAwait(false);
+                        await WriteChangesAsync(_immediateBuffer, processingToken).ConfigureAwait(false);
                     }
                     else
                     {
@@ -366,13 +371,13 @@ public class ChangeQueueProcessor : IDisposable
                 await flushTask.ConfigureAwait(false);
                 try
                 {
-                    await TryFlushAsync(run.TeardownToken).ConfigureAwait(false);
+                    await TryFlushAsync(teardownToken).ConfigureAwait(false);
                 }
                 finally
                 {
                     if (_completionHandler is not null)
                     {
-                        await _completionHandler(run.TeardownToken).ConfigureAwait(false);
+                        await _completionHandler(teardownToken).ConfigureAwait(false);
                     }
                 }
             }
