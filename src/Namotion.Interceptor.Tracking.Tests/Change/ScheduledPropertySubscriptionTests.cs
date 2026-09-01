@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Testing;
 using System.Linq.Expressions;
 using System.Reactive.Concurrency;
 
@@ -174,7 +175,9 @@ public class ScheduledPropertySubscriptionTests
         var scheduler = new ControllableScheduler();
         var received = new List<string?>();
 
-        var writer = Task.Run(() => person.FirstName = "John");
+        // The write parks in the interceptor chain, so it must not wait for a pool thread.
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(
+            () => { person.FirstName = "John"; });
         Assert.True(blocker.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)));
 
         // Act
