@@ -1294,6 +1294,7 @@ public class SubjectSourceBaseTests
         var subject = new Person(context) { FirstName = "Original" };
 
         // Capacity zero retains no writes for retry.
+        var writeAttempts = 0;
         var source = new TestSubjectSource(subject, context, NullLogger.Instance,
             writeRetryQueueSize: 0)
         {
@@ -1301,7 +1302,11 @@ public class SubjectSourceBaseTests
             {
                 subject.FirstName = "ServerValue";
             }),
-            WriteChangesOverride = (_, _) => new ValueTask<WriteResult>(WriteResult.Success),
+            WriteChangesOverride = (_, _) =>
+            {
+                Interlocked.Increment(ref writeAttempts);
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            },
         };
 
         new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
@@ -1312,8 +1317,12 @@ public class SubjectSourceBaseTests
             message: "Expected initial state to be applied");
         await source.StopAsync(CancellationToken.None);
 
-        // Assert - service runs normally without retry queue
+        // Assert - the load applies and is never re-applied outbound: capacity zero retains no
+        // connect-window write, so the owned write is counted as dropped instead of being reconciled.
         Assert.Equal("ServerValue", subject.FirstName);
+        Assert.Equal(0, Volatile.Read(ref writeAttempts));
+        Assert.Equal(1, source.Diagnostics.OutboundRetries.TotalDropped);
+        Assert.Equal(0, source.Diagnostics.OutboundRetries.Depth);
     }
 
     [Fact]
