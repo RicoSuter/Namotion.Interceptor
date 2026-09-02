@@ -71,6 +71,19 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     // shorten each other's threshold. Read only by a thread already waiting on a contended gate.
     internal int BlockedHolderThresholdMilliseconds { get; set; } = DefaultBlockedHolderThresholdMilliseconds;
 
+    // The last resort for what the holder check cannot see at all: a holder looping forever, one
+    // spinning, one blocked inside unmanaged code, and one polling so it never blocks for the whole
+    // threshold above. None of those is distinguishable from work, so this cannot be a judgement
+    // about the holder and is only a bound past which a process is stuck by any reasonable measure.
+    // Sized far above the longest legitimate hold rather than near it: attaching a quarter of a
+    // million subjects measures in seconds, so this keeps two orders of magnitude of room and still
+    // reports before a test harness or an operator calls the process hung.
+    private const int DefaultGateWaitTimeoutMilliseconds = 300_000;
+
+    // Settable for the same reason as the threshold above, and more sharply: at its real size
+    // no test can afford to reach it, so without this the bound would ship untested.
+    internal int GateWaitTimeoutMilliseconds { get; set; } = DefaultGateWaitTimeoutMilliseconds;
+
     // The thread inside a topology transaction of this lifecycle, null when there is none. Written
     // under the gate and read without it, by a waiter that is diagnosing its own wait rather than
     // deciding anything: a stale read costs one sample of a window that needs all of them.
@@ -217,6 +230,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void WaitForGate()
     {
+        var deadline = Environment.TickCount64 + GateWaitTimeoutMilliseconds;
         Thread? blockedHolder = null;
         var blockedSince = 0L;
 
@@ -250,6 +264,16 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             {
                 return;
             }
+
+            // The holder check above sees only a thread the runtime reports as blocked, so it
+            // cannot see a holder looping forever, spinning, blocked inside unmanaged code, or
+            // polling in a way that never blocks for the whole threshold. Those hang without this,
+            // so the last resort is a plain bound: nothing legitimate comes near it, and a process
+            // that reaches it is already stuck.
+            if (Environment.TickCount64 >= deadline)
+            {
+                ThrowGateWaitTimedOut(GateWaitTimeoutMilliseconds);
+            }
         }
     }
 
@@ -257,9 +281,10 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     private static void ThrowHolderBlocked(int thresholdMilliseconds)
     {
         throw new LifecycleContractViolationException(
-            $"The thread holding the topology gate of this context has been blocked, never once seen " +
-            $"running, for {thresholdMilliseconds / 1000} seconds. A holder that makes " +
-            "progress is never reported here however long it takes, so this is one of two things, " +
+            "The thread holding the topology gate of this context has been blocked, never once seen " +
+            $"running, for {TimeSpan.FromMilliseconds(thresholdMilliseconds).TotalSeconds:0.##} seconds. " +
+            "A holder that makes progress is never reported here however long it takes, so this is " +
+            "one of two things, " +
             "and both break the contract that a gate holder is fast and waits on nothing. The first " +
             "is the deadlock this framework cannot prevent: the thread inside the topology " +
             "transaction dispatched structural work to another thread and waits for it, so it cannot " +
@@ -272,6 +297,20 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             "input and output and waiting for it is safe and is not this. The second is a holder " +
             "blocked that long on a sleep, on input or output, or on a lock of its own. Nothing was " +
             "read and nothing was changed.");
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowGateWaitTimedOut(int timeoutMilliseconds)
+    {
+        throw new LifecycleContractViolationException(
+            $"Timed out after {TimeSpan.FromMilliseconds(timeoutMilliseconds).TotalSeconds:0.##} seconds waiting for the topology " +
+            "gate of this context, which another thread has held for that whole time without ever " +
+            "being seen blocked. Nothing here can tell which it is, because none of the causes is " +
+            "distinguishable from work: a lifecycle callback or an interceptor genuinely running that " +
+            "long, a loop spinning or polling instead of blocking, or a holder waiting inside " +
+            "unmanaged code for topology work it dispatched to another thread. All of them break the " +
+            "contract that a gate holder is fast and waits on nothing. Nothing was read and nothing " +
+            "was changed.");
     }
 
     /// <summary>Releases what <see cref="EnterGate"/> took. A struct, so the using costs nothing.</summary>
@@ -547,7 +586,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                 }
                 else
                 {
-                    RollbackRejectedAttach(subject, claimed);
+                    RollbackRejectedAttach(subject, anchor, claimed);
                 }
 
                 LifecycleScratch.Return(claimed);
@@ -571,7 +610,10 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// drain has actually finished, so a rollback that cannot complete leaves the root attached and
     /// detachable rather than stripped of the very state <c>DetachFromContext</c> needs.
     /// </remarks>
-    private void RollbackRejectedAttach(IInterceptorSubject subject, List<IInterceptorSubject> claimed)
+    private void RollbackRejectedAttach(
+        IInterceptorSubject subject,
+        SubjectAttachmentAnchorKind anchor,
+        List<IInterceptorSubject> claimed)
     {
         var children = LifecycleScratch.RentChildList();
         try
@@ -595,7 +637,18 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             }
             else if (ownership.IncomingCount == 0 || !_reachability.IsAnchorReachable(subject, null))
             {
-                _release.ReleaseRoot(subject);
+                try
+                {
+                    _release.ReleaseRoot(subject);
+                }
+                catch
+                {
+                    // The release runs detach callbacks, so it can fail partway. Put the anchor
+                    // back: the trace below tells the caller to detach the root explicitly, and
+                    // without an anchor that is exactly what DetachFromContext refuses to do.
+                    _graph.SetAnchor(subject, anchor);
+                    throw;
+                }
             }
 
             foreach (var claimedSubject in claimed)

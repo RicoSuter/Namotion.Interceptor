@@ -12,23 +12,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// </summary>
 public class AdversarialRollbackRaceTests
 {
-    private sealed class ParkingEnumerable(Action onFirstEnumeration) : IEnumerable<Person>
-    {
-        private int _enumerations;
-
-        public IEnumerator<Person> GetEnumerator()
-        {
-            if (Interlocked.Increment(ref _enumerations) == 1)
-            {
-                onFirstEnumeration();
-            }
-
-            return Enumerable.Empty<Person>().GetEnumerator();
-        }
-
-        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
-    }
-
     [Fact]
     [Trait("Category", "Concurrency")]
     public void WhenSeedingRejectsAChildInstalledAfterDiscoveryAndTheComponentHasABackEdge_ThenTheAttachLeavesNoResidue()

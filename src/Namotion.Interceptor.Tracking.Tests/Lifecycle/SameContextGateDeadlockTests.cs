@@ -25,10 +25,11 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// </remarks>
 public class SameContextGateDeadlockTests
 {
-    /// <summary>Comfortably longer than the gate bound, so a hang is still reported as one.</summary>
+    /// <summary>Comfortably longer than the conviction threshold, so a hang is still reported as one.</summary>
     private static readonly TimeSpan JoinTimeout = TimeSpan.FromSeconds(120);
 
-    /// <summary>Well under the gate's own backstop, so falling back to that backstop fails these.</summary>
+    /// <summary>Well under the last-resort bound, so a case decided by that bound instead of by
+    /// watching the holder fails these.</summary>
     private static readonly TimeSpan FastFailureBudget = TimeSpan.FromSeconds(5);
 
     [Fact]

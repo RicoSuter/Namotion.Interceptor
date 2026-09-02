@@ -123,7 +123,15 @@ public class AdversarialGateFalsePositiveTests
 
         // Act
         attacher.Start();
-        Thread.Sleep(80); // let the attacher reach the gate and block on the monitor
+
+        // Wait for the state the scenario needs rather than for a duration: the attacher has to be
+        // parked on the attachment monitor before the contending write starts, or the write races
+        // ahead of the hold and proves nothing.
+        Assert.True(
+            SpinWait.SpinUntil(
+                () => (attacher.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0,
+                TimeSpan.FromSeconds(10)),
+            "the attacher never blocked, so it never held the gate against the monitor");
 
         var contendedException = Record.Exception(() => contendedTarget.Father = new Person { FirstName = "waited" });
 

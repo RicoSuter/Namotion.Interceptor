@@ -29,23 +29,6 @@ public class AttachResidueTests
     /// A user enumerable that runs a callback when its enumeration starts, which is where the
     /// discovery scan invokes user code.
     /// </summary>
-    private sealed class ParkingEnumerable(Action onFirstEnumeration) : IEnumerable<Person>
-    {
-        private int _enumerations;
-
-        public IEnumerator<Person> GetEnumerator()
-        {
-            if (Interlocked.Increment(ref _enumerations) == 1)
-            {
-                onFirstEnumeration();
-            }
-
-            return Enumerable.Empty<Person>().GetEnumerator();
-        }
-
-        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
-    }
-
     /// <summary>
     /// Reproduces the finding that a rejected explicit attach leaves residue behind. The rollback
     /// contract is that a rejected attach publishes nothing at all, so this asserts each kind of
