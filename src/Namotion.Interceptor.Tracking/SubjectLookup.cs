@@ -12,6 +12,8 @@ namespace Namotion.Interceptor.Tracking;
 /// read-only-dictionary KVP extraction. Hot paths in <c>LifecycleInterceptor</c> and
 /// <c>RegisteredSubjectProperty</c> inline the dispatch switch directly for best codegen
 /// rather than going through this class.
+/// A default struct collection reads as empty here: it holds no entries, so no index or key
+/// resolves to a subject, and touching it would throw.
 /// </summary>
 public static class SubjectLookup
 {
@@ -31,6 +33,9 @@ public static class SubjectLookup
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static IInterceptorSubject? FindSubjectInCollection(object value, int index)
     {
+        if (SubjectPropertyTypeExtensions.ReadsAsEmpty(value))
+            return null;
+
         if (value is IList list)
             return list[index] as IInterceptorSubject;
 
@@ -66,6 +71,9 @@ public static class SubjectLookup
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static IInterceptorSubject? FindSubjectInDictionary(object value, object key)
     {
+        if (SubjectPropertyTypeExtensions.ReadsAsEmpty(value))
+            return null;
+
         if (value is IDictionary dictionary)
             return dictionary[key] as IInterceptorSubject;
 

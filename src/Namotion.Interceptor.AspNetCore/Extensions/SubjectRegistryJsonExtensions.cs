@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.AspNetCore.Extensions;
@@ -129,6 +130,13 @@ public static class SubjectRegistryJsonExtensions
 
         if (value is IEnumerable enumerable and not string)
         {
+            // A default struct collection throws both when enumerated and when serialized as a
+            // value, so emit the empty array an initialized empty collection would produce.
+            if (SubjectPropertyTypeExtensions.ReadsAsEmpty(value))
+            {
+                return new JsonArray();
+            }
+
             // Materialize once so the Count check and the foreach share a single pass over
             // potentially lazy / one-shot enumerables.
             var subjectChildren = enumerable.OfType<IInterceptorSubject>().ToList();
@@ -197,7 +205,12 @@ public static class SubjectRegistryJsonExtensions
 
                     if (subject.Properties.TryGetValue(nextSegment, out var property))
                     {
-                        var collection = property.GetValue?.Invoke(subject) as IEnumerable;
+                        // A default struct collection holds no children, so no index resolves.
+                        var propertyValue = property.GetValue?.Invoke(subject);
+                        var collection = SubjectPropertyTypeExtensions.ReadsAsEmpty(propertyValue)
+                            ? null
+                            : propertyValue as IEnumerable;
+
                         var child = collection?.OfType<IInterceptorSubject>().ElementAt(index);
                         if (child is not null)
                         {

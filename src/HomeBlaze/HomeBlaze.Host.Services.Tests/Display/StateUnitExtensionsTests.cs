@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Host.Services.Display;
 using HomeBlaze.Services.Lifecycle;
@@ -121,6 +122,22 @@ public class StateUnitExtensionsTests
 
         // Assert
         Assert.Equal(expected, result);
+    }
+    [Fact]
+    public void WhenDisplayValueIsADefaultStructCollection_ThenItRendersAsEmpty()
+    {
+        // Arrange: a property that was never assigned holds a struct collection whose inner array
+        // is null, so joining it throws instead of producing the empty string an empty one gives.
+        var context = CreateContext();
+        var subject = new DisplayTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty(nameof(DisplayTestSubject.Rate))!;
+
+        // Act
+        var result = property.GetPropertyDisplayValue(default(ImmutableArray<string>));
+
+        // Assert
+        Assert.Equal(string.Empty, result);
     }
 }
 

@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Host.Services.Display;
 
@@ -103,7 +104,11 @@ public static class StateUnitExtensions
             DateTime dt => dt.ToString("g"),
             DateTimeOffset dto => $"{dto.ToLocalTime().ToString("g")} {dto.ToLocalTime():zzz}",
             Enum e => e.ToString(),
-            IEnumerable<string> strings => string.Join("\n", strings),
+            // A default struct collection throws when joined; it renders as the empty join an
+            // initialized empty collection produces.
+            IEnumerable<string> strings => SubjectPropertyTypeExtensions.ReadsAsEmpty(value)
+                ? string.Empty
+                : string.Join("\n", strings),
             _ => value.ToString() ?? ""
         };
     }

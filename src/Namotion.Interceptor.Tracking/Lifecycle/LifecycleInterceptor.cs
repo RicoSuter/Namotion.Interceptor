@@ -441,6 +441,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
         HashSet<IInterceptorSubject>? touchedSubjects)
     {
+        // A default struct collection carries no children and throws when enumerated, so it
+        // releases the previously attached ones exactly as an empty collection does.
+        if (SubjectPropertyTypeExtensions.ReadsAsEmpty(value))
+        {
+            return;
+        }
+
         // Hot paths (IDictionary, ICollection) come before string/IEnumerable so common
         // writes don't pay extra type checks. The IEnumerable case at the end handles read-only
         // types that implement neither ICollection nor IDictionary (e.g. custom IReadOnlyList /

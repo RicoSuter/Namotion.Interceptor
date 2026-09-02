@@ -196,6 +196,72 @@ public class SubjectPropertyTypeExtensionsTests
     {
     }
 
+    [Fact]
+    public void WhenValueIsDefaultStructCollection_ThenItReadsAsEmpty()
+    {
+        // Arrange
+        object immutableArray = default(ImmutableArray<Person>);
+        object arraySegment = default(ArraySegment<Person>);
+        object nonSubjectImmutableArray = default(ImmutableArray<int>);
+        object structDictionary = default(RawCarMap);
+
+        // Act & Assert
+        Assert.True(SubjectPropertyTypeExtensions.ReadsAsEmpty(immutableArray));
+        Assert.True(SubjectPropertyTypeExtensions.ReadsAsEmpty(arraySegment));
+        Assert.True(SubjectPropertyTypeExtensions.ReadsAsEmpty(nonSubjectImmutableArray));
+        Assert.True(SubjectPropertyTypeExtensions.ReadsAsEmpty(structDictionary));
+    }
+
+    [Fact]
+    public void WhenValueIsAnInitializedCollection_ThenItDoesNotReadAsEmpty()
+    {
+        // Arrange: an initialized but empty collection is a usable value and must stay distinguishable
+        // from a default one, otherwise readers could not tell "empty" from "never set".
+        object emptyImmutableArray = ImmutableArray<Person>.Empty;
+        object filledImmutableArray = ImmutableArray.Create(new Person());
+        object emptyArraySegment = new ArraySegment<Person>([]);
+        object emptyList = new List<Person>();
+        object emptyArray = Array.Empty<Person>();
+
+        // Act & Assert
+        Assert.False(SubjectPropertyTypeExtensions.ReadsAsEmpty(emptyImmutableArray));
+        Assert.False(SubjectPropertyTypeExtensions.ReadsAsEmpty(filledImmutableArray));
+        Assert.False(SubjectPropertyTypeExtensions.ReadsAsEmpty(emptyArraySegment));
+        Assert.False(SubjectPropertyTypeExtensions.ReadsAsEmpty(emptyList));
+        Assert.False(SubjectPropertyTypeExtensions.ReadsAsEmpty(emptyArray));
+    }
+
+    [Fact]
+    public void WhenValueIsNullOrScalarOrString_ThenItDoesNotReadAsEmpty()
+    {
+        // Arrange: a default scalar is not a collection, and an empty string is not "no value".
+        object defaultInt = 0;
+        object defaultDateTime = default(DateTime);
+        object defaultKeyValuePair = default(KeyValuePair<string, Person>);
+
+        // Act & Assert
+        Assert.False(SubjectPropertyTypeExtensions.ReadsAsEmpty(null));
+        Assert.False(SubjectPropertyTypeExtensions.ReadsAsEmpty(defaultInt));
+        Assert.False(SubjectPropertyTypeExtensions.ReadsAsEmpty(defaultDateTime));
+        Assert.False(SubjectPropertyTypeExtensions.ReadsAsEmpty(defaultKeyValuePair));
+        Assert.False(SubjectPropertyTypeExtensions.ReadsAsEmpty(string.Empty));
+        Assert.False(SubjectPropertyTypeExtensions.ReadsAsEmpty("text"));
+        Assert.False(SubjectPropertyTypeExtensions.ReadsAsEmpty(new Person()));
+    }
+
+    [Fact]
+    public void WhenStructCollectionDeclaresAParameterlessConstructor_ThenOnlyItsDefaultReadsAsEmpty()
+    {
+        // Arrange: running the declared constructor would produce a non-default instance, so the
+        // default value has to be obtained without invoking it.
+        object defaultBag = default(ConstructedCarBag);
+        object constructedBag = new ConstructedCarBag();
+
+        // Act & Assert
+        Assert.True(SubjectPropertyTypeExtensions.ReadsAsEmpty(defaultBag));
+        Assert.False(SubjectPropertyTypeExtensions.ReadsAsEmpty(constructedBag));
+    }
+
     private readonly struct StructSubjectCollection : IEnumerable<Person>
     {
         public IEnumerator<Person> GetEnumerator() => throw new NotSupportedException();

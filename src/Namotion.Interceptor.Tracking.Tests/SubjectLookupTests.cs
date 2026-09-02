@@ -262,4 +262,33 @@ public class SubjectLookupTests
         Assert.Equal("k2", key2);
         Assert.Same(person2, subject2);
     }
+
+    [Fact]
+    public void WhenCollectionValueIsDefaultStruct_ThenReturnsNull()
+    {
+        // Arrange: ImmutableArray takes the IList fast path, ArraySegment the enumerable fallback.
+        object immutableArray = default(ImmutableArray<Person>);
+        object arraySegment = default(ArraySegment<Person>);
+
+        // Act
+        var fromImmutableArray = SubjectLookup.FindSubjectInCollection(immutableArray, 0);
+        var fromArraySegment = SubjectLookup.FindSubjectInCollection(arraySegment, 0);
+
+        // Assert
+        Assert.Null(fromImmutableArray);
+        Assert.Null(fromArraySegment);
+    }
+
+    [Fact]
+    public void WhenDictionaryValueIsDefaultStruct_ThenReturnsNull()
+    {
+        // Arrange
+        object map = default(RawCarMap);
+
+        // Act
+        var result = SubjectLookup.FindSubjectInDictionary(map, "first");
+
+        // Assert
+        Assert.Null(result);
+    }
 }

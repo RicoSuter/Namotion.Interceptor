@@ -23,6 +23,11 @@ public static class SubjectPropertyTypeExtensions
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionTypeCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryTypeCache = new();
 
+    // Boxed default instance per struct type, used by ReadsAsEmpty. Keyed by the runtime type of a
+    // value, so it never shares keys with the classification caches above (those are keyed by
+    // declared property types, which are frequently interfaces).
+    private static readonly ConcurrentDictionary<Type, object> DefaultStructValueCache = new();
+
     /// <summary>
     /// Checks whether a property can contain subjects, using both a JIT-constant fast path
     /// via <typeparamref name="TProperty"/> and a runtime fallback via the declared
@@ -95,6 +100,37 @@ public static class SubjectPropertyTypeExtensions
         return IsSubjectDictionaryTypeCache.TryGetValue(type, out var result)
             ? result
             : IsSubjectDictionaryTypeSlow(type);
+    }
+
+    /// <summary>
+    /// Returns true if the value is the default instance of a struct collection, such as
+    /// <c>default(ImmutableArray&lt;T&gt;)</c> or <c>default(ArraySegment&lt;T&gt;)</c>. Those hold a null
+    /// inner array and throw when read, so readers must treat them as an empty collection rather
+    /// than touching them. Returns false for null, for scalars, for an initialized but empty
+    /// collection, and for every reference type including strings.
+    /// </summary>
+    /// <remarks>
+    /// This is a value-level test rather than a property-type one: interface-declared properties
+    /// hold boxed default structs, so the declared type cannot tell a default apart from a live
+    /// value. Testing <see cref="IEnumerable"/> first keeps a subject reference or a scalar to a
+    /// single type test and only lets boxed containers reach the cache.
+    /// </remarks>
+    public static bool ReadsAsEmpty(object? value)
+    {
+        if (value is not IEnumerable || value is string)
+        {
+            return false;
+        }
+
+        var type = value.GetType();
+        return type.IsValueType && value.Equals(GetDefaultStructValue(type));
+    }
+
+    // GetUninitializedObject rather than Activator.CreateInstance: a struct may declare a
+    // parameterless constructor, and running it would produce something other than the default.
+    private static object GetDefaultStructValue(Type type)
+    {
+        return DefaultStructValueCache.GetOrAdd(type, static t => RuntimeHelpers.GetUninitializedObject(t));
     }
 
     private static bool CanContainSubjectsSlow(Type type)

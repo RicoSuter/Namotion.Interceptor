@@ -561,6 +561,128 @@ public class LifecycleInterceptorTests
         Assert.Contains(events, e => e.Contains("ImmutableCars[0] -> Car1") && e.Contains("detached"));
     }
 
+    [Fact]
+    public void WhenStructCollectionPropertyIsNeverAssigned_ThenAttachingTheSubjectSucceeds()
+    {
+        // Arrange
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler)
+            .WithContextInheritance();
+
+        // Act: every structural property still holds its default struct instance here.
+        var holder = new StructCollectionHolder(context);
+
+        // Assert
+        var events = handler.GetEvents();
+        Assert.Contains(events, e => e.Contains("StructCollectionHolder") && e.Contains("attached"));
+        Assert.DoesNotContain(events, e => e.Contains("ImmutableCars"));
+        Assert.DoesNotContain(events, e => e.Contains("SegmentCars"));
+        Assert.True(holder.ImmutableCars.IsDefault);
+    }
+
+    [Fact]
+    public void WhenAssigningDefaultToStructCollection_ThenSubjectsAreDetached()
+    {
+        // Arrange
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler)
+            .WithContextInheritance();
+
+        var holder = new StructCollectionHolder(context);
+        var car = new Car { Name = "Car1" };
+        holder.ImmutableCars = ImmutableArray.Create(car);
+        handler.Clear();
+
+        // Act
+        holder.ImmutableCars = default;
+
+        // Assert
+        var events = handler.GetEvents();
+        Assert.Contains(events, e => e.Contains("ImmutableCars[0] -> Car1") && e.Contains("detached"));
+    }
+
+    [Fact]
+    public void WhenAssigningDefaultToStructCollectionWithoutCollectionInterface_ThenSubjectsAreDetached()
+    {
+        // Arrange: ArraySegment implements neither ICollection nor IDictionary, so it reaches the
+        // read-only IEnumerable dispatch arm rather than the ICollection one.
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler)
+            .WithContextInheritance();
+
+        var holder = new StructCollectionHolder(context);
+        var car = new Car { Name = "Car1" };
+        holder.SegmentCars = new ArraySegment<Car>([car]);
+        handler.Clear();
+
+        // Act
+        holder.SegmentCars = default;
+
+        // Assert
+        var events = handler.GetEvents();
+        Assert.Contains(events, e => e.Contains("SegmentCars[0] -> Car1") && e.Contains("detached"));
+    }
+
+    [Fact]
+    public void WhenInterfacePropertyIsAssignedABoxedDefaultStruct_ThenSubjectsAreDetached()
+    {
+        // Arrange: the declared type is an interface, so nothing about the property tells the
+        // readers that the boxed value could be a default struct.
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler)
+            .WithContextInheritance();
+
+        var holder = new StructCollectionHolder(context);
+        var car = new Car { Name = "Car1" };
+        holder.InterfaceCars = ImmutableArray.Create(car);
+        handler.Clear();
+
+        // Act
+        holder.InterfaceCars = default(ImmutableArray<Car>);
+
+        // Assert
+        var events = handler.GetEvents();
+        Assert.Contains(events, e => e.Contains("InterfaceCars[0] -> Car1") && e.Contains("detached"));
+    }
+
+    [Fact]
+    public void WhenNullableStructuralPropertyIsAssignedTheDefaultOfItsUnderlyingType_ThenSubjectsAreDetached()
+    {
+        // Arrange: this is not the same as assigning null. The nullable has a value, and that
+        // value is the unusable default instance.
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler)
+            .WithContextInheritance();
+
+        var holder = new NullableStructuralHolder(context);
+        var car = new Car { Name = "Car1" };
+        holder.ImmutableCars = ImmutableArray.Create(car);
+        handler.Clear();
+
+        // Act
+        holder.ImmutableCars = default(ImmutableArray<Car>);
+
+        // Assert
+        Assert.NotNull(holder.ImmutableCars);
+        var events = handler.GetEvents();
+        Assert.Contains(events, e => e.Contains("ImmutableCars[0] -> Car1") && e.Contains("detached"));
+    }
+
     public class AddPropertyToSubjectHandler : ILifecycleHandler
     {
         public void HandleLifecycleChange(SubjectLifecycleChange change)

@@ -26,6 +26,11 @@ internal static class SubjectValueConvert
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static IReadOnlyList<IInterceptorSubject> ToSubjectList(object value)
     {
+        // A default struct collection satisfies the covariant fast path but throws on every read,
+        // so it has to be answered as empty before it is passed on to the diff builder.
+        if (SubjectPropertyTypeExtensions.ReadsAsEmpty(value))
+            return [];
+
         if (value is IReadOnlyList<IInterceptorSubject> readOnlyList)
             return readOnlyList;
 
@@ -52,7 +57,7 @@ internal static class SubjectValueConvert
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static List<IInterceptorSubject> ToSubjectMutableList(object? value)
     {
-        if (value is null)
+        if (value is null || SubjectPropertyTypeExtensions.ReadsAsEmpty(value))
             return [];
 
         if (value is IEnumerable<IInterceptorSubject> typedEnumerable)
