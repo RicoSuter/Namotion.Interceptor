@@ -453,10 +453,13 @@ public class SubjectSourceRetryQueueTests
             Volatile.Write(ref first, source.BeginResumeForTest());
             barrier.SignalAndWait();
 
-            // Act & Assert: whichever took the higher epoch must be the one holding the gate, so ending
-            // that resume is what clears it.
-            var newest = Math.Max(Volatile.Read(ref first), Volatile.Read(ref second));
-            Assert.True(source.TryEndResumeForTest(newest),
+            // Act & Assert: two resumes must never be handed the same epoch, or either could end the
+            // other's gate, and whichever took the higher one must be the resume holding it.
+            var older = Volatile.Read(ref first);
+            var newer = Volatile.Read(ref second);
+            Assert.True(older != newer,
+                $"Two concurrent resumes were handed the same epoch {older} (iteration {iteration}).");
+            Assert.True(source.TryEndResumeForTest(Math.Max(older, newer)),
                 $"The older of two concurrent resumes ended up owning the gate (iteration {iteration}).");
         }
 
