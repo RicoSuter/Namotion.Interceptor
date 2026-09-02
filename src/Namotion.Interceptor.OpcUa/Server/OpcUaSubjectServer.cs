@@ -87,15 +87,6 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         ILogger logger)
         : base(new ConnectorMetrics(new ThroughputCounter(), new ThroughputCounter()))
     {
-        // Checked here rather than in a configuration Validate, which this configuration alone does not
-        // have: the processor builds inside the run attempt, where a throw becomes an endless restart.
-        if (configuration.TeardownFlushTimeout < TimeSpan.Zero)
-        {
-            throw new ArgumentException(
-                $"TeardownFlushTimeout must be non-negative, got: {configuration.TeardownFlushTimeout}",
-                nameof(configuration));
-        }
-
         _subject = subject;
         _context = subject.Context;
         _logger = logger;
@@ -126,8 +117,7 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
             propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
             DeliveryRule,
             _configuration.BufferTime, maxQueueDepth: null, logger: _logger,
-            dropHandler: Metrics.OutboundChanges.AddDropped,
-            teardownFlushTimeout: _configuration.TeardownFlushTimeout);
+            dropHandler: Metrics.OutboundChanges.CreateDropReporter());
 
     private bool IsPropertyIncluded(PropertyReference propertyReference)
     {

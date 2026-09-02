@@ -129,7 +129,7 @@ public class OpcUaReconnectionTests
                 await server.StopAsync();
 
                 await AsyncTestHelpers.WaitUntilAsync(
-                    () => !client.Source!.Diagnostics.IsOperational,
+                    () => client.Source!.Diagnostics.IsOperational == false,
                     timeout: TimeSpan.FromSeconds(90),
                     message: "Client should detect disconnection");
                 logger.Log("Client detected disconnection");
@@ -163,7 +163,7 @@ public class OpcUaReconnectionTests
                 // intervals (5s each here), so a rise that arrived late enough to be worthless
                 // still fails.
                 await AsyncTestHelpers.WaitUntilAsync(
-                    () => client.Source!.Diagnostics.IsOperational,
+                    () => client.Source!.Diagnostics.IsOperational == true,
                     timeout: TimeSpan.FromSeconds(20),
                     message: "Client should report itself operational again after reconnecting");
                 Assert.NotNull(client.Source.CurrentSession);
@@ -273,14 +273,14 @@ public class OpcUaReconnectionTests
 
             Assert.NotNull(client.Source);
             await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Source!.Diagnostics.IsOperational,
+                () => client.Source!.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(60),
                 message: "Client should report operational after the initial connect");
 
             // Act
             await server.StopAsync();
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !client.Source!.Diagnostics.IsOperational,
+                () => client.Source!.Diagnostics.IsOperational == false,
                 timeout: TimeSpan.FromSeconds(60),
                 message: "Client should detect the outage");
             logger.Log("Client detected disconnection");
@@ -291,7 +291,7 @@ public class OpcUaReconnectionTests
             // out. The bound is far below that, so a rise that arrived late enough to be worthless
             // still fails.
             await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Source!.Diagnostics.IsOperational,
+                () => client.Source!.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(30),
                 message: "Client should report operational as soon as the reconnect transferred its subscriptions");
 
@@ -367,7 +367,7 @@ public class OpcUaReconnectionTests
             logger.Log("Stopping server...");
             await server.StopAsync();
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !client.Source!.Diagnostics.IsOperational,
+                () => client.Source!.Diagnostics.IsOperational == false,
                 timeout: TimeSpan.FromSeconds(90),
                 message: "Client should detect disconnection");
             logger.Log("Client detected disconnection");

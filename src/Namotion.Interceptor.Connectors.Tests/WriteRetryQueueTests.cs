@@ -8,6 +8,295 @@ namespace Namotion.Interceptor.Connectors.Tests;
 
 public class WriteRetryQueueTests
 {
+    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+
+    [Fact]
+    public async Task WhenRetryOwnershipIsDisposedWithACurrentWriteWaiting_ThenBothCompleteAndAreCountedOnce()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var diagnostics = new QueueDiagnostics(metrics);
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, metrics);
+        var source = new Mock<ISubjectSource>();
+        var olderWriteStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseOlderWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var currentWriteStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var waiterCancellation = new CancellationTokenSource();
+        source.Setup(item => item.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                if (changes.Span[0].GetOldValue<int>() == 0)
+                {
+                    olderWriteStarted.TrySetResult();
+                    await releaseOlderWrite.Task.ConfigureAwait(false);
+                }
+                else
+                {
+                    currentWriteStarted.TrySetResult();
+                }
+
+                return WriteResult.Success;
+            });
+        queue.Enqueue(CreateChanges(1, startId: 0));
+        var olderFlush = queue.FlushAsync(source.Object, CancellationToken.None).AsTask();
+        await olderWriteStarted.Task.WaitAsync(TestTimeout);
+        var currentWrite = queue.WriteAsync(
+            source.Object,
+            CreateChanges(1, startId: 1),
+            waiterCancellation.Token).AsTask();
+
+        try
+        {
+            // Act
+            queue.Dispose();
+            releaseOlderWrite.TrySetResult();
+            await olderFlush.WaitAsync(TestTimeout);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => currentWrite.IsCompleted,
+                timeout: TestTimeout,
+                message: "The registered waiter should complete after the semaphore holder exits.");
+            await currentWrite;
+
+            // Assert
+            Assert.False(currentWriteStarted.Task.IsCompleted);
+            Assert.Equal(2, diagnostics.TotalDropped);
+        }
+        finally
+        {
+            releaseOlderWrite.TrySetResult();
+            await waiterCancellation.CancelAsync();
+            await Task.WhenAll(olderFlush, currentWrite).WaitAsync(TestTimeout);
+            queue.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenACurrentPartialFailureSettlesBeforeRetirement_ThenOnlyFailedChangesAreCounted()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var diagnostics = new QueueDiagnostics(metrics);
+        using var queue = new WriteRetryQueue(100, NullLogger.Instance, metrics);
+        var source = new Mock<ISubjectSource>();
+        source.Setup(item => item.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.PartialFailure(
+                    changes.Slice(1, 1),
+                    new InvalidOperationException("One change failed"))));
+
+        // Act
+        await queue.WriteAsync(source.Object, CreateChanges(3), CancellationToken.None);
+        queue.Retire();
+
+        // Assert
+        Assert.Equal(1, diagnostics.TotalDropped);
+    }
+
+    [Fact]
+    public async Task WhenACurrentWriteFails_ThenTheFailureIsLoggedAndRetained()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var logger = new RecordingLogger();
+        using var queue = new WriteRetryQueue(100, logger, metrics);
+        var source = new Mock<ISubjectSource>();
+        source.Setup(item => item.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Failure(
+                    changes,
+                    new InvalidOperationException("Connection failed"))));
+
+        // Act
+        await queue.WriteAsync(source.Object, CreateChanges(1), CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, queue.PendingWriteCount);
+        Assert.Contains(logger.Warnings, warning => warning.Contains("Failed to write 1 changes", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WhenTheQueueIsRetiredWhileAFlushIsInFlight_ThenTheBatchIsCountedExactlyOnce()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var diagnostics = new QueueDiagnostics(metrics);
+        using var queue = new WriteRetryQueue(100, NullLogger.Instance, metrics);
+        var source = new Mock<ISubjectSource>();
+        var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        source.Setup(item => item.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+            {
+                writeStarted.TrySetResult();
+                await releaseWrite.Task.ConfigureAwait(false);
+                return WriteResult.Success;
+            });
+        queue.Enqueue(CreateChanges(3));
+        var flush = queue.FlushAsync(source.Object, CancellationToken.None);
+        await writeStarted.Task.WaitAsync(TestTimeout);
+
+        // Act
+        queue.Retire();
+
+        // Assert
+        Assert.Equal(3, diagnostics.TotalDropped);
+        releaseWrite.TrySetResult();
+        Assert.True(await flush.AsTask().WaitAsync(TestTimeout));
+        Assert.Equal(3, diagnostics.TotalDropped);
+    }
+
+    [Fact]
+    public async Task WhenRetireIsCalledTwice_ThenPendingAndActiveWritesAreCountedOnce()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var diagnostics = new QueueDiagnostics(metrics);
+        using var queue = new WriteRetryQueue(100, NullLogger.Instance, metrics);
+        var source = new Mock<ISubjectSource>();
+        var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        source.Setup(item => item.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+            {
+                writeStarted.TrySetResult();
+                await releaseWrite.Task.ConfigureAwait(false);
+                return WriteResult.Success;
+            });
+        queue.Enqueue(CreateChanges(1));
+        var flush = queue.FlushAsync(source.Object, CancellationToken.None);
+        await writeStarted.Task.WaitAsync(TestTimeout);
+        queue.Enqueue(CreateChanges(2));
+
+        // Act
+        queue.Retire();
+        queue.Retire();
+
+        // Assert
+        Assert.Equal(0, queue.PendingWriteCount);
+        Assert.Equal(3, diagnostics.TotalDropped);
+        releaseWrite.TrySetResult();
+        Assert.True(await flush.AsTask().WaitAsync(TestTimeout));
+        Assert.Equal(3, diagnostics.TotalDropped);
+    }
+
+    [Fact]
+    public void WhenAWriteIsEnqueuedAfterRetirement_ThenItIsCountedWithoutEnteringTheQueue()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var diagnostics = new QueueDiagnostics(metrics);
+        using var queue = new WriteRetryQueue(100, NullLogger.Instance, metrics);
+        queue.Retire();
+
+        // Act
+        queue.Enqueue(CreateChanges(3));
+
+        // Assert
+        Assert.Equal(0, queue.PendingWriteCount);
+        Assert.Equal(3, diagnostics.TotalDropped);
+    }
+
+    [Fact]
+    public async Task WhenAFailingFlushSettlesAfterRetirement_ThenItIsNotRequeuedOrCountedAgain()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var diagnostics = new QueueDiagnostics(metrics);
+        var logger = new RecordingLogger();
+        using var queue = new WriteRetryQueue(100, logger, metrics);
+        var source = new Mock<ISubjectSource>();
+        var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        source.Setup(item => item.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                writeStarted.TrySetResult();
+                await releaseWrite.Task.ConfigureAwait(false);
+                return WriteResult.Failure(changes, new InvalidOperationException("Connection failed"));
+            });
+        queue.Enqueue(CreateChanges(3));
+        var flush = queue.FlushAsync(source.Object, CancellationToken.None);
+        await writeStarted.Task.WaitAsync(TestTimeout);
+        queue.Retire();
+
+        // Act
+        releaseWrite.TrySetResult();
+        var result = await flush.AsTask().WaitAsync(TestTimeout);
+
+        // Assert
+        Assert.False(result);
+        Assert.Equal(0, queue.PendingWriteCount);
+        Assert.Equal(3, diagnostics.TotalDropped);
+        Assert.DoesNotContain(logger.Warnings, warning => warning.Contains("re-queuing failed items", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WhenASuccessfulFlushSettlesAfterRetirement_ThenItDoesNotReportRecovery()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var logger = new RecordingLogger();
+        using var queue = new WriteRetryQueue(100, logger, metrics);
+        var source = new Mock<ISubjectSource>();
+        var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writeAttempt = 0;
+        source.Setup(item => item.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                if (Interlocked.Increment(ref writeAttempt) == 1)
+                {
+                    return WriteResult.Failure(changes, new InvalidOperationException("Connection failed"));
+                }
+
+                writeStarted.TrySetResult();
+                await releaseWrite.Task.ConfigureAwait(false);
+                return WriteResult.Success;
+            });
+        queue.Enqueue(CreateChanges(3));
+        Assert.False(await queue.FlushAsync(source.Object, CancellationToken.None));
+        var flush = queue.FlushAsync(source.Object, CancellationToken.None);
+        await writeStarted.Task.WaitAsync(TestTimeout);
+
+        // Act
+        queue.Retire();
+        releaseWrite.TrySetResult();
+        var result = await flush.AsTask().WaitAsync(TestTimeout);
+
+        // Assert
+        Assert.True(result);
+        Assert.DoesNotContain(logger.Warnings, warning => warning.Contains("Successfully flushed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WhenFlushFails_ThenWarningReportsResultingQueueDepth()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var logger = new RecordingLogger();
+        using var queue = new WriteRetryQueue(100, logger, metrics);
+        var source = new Mock<ISubjectSource>();
+        source.Setup(item => item.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+                new ValueTask<WriteResult>(WriteResult.Failure(changes, new InvalidOperationException("Connection failed"))));
+        queue.Enqueue(CreateChanges(3));
+
+        // Act
+        var result = await queue.FlushAsync(source.Object, CancellationToken.None);
+
+        // Assert
+        Assert.False(result);
+        Assert.Contains(logger.Warnings, warning => warning.Contains("3 writes queued", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task WhenEnqueueAndFlush_ThenChangesAreWritten()
     {
@@ -50,6 +339,97 @@ public class WriteRetryQueueTests
         sourceMock.Verify(
             c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact]
+    public async Task WhenQueueAppearsEmptyDuringCurrentWrite_ThenFlushWaitsForCurrentOwner()
+    {
+        // Arrange
+        using var queue = new WriteRetryQueue(
+            100,
+            NullLogger.Instance,
+            new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var source = new Mock<ISubjectSource>();
+        var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writeAttempts = 0;
+        source.Setup(item => item.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                if (Interlocked.Increment(ref writeAttempts) == 1)
+                {
+                    writeStarted.TrySetResult();
+                    await releaseWrite.Task.ConfigureAwait(false);
+                    return WriteResult.Failure(changes, new InvalidOperationException("retry current write"));
+                }
+
+                return WriteResult.Success;
+            });
+        var currentWrite = queue.WriteAsync(
+            source.Object,
+            CreateChanges(1),
+            CancellationToken.None).AsTask();
+        await writeStarted.Task.WaitAsync(TestTimeout);
+
+        // Act
+        var flush = queue.FlushAsync(source.Object, CancellationToken.None).AsTask();
+
+        try
+        {
+            // Assert
+            Assert.False(flush.IsCompleted);
+            releaseWrite.TrySetResult();
+            await currentWrite.WaitAsync(TestTimeout);
+            Assert.True(await flush.WaitAsync(TestTimeout));
+            Assert.Equal(2, writeAttempts);
+            Assert.True(queue.IsEmpty);
+        }
+        finally
+        {
+            releaseWrite.TrySetResult();
+            await Task.WhenAll(currentWrite, flush).WaitAsync(TestTimeout);
+        }
+    }
+
+    [Fact]
+    public async Task WhenQueueIsEmpty_ThenFlushDoesNotGrowTheScratchBuffer()
+    {
+        // Arrange
+        using var queue = new WriteRetryQueue(
+            100,
+            NullLogger.Instance,
+            new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var source = new Mock<ISubjectSource>();
+        var initialBuffer = GetScratchBuffer(queue);
+
+        // Act
+        var result = await queue.FlushAsync(source.Object, CancellationToken.None);
+
+        // Assert
+        Assert.True(result);
+        Assert.Same(initialBuffer, GetScratchBuffer(queue));
+    }
+
+    [Fact]
+    public async Task WhenCurrentWriteHasNoOlderRetries_ThenScratchBufferIsNotGrown()
+    {
+        // Arrange
+        using var queue = new WriteRetryQueue(
+            100,
+            NullLogger.Instance,
+            new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var source = new Mock<ISubjectSource>();
+        source.Setup(item => item.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(new ValueTask<WriteResult>(WriteResult.Success));
+        var initialBuffer = GetScratchBuffer(queue);
+
+        // Act
+        await queue.WriteAsync(source.Object, CreateChanges(1), CancellationToken.None);
+
+        // Assert
+        Assert.Same(initialBuffer, GetScratchBuffer(queue));
     }
 
     [Fact]
@@ -518,4 +898,9 @@ public class WriteRetryQueueTests
         }
         return changes;
     }
+
+    private static SubjectPropertyChange[] GetScratchBuffer(WriteRetryQueue queue) =>
+        (SubjectPropertyChange[])typeof(WriteRetryQueue)
+            .GetField("_scratchBuffer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(queue)!;
 }

@@ -75,7 +75,7 @@ public class OpcUaClientLivenessTests
             await source.StartAsync(CancellationToken.None);
 
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(90),
                 message: "The client should report itself operational before the poisoned load runs");
 
@@ -156,7 +156,7 @@ public class OpcUaClientLivenessTests
                 message: "Initial sync should complete");
 
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(60),
                 message: "The first health check tick should report the session as operational");
 
@@ -167,19 +167,19 @@ public class OpcUaClientLivenessTests
             await server.RestartAsync();
 
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == false,
                 timeout: TimeSpan.FromSeconds(30),
                 message: "The failing keep-alive should drop liveness");
 
             // Assert - raised again by the completed transfer on the reconnect callback's own thread,
             // far inside the health check interval, so no tick can be what raised it.
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(30),
                 message: "The completed subscription transfer should raise liveness again");
 
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == false,
                 timeout: TimeSpan.FromSeconds(75),
                 message: "The failed full state sync should drop liveness with the session it cleared");
 
@@ -192,7 +192,7 @@ public class OpcUaClientLivenessTests
             // Act
             converter.Disarm();
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(75),
                 message: "The health loop should reconnect after the failed full state sync");
 
@@ -253,7 +253,7 @@ public class OpcUaClientLivenessTests
                 message: "Initial sync should complete");
 
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(30),
                 message: "The health check loop should report the session as operational");
 

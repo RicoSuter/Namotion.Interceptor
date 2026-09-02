@@ -430,7 +430,7 @@ Tiered error handling preserves connections when possible:
 
 ## Diagnostics
 
-Both WebSocket connectors report through the shared model: the member tree, the three buffers, `LastError` stickiness and the read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to WebSocket.
+Both built-in WebSocket connectors implement liveness monitoring and report through the shared model: the member tree, the three buffers, `LastError` stickiness and the read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). Before the first protocol-specific liveness observation, `IsOperational` can be `null`; after that observation, the connectors publish explicit `true` or `false` values. What follows is what is specific to WebSocket.
 
 **`IsOperational` for the standalone server means the listener is accepting connections.** It is set once Kestrel has started and drops first in the teardown, so a server that has stopped accepting connections never reports that it is still serving. It also drops and rises again on every internal restart, where the inherited `StartTime` marks the current run of the hosted service and does not move.
 
@@ -438,7 +438,7 @@ Both WebSocket connectors report through the shared model: the member tree, the 
 
 Neither connector measures throughput, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are both `null` rather than `0.0`.
 
-The client's diagnostics are a plain `SourceDiagnostics` with no WebSocket specific additions. `OutboundRetries.Capacity` echoes `WriteRetryQueueSize`, and is `0` when the queue is disabled; in that configuration read `TotalDropped` as a floor rather than the whole loss (see [Known Limitations](connectors.md#known-limitations)).
+The client's diagnostics are a plain `SourceDiagnostics` with no WebSocket specific additions. `OutboundRetries.Capacity` echoes `WriteRetryQueueSize`; at capacity 0 no writes are retained, but failed, terminally unconfirmed, and owned connect-window writes are still counted in `TotalDropped`. Writes made before the source claims their property remain unattributable; see [Known Limitations](connectors.md#known-limitations). The built-in client registers the `ClaimedPropertyCount` gauge, so it reports a measured value, including zero.
 
 The standalone server's diagnostics are a `WebSocketServerDiagnostics`, which adds two members:
 
