@@ -1,7 +1,12 @@
+using System.Collections;
 using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Reflection;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -59,8 +64,7 @@ public class DerivedPropertyConcurrencyTests
             // Arrange
             var context = InterceptorSubjectContext
                 .Create()
-                .WithFullPropertyTracking()
-                .WithContextInheritance();
+                .WithFullPropertyTracking();
 
             var car = new Car(context);
             car.Tires[0].Pressure = 30;
@@ -96,6 +100,287 @@ public class DerivedPropertyConcurrencyTests
     }
 
     [Fact]
+    public async Task WhenCrossSubjectDerivedCascadeMeetsRetainedTargetFence_ThenSourceWriteCompletesAndNotificationIsEventuallyPublished()
+    {
+        // Arrange
+        using var blocker = new BlockingRetainedDerivedTargetHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => blocker, _ => false);
+
+        var firstGarage = new Garage(context);
+        var secondGarage = new Garage(context);
+        var car = new Car();
+        firstGarage.Cars = [car];
+
+        var tire = car.Tires[0];
+        var derivedChanges = new ConcurrentQueue<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change =>
+                ReferenceEquals(change.Property.Subject, car) &&
+                change.Property.Name == nameof(Car.AveragePressure))
+            .Subscribe(derivedChanges.Enqueue);
+
+        blocker.Arm(car, secondGarage);
+
+        // Act
+        var retainedEdgeWrite = Task.Run(() => Record.Exception(() => secondGarage.Cars = [car]));
+        Exception? sourceWriteException;
+        try
+        {
+            Assert.True(
+                blocker.CallbackEntered.Wait(TimeSpan.FromSeconds(10)),
+                "retained target callback did not reach the blocking handler");
+            sourceWriteException = Record.Exception(() => tire.Pressure = 40m);
+        }
+        finally
+        {
+            blocker.ContinueCallback.Set();
+        }
+
+        var retainedEdgeWriteException = await retainedEdgeWrite.WaitAsync(TimeSpan.FromSeconds(10));
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => derivedChanges.Any(change => change.GetNewValue<decimal>() == 10m),
+            timeout: TimeSpan.FromSeconds(10),
+            message: "the deferred AveragePressure notification was not published");
+        var publishedDerivedValues = derivedChanges
+            .Select(change => change.GetNewValue<decimal>())
+            .ToArray();
+
+        // Assert
+        Assert.Null(retainedEdgeWriteException);
+        Assert.Equal(40m, tire.Pressure);
+        Assert.True(
+            sourceWriteException is null && publishedDerivedValues.Contains(10m),
+            $"The source terminal committed Pressure=40, but its setter returned " +
+            $"'{sourceWriteException?.GetType().Name ?? "no exception"}' and the eventual " +
+            $"AveragePressure notifications were [{string.Join(", ", publishedDerivedValues)}].");
+    }
+
+    [Fact]
+    public async Task WhenDerivedTargetHasExclusiveReservation_ThenSourceWriteCompletesAndNotificationResumesAfterRelease()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+        var car = new Car(context);
+        var tire = car.Tires[0];
+        var graph = ((LifecycleInterceptor)context.TryGetLifecycleInterceptor()!).Graph;
+        var reservation = graph.ReserveForStructuralWrite(
+            (InterceptorExecutor)((IInterceptorSubject)car).Executor,
+            ReservationMode.Exclusive);
+        var derivedChanges = new ConcurrentQueue<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change =>
+                ReferenceEquals(change.Property.Subject, car) &&
+                change.Property.Name == nameof(Car.AveragePressure))
+            .Subscribe(derivedChanges.Enqueue);
+
+        // Act
+        var sourceWriteException = Record.Exception(() => tire.Pressure = 40m);
+        var changesBeforeRelease = derivedChanges.ToArray();
+        reservation.Dispose();
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => derivedChanges.Any(change => change.GetNewValue<decimal>() == 10m),
+            timeout: TimeSpan.FromSeconds(10),
+            message: "the exclusively reserved derived target did not resume its notification");
+
+        // Assert
+        Assert.Null(sourceWriteException);
+        Assert.Empty(changesBeforeRelease);
+        var change = Assert.Single(derivedChanges);
+        Assert.Equal(0m, change.GetOldValue<decimal>());
+        Assert.Equal(10m, change.GetNewValue<decimal>());
+    }
+
+    [Fact]
+    public async Task WhenTwoSourceWritesMeetRetainedTargetFence_ThenOneOldToLatestNotificationUsesLatestTimestamp()
+    {
+        // Arrange
+        using var blocker = new BlockingRetainedDerivedTargetHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => blocker, _ => false);
+        var firstGarage = new Garage(context);
+        var secondGarage = new Garage(context);
+        var car = new Car();
+        firstGarage.Cars = [car];
+        var firstTimestamp = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var secondTimestamp = new DateTimeOffset(2001, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var derivedChanges = new ConcurrentQueue<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change =>
+                ReferenceEquals(change.Property.Subject, car) &&
+                change.Property.Name == nameof(Car.AveragePressure))
+            .Subscribe(derivedChanges.Enqueue);
+        blocker.Arm(car, secondGarage);
+        var retainedEdgeWrite = Task.Run(() => Record.Exception(() => secondGarage.Cars = [car]));
+
+        // Act
+        Exception? firstSourceException;
+        Exception? secondSourceException;
+        try
+        {
+            Assert.True(
+                blocker.CallbackEntered.Wait(TimeSpan.FromSeconds(10)),
+                "retained target callback did not reach the blocking handler");
+            using (SubjectChangeContext.WithChangedTimestamp(firstTimestamp))
+            {
+                firstSourceException = Record.Exception(() => car.Tires[0].Pressure = 40m);
+            }
+
+            using (SubjectChangeContext.WithChangedTimestamp(secondTimestamp))
+            {
+                secondSourceException = Record.Exception(() => car.Tires[1].Pressure = 80m);
+            }
+
+            Assert.Empty(derivedChanges);
+        }
+        finally
+        {
+            blocker.ContinueCallback.Set();
+        }
+
+        var retainedEdgeWriteException = await retainedEdgeWrite.WaitAsync(TimeSpan.FromSeconds(10));
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => derivedChanges.Any(change => change.GetNewValue<decimal>() == 30m),
+            timeout: TimeSpan.FromSeconds(10),
+            message: "the coalesced derived notification was not published");
+
+        // Assert
+        Assert.Null(firstSourceException);
+        Assert.Null(secondSourceException);
+        Assert.Null(retainedEdgeWriteException);
+        var change = Assert.Single(derivedChanges);
+        Assert.Equal(0m, change.GetOldValue<decimal>());
+        Assert.Equal(30m, change.GetNewValue<decimal>());
+        Assert.Equal(secondTimestamp, change.ChangedTimestamp);
+        Assert.Equal(secondTimestamp, car.GetPropertyReference(nameof(Car.AveragePressure)).TryGetWriteTimestamp());
+    }
+
+    [Fact]
+    public async Task WhenDerivedTargetTransitionRollsBack_ThenDeferredNotificationResumesAfterStableRestore()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+        var car = new Car(context);
+        var executor = (InterceptorExecutor)((IInterceptorSubject)car).Executor;
+        var transition = executor.PrepareAttachmentUpdate(
+            (InterceptorSubjectContext)context,
+            (InterceptorSubjectContext)context,
+            SubjectAttachmentAnchorKind.Explicit);
+        var derivedChanges = new ConcurrentQueue<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change =>
+                ReferenceEquals(change.Property.Subject, car) &&
+                change.Property.Name == nameof(Car.AveragePressure))
+            .Subscribe(derivedChanges.Enqueue);
+
+        // Act
+        var sourceWriteException = Record.Exception(() => car.Tires[0].Pressure = 40m);
+        var changesBeforeRollback = derivedChanges.ToArray();
+        transition.Dispose();
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => derivedChanges.Any(change => change.GetNewValue<decimal>() == 10m),
+            timeout: TimeSpan.FromSeconds(10),
+            message: "the rolled-back target transition did not resume its derived notification");
+
+        // Assert
+        Assert.Null(sourceWriteException);
+        Assert.Empty(changesBeforeRollback);
+        var change = Assert.Single(derivedChanges);
+        Assert.Equal(0m, change.GetOldValue<decimal>());
+        Assert.Equal(10m, change.GetNewValue<decimal>());
+        Assert.Same(context, car.TryGetContext());
+        Assert.Equal(AttachmentPhase.Stable, executor.CurrentAttachmentPhase);
+    }
+
+    [Fact]
+    public void WhenDerivedNotificationInterceptorConflictsAfterTerminal_ThenConflictIsNotReclassifiedAsAnAttachmentFence()
+    {
+        // Arrange
+        var interceptor = new PostTerminalDetachInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => interceptor, _ => false);
+        var person = new Person(context)
+        {
+            FirstName = "initial",
+            LastName = "person"
+        };
+        interceptor.Arm(person, nameof(Person.FullName), context);
+
+        // Act
+        var exception = Record.Exception(() => person.FirstName = "updated");
+
+        // Assert
+        Assert.IsType<LifecycleConflictException>(exception);
+        Assert.Equal("updated", person.FirstName);
+    }
+
+    [Fact]
+    public void WhenPendingRetrySequenceIsCurrent_ThenRecalculationOwnershipIsAcquired()
+    {
+        // Arrange
+        const long expectedSequence = 7;
+        var data = new DerivedPropertyData
+        {
+            RecalculationSequence = expectedSequence
+        };
+
+        // Act
+        bool acquired;
+        lock (data)
+        {
+            acquired = data.TryBeginPendingRecalculation(expectedSequence);
+        }
+
+        // Assert
+        Assert.True(acquired);
+        Assert.True(data.IsRecalculating);
+    }
+
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    public void WhenPendingRetryNoLongerOwnsCurrentState_ThenRecalculationOwnershipIsNotAcquired(
+        bool hasNewerSequence,
+        bool hasActiveOwner,
+        bool isDetached)
+    {
+        // Arrange
+        const long expectedSequence = 7;
+        var data = new DerivedPropertyData
+        {
+            RecalculationSequence = hasNewerSequence ? expectedSequence + 1 : expectedSequence,
+            IsRecalculating = hasActiveOwner,
+            IsAttached = !isDetached
+        };
+
+        // Act
+        bool acquired;
+        lock (data)
+        {
+            acquired = data.TryBeginPendingRecalculation(expectedSequence);
+        }
+
+        // Assert
+        Assert.False(acquired);
+        Assert.Equal(hasActiveOwner, data.IsRecalculating);
+    }
+
+    [Fact]
     public async Task WhenSourcePropertyWrittenDuringSubjectDetach_ThenNoExceptionsAndCleanState()
     {
         for (var i = 0; i < DefaultIterations; i++)
@@ -103,8 +388,7 @@ public class DerivedPropertyConcurrencyTests
             // Arrange
             var context = InterceptorSubjectContext
                 .Create()
-                .WithFullPropertyTracking()
-                .WithContextInheritance();
+                .WithFullPropertyTracking();
 
             var car = new Car(context);
             var targetTire = car.Tires[0];
@@ -140,15 +424,14 @@ public class DerivedPropertyConcurrencyTests
     }
 
     [Fact]
-    public async Task WhenSubjectAttachedAndDetachedRapidly_ThenNoStaleBacklinksAndGCEligible()
+    public async Task WhenSubjectAttachedAndDetachedRapidlyAndConflictsAreRetried_ThenNoStaleBacklinks()
     {
         for (var i = 0; i < DefaultIterations; i++)
         {
             // Arrange
             var context = InterceptorSubjectContext
                 .Create()
-                .WithFullPropertyTracking()
-                .WithContextInheritance();
+                .WithFullPropertyTracking();
 
             var car = new Car(context);
 
@@ -159,14 +442,14 @@ public class DerivedPropertyConcurrencyTests
             {
                 barrier.SignalAndWait();
                 var newTires = new[] { new Tire(context), car.Tires[1], car.Tires[2], car.Tires[3] };
-                car.Tires = newTires;
+                SetTiresRetryingLifecycleConflict(car, newTires);
             });
 
             var t2 = Task.Run(() =>
             {
                 barrier.SignalAndWait();
                 var newTires = new[] { car.Tires[0], new Tire(context), car.Tires[2], car.Tires[3] };
-                car.Tires = newTires;
+                SetTiresRetryingLifecycleConflict(car, newTires);
             });
 
             await Task.WhenAll(t1, t2);
@@ -177,14 +460,31 @@ public class DerivedPropertyConcurrencyTests
         }
     }
 
+    private static void SetTiresRetryingLifecycleConflict(Car car, Tire[] tires)
+    {
+        for (var attempt = 0; attempt < 1000; attempt++)
+        {
+            try
+            {
+                car.Tires = tires;
+                return;
+            }
+            catch (LifecycleConflictException)
+            {
+                // A detaching record rejects the old attachment epoch until its journal finishes.
+            }
+        }
+
+        throw new TimeoutException("The structural write did not observe a stable attachment epoch.");
+    }
+
     [Fact]
     public void WhenDetachedSubjectIsNoLongerReferenced_ThenItCanBeGarbageCollected()
     {
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithFullPropertyTracking()
-            .WithContextInheritance();
+            .WithFullPropertyTracking();
 
         // Act
         var weakTire = CreateCarAndReplaceFirstTire(context);
@@ -393,8 +693,7 @@ public class DerivedPropertyConcurrencyTests
             // Arrange
             var context = InterceptorSubjectContext
                 .Create()
-                .WithFullPropertyTracking()
-                .WithContextInheritance();
+                .WithFullPropertyTracking();
 
             var car = new Car(context);
             car.Tires[0].Pressure = 10;
@@ -481,8 +780,7 @@ public class DerivedPropertyConcurrencyTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithFullPropertyTracking()
-            .WithContextInheritance();
+            .WithFullPropertyTracking();
 
         var car = new Car(context);
         var pressureCounter = 0;
@@ -535,8 +833,7 @@ public class DerivedPropertyConcurrencyTests
         const int batchSize = 8;
         var context = InterceptorSubjectContext
             .Create()
-            .WithFullPropertyTracking()
-            .WithContextInheritance();
+            .WithFullPropertyTracking();
 
         var cars = new Car[carCount];
 
@@ -581,8 +878,7 @@ public class DerivedPropertyConcurrencyTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithFullPropertyTracking()
-            .WithContextInheritance();
+            .WithFullPropertyTracking();
 
         const int subjectPoolSize = 10;
         const int threadCount = 4;
@@ -754,12 +1050,259 @@ public class DerivedPropertyConcurrencyTests
     }
 
     [Fact]
-    public async Task WhenDerivedGetterWritesToSubjectTypedProperty_ThenNoDeadlockAndCorrectValue()
+    public async Task WhenEarlierAttachResumesAfterDetachAndReattach_ThenNewAttachmentStateRemainsAuthoritative()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        using var subject = new AttachmentEpochDerivedSubject(context)
+        {
+            First = 11,
+            Second = 22
+        };
+        var selectedProperty = new PropertyReference(subject, nameof(AttachmentEpochDerivedSubject.Selected));
+        var firstProperty = new PropertyReference(subject, nameof(AttachmentEpochDerivedSubject.First));
+        var secondProperty = new PropertyReference(subject, nameof(AttachmentEpochDerivedSubject.Second));
+        subject.DetachSubjectProperty(selectedProperty);
+        subject.BlockNextEvaluation();
+
+        // Act
+        var earlierAttach = Task.Run(() => subject.AttachSubjectProperty(selectedProperty));
+        try
+        {
+            Assert.True(
+                subject.EvaluationEntered.Wait(TimeSpan.FromSeconds(10)),
+                "earlier attach did not enter the derived getter");
+
+            subject.DetachSubjectProperty(selectedProperty);
+            subject.UseSecond = true;
+            subject.AttachSubjectProperty(selectedProperty);
+        }
+        finally
+        {
+            subject.ContinueEvaluation.Set();
+            await earlierAttach.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        // Assert
+        var data = selectedProperty.TryGetDerivedPropertyData();
+        Assert.NotNull(data);
+        Assert.Equal(22, data.LastKnownValue);
+        Assert.DoesNotContain(firstProperty, selectedProperty.GetRequiredProperties().ToArray());
+        Assert.Contains(secondProperty, selectedProperty.GetRequiredProperties().ToArray());
+
+        subject.Second = 23;
+
+        Assert.Equal(23, data.LastKnownValue);
+        Assert.Equal(23, subject.Selected);
+    }
+
+    [Fact]
+    public async Task WhenEarlierRecalculationResumesAfterDetachAndReattach_ThenNewAttachmentStateRemainsAuthoritative()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        using var subject = new AttachmentEpochDerivedSubject(context)
+        {
+            First = 11,
+            Second = 22
+        };
+        var selectedProperty = new PropertyReference(subject, nameof(AttachmentEpochDerivedSubject.Selected));
+        var firstProperty = new PropertyReference(subject, nameof(AttachmentEpochDerivedSubject.First));
+        var secondProperty = new PropertyReference(subject, nameof(AttachmentEpochDerivedSubject.Second));
+        var earlierTimestamp = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var reattachmentTimestamp = new DateTimeOffset(2001, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        subject.BlockNextEvaluation();
+
+        // Act
+        var earlierRecalculation = Task.Run(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(earlierTimestamp))
+            {
+                subject.First = 12;
+            }
+        });
+        try
+        {
+            Assert.True(
+                subject.EvaluationEntered.Wait(TimeSpan.FromSeconds(10)),
+                "earlier recalculation did not enter the derived getter");
+
+            subject.DetachSubjectProperty(selectedProperty);
+            subject.UseSecond = true;
+            using (SubjectChangeContext.WithChangedTimestamp(reattachmentTimestamp))
+            {
+                subject.AttachSubjectProperty(selectedProperty);
+            }
+
+            Assert.Equal(22, selectedProperty.TryGetDerivedPropertyData()!.LastKnownValue);
+        }
+        finally
+        {
+            subject.ContinueEvaluation.Set();
+            await earlierRecalculation.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        // Assert
+        var data = selectedProperty.TryGetDerivedPropertyData();
+        Assert.NotNull(data);
+        Assert.Equal(22, data.LastKnownValue);
+        Assert.Equal(reattachmentTimestamp, selectedProperty.TryGetWriteTimestamp());
+        Assert.DoesNotContain(firstProperty, selectedProperty.GetRequiredProperties().ToArray());
+        Assert.Contains(secondProperty, selectedProperty.GetRequiredProperties().ToArray());
+
+        subject.Second = 23;
+
+        Assert.Equal(23, data.LastKnownValue);
+        Assert.Equal(23, subject.Selected);
+    }
+
+    [Fact]
+    public async Task WhenAttachValidationBecomesObsoleteDuringEnumeration_ThenItsVerdictIsDiscarded()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var child = new Person { FirstName = "child" };
+        var subject = new AttachmentEpochProjectionSubject(context) { Stored = child };
+        var currentProperty = new PropertyReference(subject, nameof(AttachmentEpochProjectionSubject.Current));
+        subject.DetachSubjectProperty(currentProperty);
+        using var enumerationEntered = new ManualResetEventSlim(false);
+        using var continueEnumeration = new ManualResetEventSlim(false);
+        subject.Projection = new BlockingSubjectEnumerable(child, enumerationEntered, continueEnumeration);
+
+        // Act
+        var staleAttach = Task.Run(() => Record.Exception(() => subject.AttachSubjectProperty(currentProperty)));
+        Exception? staleException;
+        try
+        {
+            Assert.True(
+                enumerationEntered.Wait(TimeSpan.FromSeconds(10)),
+                "stale attach did not enter structural validation");
+
+            subject.DetachSubjectProperty(currentProperty);
+            subject.Stored = null;
+            subject.Projection = [];
+            subject.AttachSubjectProperty(currentProperty);
+        }
+        finally
+        {
+            continueEnumeration.Set();
+            staleException = await staleAttach.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        // Assert
+        Assert.Null(staleException);
+        Assert.Empty((IEnumerable<Person>)currentProperty.TryGetDerivedPropertyData()!.LastKnownValue!);
+        Assert.Null(child.TryGetContext());
+    }
+
+    [Fact]
+    public void WhenPendingNotificationBelongsToEarlierAttachment_ThenNewAttachmentInvalidatesIt()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+        var sharedValue = new object();
+        var subject = new AttachmentEpochNotificationSubject(context) { Source = sharedValue };
+        var property = new PropertyReference(
+            subject, nameof(AttachmentEpochNotificationSubject.Selected));
+        var data = property.GetDerivedPropertyData();
+        var oldAttachmentEpoch = data.AttachmentEpoch;
+        subject.ResetNotifications();
+
+        // Act
+        subject.DetachSubjectProperty(property);
+        subject.AttachSubjectProperty(property);
+        var currentSequence = data.RecalculationSequence;
+        var notify = typeof(DerivedPropertyChangeHandler).GetMethod(
+            "NotifyDerivedPropertyChanged",
+            BindingFlags.Static | BindingFlags.NonPublic)!;
+        notify.Invoke(null,
+        [
+            property,
+            data,
+            currentSequence,
+            oldAttachmentEpoch,
+            sharedValue,
+            new object(),
+            0L
+        ]);
+
+        // Assert
+        Assert.Same(sharedValue, data.LastKnownValue);
+        Assert.Equal(0, subject.NotificationCount);
+    }
+
+    [Fact]
+    public async Task WhenNotificationTerminalBelongsToEarlierAttachment_ThenReattachTimestampRemainsAuthoritative()
+    {
+        // Arrange
+        using var blocker = new BlockingDerivedNotificationInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+        context.AddService<IWriteInterceptor>(blocker);
+        using var subject = new AttachmentEpochDerivedSubject(context)
+        {
+            First = 11,
+            Second = 22
+        };
+        var property = new PropertyReference(subject, nameof(AttachmentEpochDerivedSubject.Selected));
+        var earlierTimestamp = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var reattachmentTimestamp = new DateTimeOffset(2001, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        blocker.Arm(subject, property.Name);
+
+        // Act
+        var earlierNotification = Task.Run(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(earlierTimestamp))
+            {
+                subject.First = 12;
+            }
+        });
+        try
+        {
+            Assert.True(
+                blocker.NotificationEntered.Wait(TimeSpan.FromSeconds(10)),
+                "earlier notification did not reach the terminal blocker");
+            subject.DetachSubjectProperty(property);
+            subject.UseSecond = true;
+            using (SubjectChangeContext.WithChangedTimestamp(reattachmentTimestamp))
+            {
+                subject.AttachSubjectProperty(property);
+            }
+        }
+        finally
+        {
+            blocker.ContinueNotification.Set();
+            await earlierNotification.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        // Assert
+        Assert.Equal(22, property.GetDerivedPropertyData().LastKnownValue);
+        Assert.Equal(reattachmentTimestamp, property.TryGetWriteTimestamp());
+    }
+
+    [Fact]
+    public async Task WhenDerivedGetterWritesToSubjectTypedPropertyOnRecalculation_ThenNoDeadlockAndCorrectValue()
     {
         // Regression test: reproduces deadlock between lock(data) and lock(_attachedSubjects).
         //
         // SideEffectPerson.Greeting getter writes to Companion (subject-typed property),
-        // which triggers LifecycleInterceptor.WriteProperty → lock(_attachedSubjects).
+        // which triggers LifecycleInterceptor.WriteProperty → lock(_attachedSubjects). The write
+        // only happens for real on the recalculation path: attach-time evaluation runs inside
+        // the derived handler's attach callback, where the callback contract rejects it, and the
+        // model absorbs that rejection so attach and re-attach complete and the toggling below
+        // keeps producing lock contention.
         //
         // The deadlock (fixed by evaluating getter outside lock(data)):
         //   Thread A: RecalculateDerivedProperty(Greeting) → lock(data_Greeting) → getter
@@ -773,13 +1316,13 @@ public class DerivedPropertyConcurrencyTests
         // so setting holder.Person = null triggers detach of all SideEffectPerson properties
         // (including Greeting) under lock(_attachedSubjects).
 
+        var totalSuccessfulWrites = 0;
         for (var i = 0; i < DefaultIterations; i++)
         {
             // Arrange
             var context = InterceptorSubjectContext
                 .Create()
-                .WithFullPropertyTracking()
-                .WithContextInheritance();
+                .WithFullPropertyTracking();
 
             var holder = new SideEffectHolder(context);
             var person = new SideEffectPerson(context)
@@ -788,6 +1331,10 @@ public class DerivedPropertyConcurrencyTests
                 Companion = new Person(context) { FirstName = "Friend" }
             };
             holder.Person = person;
+
+            // The Arrange writes above already recalculate Greeting, so only writes landed during
+            // the concurrent phase count towards proving that phase alive.
+            var successfulWritesBeforeAct = person.SuccessfulCompanionWriteCount;
 
             var barrier = new Barrier(2);
 
@@ -809,6 +1356,11 @@ public class DerivedPropertyConcurrencyTests
                         // Expected: person may be temporarily detached (context nulled)
                         // by the concurrent holder.Person = null on the other thread.
                     }
+                    catch (LifecycleConflictException)
+                    {
+                        // Expected: a scalar write that loses to the subject's in-progress
+                        // detach or reattach is rejected before its terminal and can be retried.
+                    }
                 }
             });
 
@@ -824,10 +1376,10 @@ public class DerivedPropertyConcurrencyTests
                         // Reattach: lifecycle adds SideEffectPerson → AttachProperty(Greeting) → lock(data_Greeting)
                         holder.Person = person;
                     }
-                    catch (NullReferenceException)
+                    catch (LifecycleConflictException)
                     {
-                        // Expected: concurrent detach may null the context while
-                        // LifecycleInterceptor reads properties during attach/detach.
+                        // Expected: the competing structural write can observe the subject's
+                        // non-stable detach/reattach phase and lose before its terminal.
                     }
                 }
             });
@@ -838,10 +1390,223 @@ public class DerivedPropertyConcurrencyTests
             // Assert — test must complete (no deadlock) and final value must be correct.
             Assert.True(completed == work, "Test timed out — possible deadlock");
             await work;
+            holder.Person = person;
+
+            // Captured before the Greeting read below, which invokes the getter itself and would
+            // otherwise count a write the concurrent phase never produced.
+            totalSuccessfulWrites += person.SuccessfulCompanionWriteCount - successfulWritesBeforeAct;
 
             Assert.Equal($"Hello, {person.Name}", person.Greeting);
         }
+
+        // The getter absorbs the contract violation thrown inside callback scopes, so if
+        // recalculation ever moves inside one, every write is eaten and this test passes while
+        // pinning nothing. At least one landed write proves the recalculation path stayed alive.
+        Assert.True(totalSuccessfulWrites > 0, "No Companion write ever landed; the getter absorbed all of them and the test went vacuous.");
     }
 
     private static int TireIndex(int threadIndex) => (threadIndex % 3) + 1;
+
+    private sealed class BlockingRetainedDerivedTargetHandler : ILifecycleHandler, IDisposable
+    {
+        private IInterceptorSubject? _target;
+        private IInterceptorSubject? _expectedParent;
+
+        internal ManualResetEventSlim CallbackEntered { get; } = new(false);
+        internal ManualResetEventSlim ContinueCallback { get; } = new(false);
+
+        internal void Arm(IInterceptorSubject target, IInterceptorSubject expectedParent)
+        {
+            _target = target;
+            _expectedParent = expectedParent;
+        }
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (!change.IsPropertyReferenceAdded ||
+                !ReferenceEquals(change.Subject, _target) ||
+                change.Property is not { } property ||
+                !ReferenceEquals(property.Subject, _expectedParent))
+            {
+                return;
+            }
+
+            CallbackEntered.Set();
+            if (!ContinueCallback.Wait(TimeSpan.FromSeconds(10)))
+            {
+                throw new TimeoutException("the test did not release the retained target callback");
+            }
+        }
+
+        public void Dispose()
+        {
+            CallbackEntered.Dispose();
+            ContinueCallback.Dispose();
+        }
+    }
+
+    private sealed class PostTerminalDetachInterceptor : IWriteInterceptor
+    {
+        private IInterceptorSubject? _subject;
+        private string? _propertyName;
+        private IInterceptorSubjectContext? _context;
+
+        internal void Arm(
+            IInterceptorSubject subject,
+            string propertyName,
+            IInterceptorSubjectContext context)
+        {
+            _subject = subject;
+            _propertyName = propertyName;
+            _context = context;
+        }
+
+        public void WriteProperty<TProperty>(
+            ref PropertyWriteContext<TProperty> context,
+            WriteInterceptionDelegate<TProperty> next)
+        {
+            var isArmed = ReferenceEquals(context.Property.Subject, _subject) &&
+                context.Property.Name == _propertyName;
+            next(ref context);
+            if (isArmed)
+            {
+                _subject = null;
+                context.Property.Subject.DetachFromContext(_context!);
+            }
+        }
+    }
+}
+
+[InterceptorSubject]
+public partial class AttachmentEpochDerivedSubject : IDisposable
+{
+    private int _blockNextEvaluation;
+
+    internal ManualResetEventSlim EvaluationEntered { get; } = new(false);
+    internal ManualResetEventSlim ContinueEvaluation { get; } = new(false);
+    internal bool UseSecond { get; set; }
+
+    public partial int First { get; set; }
+    public partial int Second { get; set; }
+
+    internal void BlockNextEvaluation() => Volatile.Write(ref _blockNextEvaluation, 1);
+
+    [Derived]
+    public int Selected
+    {
+        get
+        {
+            var value = UseSecond ? Second : First;
+            if (Interlocked.Exchange(ref _blockNextEvaluation, 0) == 1)
+            {
+                EvaluationEntered.Set();
+                if (!ContinueEvaluation.Wait(TimeSpan.FromSeconds(10)))
+                {
+                    throw new TimeoutException("The test did not release the derived getter.");
+                }
+            }
+
+            return value;
+        }
+    }
+
+    public void Dispose()
+    {
+        EvaluationEntered.Dispose();
+        ContinueEvaluation.Dispose();
+    }
+}
+
+[InterceptorSubject]
+public partial class AttachmentEpochProjectionSubject
+{
+    internal IEnumerable<Person> Projection { get; set; } = [];
+
+    public partial Person? Stored { get; set; }
+
+    [Derived]
+    public IEnumerable<Person> Current => Projection;
+}
+
+[InterceptorSubject]
+public partial class AttachmentEpochNotificationSubject : IRaisePropertyChanged
+{
+    private int _notificationCount;
+
+    public partial object? Source { get; set; }
+
+    [Derived]
+    public object? Selected => Source;
+
+    internal int NotificationCount => Volatile.Read(ref _notificationCount);
+
+    public void RaisePropertyChanged(string propertyName)
+    {
+        if (propertyName == nameof(Selected))
+        {
+            Interlocked.Increment(ref _notificationCount);
+        }
+    }
+
+    internal void ResetNotifications() => Volatile.Write(ref _notificationCount, 0);
+}
+
+internal sealed class BlockingSubjectEnumerable(
+    Person child,
+    ManualResetEventSlim enumerationEntered,
+    ManualResetEventSlim continueEnumeration) : IEnumerable<Person>
+{
+    public IEnumerator<Person> GetEnumerator()
+    {
+        enumerationEntered.Set();
+        if (!continueEnumeration.Wait(TimeSpan.FromSeconds(10)))
+        {
+            throw new TimeoutException("The test did not release structural validation.");
+        }
+
+        yield return child;
+    }
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
+internal sealed class BlockingDerivedNotificationInterceptor : IWriteInterceptor, IDisposable
+{
+    private IInterceptorSubject? _subject;
+    private string? _propertyName;
+    private int _isArmed;
+
+    internal ManualResetEventSlim NotificationEntered { get; } = new(false);
+    internal ManualResetEventSlim ContinueNotification { get; } = new(false);
+
+    internal void Arm(IInterceptorSubject subject, string propertyName)
+    {
+        _subject = subject;
+        _propertyName = propertyName;
+        Volatile.Write(ref _isArmed, 1);
+    }
+
+    public void WriteProperty<TProperty>(
+        ref PropertyWriteContext<TProperty> context,
+        WriteInterceptionDelegate<TProperty> next)
+    {
+        if (ReferenceEquals(context.Property.Subject, _subject) &&
+            context.Property.Name == _propertyName &&
+            Interlocked.Exchange(ref _isArmed, 0) == 1)
+        {
+            NotificationEntered.Set();
+            if (!ContinueNotification.Wait(TimeSpan.FromSeconds(10)))
+            {
+                throw new TimeoutException("the test did not release the derived notification");
+            }
+        }
+
+        next(ref context);
+    }
+
+    public void Dispose()
+    {
+        NotificationEntered.Dispose();
+        ContinueNotification.Dispose();
+    }
 }

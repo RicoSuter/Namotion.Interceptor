@@ -287,20 +287,28 @@ This goes through the same pipeline as automatic recalculation: the getter is re
 
 ## Context Inheritance
 
-Automatically assigns the parent context to child subjects, ensuring they participate in the same tracking and interception pipeline:
+Attaching a subject into a graph attaches it to that graph's context, so it participates in the same tracking and interception pipeline. This is intrinsic to the lifecycle:
 
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithContextInheritance();
+    .WithLifecycle();
 
 var car = new Car(context);
 var tire = new Tire(); // No context assigned yet
 
-car.Tire = tire; // tire.Context is automatically set to context
+car.Tire = tire; // tire is now attached to the same context; tire.TryGetContext() returns it
 ```
 
 This ensures that all objects in the subject graph share the same context, enabling consistent tracking, validation, and other interceptor features.
+
+Configure the context fully before attaching anything to it. A subject attached to a context that has no lifecycle yet is anchored but never enters the ownership graph a later `WithLifecycle()` brings, so registering one behind an attach throws. `WithRegistry()`, `WithFullPropertyTracking()` and `WithDerivedPropertyChangeDetection()` register the lifecycle themselves and are rejected the same way.
+
+```csharp
+var context = InterceptorSubjectContext.Create();
+var car = new Car(context); // anchors car on a context with no lifecycle
+context.WithRegistry();     // throws: the lifecycle would never see car
+```
 
 ## Subject Lifecycle Tracking
 
@@ -438,18 +446,19 @@ lifecycleInterceptor.SubjectDetaching += async change =>
 
 ### Reference Counting
 
-Each subject tracks how many property references point to it via `GetReferenceCount()`:
+Each subject tracks how many structural edge occurrences point to it via `GetReferenceCount()`:
 
 ```csharp
 var referenceCount = subject.GetReferenceCount();
-// Returns the number of properties referencing this subject
+// Returns the number of structural edge occurrences pointing at this subject
 // Returns 0 if not attached or lifecycle tracking is disabled
 ```
 
 **Important notes:**
-- Subjects created directly with context (root subjects) have `refs: 0` - they have no property references pointing to them
-- Subjects attached via properties have their reference count incremented/decremented on add/remove
-- `GetReferenceCount()` returns property reference count, not total attachment count
+- The count is per occurrence, not per property: a subject listed twice in one collection counts 2
+- Subjects created directly with context (root subjects) have `refs: 0` - no edge points at an anchored root
+- Subjects attached via properties have their reference count incremented/decremented per occurrence added or removed
+- `GetReferenceCount()` is never an attachment predicate: an anchored root reports 0 while attached, so use `TryGetContext()` to test attachment and a non-None `Executor.AttachmentAnchor` to test root-ness. An empty `GetParents()` is not a root test either: it answers the same for a root, an unattached subject, and a subject inside its own release
 
 The `SubjectLifecycleChange` includes `ReferenceCount` after the operation. Use the flags to determine the event type:
 
@@ -494,41 +503,40 @@ Root
   └── B ──┴── Shared (refs: 2)
 ```
 
-Removing A reduces Shared's refs to 1 - it stays attached via B.
-Removing B after A detaches Shared (refs: 0).
+Removing A reduces Shared's refs to 1 - it stays attached via B. Removing B after A detaches Shared (refs: 0), in either removal order, and a detached subject stops resolving the graph's services.
 
-**Cycles (Limitation)**
+**Cycles**
 
-Nodes that only reference each other stay attached due to reference counting:
+Nodes that only reference each other are released together once nothing outside the cycle reaches them:
 
 ```
 Root → A → B ↔ C (internal cycle)
 ```
 
 If `Root.A = null`:
-- A detaches (lost reference from Root)
-- B and C **stay attached** (they keep each other alive with refs: 1 each)
+- A detaches (lost its reference from Root)
+- B and C detach as well, because the only thing keeping them attached is each other
 
-This is the classic reference counting limitation. **Workarounds:**
-1. Call `DetachSubjectFromContext(subject)` explicitly
-2. Break all cycle references before removing the parent
+Attachment follows reachability from a root rather than a reference count, so a closed cycle with no way in is released like any other unreachable subgraph. A subject that was explicitly attached stays until it is explicitly detached.
 
 ## Parent-Child Relationship Tracking
 
-Tracks parent-child relationships in the subject graph, enabling upward navigation:
+Parent relationships come from the lifecycle itself, so any context with `WithLifecycle()` (included in `WithFullPropertyTracking()` and `WithRegistry()`) answers them:
 
 ```csharp
 var context = InterceptorSubjectContext
     .Create()
-    .WithParents();
+    .WithFullPropertyTracking();
 
 var car = new Car(context);
-var tire = new Tire(context);
+var tire = new Tire();
 
 car.Tires = [tire];
 
 var parents = tire.GetParents(); // Returns ImmutableArray with [(car, "Tires", 0)]
 ```
+
+Entries are per occurrence: a subject listed twice in one collection has two, one per index. Nothing is materialised for a subject until `GetParents()` is first called on it, so a consumer that never asks pays nothing. The order of the entries is unspecified; only the set of occurrences is meaningful.
 
 This enables scenarios like:
 - Finding the root object of a subject graph

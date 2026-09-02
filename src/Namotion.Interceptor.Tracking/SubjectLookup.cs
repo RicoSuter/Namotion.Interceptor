@@ -95,10 +95,23 @@ public static class SubjectLookup
             var outVar = Expression.Variable(valueType, "outVal");
             var tryGetMethod = rodInterface.GetMethod(nameof(IReadOnlyDictionary<int, int>.TryGetValue))!;
 
+            // The key is tested before it is converted. A reconcile probes one value of a property
+            // with an occurrence index taken from the other, and the two need not identify their
+            // occurrences the same way, so a wrong-typed key reaches here whenever the property
+            // changed shape. Without this test the compiled conversion throws out of a write that
+            // has already committed its baseline and removed some of its edges.
+            //
+            // The IDictionary fast path carries no equivalent guard. Most implementations answer
+            // null for a wrong-typed key, but ImmutableDictionary and ImmutableSortedDictionary
+            // cast unchecked in their explicit indexer and throw, which is a pre-existing hole.
+            // Closing it needs the key type resolved per dictionary type on every lookup, which is
+            // the work that path exists to avoid, so it is not changed here unmeasured.
             var body = Expression.Block(
                 [outVar],
                 Expression.Condition(
-                    Expression.Call(typedDict, tryGetMethod, typedKey, outVar),
+                    Expression.AndAlso(
+                        Expression.TypeIs(keyParam, keyType),
+                        Expression.Call(typedDict, tryGetMethod, typedKey, outVar)),
                     Expression.Convert(outVar, typeof(object)),
                     Expression.Constant(null, typeof(object))));
 

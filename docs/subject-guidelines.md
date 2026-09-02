@@ -86,7 +86,7 @@ dept.Employees = [person1, person2];  // person1, person2 attached to graph
 dept.Employees = [person3];           // person1, person2 detached; person3 attached
 ```
 
-With `WithContextInheritance()`, attached subjects inherit the parent's context.
+Attached subjects inherit the graph's context. This is intrinsic to the lifecycle rather than a separate opt-in.
 
 ## ⚠️ Initialize All Properties in Constructors
 
@@ -305,7 +305,7 @@ public partial class Sensor
 
 ## Base Classes and Subclasses
 
-A subject can derive from another subject, and properties declared anywhere in the hierarchy are intercepted. The set of members that interception needs (the context, the property table, the sync root and the helper methods the generated accessors call) is emitted once, in the class at the root of the hierarchy, and every subject below it inherits it.
+A subject can derive from another subject, and properties declared anywhere in the hierarchy are intercepted. The set of members that interception needs (the executor, the property table and the helper methods the generated accessors call) is emitted once, in the class at the root of the hierarchy, and every subject below it inherits it.
 
 ```csharp
 [InterceptorSubject]
@@ -441,7 +441,7 @@ Most other C# patterns (nullable, required, init, virtual, override, data annota
 
 ## Constructor Dependency Injection
 
-Subjects can receive DI-injected services via constructor parameters alongside `IInterceptorSubjectContext`. When you define a constructor that accepts additional parameters, the source generator detects the user-defined constructor and does not generate an additional one.
+Subjects can receive DI-injected services via constructor parameters alongside `IInterceptorSubjectContext`. The generator mirrors every constructor you declare with a second one that appends an `IInterceptorSubjectContext` parameter and attaches the subject, so a type whose only constructor takes dependencies still has a context-taking constructor for dependency injection to select. A constructor you declare yourself always wins over its mirror. Some shapes cannot be mirrored and are skipped silently, so a subject built through one of them is never attached: see [the generator reference](generator.md) for which.
 
 ### Pattern
 

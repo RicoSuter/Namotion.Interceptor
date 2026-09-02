@@ -53,7 +53,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         IInterceptorSubject subject,
         MqttClientConfiguration configuration,
         ILogger<MqttSubjectClientSource> logger)
-        : base(subject.Context, logger, configuration.BufferTime, configuration.RetryTime, configuration.WriteRetryQueueSize)
+        : base(subject.GetContext(), logger, configuration.BufferTime, configuration.RetryTime, configuration.WriteRetryQueueSize)
     {
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -586,7 +586,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         _logger.LogInformation("Subscribed to {Count} MQTT topics.", properties.Count);
     }
 
-    private (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
+    internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
         if (_propertyToTopic.TryGetValue(propertyReference, out var cached))
         {
@@ -603,11 +603,13 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
         var entry = (topic, resolvedMapping);
 
-        // Add first, then validate (guarantees no memory leak)
+        // Add first, then validate (guarantees no memory leak). Registry membership is the whole
+        // test: the reference count answers zero for the anchored root, so asking it here would
+        // evict every mapping the root owns and make this cache a per-message mapper call.
         if (_propertyToTopic.TryAdd(propertyReference, entry))
         {
             var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
-            if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+            if (registeredSubject is null)
             {
                 _propertyToTopic.TryRemove(propertyReference, out _);
             }
@@ -636,7 +638,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             if (propertyReference is { } propRef)
             {
                 var registeredSubject = propRef.Subject.TryGetRegisteredSubject();
-                if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+                if (registeredSubject is null)
                 {
                     _topicToProperty.TryRemove(topic, out _);
                 }

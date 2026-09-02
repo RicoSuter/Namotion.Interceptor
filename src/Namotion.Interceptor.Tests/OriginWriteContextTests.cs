@@ -94,7 +94,7 @@ public class OriginWriteContextTests
     }
 
     [Fact]
-    public void WhenFinalOriginIsResolvedBeforeWrite_ThenTheAttemptedOriginRemainsAvailableToTheTerminal()
+    public void WhenFinalOriginIsResolvedBeforeWrite_ThenAttemptedOriginClassifiesTheCommitMarker()
     {
         // Arrange
         var probe = new ResolvingOriginProbe();

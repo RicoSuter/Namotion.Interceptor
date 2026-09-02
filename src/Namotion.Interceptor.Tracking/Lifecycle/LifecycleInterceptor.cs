@@ -1,551 +1,717 @@
-using System.Collections;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
+using System.Collections.Immutable;
+using System.Diagnostics;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
-public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
+/// <summary>Owns structural graph membership and lifecycle publication for one context.</summary>
+public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHandler,
+    IWriteTerminalCoordinator, ITopologyAdmissionCoordinator,
+    INonStructuralWriteCompletionCoordinator, ILogicalContextGuard
 {
-    private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = [];
-    private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
+    private readonly IInterceptorSubjectContext _context;
+    private readonly OwnershipGraph _graph;
+    private readonly LifecycleNotifier _notifier;
+    private readonly PropertyAdmission _admission;
+
+    private readonly Lock _gate = new();
 
     [ThreadStatic]
-    private static Stack<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
+    private static int _heldGateCount;
 
-    [ThreadStatic]
-    private static Stack<HashSet<IInterceptorSubject>>? _subjectHashSetPool;
-
-    /// <summary>
-    /// Raised when a subject is attached to the object graph.
-    /// Handlers must be exception-free and fast (invoked inside lock).
-    /// </summary>
-    public event Action<SubjectLifecycleChange>? SubjectAttached;
-
-    /// <summary>
-    /// Raised when a subject is about to be detached from the object graph.
-    /// Fires BEFORE ILifecycleHandler.HandleLifecycleChange (symmetric with SubjectAttached which fires AFTER).
-    /// At this point, the full object graph is still accessible.
-    /// Handlers must be exception-free and fast (invoked inside lock).
-    /// </summary>
-    public event Action<SubjectLifecycleChange>? SubjectDetaching;
-
-    public void AttachSubjectToContext(IInterceptorSubject subject)
+    /// <summary>Raised after a subject attaches to the object graph.</summary>
+    public event Action<SubjectLifecycleChange>? SubjectAttached
     {
-        var collectedSubjects = GetList();
+        add => _notifier.SubjectAttached += value;
+        remove => _notifier.SubjectAttached -= value;
+    }
+
+    /// <summary>Raised when a subject detaches from the object graph.</summary>
+    public event Action<SubjectLifecycleChange>? SubjectDetaching
+    {
+        add => _notifier.SubjectDetaching += value;
+        remove => _notifier.SubjectDetaching -= value;
+    }
+
+    /// <summary>Creates the lifecycle authority for one exact context.</summary>
+    public LifecycleInterceptor(IInterceptorSubjectContext context)
+    {
+        _context = context;
+        _notifier = new LifecycleNotifier(context, this);
+        _graph = new OwnershipGraph(context, this);
+        _admission = new PropertyAdmission(_notifier, _graph);
+    }
+
+    private GateScope EnterGate()
+    {
+        if (_heldGateCount > 0 && !_gate.IsHeldByCurrentThread)
+        {
+            throw new LifecycleContractViolationException(
+                "A thread runs at most one lifecycle topology transaction at a time, and this one " +
+                "is already inside a transaction of another context. Topology gates have no order " +
+                "among themselves, so waiting for a second one can deadlock against a thread " +
+                "taking them the other way round. Nothing was read and nothing was changed: defer " +
+                "the second operation until the enclosing one completes.");
+        }
+
+        _gate.Enter();
+        _heldGateCount++;
+
+        return new GateScope(this);
+    }
+
+    private void ExitGate()
+    {
+        _heldGateCount--;
+        _gate.Exit();
+    }
+
+    private readonly struct GateScope(LifecycleInterceptor lifecycle) : IDisposable
+    {
+        public void Dispose()
+        {
+            lifecycle.ExitGate();
+        }
+
+    }
+
+    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    {
+        var property = context.Property;
+        var metadata = property.Metadata;
+        if (!metadata.Type.CanContainSubjects<TProperty>() || !metadata.IsIntercepted ||
+            metadata is { IsDerived: true, IsDynamic: true, SetValue: null })
+        {
+            next(ref context);
+            return;
+        }
+
+        LifecycleNotifier.ThrowIfTopologyChange((InterceptorSubjectContext)_context);
+
+        if (!ReferenceEquals(context.Executor.AttachedContext, _context))
+        {
+            next(ref context);
+            return;
+        }
+
+        context.TerminalCoordinator = this;
+        Exception? primaryException = null;
         try
         {
-            lock (_attachedSubjects)
-            {
-                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
-
-                foreach (var child in collectedSubjects)
-                {
-                    AttachToProperty(child.subject, subject.Context, child.property, child.index);
-                }
-
-                if (!_attachedSubjects.ContainsKey(subject))
-                {
-                    AttachToContext(subject, subject.Context);
-                }
-            }
+            next(ref context);
         }
-        finally
+        catch (Exception exception)
         {
-            ReturnList(collectedSubjects);
+            primaryException = exception;
+        }
+
+        if (context.CommittedLifecycleJournal is LifecycleNotifier.LifecycleJournal journal)
+        {
+            primaryException = journal.Drain(primaryException);
+        }
+
+        if (primaryException is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(primaryException).Throw();
         }
     }
 
-    public void DetachSubjectFromContext(IInterceptorSubject subject)
+    void IWriteTerminalCoordinator.ExecuteTerminal<TProperty>(
+        ref PropertyWriteContext<TProperty> context,
+        Func<IInterceptorSubject, TProperty>? readValue,
+        Action<IInterceptorSubject, TProperty> writeValue)
     {
-        var collectedSubjects = GetList();
+        if (readValue is null || context.StructuralLease is not { } lease)
+        {
+            throw new InvalidOperationException("A coordinated structural terminal requires its trusted raw reader and active lease.");
+        }
+
+        var value = context.GetFinalValue();
+        var snapshot = StructuralSnapshotBuilder.Build(context.Property.Metadata.Type, value, 0);
+        var reservations = LifecycleScratch.RentOwnershipReservations();
+        var seededSnapshots = new Dictionary<PropertyReference, StructuralSnapshot>(PropertyReference.Comparer);
+        var seededSubjectProperties = new Dictionary<IInterceptorSubject, ImmutableArray<SubjectPropertyMetadata>>(ReferenceEqualityComparer.Instance);
         try
         {
-            lock (_attachedSubjects)
+            while (true)
             {
-                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
-
-                foreach (var child in collectedSubjects)
+                ImmutableArray<StructuralSnapshotBuilder.CaptureParticipant> participants;
+                try
                 {
-                    DetachFromProperty(child.subject, subject.Context, child.property, child.index);
+                    participants = ReserveComponent(
+                        snapshot, reservations, seededSnapshots, seededSubjectProperties);
                 }
-
-                DetachFromContext(subject, subject.Context);
-            }
-        }
-        finally
-        {
-            ReturnList(collectedSubjects);
-        }
-    }
-
-    /// <summary>
-    /// Attaches a subject directly to a context (root subject, no property reference).
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AttachToContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
-    {
-        var isFirstAttach = _attachedSubjects.TryAdd(subject, default);
-        if (!isFirstAttach)
-        {
-            return;
-        }
-
-        var count = subject.GetReferenceCount();
-        var change = new SubjectLifecycleChange
-        {
-            Subject = subject,
-            ReferenceCount = count,
-            IsContextAttach = true
-        };
-
-        var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlers(subject, context, change);
-
-        SubjectAttached?.Invoke(change);
-        foreach (var propertyName in properties)
-        {
-            subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
-        }
-    }
-
-    /// <summary>
-    /// Attaches a subject via a property reference.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AttachToProperty(IInterceptorSubject subject, IInterceptorSubjectContext context,
-        PropertyReference property, object? index)
-    {
-        ref var set = ref CollectionsMarshal.GetValueRefOrAddDefault(_attachedSubjects, subject, out var existed);
-        var isFirstAttach = !existed;
-        if (!set.Add(property))
-        {
-            return;
-        }
-
-        var count = subject.IncrementReferenceCount();
-        var change = new SubjectLifecycleChange
-        {
-            Subject = subject,
-            Property = property,
-            Index = index,
-            ReferenceCount = count,
-            IsContextAttach = isFirstAttach,
-            IsPropertyReferenceAdded = true
-        };
-
-        var properties = subject.Properties.Keys;
-        InvokeAddedLifecycleHandlers(subject, context, change);
-
-        if (isFirstAttach)
-        {
-            SubjectAttached?.Invoke(change);
-
-            foreach (var propertyName in properties)
-            {
-                subject.AttachSubjectProperty(new PropertyReference(subject, propertyName));
-            }
-        }
-    }
-    
-    private static void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
-    {
-        var array = context.GetServices<ILifecycleHandler>();
-        for (var index = 0; index < array.Length; index++)
-        {
-            var handler = array[index];
-            handler.HandleLifecycleChange(change);
-        }
-
-        if (subject is ILifecycleHandler subjectHandler)
-        {
-            subjectHandler.HandleLifecycleChange(change);
-        }
-    }
-
-    /// <summary>
-    /// Detaches a subject from a context (root subject, no property reference).
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void DetachFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
-    {
-        if (!_attachedSubjects.Remove(subject))
-        {
-            return;
-        }
-        
-        foreach (var entry in subject.Properties)
-        {
-            var property = new PropertyReference(subject, entry.Key);
-            if (entry.Value is { IsIntercepted: true } && entry.Value.Type.CanContainSubjects())
-                _lastProcessedValues.Remove(property);
-
-            subject.DetachSubjectProperty(property);
-        }
-
-        var count = subject.GetReferenceCount();
-        var change = new SubjectLifecycleChange
-        {
-            Subject = subject,
-            ReferenceCount = count,
-            IsContextDetach = true
-        };
-
-        SubjectDetaching?.Invoke(change);
-        InvokeRemovedLifecycleHandlers(subject, context, change);
-    }
-
-    /// <summary>
-    /// Detaches a subject from a property reference.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void DetachFromProperty(
-        IInterceptorSubject subject, IInterceptorSubjectContext context,
-        PropertyReference property, object? index)
-    {
-        ref var set = ref CollectionsMarshal.GetValueRefOrNullRef(_attachedSubjects, subject);
-        if (Unsafe.IsNullRef(ref set) || !set.Remove(property))
-        {
-            return;
-        }
-
-        var isLastDetach = set.IsEmpty;
-
-        // Collect children and clean up in a single pass over properties
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
-        if (isLastDetach)
-        {
-            _attachedSubjects.Remove(subject);
-
-            foreach (var entry in subject.Properties)
-            {
-                var subjectProperty = new PropertyReference(subject, entry.Key);
-
-                var metadata = entry.Value;
-                if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
+                catch (LifecycleConflictException exception) when (exception.IsTransientCapture)
                 {
-                    // Use _lastProcessedValues (what was actually attached) instead of the backing
-                    // store, which may contain unattached children from a concurrent next() call.
-                    if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
+                    ResetCaptureAttempt(reservations, seededSnapshots, seededSubjectProperties);
+                    continue;
+                }
+                var retryCapture = false;
+                using (var journalCapture = _notifier.BeginJournal())
+                {
+                    lock (context.Executor.SyncRoot)
                     {
-                        children ??= GetList();
-                        FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
-                    }
+                        context.SetTerminalPredecessor(readValue(context.Property.Subject));
+                        using (EnterGate())
+                        {
+                            if (!context.Executor.IsStructuralWriteLeaseActive(
+                                    lease, (InterceptorSubjectContext)_context) ||
+                                reservations.Values.Any(reservation =>
+                                    !reservation.IsActive((InterceptorSubjectContext)_context)))
+                            {
+                                throw LifecycleConflictException.Retryable(context.Property.Subject);
+                            }
 
-                    _lastProcessedValues.Remove(subjectProperty);
+                            if (!_graph.IsCaptureCurrent(participants))
+                            {
+                                retryCapture = true;
+                            }
+                            else
+                            {
+                                using var change = _graph.PrepareWrite(
+                                    context.Property,
+                                    snapshot,
+                                    context.Executor.Revision + 1,
+                                    seededSnapshots,
+                                    seededSubjectProperties,
+                                    reservations,
+                                    _notifier);
+                                journalCapture.PreflightCompletion();
+                                var journal = journalCapture.CompleteAfterPreflight();
+                                context.Executor.CommitRawWriteLocked(ref context, value, writeValue);
+                                if (context.IsTerminalCommitted)
+                                {
+                                    _graph.Publish(change);
+                                    context.CommittedLifecycleJournal = journal;
+                                }
+                            }
+                        }
+                    }
                 }
 
-                subject.DetachSubjectProperty(subjectProperty);
+                if (!retryCapture)
+                {
+                    break;
+                }
+
+                ResetCaptureAttempt(
+                    reservations, seededSnapshots, seededSubjectProperties);
             }
         }
-
-        var count = subject.DecrementReferenceCount();
-        var change = new SubjectLifecycleChange
+        finally
         {
-            Subject = subject,
-            Property = property,
-            Index = index,
-            ReferenceCount = count,
-            IsPropertyReferenceRemoved = true,
-            IsContextDetach = isLastDetach
-        };
-
-        if (isLastDetach)
-        {
-            SubjectDetaching?.Invoke(change);
-        }
-
-        InvokeRemovedLifecycleHandlers(subject, context, change);
-
-        if (children is not null)
-        {
-            foreach (var child in children)
-            {
-                DetachFromProperty(child.subject, context, child.property, child.index);
-            }
-
-            ReturnList(children);
+            _graph.ReleaseUnusedReservations(reservations);
+            LifecycleScratch.Return(reservations);
         }
     }
 
-    private static void InvokeRemovedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
+    private ImmutableArray<StructuralSnapshotBuilder.CaptureParticipant> ReserveComponent(
+        StructuralSnapshot snapshot,
+        Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
+        Dictionary<PropertyReference, StructuralSnapshot> seededSnapshots,
+        Dictionary<IInterceptorSubject, ImmutableArray<SubjectPropertyMetadata>> seededSubjectProperties)
     {
-        if (subject is ILifecycleHandler subjectHandler)
+        var visited = LifecycleScratch.RentSubjectSet();
+        try
         {
-            subjectHandler.HandleLifecycleChange(change);
+            var participants = StructuralSnapshotBuilder.CaptureComponent(
+                snapshot,
+                _context,
+                _graph.State,
+                visited,
+                seededSnapshots,
+                seededSubjectProperties);
+
+            if (!_graph.TryReserveParticipants(participants, reservations))
+            {
+                throw new InvalidOperationException(
+                    "Another context claimed a subject of the assigned graph before its structural write reached the terminal.");
+            }
+
+            return participants;
+        }
+        finally
+        {
+            LifecycleScratch.Return(visited);
+        }
+    }
+
+    private void ResetCaptureAttempt(
+        Dictionary<IInterceptorSubject, OwnershipReservationToken> reservations,
+        Dictionary<PropertyReference, StructuralSnapshot> snapshots,
+        Dictionary<IInterceptorSubject, ImmutableArray<SubjectPropertyMetadata>> subjectProperties)
+    {
+        _graph.ReleaseUnusedReservations(reservations);
+        snapshots.Clear();
+        subjectProperties.Clear();
+    }
+
+    StructuralWriteLease ITopologyAdmissionCoordinator.AcquireStructuralWriteLease(InterceptorExecutor executor)
+    {
+        using (EnterGate())
+        {
+            return executor.TryAcquireStructuralWriteLease((InterceptorSubjectContext)_context, this);
+        }
+    }
+
+    void ILogicalContextGuard.ThrowIfOtherLogicalContext() =>
+        LifecycleNotifier.ThrowIfOtherContext((InterceptorSubjectContext)_context);
+
+    Exception? ITopologyAdmissionCoordinator.CompleteStructuralWrite(
+        InterceptorExecutor executor,
+        StructuralWriteLease lease,
+        Exception? primaryException)
+    {
+        bool runDeferredSweep;
+        using (EnterGate())
+        {
+            executor.ReleaseStructuralWriteLease(lease);
+            runDeferredSweep = _graph.HasDeferredSweep;
         }
 
-        var array = context.GetServices<ILifecycleHandler>();
-        for (var index = 0; index < array.Length; index++)
+        return runDeferredSweep ? TryDrainDeferredSweep(primaryException) : primaryException;
+    }
+
+    Exception? INonStructuralWriteCompletionCoordinator.CompleteNonStructuralWrite(Exception? primaryException)
+    {
+        if (!_graph.HasDeferredSweep)
         {
-            var handler = array[index];
-            handler.HandleLifecycleChange(change);
+            return primaryException;
+        }
+
+        if (InterceptorExecutor.IsInsideLogicalCallback ||
+            !InterceptorExecutor.IsCurrentLogicalContext((InterceptorSubjectContext)_context))
+        {
+            ThreadPool.UnsafeQueueUserWorkItem(
+                static lifecycle => lifecycle.CompleteDeferredSweepInBackground(),
+                this,
+                preferLocal: false);
+            return primaryException;
+        }
+
+        return TryDrainDeferredSweep(primaryException);
+    }
+
+    private void CompleteDeferredSweepInBackground()
+    {
+        try
+        {
+            CompleteDeferredSweep();
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                Trace.TraceError($"Completing a deferred lifecycle sweep failed: {exception}");
+            }
+            catch
+            {
+                // Background cleanup remains no-throw when diagnostics are misconfigured.
+            }
+        }
+    }
+
+    private Exception? TryDrainDeferredSweep(Exception? primaryException)
+    {
+        try
+        {
+            return DrainDeferredSweep(primaryException);
+        }
+        catch (LifecycleConflictException conflict) when (conflict.IsTransientCapture)
+        {
+            // The conflicting non-structural writer retries the sweep after leaving its terminal.
+            return primaryException;
+        }
+        catch (LifecycleConflictException)
+        {
+            // A published journal still owns one of the affected subjects. Its final attachment
+            // action retries the sweep after that subject becomes stable.
+            return primaryException;
+        }
+    }
+
+    private Exception? DrainDeferredSweep(Exception? primaryException)
+    {
+        using var capture = _notifier.BeginJournal();
+        LifecycleNotifier.LifecycleJournal journal;
+        using (EnterGate())
+        {
+            using var change = _graph.PrepareDeferredSweep(_notifier);
+            journal = capture.Complete();
+            if (change is not null)
+            {
+                _graph.Publish(change);
+            }
+        }
+
+        return journal.Drain(primaryException);
+    }
+
+    OwnershipReservationToken ITopologyAdmissionCoordinator.AcquireOwnershipReservation(
+        InterceptorExecutor executor, ReservationMode mode)
+    {
+        using (EnterGate())
+        {
+            return executor.TryAcquireOwnershipReservation(
+                (InterceptorSubjectContext)_context, mode, this);
+        }
+    }
+
+    void ITopologyAdmissionCoordinator.CompleteOwnershipReservation(
+        InterceptorExecutor executor,
+        OwnershipReservationToken token,
+        bool retainCommittedOwnership)
+    {
+        bool runDeferredSweep;
+        using (EnterGate())
+        {
+            if (!retainCommittedOwnership)
+            {
+                executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
+                retainCommittedOwnership = _graph.IsOwned(executor.Subject) ||
+                    (anchor != SubjectAttachmentAnchorKind.None && ReferenceEquals(attachedContext, _context));
+            }
+
+            executor.ReleaseOwnershipReservation(token, detachIfLast: !retainCommittedOwnership);
+            runDeferredSweep = _graph.HasDeferredSweep;
+        }
+
+        if (runDeferredSweep && TryDrainDeferredSweep(null) is { } exception)
+        {
+            try
+            {
+                Trace.TraceError($"Completing an ownership reservation failed: {exception}");
+            }
+            catch
+            {
+                // Reservation disposal and cleanup remain no-throw when diagnostics are misconfigured.
+            }
         }
     }
 
     /// <inheritdoc />
-    /// <remarks>
-    /// Re-entrant for different properties (lock is re-entrant, each property has its own
-    /// <c>_lastProcessedValues</c> entry). Handlers must NOT write to the same property
-    /// that is currently being reconciled, because this would corrupt the reconciliation baseline.
-    /// </remarks>
-    public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    public bool TryAddProperties(SubjectPropertyRegistration registration)
     {
-        next(ref context);
-
-        var metadata = context.Property.Metadata;
-        if (!metadata.Type.CanContainSubjects<TProperty>())
+        LifecycleNotifier.ThrowIfOtherContext((InterceptorSubjectContext)_context);
+        using var logicalContextScope = InterceptorExecutor.EnterLogicalContext((InterceptorSubjectContext)_context);
+        var registrationExecutor = (InterceptorExecutor)registration.Subject.Executor;
+        var attachment = registrationExecutor.AttachmentSnapshot;
+        if (attachment.Phase == AttachmentPhase.Detaching &&
+            !_graph.IsOwned(registration.Subject))
         {
-            return;
-        }
-
-        lock (_attachedSubjects)
-        {
-            var lastProcessed = _lastProcessedValues.GetValueOrDefault(context.Property);
-
-            // Read the actual backing store value to handle concurrent writes correctly.
-            // context.NewValue may differ from the backing store if another thread
-            // overwrote the property between our next() call and lock acquisition.
-            var getValue = metadata.GetValue;
-            var newValue = getValue is not null
-                ? getValue(context.Property.Subject)
-                : context.NewValue;
-
-            if (ReferenceEquals(lastProcessed, newValue))
-            {
-                return;
-            }
-
-            if ((lastProcessed is not (null or IInterceptorSubject or IEnumerable) || lastProcessed is string) &&
-                (newValue is not (null or IInterceptorSubject or IEnumerable) || newValue is string))
-            {
-                return;
-            }
-
-            var oldCollectedSubjects = GetList();
-            var newCollectedSubjects = GetList();
-            var oldTouchedSubjects = GetSubjectHashSet();
-            var newTouchedSubjects = GetSubjectHashSet();
-
             try
             {
-                FindSubjectsInProperty(context.Property, lastProcessed, oldCollectedSubjects, oldTouchedSubjects);
-                FindSubjectsInProperty(context.Property, newValue, newCollectedSubjects, newTouchedSubjects);
+                registration.PreparePublication(registrationExecutor);
+            }
+            catch (LifecycleConflictException conflict) when (conflict.IsTransientCapture)
+            {
+                return false;
+            }
 
-                // Detach in reverse order so that collection children are removed from the end first.
-                // RemoveChild searches backwards to match this order for O(1) per removal.
-                for (var i = oldCollectedSubjects.Count - 1; i >= 0; i--)
+            return registration.TryPublishPrepared(registrationExecutor, attachment);
+        }
+
+        var reservations = LifecycleScratch.RentOwnershipReservations();
+        try
+        {
+            while (true)
+            {
+                PropertyAdmission.Capture capture;
+                try { capture = _admission.CaptureBatch(registration); }
+                catch (LifecycleConflictException conflict) when (conflict.IsTransientCapture) { continue; }
+
+                if (capture.AddedProperties.Count == 0)
                 {
-                    var (subject, property, index) = oldCollectedSubjects[i];
-                    if (!newTouchedSubjects.Contains(subject))
-                    {
-                        DetachFromProperty(subject, context.Property.Subject.Context, property, index);
-                    }
+                    return true;
                 }
 
-                for (var i = 0; i < newCollectedSubjects.Count; i++)
+                var rootExecutor = capture.Participants[0].Executor;
+
+                bool reserved;
+                try
                 {
-                    var (subject, property, index) = newCollectedSubjects[i];
-                    if (!oldTouchedSubjects.Contains(subject))
-                    {
-                        AttachToProperty(subject, context.Property.Subject.Context, property, index);
-                    }
+                    reserved = _graph.TryReserveParticipants(
+                        capture.Participants, reservations,
+                        exclusiveParticipants: true);
+                }
+                catch (LifecycleConflictException conflict) when (conflict.IsTransientCapture)
+                {
+                    continue;
                 }
 
-                _lastProcessedValues[context.Property] = newValue;
-
-                // Parent was concurrently detached between next() and lock acquisition.
-                // Undo: remove dangling _lastProcessedValues and detach orphaned children.
-                if (!_attachedSubjects.ContainsKey(context.Property.Subject))
+                if (!reserved)
                 {
-                    _lastProcessedValues.Remove(context.Property);
-                    for (var i = 0; i < newCollectedSubjects.Count; i++)
+                    throw new InvalidOperationException(
+                        "Another context claimed a subject of the admitted graph while this call was validating it.");
+                }
+
+                LifecycleNotifier.LifecycleJournal? journal = null;
+                var retryCapture = false;
+                using var journalCapture = _notifier.BeginJournal();
+                using (EnterGate())
+                {
+                    var subject = registration.Subject;
+                    if (!_graph.IsCaptureCurrent(capture.Participants))
                     {
-                        var (subject, property, index) = newCollectedSubjects[i];
-                        if (!oldTouchedSubjects.Contains(subject))
+                        retryCapture = true;
+                    }
+                    else if (!ReferenceEquals(rootExecutor.AttachedContext, _context) ||
+                             !_graph.IsOwned(subject))
+                    {
+                        return false;
+                    }
+                    else
+                    {
+                        for (var index = 0; index < capture.Participants.Length; index++)
                         {
-                            DetachFromProperty(subject, context.Property.Subject.Context, property, index);
+                            capture.Participants[index].Executor.PreflightPotentialAttachmentUpdate(
+                                forceTransition: true);
+                        }
+
+                        journalCapture.PreflightCompletion(capture.ProjectionRevisionCapacity);
+                    }
+                }
+
+                if (!retryCapture)
+                {
+                    registration.PublishReserved(
+                        rootExecutor,
+                        reservations[capture.Participants[0].Subject]);
+
+                    using (EnterGate())
+                    {
+                        Debug.Assert(reservations.Values.All(reservation =>
+                            reservation.IsActive((InterceptorSubjectContext)_context)));
+                        Debug.Assert(ReferenceEquals(rootExecutor.AttachedContext, _context));
+                        Debug.Assert(_graph.IsOwned(registration.Subject));
+
+                        using var change = _admission.Prepare(capture, reservations);
+                        journal = journalCapture.CompleteAfterPreflight();
+                        _graph.Publish(change);
+                    }
+                }
+
+                if (retryCapture)
+                {
+                    _graph.ReleaseUnusedReservations(reservations);
+                    continue;
+                }
+
+                _graph.ReleaseUnusedReservations(reservations);
+                if (journal!.Drain(null) is { } exception)
+                {
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception).Throw();
+                }
+
+                return true;
+            }
+        }
+        finally
+        {
+            _graph.ReleaseUnusedReservations(reservations);
+            LifecycleScratch.Return(reservations);
+        }
+    }
+
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
+    {
+    }
+
+    /// <inheritdoc />
+    public void AttachSubjectToContext(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectAttachmentAnchorKind anchor)
+    {
+        LifecycleNotifier.ThrowIfTopologyChange((InterceptorSubjectContext)_context);
+
+        if (!ReferenceEquals(context, _context))
+        {
+            throw new InvalidOperationException("The subject cannot be attached through the lifecycle of another context.");
+        }
+
+        if (anchor == SubjectAttachmentAnchorKind.None)
+        {
+            throw new InvalidOperationException("An attach without a root anchor would be released by the next reachability decision.");
+        }
+
+        using var logicalScope = InterceptorExecutor.EnterLogicalContext((InterceptorSubjectContext)_context);
+        var executor = subject.Executor;
+        lock (_gate)
+        {
+            var attachment = ((InterceptorExecutor)executor).AttachmentSnapshot;
+            if (attachment.Phase != AttachmentPhase.Stable)
+                throw LifecycleConflictException.Retryable(subject);
+
+            InterceptorSubjectExtensions.ValidateRootAnchor(
+                attachment.Context, attachment.Anchor, context, anchor);
+            if (anchor == SubjectAttachmentAnchorKind.Provisional && attachment.Context is not null)
+                return;
+        }
+
+        var visited = LifecycleScratch.RentSubjectSet();
+        var reservations = LifecycleScratch.RentOwnershipReservations();
+        var snapshots = new Dictionary<PropertyReference, StructuralSnapshot>(PropertyReference.Comparer);
+        var subjectProperties = new Dictionary<IInterceptorSubject, ImmutableArray<SubjectPropertyMetadata>>(ReferenceEqualityComparer.Instance);
+        try
+        {
+            while (true)
+            {
+                var participants = StructuralSnapshotBuilder.CaptureComponent(
+                    subject, _context, _graph.State, visited, snapshots, subjectProperties);
+                if (!_graph.TryReserveParticipants(participants, reservations, subject))
+                {
+                    throw new InvalidOperationException(
+                        "Another context claimed a subject of this graph while the attach was validating it.");
+                }
+
+                LifecycleNotifier.LifecycleJournal? journal = null;
+                var retryCapture = false;
+                using (var journalCapture = _notifier.BeginJournal())
+                {
+                    using (EnterGate())
+                    {
+                        if (reservations.Values.Any(reservation =>
+                                !reservation.IsActive((InterceptorSubjectContext)_context)))
+                        {
+                            throw LifecycleConflictException.Retryable(subject);
+                        }
+
+                        if (!_graph.IsCaptureCurrent(participants))
+                        {
+                            retryCapture = true;
+                        }
+                        else
+                        {
+                            executor.TryGetAttachment(out var attachedContext, out var currentAnchor, out _);
+                            InterceptorSubjectExtensions.ValidateRootAnchor(
+                                attachedContext, currentAnchor, context, anchor);
+                            if (anchor == SubjectAttachmentAnchorKind.Provisional && attachedContext is not null)
+                                return;
+
+                            using var change = _graph.PrepareAttach(
+                                subject, anchor, snapshots, subjectProperties, reservations, _notifier);
+                            journal = journalCapture.Complete();
+                            _graph.Publish(change);
                         }
                     }
-
-                    return;
                 }
 
-                // Refresh child index metadata for retained subjects whose
-                // positions may have shifted in the new collection.
-                if (newValue is IEnumerable && oldTouchedSubjects.Overlaps(newTouchedSubjects))
+                if (retryCapture)
                 {
-                    var handlers = context.Property.Subject.Context.GetServices<IPropertyLifecycleHandler>();
-                    for (var i = 0; i < handlers.Length; i++)
+                    ResetCaptureAttempt(reservations, snapshots, subjectProperties);
+                    visited.Clear();
+                    continue;
+                }
+
+                _graph.ReleaseUnusedReservations(reservations);
+                if (journal!.Drain(null) is { } exception)
+                {
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception).Throw();
+                }
+
+                return;
+            }
+        }
+        finally
+        {
+            _graph.ReleaseUnusedReservations(reservations);
+            LifecycleScratch.Return(reservations);
+            LifecycleScratch.Return(visited);
+        }
+    }
+
+    /// <inheritdoc />
+    public void DetachSubjectFromContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
+    {
+        LifecycleNotifier.ThrowIfTopologyChange((InterceptorSubjectContext)_context);
+
+        if (!ReferenceEquals(context, _context))
+        {
+            throw new InvalidOperationException("The subject cannot be detached through the lifecycle of another context.");
+        }
+
+        using var logicalScope = InterceptorExecutor.EnterLogicalContext((InterceptorSubjectContext)_context);
+        var executor = (InterceptorExecutor)subject.Executor;
+        using var journalCapture = _notifier.BeginJournal();
+        LifecycleNotifier.LifecycleJournal journal;
+        using (EnterGate())
+        {
+            executor.TryGetAttachment(out var attachedContext, out var anchor, out _);
+            InterceptorSubjectExtensions.ValidateDetach(attachedContext, anchor, context);
+            using var change = _graph.PrepareDetach(subject, _notifier);
+            journal = journalCapture.Complete();
+            _graph.Publish(change);
+        }
+
+        if (journal.Drain(null) is { } exception)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception).Throw();
+        }
+    }
+
+    internal OwnershipGraph Graph => _graph;
+
+    internal void CompleteAttachments(
+        ImmutableArray<OwnershipGraph.AttachmentPlan> attachments)
+    {
+        foreach (var attachment in attachments)
+        {
+            lock (_gate)
+            {
+                if (_graph.IsOwned(attachment.Executor.Subject))
+                {
+                    attachment.Executor.FinalizeAttachment(
+                        attachment.Context,
+                        attachment.Revision);
+                }
+            }
+        }
+    }
+
+    internal void CompleteDetachments(
+        ImmutableArray<OwnershipGraph.DetachmentPlan> detachments)
+    {
+        foreach (var detachment in detachments)
+        {
+            var captureRevision = detachment.Executor.BeginFinalDetachmentCapture();
+            try
+            {
+                lock (_gate)
+                {
+                    if (!_graph.IsOwned(detachment.Executor.Subject))
                     {
-                        handlers[i].RefreshCollectionProperty(context.Property, newValue);
+                        detachment.Executor.FinalizeDetachmentUnderCapture(
+                            detachment.Context, detachment.Revision, captureRevision);
                     }
                 }
             }
             finally
             {
-                ReturnList(oldCollectedSubjects);
-                ReturnList(newCollectedSubjects);
-                ReturnSubjectHashSet(oldTouchedSubjects);
-                ReturnSubjectHashSet(newTouchedSubjects);
+                detachment.Executor.CompleteFinalDetachmentCapture(captureRevision);
             }
         }
     }
 
-    private enum LastProcessedValuesMode
+    internal void CompleteDeferredSweep()
     {
-        /// <summary>Read property values from the backing store (default).</summary>
-        None,
-
-        /// <summary>Read from backing store and seed _lastProcessedValues (used during attach).</summary>
-        Seed,
-
-        /// <summary>Read from _lastProcessedValues instead of backing store (used during detach).</summary>
-        Use
-    }
-
-    private void FindSubjectsInProperties(IInterceptorSubject subject,
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
-        HashSet<IInterceptorSubject>? touchedSubjects,
-        LastProcessedValuesMode lastProcessedValuesMode = LastProcessedValuesMode.None)
-    {
-        foreach (var property in subject.Properties)
+        if (_graph.HasDeferredSweep && TryDrainDeferredSweep(null) is { } exception)
         {
-            var metadata = property.Value;
-            if (!metadata.IsIntercepted ||
-                !metadata.Type.CanContainSubjects())
-            {
-                continue;
-            }
-
-            var propertyReference = new PropertyReference(subject, property.Key);
-            var propertyValue = lastProcessedValuesMode == LastProcessedValuesMode.Use && _lastProcessedValues.TryGetValue(propertyReference, out var lastProcessed)
-                ? lastProcessed
-                : metadata.GetValue?.Invoke(subject);
-
-            if (lastProcessedValuesMode == LastProcessedValuesMode.Seed)
-            {
-                _lastProcessedValues[propertyReference] = propertyValue;
-            }
-
-            if (propertyValue is not null)
-            {
-                FindSubjectsInProperty(propertyReference, propertyValue, collectedSubjects, touchedSubjects);
-            }
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception).Throw();
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void FindSubjectsInProperty(PropertyReference property,
-        object? value,
-        List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
-        HashSet<IInterceptorSubject>? touchedSubjects)
+    internal void FailNextJournalCompletionForTests(Exception failure) =>
+        _notifier.FailNextJournalCompletionForTests(failure);
+
+    /// <summary>Gets the committed incoming occurrence count, excluding a root anchor.</summary>
+    public int GetReferenceCount(IInterceptorSubject subject)
     {
-        // Hot paths (IDictionary, ICollection) come before string/IEnumerable so common
-        // writes don't pay extra type checks. The IEnumerable case at the end handles read-only
-        // types that implement neither ICollection nor IDictionary (e.g. custom IReadOnlyList /
-        // IReadOnlyDictionary wrappers that opt out of the non-generic container interfaces).
-        switch (value)
-        {
-            case null:
-                return;
-
-            case IInterceptorSubject subject:
-                touchedSubjects?.Add(subject);
-                collectedSubjects.Add((subject, property, null));
-                return;
-
-            case IDictionary dictionary:
-                foreach (DictionaryEntry entry in dictionary)
-                {
-                    if (entry.Value is IInterceptorSubject subjectItem)
-                    {
-                        touchedSubjects?.Add(subjectItem);
-                        collectedSubjects.Add((subjectItem, property, entry.Key));
-                    }
-                }
-                return;
-
-            case ICollection collection:
-            {
-                var i = 0;
-                foreach (var item in collection)
-                {
-                    if (item is IInterceptorSubject subjectItem)
-                    {
-                        touchedSubjects?.Add(subjectItem);
-                        collectedSubjects.Add((subjectItem, property, i));
-                    }
-                    i++;
-                }
-                return;
-            }
-
-            case string:
-                return;
-
-            case IEnumerable enumerable:
-                // Read-only types (no ICollection): dispatch on declared property shape.
-                if (property.Metadata.Type.IsSubjectDictionaryType())
-                {
-                    foreach (var item in enumerable)
-                    {
-                        if (item is null) continue;
-                        if (SubjectLookup.TryGetSubjectFromKeyValuePair(item, out var key, out var subjectItem))
-                        {
-                            touchedSubjects?.Add(subjectItem);
-                            collectedSubjects.Add((subjectItem, property, key));
-                        }
-                    }
-                }
-                else
-                {
-                    var i = 0;
-                    foreach (var item in enumerable)
-                    {
-                        if (item is IInterceptorSubject subjectItem)
-                        {
-                            touchedSubjects?.Add(subjectItem);
-                            collectedSubjects.Add((subjectItem, property, i));
-                        }
-                        i++;
-                    }
-                }
-                return;
-        }
+        return _graph.TryGetOwnership(subject)?.IncomingCount ?? 0;
     }
 
-    #region  Performance
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static List<(IInterceptorSubject subject, PropertyReference property, object? index)> GetList()
+    /// <summary>Gets the subject's immutable occurrence-aware parent publication.</summary>
+    public ImmutableArray<SubjectParent> GetParents(IInterceptorSubject subject)
     {
-        _listPool ??= new Stack<List<(IInterceptorSubject, PropertyReference, object?)>>();
-        return _listPool.Count > 0 ? _listPool.Pop() : new List<(IInterceptorSubject, PropertyReference, object?)>(8);
+        return _graph.GetParents(subject);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static HashSet<IInterceptorSubject> GetSubjectHashSet()
-    {
-        _subjectHashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
-        return _subjectHashSetPool.Count > 0 ? _subjectHashSetPool.Pop() : new HashSet<IInterceptorSubject>(8);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ReturnList(List<(IInterceptorSubject, PropertyReference, object?)> list)
-    {
-        list.Clear();
-        _listPool ??= new Stack<List<(IInterceptorSubject, PropertyReference, object?)>>();
-        _listPool.Push(list);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ReturnSubjectHashSet(HashSet<IInterceptorSubject> hashSet)
-    {
-        hashSet.Clear();
-        _subjectHashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
-        _subjectHashSetPool.Push(hashSet);
-    }
-
-    #endregion
 }

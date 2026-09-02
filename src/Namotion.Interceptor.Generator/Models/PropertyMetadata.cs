@@ -15,6 +15,7 @@ internal sealed record PropertyMetadata(
     bool HasSetter,
     bool HasInit,
     bool IsFromInterface,
+    bool CanUseScalarFastPath,
     string? GetterAccessModifier,
     string? SetterAccessModifier,
     string? InterfaceTypeName = null,

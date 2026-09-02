@@ -1,10 +1,39 @@
 using Namotion.Interceptor.Generator.Tests.Models;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Attributes;
+using System.Collections;
+using System.Reflection;
 
 namespace Namotion.Interceptor.Generator.Tests;
 
+[InterceptorSubject]
+public partial class DetachedGeneratedAccessSubject
+{
+    public partial DetachedGeneratedAccessSubject? Child { get; set; }
+
+    public partial DetachedChildCollection? Children { get; set; }
+
+    public partial int Count { get; set; }
+}
+
+public readonly struct DetachedChildCollection(IEnumerable<DetachedGeneratedAccessSubject> children) :
+    IEnumerable<DetachedGeneratedAccessSubject>
+{
+    public IEnumerator<DetachedGeneratedAccessSubject> GetEnumerator() => children.GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
 public class InterceptorSubjectTests
 {
+    private static readonly FieldInfo ExecutorField = typeof(DetachedGeneratedAccessSubject)
+        .GetField("_executor", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("The generated executor field is missing.");
+
+    private static readonly FieldInfo RevisionField = typeof(InterceptorExecutor)
+        .GetField("Revision", BindingFlags.Instance | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("The executor revision field is missing.");
+
     [Fact]
     public void WhenSettingData_ThenDataCanBeRead()
     {
@@ -49,5 +78,129 @@ public class InterceptorSubjectTests
         // Assert
         Assert.Equal(3, result);
         Assert.Equal(2, interceptor.Contexts.Count);
+    }
+
+    [Fact]
+    public void WhenDetachedStructuralSetterRunsFirst_ThenItInitializesTheExecutorAndConsumesATerminalRevision()
+    {
+        // Arrange
+        var subject = new DetachedGeneratedAccessSubject();
+        var child = new DetachedGeneratedAccessSubject();
+        Assert.Null(ExecutorField.GetValue(subject));
+
+        // Act
+        subject.Child = child;
+
+        // Assert
+        var executor = Assert.IsType<InterceptorExecutor>(ExecutorField.GetValue(subject));
+        Assert.Same(child, subject.Child);
+        Assert.Equal(1L, Assert.IsType<long>(RevisionField.GetValue(executor)));
+        var property = new PropertyReference(subject, nameof(DetachedGeneratedAccessSubject.Child));
+        Assert.True(property.TryGetWriteState(true, out var revision, out _));
+        Assert.Equal(1, revision);
+        Assert.Null(property.TryGetWriteTimestamp());
+    }
+
+    [Fact]
+    public void WhenPrepublicationStructuralWriteHasTimestampScope_ThenItRemainsUntimestamped()
+    {
+        // Arrange
+        var subject = new DetachedGeneratedAccessSubject();
+        var timestamp = new DateTimeOffset(2026, 8, 31, 12, 0, 0, TimeSpan.Zero);
+
+        // Act
+        using (SubjectChangeContext.WithChangedTimestamp(timestamp))
+        {
+            subject.Child = new DetachedGeneratedAccessSubject();
+        }
+
+        // Assert
+        var property = new PropertyReference(subject, nameof(DetachedGeneratedAccessSubject.Child));
+        Assert.Null(property.TryGetWriteTimestamp());
+    }
+
+    [Fact]
+    public void WhenDetachedStructuralAccessCreatesExecutor_ThenLaterLocalWriteRemainsUntimestamped()
+    {
+        // Arrange
+        var subject = new DetachedGeneratedAccessSubject();
+        subject.Child = new DetachedGeneratedAccessSubject();
+
+        // Act
+        subject.Count = 42;
+
+        // Assert
+        var property = new PropertyReference(subject, nameof(DetachedGeneratedAccessSubject.Count));
+        Assert.True(property.TryGetWriteState(true, out var revision, out _));
+        Assert.Equal(2, revision);
+        Assert.Null(property.TryGetWriteTimestamp());
+    }
+
+    [Fact]
+    public void WhenAttachedStructuralWriteHasNoTimestampScope_ThenItRecordsATimestamp()
+    {
+        // Arrange
+        var subject = new DetachedGeneratedAccessSubject(InterceptorSubjectContext.Create());
+
+        // Act
+        subject.Child = new DetachedGeneratedAccessSubject();
+
+        // Assert
+        var property = new PropertyReference(subject, nameof(DetachedGeneratedAccessSubject.Child));
+        Assert.NotNull(property.TryGetWriteTimestamp());
+    }
+
+    [Fact]
+    public void WhenDetachedStructuralGetterRunsFirst_ThenItInitializesTheExecutor()
+    {
+        // Arrange
+        var subject = new DetachedGeneratedAccessSubject();
+        Assert.Null(ExecutorField.GetValue(subject));
+
+        // Act
+        var child = subject.Child;
+
+        // Assert
+        Assert.Null(child);
+        Assert.IsType<InterceptorExecutor>(ExecutorField.GetValue(subject));
+    }
+
+    [Fact]
+    public void WhenDetachedScalarSetterRunsFirst_ThenItPreservesTheDirectFastPath()
+    {
+        // Arrange
+        var subject = new DetachedGeneratedAccessSubject();
+        Assert.Null(ExecutorField.GetValue(subject));
+
+        // Act
+        subject.Count = 42;
+
+        // Assert
+        Assert.Equal(42, subject.Count);
+        Assert.Null(ExecutorField.GetValue(subject));
+    }
+
+    [Fact]
+    public void WhenDetachedNullableStructuralAccessRunsFirst_ThenBothAccessorsInitializeTheExecutorAndTheSetterConsumesARevision()
+    {
+        // Arrange
+        var getterSubject = new DetachedGeneratedAccessSubject();
+        var setterSubject = new DetachedGeneratedAccessSubject();
+        var child = new DetachedGeneratedAccessSubject();
+        Assert.Null(ExecutorField.GetValue(getterSubject));
+        Assert.Null(ExecutorField.GetValue(setterSubject));
+
+        // Act
+        var initial = getterSubject.Children;
+        setterSubject.Children = new DetachedChildCollection([child]);
+
+        // Assert
+        Assert.Null(initial);
+        Assert.IsType<InterceptorExecutor>(ExecutorField.GetValue(getterSubject));
+        var setterExecutor = Assert.IsType<InterceptorExecutor>(ExecutorField.GetValue(setterSubject));
+        Assert.Equal(1L, Assert.IsType<long>(RevisionField.GetValue(setterExecutor)));
+        Assert.True(new PropertyReference(setterSubject, nameof(DetachedGeneratedAccessSubject.Children))
+            .TryGetWriteState(true, out var revision, out _));
+        Assert.Equal(1, revision);
     }
 }

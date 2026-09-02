@@ -22,6 +22,17 @@ public interface IWriteInterceptor
 
 public delegate void WriteInterceptionDelegate<TProperty>(ref PropertyWriteContext<TProperty> context);
 
+internal interface IWriteCommitGuard
+{
+    bool TryEnter();
+
+    void Exit();
+
+    bool TryDefer();
+
+    void Resume();
+}
+
 /// <summary>
 /// Context for a property write operation.
 /// <typeparamref name="TProperty"/> is a hint. It may be <c>object</c> when values are
@@ -41,41 +52,36 @@ public struct PropertyWriteContext<TProperty>
     // trigger's already-resolved value.
     private long _writeTimestamp;
 
-    // Set by the first PropertyChangeInterceptor instance that resolves this write's per-property
-    // observers (whether or not any were found), so outer aggregated instances skip resolution.
-    internal bool ArePropertyObserversResolved;
-
-    // The terminal write action for this call. Threaded through the per-call context (which already
-    // flows by ref to the end of the chain) instead of a ThreadStatic on the shared chain instance:
-    // per-call state belongs on the per-call context, which is also robust against reentrant writes.
+    // Per-call terminal state flows by ref through the chain.
     internal Action<IInterceptorSubject, TProperty>? Terminal;
 
-    // The executor that started this write, and always the executor of Property.Subject: both library
-    // construction sites pass their own 'this' alongside a PropertyReference over their own subject.
-    // The constructors are also visible to the test and benchmark assemblies, which construct contexts
-    // of their own, which is why the terminal asserts that pairing instead of assuming it.
-    // Threaded through the context so the terminal can stamp the commit revision with a plain field
-    // increment, instead of resolving the subject's context (an interface dispatch plus a type test)
-    // on every committed write.
+    internal Func<IInterceptorSubject, TProperty>? ReadValue;
+
+    internal IWriteTerminalCoordinator? TerminalCoordinator;
+
+    internal StructuralWriteLease? StructuralLease;
+
+    internal IWriteCommitGuard? CommitGuard;
+
+    internal object? CommittedLifecycleJournal;
+
+    // Paired with Property.Subject so the terminal can stamp its executor directly.
     internal readonly InterceptorExecutor Executor;
+
+    private TProperty _currentValue;
+    private TProperty _newValue;
+    private TProperty _terminalValue = default!;
+    private bool _terminalEntered;
+    private ChangeOrigin _terminalOrigin;
+    private bool _isTerminalOriginResolved;
+
+    internal bool IsTerminalCommitted;
 
     /// <summary>
     /// The subject's commit revision assigned by the terminal write, or 0 when the write did not
     /// commit. Monotonic per subject, not comparable across subjects.
     /// </summary>
     internal long Revision;
-
-    /// <summary>
-    /// Set by the cascade re-entry constructor, where <see cref="NewValue"/> is already the
-    /// stabilized getter output. Stops <see cref="GetFinalValue"/> from re-invoking the getter,
-    /// which would run user code at publish time and could return a value that never paired
-    /// atomically with this change's old value.
-    ///
-    /// The published value is therefore <see cref="NewValue"/> as of publish time, not as of entry.
-    /// <see cref="NewValue"/> is publicly settable, so an interceptor that rewrites it on a derived
-    /// recalculation now changes what is published; the getter re-read used to mask such a rewrite.
-    /// </summary>
-    internal bool FinalValueIsNewValue;
 
     /// <summary>
     /// Gets the property to write a value to.
@@ -85,13 +91,18 @@ public struct PropertyWriteContext<TProperty>
     /// <summary>
     /// Gets the current property value.
     /// </summary>
-    public TProperty CurrentValue { get; }
+    public TProperty CurrentValue => _currentValue;
 
     /// <summary>
-    /// Gets the new value to write (might be different than the value returned by calling the
-    /// getter after the write, use <see cref="GetFinalValue"/> for that).
+    /// Gets or sets the value forwarded toward the terminal. Terminal entry freezes its current
+    /// value for storage and publication. Assignments after <c>next</c> returns affect only this
+    /// context's unwind state and do not change <see cref="GetFinalValue"/>.
     /// </summary>
-    public TProperty NewValue { get; set; }
+    public TProperty NewValue
+    {
+        get => _newValue;
+        set => _newValue = value;
+    }
 
     /// <summary>
     /// Gets or sets whether the write was performed.
@@ -99,10 +110,7 @@ public struct PropertyWriteContext<TProperty>
     /// </summary>
     public bool IsWritten { get; set; }
 
-    /// <summary>
-    /// The attempted origin paired with the value the source sent (valid when the origin is
-    /// stamped). Finalized at the terminal write; see <see cref="Origin"/> and <see cref="FinalizeOrigin"/>.
-    /// </summary>
+    // Attempted origin paired with the source value until terminal finalization.
     private AttemptedOrigin _attempted;
 
     /// <summary>
@@ -114,47 +122,46 @@ public struct PropertyWriteContext<TProperty>
     /// </summary>
     public ChangeOrigin Origin => _attempted.Origin;
 
-    /// <summary>
-    /// Constructs a write context and, as a side effect, consumes the thread-static pending
-    /// origin stamp for this property (see <see cref="PendingOrigin"/>). Any direct construction
-    /// (tests, benchmarks, not just the interceptor chain) drains the pending stamp for the
-    /// matching property; a caller newing up a context by hand takes on that consumption.
-    /// Internal so every meaningfully constructed context comes from the library's execution
-    /// entry points, which always thread the per-call chain state (such as the terminal) through it.
-    /// </summary>
+    // Construction consumes this property's thread-static pending origin.
     internal PropertyWriteContext(InterceptorExecutor executor, PropertyReference property, TProperty currentValue, TProperty newValue)
     {
         Executor = executor;
         Property = property;
-        CurrentValue = currentValue;
-        NewValue = newValue;
+        _currentValue = currentValue;
+        _newValue = newValue;
         IsWritten = false;
         _writeTimestamp = 0;
         PendingOrigin.TryConsume(in property, out _attempted);
     }
 
-    /// <summary>
-    /// Internal constructor for cascade re-entry: pre-populates the cache with the trigger's
-    /// already-resolved raw timestamp, so the dependent's write does not need to lazy-resolve
-    /// (and therefore does not need an active <c>WithChangedTimestamp</c> scope to share state
-    /// with the trigger). Pass 0 to leave the cache uninitialized (the default lazy behavior).
-    /// Like the other constructor, this consumes the thread-static pending origin stamp for
-    /// this property (see <see cref="PendingOrigin"/>) as a side effect of construction.
-    ///
-    /// Cascade re-entry is only ever reached with a new value that is already the stabilized getter
-    /// output, so <see cref="FinalValueIsNewValue"/> is set here rather than passed in.
-    /// </summary>
+    // Cascade re-entry supplies its trigger's resolved timestamp and stabilized value.
     internal PropertyWriteContext(InterceptorExecutor executor, PropertyReference property, TProperty currentValue, TProperty newValue, long rawTimestamp)
     {
         Executor = executor;
         Property = property;
-        CurrentValue = currentValue;
-        NewValue = newValue;
+        _currentValue = currentValue;
+        _newValue = newValue;
         IsWritten = false;
-        FinalValueIsNewValue = true;
         _writeTimestamp = rawTimestamp;
         PendingOrigin.TryConsume(in property, out _attempted);
     }
+
+    internal TProperty FreezeNewValue()
+    {
+        if (_terminalEntered)
+            throw new InvalidOperationException("The write terminal can only be entered once.");
+        _terminalEntered = true;
+        return _terminalValue = _newValue;
+    }
+
+    internal void PrepareTerminalState()
+    {
+        _terminalOrigin = ResolveFinalOrigin();
+        _isTerminalOriginResolved = true;
+        _ = WriteTimestampRawForCommit;
+    }
+
+    internal void SetTerminalPredecessor(TProperty value) => _currentValue = value;
 
     /// <summary>
     /// Gets the timestamp stamped on the property by this write, or <c>null</c> if the write used
@@ -208,6 +215,29 @@ public struct PropertyWriteContext<TProperty>
         }
     }
 
+    /// <summary>
+    /// Resolves the timestamp needed by a committed write. A generated write before the subject
+    /// has crossed any attachment boundary still consumes a terminal revision for race safety, but
+    /// it preserves the historical pre-publication behavior of having no write timestamp. Before
+    /// generated structural coordination existed, those writes did not observe timestamp scopes.
+    /// </summary>
+    internal long WriteTimestampRawForCommit
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            var ticks = _writeTimestamp;
+            if (ticks != 0)
+            {
+                return ticks;
+            }
+
+            return Executor.SuppressGeneratedPrepublicationTimestamp
+                ? 0
+                : ResolveAndCacheWriteTimestamp();
+        }
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private long ResolveAndCacheWriteTimestamp()
     {
@@ -236,22 +266,16 @@ public struct PropertyWriteContext<TProperty>
     }
 
     /// <summary>
-    /// Reads the current property value (might be different from <see cref="NewValue"/> if the property is derived).
-    /// Must only be used after the 'next()' call in the write interceptor.
-    ///
-    /// One exception: on a derived property's own recalculation, <see cref="NewValue"/> is already the
-    /// stabilized getter output, so this returns it directly instead of invoking the getter again. That
-    /// keeps the published new value paired with the old value it was compared against, and keeps user
-    /// code off the publish path, where a throwing getter used to suppress the notification entirely.
-    /// An interceptor that rewrites <see cref="NewValue"/> on that path therefore changes what is
-    /// published, which the previous getter re-read would have masked.
+    /// Gets the value frozen when the write entered its terminal. Assigning <see cref="NewValue"/>
+    /// after <c>next</c> returns does not change this value or built-in publication. Must only be used
+    /// after the <c>next</c> call in the write interceptor.
     /// </summary>
     /// <returns>The property value.</returns>
     public TProperty GetFinalValue()
     {
-        if (FinalValueIsNewValue)
+        if (_terminalEntered)
         {
-            return NewValue;
+            return _terminalValue;
         }
 
         var property = Property;
@@ -264,6 +288,11 @@ public struct PropertyWriteContext<TProperty>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal ChangeOrigin GetFinalOrigin()
     {
+        return _isTerminalOriginResolved ? _terminalOrigin : ResolveFinalOrigin();
+    }
+
+    private ChangeOrigin ResolveFinalOrigin()
+    {
         if (_attempted.Origin.Kind == ChangeOriginKind.Local)
         {
             return default;
@@ -271,7 +300,7 @@ public struct PropertyWriteContext<TProperty>
 
         // A derived property's stored value is recomputed by its getter, never literally the sent value,
         // so a stamped origin never survives. Demoted without invoking the getter, which must not run
-        // here (this executes under the subject's SyncRoot).
+        // here (this executes under the executor's terminal lock).
         if (Property.Metadata.IsDerived)
         {
             return default;
@@ -282,11 +311,12 @@ public struct PropertyWriteContext<TProperty>
         // explicitly ('null is TProperty' is always false), else a legitimately stored null would demote
         // to Local and defeat echo suppression. A box the pattern rejects falls back to the setter's own
         // unbox (see SentValueEqualsAfterUnbox); a box the setter would reject demotes.
+        var finalValue = GetFinalValue();
         var survives = _attempted.SentValue is TProperty typedSentValue
-            ? EqualityComparer<TProperty>.Default.Equals(typedSentValue, NewValue)
+            ? EqualityComparer<TProperty>.Default.Equals(typedSentValue, finalValue)
             : _attempted.SentValue is null
-                ? NewValue is null
-                : SentValueEqualsAfterUnbox(_attempted.SentValue, NewValue);
+                ? finalValue is null
+                : SentValueEqualsAfterUnbox(_attempted.SentValue, finalValue);
 
         return survives ? _attempted.Origin : default;
     }

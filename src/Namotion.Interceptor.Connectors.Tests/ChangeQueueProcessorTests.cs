@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors.Tests.Models;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
@@ -397,11 +398,13 @@ public class ChangeQueueProcessorTests
 
         // Act
         var property = new PropertyReference(subject, nameof(Person.FirstName));
-        EnqueueChange(processor, property, "Committed1", "Committed2", revision: 2);
-        EnqueueChange(processor, property, "Committed0", "Committed1", revision: 1);
-
-        // The higher revision is the committed state, whichever order they were enqueued in.
+        subject.FirstName = "Committed1";
+        Assert.True(property.TryGetWriteState(true, out var olderRevision, out _));
         subject.FirstName = "Committed2";
+        Assert.True(property.TryGetWriteState(true, out var newerRevision, out _));
+
+        EnqueueChange(processor, property, "Committed1", "Committed2", revision: newerRevision);
+        EnqueueChange(processor, property, "Committed0", "Committed1", revision: olderRevision);
 
         await TriggerFlushAsync(processor);
 
@@ -412,7 +415,7 @@ public class ChangeQueueProcessorTests
         var change = Assert.Single(writtenChanges);
         Assert.Equal("Committed0", change.GetOldValue<string>());
         Assert.Equal("Committed2", change.GetNewValue<string>());
-        Assert.Equal(2, change.Revision);
+        Assert.Equal(newerRevision, change.Revision);
     }
 
     [Fact]
@@ -1306,7 +1309,7 @@ public class ChangeQueueProcessorTests
         var dataAccessEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseDataAccess = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var completionReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var subject = new BlockingDataSubject(context, dataAccessEntered, releaseDataAccess);
+        var subject = new BlockingDataSubject(dataAccessEntered, releaseDataAccess);
         var property = new PropertyReference(subject, nameof(Person.FirstName));
         var writeHandlerEntered = false;
 
@@ -1971,9 +1974,16 @@ public class ChangeQueueProcessorTests
 
         var firstName = new PropertyReference(subject, nameof(Person.FirstName));
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
-        EnqueueChange(processor, firstName, null, "superseded", revision: 1);
-        EnqueueChange(processor, lastName, null, "survivor", revision: 2);
-        EnqueueChange(processor, firstName, "superseded", "latest", revision: 3);
+
+        // Relative to the subject's commit counter, which the write protocol also advances during
+        // construction: an absolute revision would rank below the arranged writes and be dropped as stale.
+        firstName.TryGetWriteState(includeSourceCommitsInRevision: false, out var firstNameRevision, out _);
+        lastName.TryGetWriteState(includeSourceCommitsInRevision: false, out var lastNameRevision, out _);
+        var baseRevision = Math.Max(firstNameRevision, lastNameRevision);
+
+        EnqueueChange(processor, firstName, null, "superseded", revision: baseRevision + 1);
+        EnqueueChange(processor, lastName, null, "survivor", revision: baseRevision + 2);
+        EnqueueChange(processor, firstName, "superseded", "latest", revision: baseRevision + 3);
 
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
@@ -2103,9 +2113,16 @@ public class ChangeQueueProcessorTests
 
         var firstName = new PropertyReference(subject, nameof(Person.FirstName));
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
-        EnqueueChange(processor, firstName, null, "superseded", revision: 1);
-        EnqueueChange(processor, lastName, null, "survivor", revision: 2);
-        EnqueueChange(processor, firstName, "superseded", "latest", revision: 3);
+
+        // Relative to the subject's commit counter, which the write protocol also advances during
+        // construction: an absolute revision would rank below the arranged writes and be dropped as stale.
+        firstName.TryGetWriteState(includeSourceCommitsInRevision: false, out var firstNameRevision, out _);
+        lastName.TryGetWriteState(includeSourceCommitsInRevision: false, out var lastNameRevision, out _);
+        var baseRevision = Math.Max(firstNameRevision, lastNameRevision);
+
+        EnqueueChange(processor, firstName, null, "superseded", revision: baseRevision + 1);
+        EnqueueChange(processor, lastName, null, "survivor", revision: baseRevision + 2);
+        EnqueueChange(processor, firstName, "superseded", "latest", revision: baseRevision + 3);
 
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseCancellation.TrySetResult());
@@ -2488,15 +2505,14 @@ public class ChangeQueueProcessorTests
     private sealed class WriteFailureException : Exception;
 
     private sealed class BlockingDataSubject(
-        IInterceptorSubjectContext context,
         TaskCompletionSource dataAccessEntered,
         TaskCompletionSource releaseDataAccess) : IInterceptorSubject
     {
         private readonly ConcurrentDictionary<(string? property, string key), object?> _data = new();
 
-        public object SyncRoot { get; } = new();
+        private IInterceptorExecutor? _executor;
 
-        public IInterceptorSubjectContext Context { get; } = context;
+        public IInterceptorExecutor Executor => InterceptorExecutor.GetOrCreate(ref _executor, this);
 
         public ConcurrentDictionary<(string? property, string key), object?> Data
         {

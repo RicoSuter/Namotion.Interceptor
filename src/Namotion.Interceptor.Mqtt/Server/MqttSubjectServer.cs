@@ -86,7 +86,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         _subject = subject ?? throw new ArgumentNullException(nameof(subject));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _context = subject.Context;
+        _context = subject.GetContext();
         _serverClientId = _configuration.ClientId;
 
         Diagnostics = new MqttServerDiagnostics(this, Metrics);
@@ -468,7 +468,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
         }
     }
 
-    private (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
+    internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
         if (_propertyToTopic.TryGetValue(propertyReference, out var cached))
         {
@@ -485,11 +485,13 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
 
         var entry = (topic, resolvedMapping);
 
-        // Add first, then validate (guarantees no memory leak)
+        // Add first, then validate (guarantees no memory leak). Registry membership is the whole
+        // test: the reference count answers zero for the anchored root, so asking it here would
+        // evict every mapping the root owns and make this cache a per-message mapper call.
         if (_propertyToTopic.TryAdd(propertyReference, entry))
         {
             var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
-            if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+            if (registeredSubject is null)
             {
                 _propertyToTopic.TryRemove(propertyReference, out _);
             }
@@ -519,7 +521,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
             if (propertyReference is { } propRef)
             {
                 var registeredSubject = propRef.Subject.TryGetRegisteredSubject();
-                if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
+                if (registeredSubject is null)
                 {
                     _pathToProperty.TryRemove(path, out _);
                 }

@@ -5,10 +5,8 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 namespace Namotion.Interceptor.Tracking.Tests.Change;
 
 /// <summary>
-/// Pins the origin semantics of a derived property that has a setter and a transforming getter: a
-/// source apply stores the raw value, but the published value is the getter's recomputation, never
-/// literally the value the source sent. The change must therefore publish with a Local origin so it
-/// is not echo-suppressed for the applying source.
+/// Pins the origin semantics of a derived property that has a setter and a transforming getter.
+/// The terminal publication uses its frozen input, followed by the getter's recalculated value.
 /// </summary>
 public class DerivedSetterSourceOriginTests
 {
@@ -41,13 +39,14 @@ public class DerivedSetterSourceOriginTests
         var changes = DrainUntilSentinel(context, subscription);
         var trimmedChanges = changes.Where(c => c.Property.Name == "Trimmed").ToList();
 
-        // Assert: the stored/published value is the getter's recomputation ("hello"), never literally
-        // the value the source sent ("  hello  "), so a stamped source origin cannot survive on the
-        // derived write: every published change carries Local (and is not echo-suppressed).
-        Assert.NotEmpty(trimmedChanges);
+        // Assert: the terminal publishes its frozen input before derived recalculation publishes the
+        // getter projection. Both are derived writes, so neither retains the stamped source origin.
+        Assert.Collection(
+            trimmedChanges,
+            change => Assert.Equal("  hello  ", change.GetNewValue<string?>()),
+            change => Assert.Equal("hello", change.GetNewValue<string?>()));
         Assert.All(trimmedChanges, c => Assert.Equal(ChangeOriginKind.Local, c.Origin.Kind));
         Assert.All(trimmedChanges, c => Assert.Null(c.Origin.Source));
-        Assert.All(trimmedChanges, c => Assert.Equal("hello", c.GetNewValue<string?>()));
     }
 
     // Writes a sentinel change on a fresh subject and drains the subscription up to it (excluded),

@@ -78,7 +78,9 @@ internal static class SubjectMetadataExtractor
             }
         }
 
-        var className = typeDeclaration.Identifier.ValueText;
+        // Text keeps the escape on a verbatim identifier: the name is re-emitted as the partial
+        // declaration, as every cast and as each generated constructor's name.
+        var className = typeDeclaration.Identifier.Text;
 
         // Use the symbol rather than the syntax modifiers: a top-level class without a modifier
         // defaults to internal, a nested one to private.
@@ -130,6 +132,8 @@ internal static class SubjectMetadataExtractor
         var (needsGeneratedParameterlessConstructor, hasOrWillHaveParameterlessConstructor) =
             DetectConstructorState(allTypeDeclarations);
 
+        var constructors = CollectConstructors(allTypeDeclarations, semanticModel, cancellationToken);
+
         return new ExtractionResult(
             new SubjectMetadata(
                 className,
@@ -140,6 +144,7 @@ internal static class SubjectMetadataExtractor
                 containingTypes,
                 needsGeneratedParameterlessConstructor,
                 hasOrWillHaveParameterlessConstructor,
+                constructors,
                 baseClass,
                 properties,
                 methods),
@@ -166,9 +171,11 @@ internal static class SubjectMetadataExtractor
         var parent = node.Parent;
         while (parent is TypeDeclarationSyntax typeDeclaration)
         {
+            // Text keeps the escape on a verbatim identifier: the generated file reopens every
+            // containing type by name.
             types.Insert(0, new ContainingType(
                 GetTypeKeyword(typeDeclaration),
-                typeDeclaration.Identifier.ValueText));
+                typeDeclaration.Identifier.Text));
             parent = parent.Parent;
         }
         return types.ToArray();
@@ -330,6 +337,7 @@ internal static class SubjectMetadataExtractor
                     hasSetter,
                     hasInit,
                     IsFromInterface: false,
+                    CanUseScalarFastPath: typeInfo.Type is { } propertyType && CanUseScalarFastPath(propertyType),
                     getterAccessModifier,
                     setterAccessModifier,
                     InterfaceTypeName: null,
@@ -516,9 +524,11 @@ internal static class SubjectMetadataExtractor
 
                 var returnType = GetFullTypeName(method.ReturnType, declarationModel);
 
+                // Text keeps the escape on a verbatim identifier; the wrapper restates the name
+                // in declaration and argument position, where the unescaped keyword cannot parse.
                 var parameters = method.ParameterList.Parameters
                     .Select(p => new ParameterMetadata(
-                        p.Identifier.ValueText,
+                        p.Identifier.Text,
                         GetFullTypeName(p.Type, declarationModel) ?? "object"))
                     .ToList();
 
@@ -676,6 +686,7 @@ internal static class SubjectMetadataExtractor
                     hasSetter,
                     hasInit,
                     IsFromInterface: true,
+                    CanUseScalarFastPath: CanUseScalarFastPath(property.Type),
                     GetterAccessModifier: null,
                     SetterAccessModifier: null,
                     InterfaceTypeName: interfaceTypeName));
@@ -683,6 +694,21 @@ internal static class SubjectMetadataExtractor
         }
 
         return interfaceProperties;
+    }
+
+    private static bool CanUseScalarFastPath(ITypeSymbol type)
+    {
+        if (type is INamedTypeSymbol namedType &&
+            namedType.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
+        {
+            return CanUseScalarFastPath(namedType.TypeArguments[0]);
+        }
+
+        return type.SpecialType == SpecialType.System_String ||
+               type.TypeKind == TypeKind.Enum ||
+               type.IsValueType && type.SpecialType != SpecialType.None ||
+               type.ContainingNamespace?.ToDisplayString() == "System" &&
+               type.Name is "DateTimeOffset" or "TimeSpan" or "Guid";
     }
 
     /// <summary>
@@ -831,6 +857,120 @@ internal static class SubjectMetadataExtractor
 
         // First constructor has parameters, so we don't have a parameterless constructor
         return (NeedsGeneratedParameterlessConstructor: false, HasOrWillHaveParameterlessConstructor: false);
+    }
+
+    /// <summary>
+    /// Collects the declared instance constructors across all partial declarations, omitting the
+    /// ones a mirror could not reproduce faithfully. Parameter types are resolved through each
+    /// declaration's own semantic model rather than taken from syntax text, because the generated
+    /// partial half does not repeat the declaring file's using directives, so a name like
+    /// "List&lt;Foo&gt;" may not resolve there.
+    /// </summary>
+    private static IReadOnlyList<SubjectConstructor> CollectConstructors(
+        TypeDeclarationSyntax[] allTypeDeclarations,
+        SemanticModel semanticModel,
+        CancellationToken cancellationToken)
+    {
+        var constructors = new List<SubjectConstructor>();
+
+        foreach (var typeDeclaration in allTypeDeclarations)
+        {
+            var declarationModel = semanticModel.Compilation.GetSemanticModel(typeDeclaration.SyntaxTree);
+
+            foreach (var constructor in typeDeclaration.Members.OfType<ConstructorDeclarationSyntax>())
+            {
+                // A static constructor has no accessibility and cannot be chained to.
+                if (constructor.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword)))
+                {
+                    continue;
+                }
+
+                // An obsolete constructor is never mirrored: the mirror's ": this(...)" chain
+                // would reference it from the generated file, raising CS0618 (or CS0619 with
+                // error: true) in code the consumer does not own. It is still collected, because
+                // the emit side matches each mirror it is about to write against the declared
+                // signatures; an obsolete constructor already carrying a mirror's shape would
+                // otherwise collide with it as CS0111 in a file the consumer cannot edit.
+                // Resolved through the semantic model so an alias, the "Attribute" suffix and
+                // qualified spellings are all caught, not just the literal identifier "Obsolete".
+                var isObsolete = SymbolExtensions.HasAttribute(
+                    constructor.AttributeLists, KnownTypes.ObsoleteAttribute, declarationModel, cancellationToken);
+
+                var parameters = CollectConstructorParameters(constructor, declarationModel);
+                if (parameters is null)
+                {
+                    continue;
+                }
+
+                // Carried because a generated constructor chaining to this one has to repeat the
+                // attribute; without it the chain is CS9039.
+                var setsRequiredMembers = SymbolExtensions.HasAttribute(
+                    constructor.AttributeLists, KnownTypes.SetsRequiredMembersAttribute, declarationModel, cancellationToken);
+
+                constructors.Add(new SubjectConstructor(
+                    GetAccessModifier(constructor.Modifiers),
+                    parameters,
+                    isObsolete,
+                    setsRequiredMembers));
+            }
+        }
+
+        return constructors;
+    }
+
+    private static IReadOnlyList<SubjectConstructorParameter>? CollectConstructorParameters(
+        ConstructorDeclarationSyntax constructor,
+        SemanticModel declarationModel)
+    {
+        var parameters = new List<SubjectConstructorParameter>(constructor.ParameterList.Parameters.Count);
+
+        foreach (var parameter in constructor.ParameterList.Parameters)
+        {
+            // ref, out, in, params or scoped: the metadata carries no parameter modifier, so a
+            // mirror would either not compile or silently change the calling convention. Such a
+            // constructor is never mirrored.
+            if (parameter.Modifiers.Count > 0)
+            {
+                return null;
+            }
+
+            var parameterType = parameter.Type is not null
+                ? declarationModel.GetTypeInfo(parameter.Type).Type
+                : null;
+            if (parameterType is null)
+            {
+                // Only reachable with error code, since a constructor parameter cannot omit its
+                // type; dropping the whole constructor beats carrying a wrong signature.
+                return null;
+            }
+
+            // A pointer or function pointer type compiles only in an unsafe context, which the
+            // generated mirror does not have; "unsafe" sits on the constructor, so the modifier
+            // check above never sees it. Arrays are unwrapped because int*[] carries the same
+            // requirement.
+            if (ContainsPointerType(parameterType))
+            {
+                return null;
+            }
+
+            // Text rather than ValueText: the latter drops the escape from a verbatim identifier,
+            // so a parameter named "@event" would be re-emitted as the keyword "event".
+            parameters.Add(new SubjectConstructorParameter(
+                parameterType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                parameter.Identifier.Text));
+        }
+
+        return parameters;
+    }
+
+    private static bool ContainsPointerType(ITypeSymbol type)
+    {
+        while (type is IArrayTypeSymbol array)
+        {
+            type = array.ElementType;
+        }
+
+        return type.TypeKind is TypeKind.Pointer or TypeKind.FunctionPointer;
     }
 
     private static string GetAccessModifier(SyntaxTokenList modifiers)

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Tests.Models;
 using Namotion.Interceptor.Tracking;
@@ -54,7 +55,18 @@ public class DynamicPropertyWithWriteInterceptorTests
         var tasks = Enumerable.Range(0, propertyCount).Select(i => Task.Run(() =>
         {
             barrier.SignalAndWait();
-            registeredSubject.AddProperty($"Dynamic_{i}", typeof(string), _ => $"value_{i}", null);
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    registeredSubject.AddProperty($"Dynamic_{i}", typeof(string), _ => $"value_{i}", null);
+                    break;
+                }
+                catch (LifecycleConflictException) when (attempt < 1000)
+                {
+                    // Concurrent admission is exclusive and rejects a loser before publication.
+                }
+            }
         })).ToArray();
 
         await Task.WhenAll(tasks);

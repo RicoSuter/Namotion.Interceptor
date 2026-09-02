@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Cache;
 
 internal sealed class WriteInterceptorChain<TProperty>
 {
-    public delegate TProperty ExecuteTerminalFunc(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> terminal);
+    public delegate void ExecuteTerminalFunc(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> terminal);
 
     private readonly ImmutableArray<IWriteInterceptor> _interceptors;
     private readonly ExecuteTerminalFunc _executeTerminal;

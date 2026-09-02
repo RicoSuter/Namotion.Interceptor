@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
@@ -8,8 +9,15 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// to minimize dictionary lookups (one lookup instead of separate lookups
 /// for UsedByProperties, RequiredProperties, and LastKnownValue).
 /// </summary>
-internal sealed class DerivedPropertyData
+internal sealed class DerivedPropertyData : IWriteCommitGuard
 {
+    private long _notificationSequence;
+    private object? _notificationOldValue;
+    private PropertyReference _notificationProperty;
+    private bool _isNotificationDeferred;
+    private bool _resumeDeferredNotification;
+    private long _deferredNotificationRawTimestamp;
+
     /// <summary>
     /// Dependencies: Which properties this derived property depends on.
     /// Always read/written under lock(this) — no volatile or CAS needed.
@@ -52,12 +60,134 @@ internal sealed class DerivedPropertyData
     internal long RecalculationSequence;
 
     /// <summary>
+    /// Incremented under lock(this) for every attach and detach callback. An evaluation or pending
+    /// notification may publish only while the epoch it captured is still current.
+    /// </summary>
+    internal long AttachmentEpoch;
+
+    /// <summary>
     /// Set under lock(this) when a state change occurs while IsRecalculating is true:
     /// concurrent RecalculateDerivedProperty (bails), DetachProperty, or AttachProperty.
     /// Checked by RecalculateDerivedProperty before committing — if set, the evaluation
     /// result is discarded and the getter is re-evaluated with a fresh state.
     /// </summary>
     internal bool RecalculationNeeded;
+
+    /// <summary>
+    /// Latest trigger metadata recorded while another recalculation owns this property. The epoch
+    /// prevents an invalidated attachment from replaying its timestamp into a newer attachment.
+    /// Always read and written under lock(this).
+    /// </summary>
+    internal long PendingRecalculationEpoch = -1;
+    internal long PendingRawTimestamp;
+
+    internal void RequestRecalculation(long rawTimestamp)
+    {
+        if (_isNotificationDeferred)
+        {
+            _deferredNotificationRawTimestamp = rawTimestamp;
+            return;
+        }
+
+        RecalculationNeeded = true;
+        PendingRecalculationEpoch = AttachmentEpoch;
+        PendingRawTimestamp = rawTimestamp;
+    }
+
+    internal bool TryConsumePendingRecalculation(out long rawTimestamp)
+    {
+        var isCurrent = PendingRecalculationEpoch == AttachmentEpoch;
+        rawTimestamp = PendingRawTimestamp;
+        PendingRecalculationEpoch = -1;
+        PendingRawTimestamp = 0;
+        return isCurrent;
+    }
+
+    internal bool DeferNotification(long rawTimestamp)
+    {
+        if (RecalculationNeeded)
+        {
+            if (TryConsumePendingRecalculation(out var pendingRawTimestamp))
+            {
+                rawTimestamp = pendingRawTimestamp;
+            }
+
+            RecalculationNeeded = false;
+        }
+
+        _deferredNotificationRawTimestamp = rawTimestamp;
+        if (_isNotificationDeferred)
+        {
+            return false;
+        }
+
+        _isNotificationDeferred = true;
+        return true;
+    }
+
+    internal bool TryUpdateDeferredNotification(long rawTimestamp)
+    {
+        if (!_isNotificationDeferred)
+        {
+            return false;
+        }
+
+        _deferredNotificationRawTimestamp = rawTimestamp;
+        return true;
+    }
+
+    internal bool TryConsumeDeferredNotification(out long rawTimestamp)
+    {
+        rawTimestamp = _deferredNotificationRawTimestamp;
+        _deferredNotificationRawTimestamp = 0;
+        var wasDeferred = _isNotificationDeferred;
+        _isNotificationDeferred = false;
+        _resumeDeferredNotification = false;
+        return wasDeferred;
+    }
+
+    internal bool TryBeginDeferredRecalculation(out long rawTimestamp)
+    {
+        if (!_isNotificationDeferred)
+        {
+            rawTimestamp = 0;
+            return false;
+        }
+
+        if (IsRecalculating)
+        {
+            _resumeDeferredNotification = true;
+            rawTimestamp = 0;
+            return false;
+        }
+
+        rawTimestamp = 0;
+        if (!IsAttached || !TryConsumeDeferredNotification(out rawTimestamp))
+        {
+            return false;
+        }
+
+        IsRecalculating = true;
+        return true;
+    }
+
+    internal bool TryBeginPendingRecalculation(long expectedSequence)
+    {
+        if (!IsAttached || IsRecalculating || RecalculationSequence != expectedSequence)
+        {
+            return false;
+        }
+
+        IsRecalculating = true;
+        return true;
+    }
+
+    internal bool TryConsumeDeferredResumeRequest()
+    {
+        var resume = _resumeDeferredNotification && _isNotificationDeferred && IsAttached;
+        _resumeDeferredNotification = false;
+        return resume;
+    }
 
     /// <summary>
     /// Lifecycle flag cleared during DetachProperty under lock(this).
@@ -77,6 +207,65 @@ internal sealed class DerivedPropertyData
     /// WriteProperty. Write-once; never reset (metadata.IsDerived is immutable).
     /// </remarks>
     internal bool IsDerived;
+
+    internal void PrepareNotificationCommit(
+        in PropertyReference property,
+        long sequence,
+        object? oldValue,
+        long rawTimestamp)
+    {
+        _notificationProperty = property;
+        _notificationSequence = sequence;
+        _notificationOldValue = oldValue;
+        _deferredNotificationRawTimestamp = rawTimestamp;
+    }
+
+    bool IWriteCommitGuard.TryDefer()
+    {
+        lock (this)
+        {
+            if (!IsAttached || _notificationSequence != RecalculationSequence)
+            {
+                return false;
+            }
+
+            LastKnownValue = _notificationOldValue;
+            RecalculationSequence++;
+            return DeferNotification(_deferredNotificationRawTimestamp);
+        }
+    }
+
+    void IWriteCommitGuard.Resume()
+    {
+        PropertyReference property;
+        lock (this)
+        {
+            if (!_isNotificationDeferred)
+            {
+                return;
+            }
+
+            property = _notificationProperty;
+        }
+
+        DerivedPropertyChangeHandler.RecalculateDerivedProperty(
+            ref property, 0, resumeDeferredNotification: true);
+    }
+
+    bool IWriteCommitGuard.TryEnter()
+    {
+        Monitor.Enter(this);
+        if (IsAttached &&
+            _notificationSequence == RecalculationSequence)
+        {
+            return true;
+        }
+
+        Monitor.Exit(this);
+        return false;
+    }
+
+    void IWriteCommitGuard.Exit() => Monitor.Exit(this);
 
     /// <summary>
     /// Read-only access to used-by properties for public API.
@@ -131,6 +320,8 @@ internal sealed class DerivedPropertyData
     internal PropertyReference[] DetachAndSnapshotUsedBy(in PropertyReference property)
     {
         IsAttached = false;
+        _isNotificationDeferred = false;
+        _deferredNotificationRawTimestamp = 0;
 
         // Case 1 (derived only): remove this property from each dependency's UsedByProperties.
         if (property.Metadata.IsDerived)
