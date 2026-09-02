@@ -112,7 +112,10 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
 
     /// <summary>
     /// Raised when a subject is attached to the object graph.
-    /// Handlers must be exception-free and fast (invoked inside lock).
+    /// Handlers must be exception-free and fast (invoked inside lock). Never hand structural
+    /// work to another thread and wait for it from here: the dispatched write needs the very
+    /// gate this thread is holding. Dispatching a read, a scalar write or input and output is
+    /// safe, and so is handing structural work off without waiting.
     /// </summary>
     public event Action<SubjectLifecycleChange>? SubjectAttached
     {
@@ -126,7 +129,10 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// The subject's ownership record and baselines are already gone by this point, so GetParents()
     /// answers empty and GetReferenceCount() answers zero; the subject still resolves its context,
     /// which is what the teardown callbacks need.
-    /// Handlers must be exception-free and fast (invoked inside lock).
+    /// Handlers must be exception-free and fast (invoked inside lock). Never hand structural
+    /// work to another thread and wait for it from here: the dispatched write needs the very
+    /// gate this thread is holding. Dispatching a read, a scalar write or input and output is
+    /// safe, and so is handing structural work off without waiting.
     /// </summary>
     public event Action<SubjectLifecycleChange>? SubjectDetaching
     {
