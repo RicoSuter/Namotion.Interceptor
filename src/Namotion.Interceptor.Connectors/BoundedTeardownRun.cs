@@ -30,13 +30,18 @@ internal sealed class BoundedTeardownRun
     public BoundedTeardownRun(TimeSpan teardownBound)
     {
         _teardownBound = teardownBound;
+
+        // Captured here rather than exposed as source reads: a captured token outlives its source's
+        // disposal, so no reader has to know when this run releases its sources.
+        ProcessingToken = _processingTokenSource.Token;
+        TeardownToken = _teardownTokenSource.Token;
     }
 
     /// <summary>Cancelled first when the run is stopping; the core's steady-state work observes this.</summary>
-    public CancellationToken ProcessingToken => _processingTokenSource.Token;
+    public CancellationToken ProcessingToken { get; }
 
     /// <summary>Cancelled only at the bound; the core's final flush and handoff observe this.</summary>
-    public CancellationToken TeardownToken => _teardownTokenSource.Token;
+    public CancellationToken TeardownToken { get; }
 
     /// <summary>Reports that the core is entering ordinary finalization. First report wins.</summary>
     public void MarkFinalizationStarted() => _finalizationStarted.TrySetResult(null);
@@ -58,11 +63,12 @@ internal sealed class BoundedTeardownRun
     /// wait handle can throw and the caller has to establish that before the run.
     /// </param>
     /// <returns>
-    /// Whether the core was abandoned at the bound, and the fault that pushed it into finalization when
-    /// one was reported. The caller settles ownership of whatever an abandoned core still holds, then
-    /// rethrows the fault; a core that completes in time propagates its exception from the await instead.
+    /// Whether the core was abandoned at the bound (it was still finalizing and will never be waited on
+    /// again), and the fault that pushed it into finalization when one was reported. The caller settles
+    /// ownership of whatever an abandoned core still holds, then rethrows the fault; a core that
+    /// completes in time propagates its exception from the await instead.
     /// </returns>
-    public async Task<BoundedTeardownOutcome> RunAsync(Func<Task> core, Task stopSignal)
+    public async Task<(bool AbandonedAtBound, ExceptionDispatchInfo? Fault)> RunAsync(Func<Task> core, Task stopSignal)
     {
         var coreTask = Task.Run(core, CancellationToken.None);
 
@@ -77,7 +83,7 @@ internal sealed class BoundedTeardownRun
                 _teardownTokenSource.Dispose();
             }
 
-            return BoundedTeardownOutcome.Completed;
+            return (AbandonedAtBound: false, Fault: null);
         }
 
         var processingCancellationTask = _processingTokenSource.CancelAsync();
@@ -90,61 +96,36 @@ internal sealed class BoundedTeardownRun
             {
                 await boundCancellation.CancelAsync().ConfigureAwait(false);
                 await coreTask.ConfigureAwait(false);
-                return BoundedTeardownOutcome.Completed;
+                return (AbandonedAtBound: false, Fault: null);
             }
 
             teardownCancellationTask = _teardownTokenSource.CancelAsync();
 
             // The fault surfaces only when finalization began on its own: a caller-requested stop has
             // no fault to raise, and abandonment at the bound is its documented outcome, not an error.
-            return new BoundedTeardownOutcome(
-                abandonedAtBound: true,
-                fault: completedTask == _finalizationStarted.Task
+            return (AbandonedAtBound: true,
+                Fault: completedTask == _finalizationStarted.Task
                     ? await _finalizationStarted.Task.ConfigureAwait(false)
                     : null);
         }
         finally
         {
-            ObserveInBackground(coreTask, processingCancellationTask, teardownCancellationTask,
-                _processingTokenSource, _teardownTokenSource);
+            ObserveInBackground(coreTask, processingCancellationTask, teardownCancellationTask);
         }
     }
 
     // Nothing awaits this: the point of the bound is that the caller has already been released.
-    private static void ObserveInBackground(
-        Task coreTask,
-        Task processingCancellationTask,
-        Task teardownCancellationTask,
-        CancellationTokenSource processingTokenSource,
-        CancellationTokenSource teardownTokenSource)
+    private void ObserveInBackground(Task coreTask, Task processingCancellationTask, Task teardownCancellationTask)
     {
         _ = Task.WhenAll(coreTask, processingCancellationTask, teardownCancellationTask).ContinueWith(
             task =>
             {
                 _ = task.Exception;
-                processingTokenSource.Dispose();
-                teardownTokenSource.Dispose();
+                _processingTokenSource.Dispose();
+                _teardownTokenSource.Dispose();
             },
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
     }
-}
-
-/// <summary>How a <see cref="BoundedTeardownRun"/> ended, for the caller to settle and rethrow.</summary>
-internal readonly struct BoundedTeardownOutcome
-{
-    public static readonly BoundedTeardownOutcome Completed = default;
-
-    public BoundedTeardownOutcome(bool abandonedAtBound, ExceptionDispatchInfo? fault)
-    {
-        AbandonedAtBound = abandonedAtBound;
-        Fault = fault;
-    }
-
-    /// <summary>The core was still finalizing at the bound and will never be waited on again.</summary>
-    public bool AbandonedAtBound { get; }
-
-    /// <summary>The fault that pushed the core into finalization, when it was abandoned before completing.</summary>
-    public ExceptionDispatchInfo? Fault { get; }
 }

@@ -5,15 +5,21 @@ public class BoundedTeardownRunTests
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan ShortBound = TimeSpan.FromMilliseconds(100);
 
+    // Strictly above TestTimeout, so a test that hangs fails on its own timeout instead of
+    // ambiguously racing the bound it meant to keep out of reach.
+    private static readonly TimeSpan UnreachableBound = TimeSpan.FromMinutes(5);
+
+    // A stop that never arrives; the name is the precondition the tests using it depend on.
+    private static readonly Task NoStopRequested = new TaskCompletionSource().Task;
+
     [Fact]
     public async Task WhenTheCoreCompletesOnItsOwn_ThenNothingIsAbandoned()
     {
         // Arrange
         var run = new BoundedTeardownRun(ShortBound);
-        var stopSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // Act
-        var outcome = await run.RunAsync(() => Task.CompletedTask, stopSignal.Task).WaitAsync(TestTimeout);
+        var outcome = await run.RunAsync(() => Task.CompletedTask, NoStopRequested).WaitAsync(TestTimeout);
 
         // Assert
         Assert.False(outcome.AbandonedAtBound);
@@ -25,12 +31,11 @@ public class BoundedTeardownRunTests
     {
         // Arrange
         var run = new BoundedTeardownRun(ShortBound);
-        var stopSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var fault = new InvalidOperationException("core failed");
 
         // Act & Assert
         var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => run.RunAsync(() => throw fault, stopSignal.Task)).WaitAsync(TestTimeout);
+            () => run.RunAsync(() => throw fault, NoStopRequested)).WaitAsync(TestTimeout);
         Assert.Same(fault, thrown);
     }
 
@@ -39,7 +44,6 @@ public class BoundedTeardownRunTests
     {
         // Arrange
         var run = new BoundedTeardownRun(ShortBound);
-        var stopSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var fault = new InvalidOperationException("core failed");
 
         // Act & Assert
@@ -48,7 +52,7 @@ public class BoundedTeardownRunTests
             {
                 run.MarkFinalizationStarted(fault);
                 throw fault;
-            }, stopSignal.Task)).WaitAsync(TestTimeout);
+            }, NoStopRequested)).WaitAsync(TestTimeout);
         Assert.Same(fault, thrown);
     }
 
@@ -56,7 +60,7 @@ public class BoundedTeardownRunTests
     public async Task WhenStopIsRequestedAndTheCoreFinishesWithinTheBound_ThenNothingIsAbandoned()
     {
         // Arrange
-        var run = new BoundedTeardownRun(TimeSpan.FromSeconds(30));
+        var run = new BoundedTeardownRun(UnreachableBound);
         var stopSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var processingCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var runTask = run.RunAsync(async () =>
@@ -82,8 +86,8 @@ public class BoundedTeardownRunTests
         // Arrange
         var run = new BoundedTeardownRun(ShortBound);
         var stopSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseCore = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var runTask = run.RunAsync(() => releaseCore.Task, stopSignal.Task);
+        using var core = new HungCore();
+        var runTask = run.RunAsync(() => core.Task, stopSignal.Task);
 
         // Act
         stopSignal.TrySetResult();
@@ -93,7 +97,6 @@ public class BoundedTeardownRunTests
         Assert.True(outcome.AbandonedAtBound);
         Assert.Null(outcome.Fault);
         Assert.True(run.TeardownToken.IsCancellationRequested);
-        releaseCore.TrySetResult();
     }
 
     [Fact]
@@ -101,14 +104,13 @@ public class BoundedTeardownRunTests
     {
         // Arrange
         var run = new BoundedTeardownRun(ShortBound);
-        var stopSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseCore = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var core = new HungCore();
         var fault = new InvalidOperationException("finalization fault");
         var runTask = run.RunAsync(() =>
         {
             run.MarkFinalizationStarted(fault);
-            return releaseCore.Task;
-        }, stopSignal.Task);
+            return core.Task;
+        }, NoStopRequested);
 
         // Act
         var outcome = await runTask.WaitAsync(TestTimeout);
@@ -117,7 +119,6 @@ public class BoundedTeardownRunTests
         Assert.True(outcome.AbandonedAtBound);
         Assert.NotNull(outcome.Fault);
         Assert.Same(fault, outcome.Fault!.SourceException);
-        releaseCore.TrySetResult();
     }
 
     [Fact]
@@ -125,14 +126,13 @@ public class BoundedTeardownRunTests
     {
         // Arrange
         var run = new BoundedTeardownRun(ShortBound);
-        var stopSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseCore = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var core = new HungCore();
         var runTask = run.RunAsync(() =>
         {
             run.MarkFinalizationStarted();
             run.MarkFinalizationStarted(new InvalidOperationException("reported second"));
-            return releaseCore.Task;
-        }, stopSignal.Task);
+            return core.Task;
+        }, NoStopRequested);
 
         // Act
         var outcome = await runTask.WaitAsync(TestTimeout);
@@ -140,7 +140,6 @@ public class BoundedTeardownRunTests
         // Assert
         Assert.True(outcome.AbandonedAtBound);
         Assert.Null(outcome.Fault);
-        releaseCore.TrySetResult();
     }
 
     [Fact]
@@ -149,12 +148,12 @@ public class BoundedTeardownRunTests
         // Arrange
         var run = new BoundedTeardownRun(ShortBound);
         var stopSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseCore = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var processingCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var registration = run.ProcessingToken
             .Register(() => processingCancelled.TrySetResult())
             .ConfigureAwait(false);
-        var runTask = run.RunAsync(() => releaseCore.Task, stopSignal.Task);
+        using var core = new HungCore();
+        var runTask = run.RunAsync(() => core.Task, stopSignal.Task);
 
         // Act
         stopSignal.TrySetResult();
@@ -165,6 +164,15 @@ public class BoundedTeardownRunTests
         // Assert
         Assert.True(outcome.AbandonedAtBound);
         Assert.Null(outcome.Fault);
-        releaseCore.TrySetResult();
+    }
+
+    // An abandoned core the test releases on scope exit, even when an assert fails first.
+    private sealed class HungCore : IDisposable
+    {
+        private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Task => _completion.Task;
+
+        public void Dispose() => _completion.TrySetResult();
     }
 }

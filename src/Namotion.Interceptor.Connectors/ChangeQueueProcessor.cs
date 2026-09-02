@@ -127,7 +127,8 @@ public class ChangeQueueProcessor : IDisposable
             ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
 
             _ledger = new OutboundDeliveryLedger(
-                maxQueueDepth, dropHandler, logger, TeardownFlushBound, tracksDeliveryOutcome: true);
+                _bufferTime > TimeSpan.Zero ? maxQueueDepth : null,
+                dropHandler, logger, tracksDeliveryOutcome: true);
             _deliveryRule = ValidateRule(deliveryRule);
 
             _changeMerger = new ChangeMerger();
@@ -172,7 +173,8 @@ public class ChangeQueueProcessor : IDisposable
         ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
 
         _ledger = new OutboundDeliveryLedger(
-            maxQueueDepth, dropHandler, logger, TeardownFlushBound, tracksDeliveryOutcome: !writeHandlerOwnsChanges);
+            _bufferTime > TimeSpan.Zero ? maxQueueDepth : null,
+            dropHandler, logger, tracksDeliveryOutcome: !writeHandlerOwnsChanges);
         _subscription = subscription;
         _deliveryRule = ValidateRule(deliveryRule);
         _changeMerger = new ChangeMerger();
@@ -222,53 +224,47 @@ public class ChangeQueueProcessor : IDisposable
             cancellationSignal,
             Timeout.InfiniteTimeSpan,
             executeOnlyOnce: true);
-        var previousState = Interlocked.CompareExchange(ref _lifecycleState, ProcessingState, IdleState);
-        if (previousState != IdleState)
-        {
-            cancellationWait.Unregister(null);
-            throw previousState == ProcessingState
-                ? new InvalidOperationException("The processor is already running.")
-                : new ObjectDisposedException(nameof(ChangeQueueProcessor));
-        }
-
-        if (Volatile.Read(ref _lifecycleState) == DisposedState)
-        {
-            // Dispose raced the Idle-to-Processing transition before the processing task was created,
-            // so no live run remains to release the merger in its finally block.
-            cancellationWait.Unregister(null);
-            DisposeMerger();
-            throw new ObjectDisposedException(nameof(ChangeQueueProcessor));
-        }
-
-        var run = new BoundedTeardownRun(TeardownFlushBound);
         try
         {
+            var previousState = Interlocked.CompareExchange(ref _lifecycleState, ProcessingState, IdleState);
+            if (previousState != IdleState)
+            {
+                throw previousState == ProcessingState
+                    ? new InvalidOperationException("The processor is already running.")
+                    : new ObjectDisposedException(nameof(ChangeQueueProcessor));
+            }
+
+            if (Volatile.Read(ref _lifecycleState) == DisposedState)
+            {
+                // Dispose raced the Idle-to-Processing transition before the processing task was created,
+                // so no live run remains to release the merger in its finally block.
+                DisposeMerger();
+                throw new ObjectDisposedException(nameof(ChangeQueueProcessor));
+            }
+
+            var run = new BoundedTeardownRun(TeardownFlushBound);
             var outcome = await run.RunAsync(() => ProcessCoreAsync(run), cancellationSignal.Task).ConfigureAwait(false);
             if (outcome.AbandonedAtBound)
             {
-                // The abandoned core still holds its batch, so ownership is settled here before the
-                // caller learns anything: closed admission claims and counts whatever is outstanding.
+                // The abandoned core still holds its batch, so everything terminal settles here before
+                // the caller learns anything: Dispose closes admission to claim and count what is
+                // outstanding, releases an owned subscription, and fires the terminal handler once.
                 Dispose();
                 outcome.Fault?.Throw();
             }
         }
         finally
         {
-            // Held for the whole run rather than released once the stop is observed: the registration
-            // pins the caller's token wait handle, which must stay valid until unregistered, and this
-            // finally is what keeps that inside ProcessAsync's lifetime. Past the first wait the callback
-            // can at most complete a stop signal that nothing observes any longer.
+            // The one cleanup path for every exit: the registration pins the caller's token wait
+            // handle, which must stay valid until unregistered, and this finally keeps that inside
+            // ProcessAsync's lifetime. Past the first wait the callback can at most complete a stop
+            // signal that nothing observes any longer.
             cancellationWait.Unregister(null);
         }
     }
 
     private async Task ProcessCoreAsync(BoundedTeardownRun run)
     {
-        // Captured once: the token getters check disposal on every call, which the per-change loop
-        // should not repeat, and the capture keeps this method off the run's disposal timing entirely.
-        var processingToken = run.ProcessingToken;
-        var teardownToken = run.TeardownToken;
-
         try
         {
             // Connect-window staleness is positional: changes arriving after this snapshot are steady state.
@@ -281,12 +277,12 @@ public class ChangeQueueProcessor : IDisposable
                     var flushFailureReported = false;
                     try
                     {
-                        while (await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
+                        while (await periodicTimer.WaitForNextTickAsync(run.ProcessingToken).ConfigureAwait(false))
                         {
                             // Catch per tick so a consumer callback cannot permanently stop delivery while dequeueing continues.
                             try
                             {
-                                await TryFlushAsync(processingToken).ConfigureAwait(false);
+                                await TryFlushAsync(run.ProcessingToken).ConfigureAwait(false);
                                 flushFailureReported = false;
                             }
                             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -314,7 +310,7 @@ public class ChangeQueueProcessor : IDisposable
 
             try
             {
-                while (_subscription.TryDequeue(out var change, processingToken))
+                while (_subscription.TryDequeue(out var change, run.ProcessingToken))
                 {
                     var wasQueuedBeforeStart = queuedBeforeStart > 0;
                     if (wasQueuedBeforeStart)
@@ -352,7 +348,7 @@ public class ChangeQueueProcessor : IDisposable
                         }
 
                         _immediateBuffer[0] = change;
-                        await WriteChangesAsync(_immediateBuffer, processingToken).ConfigureAwait(false);
+                        await WriteChangesAsync(_immediateBuffer, run.ProcessingToken).ConfigureAwait(false);
                     }
                     else
                     {
@@ -372,13 +368,13 @@ public class ChangeQueueProcessor : IDisposable
                 await flushTask.ConfigureAwait(false);
                 try
                 {
-                    await TryFlushAsync(teardownToken).ConfigureAwait(false);
+                    await TryFlushAsync(run.TeardownToken).ConfigureAwait(false);
                 }
                 finally
                 {
                     if (_completionHandler is not null)
                     {
-                        await _completionHandler(teardownToken).ConfigureAwait(false);
+                        await _completionHandler(run.TeardownToken).ConfigureAwait(false);
                     }
                 }
             }
@@ -468,13 +464,7 @@ public class ChangeQueueProcessor : IDisposable
 
         try
         {
-            // Drain the concurrent queue into the scratch buffer under exclusive flush
-            _flushChanges.Clear();
-            while (_ledger.TryDequeue(out var change))
-            {
-                _flushChanges.Add(change);
-            }
-
+            _ledger.DrainInto(_flushChanges);
             if (_flushChanges.Count == 0)
             {
                 return;
@@ -491,7 +481,7 @@ public class ChangeQueueProcessor : IDisposable
                 await WriteChangesAsync(
                     mergedChanges,
                     cancellationToken,
-                    deliveryAdmitted: !_writeHandlerOwnsChanges).ConfigureAwait(false);
+                    deliveryAdmitted: _ledger.MergedDeliveryAdmission is not null).ConfigureAwait(false);
             }
         }
         finally

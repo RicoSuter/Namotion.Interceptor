@@ -39,7 +39,6 @@ internal sealed class OutboundDeliveryLedger
     private readonly int? _maxQueueDepth;
     private readonly Action<long>? _dropHandler;
     private readonly ILogger _logger;
-    private readonly TimeSpan _terminalBound;
 
     private long _dropCount;
     private int _deliveryState;
@@ -48,13 +47,11 @@ internal sealed class OutboundDeliveryLedger
         int? maxQueueDepth,
         Action<long>? dropHandler,
         ILogger logger,
-        TimeSpan terminalBound,
         bool tracksDeliveryOutcome)
     {
         _maxQueueDepth = maxQueueDepth;
         _dropHandler = dropHandler;
         _logger = logger;
-        _terminalBound = terminalBound;
         MergedDeliveryAdmission = tracksDeliveryOutcome ? TryAdmitOrCountTerminal : null;
     }
 
@@ -77,11 +74,15 @@ internal sealed class OutboundDeliveryLedger
     public void Enqueue(in SubjectPropertyChange change)
     {
         _changes.Enqueue(change);
-        if (_maxQueueDepth is not int maxQueueDepth || _changes.Count <= maxQueueDepth)
+        if (_maxQueueDepth is int maxQueueDepth && _changes.Count > maxQueueDepth)
         {
-            return;
+            TrimToBound(maxQueueDepth);
         }
+    }
 
+    // Split out so the per-change Enqueue stays loop-free and inside the JIT's inline budget.
+    private void TrimToBound(int maxQueueDepth)
+    {
         var droppedCount = 0L;
         while (_changes.Count > maxQueueDepth && _changes.TryDequeue(out _))
         {
@@ -95,8 +96,18 @@ internal sealed class OutboundDeliveryLedger
         }
     }
 
-    /// <summary>Hands a buffered change to the flush that is about to deliver it.</summary>
-    public bool TryDequeue(out SubjectPropertyChange change) => _changes.TryDequeue(out change);
+    /// <summary>
+    /// Drains everything buffered into <paramref name="buffer"/> (cleared first) for the flush that is
+    /// about to deliver it. The caller holds the flush gate, so at most one drain runs at a time.
+    /// </summary>
+    public void DrainInto(List<SubjectPropertyChange> buffer)
+    {
+        buffer.Clear();
+        while (_changes.TryDequeue(out var change))
+        {
+            buffer.Add(change);
+        }
+    }
 
     /// <summary>
     /// Claims delivery for <paramref name="count"/> changes. Fails while another delivery is in flight or
@@ -169,10 +180,8 @@ internal sealed class OutboundDeliveryLedger
     /// </summary>
     public void CloseAndCountTerminalDrops() => CountTerminalDrops(CloseAndDrain());
 
-    /// <remarks>
-    /// Under the lock, so a cancellation requeue or a failure accounting that is mid-transition settles
-    /// first and is observed rather than missed.
-    /// </remarks>
+    // Under the lock, so a cancellation requeue or a failure accounting that is mid-transition
+    // settles first and is observed rather than missed.
     private int CloseAndDrain()
     {
         lock (_ownership)
@@ -208,7 +217,7 @@ internal sealed class OutboundDeliveryLedger
                 _logger.LogWarning(
                     "Gave up waiting after {Timeout} for {Count} changes to be written while stopping. " +
                     "A write handler may already have completed them remotely or may still complete them.",
-                    _terminalBound,
+                    ChangeQueueProcessor.TeardownFlushBound,
                     count);
             }
             catch
