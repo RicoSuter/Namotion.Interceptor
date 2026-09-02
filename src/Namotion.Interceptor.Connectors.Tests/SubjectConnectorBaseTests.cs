@@ -66,7 +66,7 @@ public class SubjectConnectorBaseTests
         using var connector = new TestConnector();
         await ((IHostedService)connector).StartAsync(CancellationToken.None);
         connector.MarkOperational();
-        await AsyncTestHelpers.WaitUntilAsync(() => connector.Diagnostics.IsOperational);
+        await AsyncTestHelpers.WaitUntilAsync(() => connector.Diagnostics.IsOperational == true);
 
         // Act
         connector.Release();
@@ -83,7 +83,7 @@ public class SubjectConnectorBaseTests
         var connector = new TestConnector();
         await ((IHostedService)connector).StartAsync(CancellationToken.None);
         connector.MarkOperational();
-        await AsyncTestHelpers.WaitUntilAsync(() => connector.Diagnostics.IsOperational);
+        await AsyncTestHelpers.WaitUntilAsync(() => connector.Diagnostics.IsOperational == true);
 
         // Act
         connector.Dispose();

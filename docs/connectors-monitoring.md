@@ -207,7 +207,7 @@ Reading `State` and `StateChangeTime` in sequence is two separate snapshots. Eac
 
 The outbound backlog is the clearest case of the split: `Diagnostics.OutboundRetries.Depth` can be non-zero during entirely normal synchronized operation, because a queued write says nothing about whether the model mirrors the external system.
 
-Read the two together to tell a network outage from a connected source that is still loading: the first is `IsOperational` false, the second is `IsOperational` true with a state of `Synchronizing`.
+Read the two together to tell a reported network outage from a connected source that is still loading: the first is `IsOperational == false`, the second is `IsOperational == true` with a state of `Synchronizing`. `IsOperational == null` means the source is running and has not published liveness, so it identifies neither condition and does not change the source's synchronization state. A stopped source always reads `false`.
 
 ### The Event Stream
 

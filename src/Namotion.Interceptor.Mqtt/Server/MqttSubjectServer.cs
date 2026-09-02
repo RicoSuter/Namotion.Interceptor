@@ -834,6 +834,5 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
             _configuration.BufferTime,
             maxQueueDepth: null,
             logger: _logger,
-            dropHandler: Metrics.OutboundChanges.AddDropped,
-            teardownFlushTimeout: _configuration.TeardownFlushTimeout);
+            dropHandler: Metrics.OutboundChanges.CreateDropReporter());
 }

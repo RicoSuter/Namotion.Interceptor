@@ -20,7 +20,7 @@ public class WebSocketServerDiagnosticsTests
     /// here is what a fresh <c>ConnectorMetrics</c> and an idle handler report.
     /// </summary>
     [Fact]
-    public void WhenNeverStarted_ThenTheServerReportsNotOperational()
+    public void WhenNeverStarted_ThenTheServerReportsUnavailableLiveness()
     {
         // Arrange
         using var server = CreateServer();
@@ -29,7 +29,7 @@ public class WebSocketServerDiagnosticsTests
         var diagnostics = server.Diagnostics;
 
         // Assert
-        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.IsOperational);
         Assert.Null(diagnostics.OperationalChangeTime);
         Assert.Null(diagnostics.StartTime);
         Assert.Null(diagnostics.LastError);

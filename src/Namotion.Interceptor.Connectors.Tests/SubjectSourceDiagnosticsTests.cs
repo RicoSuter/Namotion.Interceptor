@@ -23,8 +23,8 @@ public class SubjectSourceDiagnosticsTests
         // Assert
         Assert.NotNull(source.Diagnostics);
         Assert.Null(source.Diagnostics.StartTime);
-        Assert.False(source.Diagnostics.IsOperational);
-        Assert.Equal(0, source.Diagnostics.ClaimedPropertyCount);
+        Assert.Null(source.Diagnostics.IsOperational);
+        Assert.Null(source.Diagnostics.ClaimedPropertyCount);
     }
 
     [Fact]
@@ -62,6 +62,25 @@ public class SubjectSourceDiagnosticsTests
 
         // Assert
         Assert.NotNull(source.Diagnostics.StartTime);
+        await ((IHostedService)source).StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task WhenStartedWithoutLivenessReporting_ThenTheSourceIsSynchronizedWithUnavailableLiveness()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
+        var subject = new Person(context);
+        using var source = new TestSubjectSource(subject, context, NullLogger.Instance);
+
+        // Act
+        await ((IHostedService)source).StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => source.State == SourceState.Synchronized,
+            message: "The source did not complete its initial synchronization.");
+
+        // Assert
+        Assert.Null(source.Diagnostics.IsOperational);
         await ((IHostedService)source).StopAsync(CancellationToken.None);
     }
 

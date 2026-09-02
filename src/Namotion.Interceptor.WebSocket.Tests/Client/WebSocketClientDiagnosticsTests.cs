@@ -32,7 +32,7 @@ public class WebSocketClientDiagnosticsTests
     /// counter this connector does not feed, which would report a misleading zero.
     /// </summary>
     [Fact]
-    public async Task WhenNeverConnected_ThenTheSourceReportsNotOperationalAndNoThroughput()
+    public async Task WhenNeverConnected_ThenTheSourceReportsUnavailableLivenessAndNoThroughput()
     {
         // Arrange
         await using var source = CreateClientSource();
@@ -41,7 +41,7 @@ public class WebSocketClientDiagnosticsTests
         var diagnostics = source.Diagnostics;
 
         // Assert
-        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.IsOperational);
         Assert.Null(diagnostics.OperationalChangeTime);
         Assert.Null(diagnostics.StartTime);
         Assert.Null(diagnostics.LastError);
@@ -91,7 +91,7 @@ public class WebSocketClientDiagnosticsTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == true,
                 message: "The client should report operational once the handshake is accepted.");
             Assert.Null(source.Diagnostics.LastError);
 

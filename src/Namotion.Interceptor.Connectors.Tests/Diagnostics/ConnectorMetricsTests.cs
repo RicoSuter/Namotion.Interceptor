@@ -5,19 +5,19 @@ namespace Namotion.Interceptor.Connectors.Tests.Diagnostics;
 public class ConnectorMetricsTests
 {
     [Fact]
-    public void WhenNeverStarted_ThenNotOperationalAndNoTimestamps()
+    public void WhenLivenessIsNeverReported_ThenOperationalStateAndTimestampAreNull()
     {
         // Arrange
         var metrics = new ConnectorMetrics();
 
         // Act
         var diagnostics = new ConnectorDiagnostics(metrics);
+        metrics.MarkStarted();
 
         // Assert
-        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.IsOperational);
         Assert.Null(diagnostics.OperationalChangeTime);
-        Assert.Null(diagnostics.StartTime);
-        Assert.Null(diagnostics.LastError);
+        Assert.NotNull(diagnostics.StartTime);
     }
 
     [Fact]
@@ -33,6 +33,21 @@ public class ConnectorMetricsTests
 
         // Assert
         Assert.True(diagnostics.IsOperational);
+        Assert.NotNull(diagnostics.OperationalChangeTime);
+    }
+
+    [Fact]
+    public void WhenMarkedNotOperationalFirst_ThenFalseAndTimestampArePublished()
+    {
+        // Arrange
+        var metrics = new ConnectorMetrics();
+        var diagnostics = new ConnectorDiagnostics(metrics);
+
+        // Act
+        metrics.MarkNotOperational();
+
+        // Assert
+        Assert.False(diagnostics.IsOperational);
         Assert.NotNull(diagnostics.OperationalChangeTime);
     }
 
@@ -127,7 +142,7 @@ public class ConnectorMetricsTests
     }
 
     [Fact]
-    public void WhenStoppedWithoutEverBeingOperational_ThenNoTransitionTimestampIsInvented()
+    public void WhenUnmonitoredConnectorIsStopped_ThenLivenessBecomesFalseAndLateReportsAreIgnored()
     {
         // Arrange
         var metrics = new ConnectorMetrics();
@@ -135,9 +150,44 @@ public class ConnectorMetricsTests
 
         // Act
         metrics.MarkStopped();
+        metrics.MarkOperational();
+
+        // Assert: a stopped connector is known not to be serving even though it never measured that.
+        Assert.False(diagnostics.IsOperational);
+        Assert.NotNull(diagnostics.OperationalChangeTime);
+    }
+
+    [Fact]
+    public void WhenMonitoredConnectorIsRestarted_ThenLivenessReturnsToUnavailable()
+    {
+        // Arrange
+        var metrics = new ConnectorMetrics();
+        var diagnostics = new ConnectorDiagnostics(metrics);
+        metrics.MarkOperational();
+        metrics.MarkStopped();
+
+        // Act
+        metrics.MarkStarted();
+
+        // Assert: the new epoch reports nothing observed rather than the previous epoch's value and a
+        // timestamp from before it began.
+        Assert.Null(diagnostics.IsOperational);
+        Assert.Null(diagnostics.OperationalChangeTime);
+    }
+
+    [Fact]
+    public void WhenUnmonitoredConnectorIsRestarted_ThenLivenessRemainsNullUntilExplicitlyReported()
+    {
+        // Arrange
+        var metrics = new ConnectorMetrics();
+        var diagnostics = new ConnectorDiagnostics(metrics);
+        metrics.MarkStopped();
+
+        // Act
+        metrics.MarkStarted();
 
         // Assert
-        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.IsOperational);
         Assert.Null(diagnostics.OperationalChangeTime);
     }
 
@@ -196,7 +246,7 @@ public class ConnectorMetricsTests
 
         // Assert
         Assert.NotEqual(firstStart, diagnostics.StartTime);
-        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.IsOperational);
         Assert.Equal(0, diagnostics.OutboundChanges.TotalDropped);
         Assert.Equal(0, diagnostics.OutboundRetries.TotalDropped);
         Assert.Equal(0, diagnostics.InboundBuffer.TotalDropped);
@@ -268,7 +318,7 @@ public class ConnectorMetricsTests
     }
 
     [Fact]
-    public void WhenNoClaimedPropertyProviderIsRegistered_ThenCountIsZero()
+    public void WhenNoClaimedPropertyProviderIsRegistered_ThenCountIsUnavailable()
     {
         // Arrange
         var metrics = new SourceMetrics();
@@ -277,7 +327,7 @@ public class ConnectorMetricsTests
         var diagnostics = new SourceDiagnostics(metrics);
 
         // Assert
-        Assert.Equal(0, diagnostics.ClaimedPropertyCount);
+        Assert.Null(diagnostics.ClaimedPropertyCount);
     }
 
     [Fact]
@@ -297,7 +347,7 @@ public class ConnectorMetricsTests
     }
 
     [Fact]
-    public void WhenClaimedPropertyProviderThrows_ThenCountIsZeroInsteadOfThrowing()
+    public void WhenClaimedPropertyProviderThrows_ThenCountIsUnavailableInsteadOfThrowing()
     {
         // Arrange
         var metrics = new SourceMetrics();
@@ -308,7 +358,7 @@ public class ConnectorMetricsTests
         var count = diagnostics.ClaimedPropertyCount;
 
         // Assert
-        Assert.Equal(0, count);
+        Assert.Null(count);
     }
 
     [Fact]
