@@ -1974,9 +1974,16 @@ public class ChangeQueueProcessorTests
 
         var firstName = new PropertyReference(subject, nameof(Person.FirstName));
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
-        EnqueueChange(processor, firstName, null, "superseded", revision: 1);
-        EnqueueChange(processor, lastName, null, "survivor", revision: 2);
-        EnqueueChange(processor, firstName, "superseded", "latest", revision: 3);
+
+        // Relative to the subject's commit counter, which the write protocol also advances during
+        // construction: an absolute revision would rank below the arranged writes and be dropped as stale.
+        firstName.TryGetWriteState(includeSourceCommitsInRevision: false, out var firstNameRevision, out _);
+        lastName.TryGetWriteState(includeSourceCommitsInRevision: false, out var lastNameRevision, out _);
+        var baseRevision = Math.Max(firstNameRevision, lastNameRevision);
+
+        EnqueueChange(processor, firstName, null, "superseded", revision: baseRevision + 1);
+        EnqueueChange(processor, lastName, null, "survivor", revision: baseRevision + 2);
+        EnqueueChange(processor, firstName, "superseded", "latest", revision: baseRevision + 3);
 
         using var cancellation = new CancellationTokenSource();
         var processing = processor.ProcessAsync(cancellation.Token);
@@ -2106,9 +2113,16 @@ public class ChangeQueueProcessorTests
 
         var firstName = new PropertyReference(subject, nameof(Person.FirstName));
         var lastName = new PropertyReference(subject, nameof(Person.LastName));
-        EnqueueChange(processor, firstName, null, "superseded", revision: 1);
-        EnqueueChange(processor, lastName, null, "survivor", revision: 2);
-        EnqueueChange(processor, firstName, "superseded", "latest", revision: 3);
+
+        // Relative to the subject's commit counter, which the write protocol also advances during
+        // construction: an absolute revision would rank below the arranged writes and be dropped as stale.
+        firstName.TryGetWriteState(includeSourceCommitsInRevision: false, out var firstNameRevision, out _);
+        lastName.TryGetWriteState(includeSourceCommitsInRevision: false, out var lastNameRevision, out _);
+        var baseRevision = Math.Max(firstNameRevision, lastNameRevision);
+
+        EnqueueChange(processor, firstName, null, "superseded", revision: baseRevision + 1);
+        EnqueueChange(processor, lastName, null, "survivor", revision: baseRevision + 2);
+        EnqueueChange(processor, firstName, "superseded", "latest", revision: baseRevision + 3);
 
         using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var watchdogRegistration = watchdog.Token.Register(() => releaseCancellation.TrySetResult());
