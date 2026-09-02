@@ -12,6 +12,13 @@ namespace Namotion.Interceptor.Connectors;
 /// The invariant this type exists to hold: an accepted change is owned by exactly one of the buffered
 /// queue, one active delivery, or the terminal drop count. It is never in two of them and never in none.
 /// <para>
+/// Two boundaries scope it. When the write handler owns delivery, <see cref="MergedDeliveryAdmission"/>
+/// is null and a change leaves this accounting for good when the pump hands it over: only the buffered
+/// queue and terminal closure are kept here. And a flush holds dequeued changes in its scratch buffer
+/// until the merger asks for admission, so a merge failure inside that window loses them to all three
+/// places; the flush gate keeps that window single-threaded.
+/// </para>
+/// <para>
 /// Delivery admission is a single integer: 0 means idle, a positive value is the size of the one delivery
 /// in flight, and <see cref="ClosedDelivery"/> is terminal. Admission requires idle, so two deliveries
 /// cannot overlap and a batch that finishes after close cannot reopen admission. The lock exists only to
@@ -37,13 +44,25 @@ internal sealed class OutboundDeliveryLedger
     private long _dropCount;
     private int _deliveryState;
 
-    public OutboundDeliveryLedger(int? maxQueueDepth, Action<long>? dropHandler, ILogger logger, TimeSpan terminalBound)
+    public OutboundDeliveryLedger(
+        int? maxQueueDepth,
+        Action<long>? dropHandler,
+        ILogger logger,
+        TimeSpan terminalBound,
+        bool tracksDeliveryOutcome)
     {
         _maxQueueDepth = maxQueueDepth;
         _dropHandler = dropHandler;
         _logger = logger;
         _terminalBound = terminalBound;
+        MergedDeliveryAdmission = tracksDeliveryOutcome ? TryAdmitOrCountTerminal : null;
     }
+
+    /// <summary>
+    /// The admission callback a flush hands the merger, or null when the write handler owns delivery
+    /// and no outcome is accounted here. Allocated once so a flush does not.
+    /// </summary>
+    public Func<int, bool>? MergedDeliveryAdmission { get; }
 
     /// <summary>Total changes this ledger has accounted for as lost, for any reason.</summary>
     public long DropCount => Interlocked.Read(ref _dropCount);
@@ -83,7 +102,7 @@ internal sealed class OutboundDeliveryLedger
     /// Claims delivery for <paramref name="count"/> changes. Fails while another delivery is in flight or
     /// once ownership has closed.
     /// </summary>
-    public bool TryAdmit(int count) => Interlocked.CompareExchange(ref _deliveryState, count, 0) == 0;
+    private bool TryAdmit(int count) => Interlocked.CompareExchange(ref _deliveryState, count, 0) == 0;
 
     /// <summary>
     /// Claims delivery, and accounts for the batch as terminally lost when the claim is refused, so a
@@ -144,14 +163,17 @@ internal sealed class OutboundDeliveryLedger
     }
 
     /// <summary>
-    /// Closes ownership for good and claims everything still outstanding: the delivery in flight plus
-    /// everything still buffered. Returns how many changes that was.
+    /// Closes ownership for good, claims everything still outstanding (the delivery in flight plus
+    /// everything still buffered) and accounts for all of it as terminally lost. One method, so a
+    /// closed ledger can never have claimed changes that were not counted.
     /// </summary>
+    public void CloseAndCountTerminalDrops() => CountTerminalDrops(CloseAndDrain());
+
     /// <remarks>
     /// Under the lock, so a cancellation requeue or a failure accounting that is mid-transition settles
     /// first and is observed rather than missed.
     /// </remarks>
-    public int CloseAndDrain()
+    private int CloseAndDrain()
     {
         lock (_ownership)
         {
@@ -170,7 +192,7 @@ internal sealed class OutboundDeliveryLedger
     /// off the caller's thread, because the caller is a teardown path that must stay bounded and both the
     /// drop handler and the logger are consumer supplied.
     /// </summary>
-    public void CountTerminalDrops(int count)
+    private void CountTerminalDrops(int count)
     {
         if (count <= 0)
         {

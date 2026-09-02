@@ -31,7 +31,6 @@ public class ChangeQueueProcessor : IDisposable
     private readonly bool _writeHandlerOwnsChanges;
     private Action? _terminalHandler;
     private readonly Func<CancellationToken, ValueTask>? _completionHandler;
-    private readonly Func<int, bool>? _mergedDeliveryAdmission;
 
     // Owns every accepted change and its outcome; see OutboundDeliveryLedger for the invariant.
     private readonly OutboundDeliveryLedger _ledger;
@@ -127,8 +126,8 @@ public class ChangeQueueProcessor : IDisposable
         {
             ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
 
-            _ledger = new OutboundDeliveryLedger(maxQueueDepth, dropHandler, logger, TeardownFlushBound);
-            _mergedDeliveryAdmission = _ledger.TryAdmitOrCountTerminal;
+            _ledger = new OutboundDeliveryLedger(
+                maxQueueDepth, dropHandler, logger, TeardownFlushBound, tracksDeliveryOutcome: true);
             _deliveryRule = ValidateRule(deliveryRule);
 
             _changeMerger = new ChangeMerger();
@@ -172,8 +171,8 @@ public class ChangeQueueProcessor : IDisposable
 
         ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
 
-        _ledger = new OutboundDeliveryLedger(maxQueueDepth, dropHandler, logger, TeardownFlushBound);
-        _mergedDeliveryAdmission = writeHandlerOwnsChanges ? null : _ledger.TryAdmitOrCountTerminal;
+        _ledger = new OutboundDeliveryLedger(
+            maxQueueDepth, dropHandler, logger, TeardownFlushBound, tracksDeliveryOutcome: !writeHandlerOwnsChanges);
         _subscription = subscription;
         _deliveryRule = ValidateRule(deliveryRule);
         _changeMerger = new ChangeMerger();
@@ -255,8 +254,10 @@ public class ChangeQueueProcessor : IDisposable
         }
         finally
         {
-            // Held for the whole run rather than released once the stop is observed. The callback only
-            // sets an already-settled source after that point, so the extra lifetime is inert.
+            // Held for the whole run rather than released once the stop is observed: the registration
+            // pins the caller's token wait handle, which must stay valid until unregistered, and this
+            // finally is what keeps that inside ProcessAsync's lifetime. Past the first wait the callback
+            // can at most complete a stop signal that nothing observes any longer.
             cancellationWait.Unregister(null);
         }
     }
@@ -483,7 +484,7 @@ public class ChangeQueueProcessor : IDisposable
             var mergedChanges = _changeMerger!.Merge(
                 CollectionsMarshal.AsSpan(_flushChanges),
                 _deliveryRule,
-                _mergedDeliveryAdmission);
+                _ledger.MergedDeliveryAdmission);
 
             if (mergedChanges.Length > 0)
             {
@@ -530,7 +531,7 @@ public class ChangeQueueProcessor : IDisposable
             _ownedSubscription?.Dispose();
         }
 
-        _ledger.CountTerminalDrops(_ledger.CloseAndDrain());
+        _ledger.CloseAndCountTerminalDrops();
         if (previousState == IdleState)
         {
             DisposeMerger();
