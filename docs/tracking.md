@@ -657,11 +657,11 @@ registered.AddProperty("Tires", typeof(Tire[]),
 
 Caching from inside the getter is safe, including when the getter writes its value back through the property's own intercepted setter: the first read happens during the attach's discovery pass, before the subject is attached and before any callback scope is open, so the store is invisible to interception.
 
-An unstable getter costs a permanently stranded subject. Discovery claims the first value and seeding commits the second, so the first is left unregistered, with a reference count of 0, attached to the context so it cannot join another graph, and unreachable so nothing can ever detach it. No exception is raised.
+An unstable getter costs a discarded subject. Discovery claims the first value and seeding commits the second, so the first never joins the graph: it is unregistered, has a reference count of 0, and its claim is handed back at the end of the attach, which leaves it unattached and reusable rather than stranded on the context. No exception is raised, so the wasted work is invisible.
 
 Do not create the value lazily from a lifecycle callback either: a callback may not write a structural property and throws `LifecycleContractViolationException` if it tries. Construction time is the supported place for a default child.
 
-> **Internal design:** For the exact read points and what the stranded state looks like in the graph, see [Structural Getters](design/tracking-lifecycle.md#structural-getters).
+> **Internal design:** For the exact read points and why the discard is cleaned up rather than reported, see [Structural Getters](design/tracking-lifecycle.md#structural-getters).
 
 ## Parent-Child Relationship Tracking
 

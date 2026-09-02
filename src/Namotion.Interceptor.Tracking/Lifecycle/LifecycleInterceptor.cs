@@ -547,7 +547,16 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             }
             finally
             {
-                if (!published)
+                if (published)
+                {
+                    // Seeding rereads what discovery read, so a structural getter that answers
+                    // differently across the two, or a concurrent write landing in the window
+                    // before the claim, leaves a claimed subject no edge points at. It would be
+                    // attached, unowned and out of reach of every release; handing it back is the
+                    // compensation the write path already applies to the same residue.
+                    _graph.ReleaseUnusedClaims(claimed);
+                }
+                else
                 {
                     RollbackRejectedAttach(subject, claimed);
                 }

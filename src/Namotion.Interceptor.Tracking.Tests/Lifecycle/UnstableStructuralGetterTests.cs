@@ -15,9 +15,6 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// differently across those two reads breaks the stability the protocol requires, and the value only
 /// discovery saw must not be left claimed by the context: it carries no edge, so no release can
 /// reach it, and a subject the context owns can neither join another graph nor be detached.
-///
-/// This currently fails: the attach path has no equivalent of the write path's unused-claim
-/// cleanup, so the discarded value keeps the claim discovery took.
 /// </summary>
 public class UnstableStructuralGetterTests
 {

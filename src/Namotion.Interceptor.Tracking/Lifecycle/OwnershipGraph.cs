@@ -488,8 +488,9 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     /// <summary>
     /// Hands back every claim that did not end up carrying ownership, which happens when the
     /// terminal or the authoritative getter reread throws, when a normalizing setter stores a
-    /// different graph than the one that was validated, or when a downstream write interceptor
-    /// suppresses the continuation.
+    /// different graph than the one that was validated, when a downstream write interceptor
+    /// suppresses the continuation, and on the attach path when seeding commits something other
+    /// than what discovery claimed.
     /// </summary>
     public void ReleaseUnusedClaims(List<IInterceptorSubject> claimed)
     {
