@@ -43,6 +43,11 @@ public partial class HueBridge : BackgroundService,
 
     private readonly ILogger<HueBridge> _logger;
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
+    private readonly Lock _clientLock = new();
+
+    // Set under _clientLock once the bridge is disposed, so no operation can build a client that
+    // nothing is left to release.
+    private bool _disposed;
 
     private LocatedBridge? _bridge;
     private HttpClient? _httpClient;
@@ -116,7 +121,9 @@ public partial class HueBridge : BackgroundService,
     {
         _logger = logger;
 
-        PollingInterval = TimeSpan.FromMilliseconds(500);
+        // The event stream carries state changes; this poll only reconciles the device set, so it is
+        // deliberately slow. This is the interval the loop hardcoded while the setting was ignored.
+        PollingInterval = TimeSpan.FromSeconds(60);
         RetryInterval = TimeSpan.FromSeconds(30);
 
         Lights = new();
@@ -133,24 +140,96 @@ public partial class HueBridge : BackgroundService,
     /// </summary>
     internal LocalHueApi GetOrCreateClient()
     {
-        if (_client is not null)
+        lock (_clientLock)
         {
-            return _client;
+            // Disposal is reported as such rather than as a disconnection, even though Dispose clears
+            // IsConnected on its way past: "the bridge is gone" and "the bridge is not up yet" are
+            // different answers to a caller deciding whether to retry.
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            // An operation may only use a connection the loop is maintaining. Building its own would
+            // reach the bridge and physically succeed, but nothing would be streaming or polling it,
+            // so every derived value stayed at its pre-command reading for as long as the loop was
+            // failing to connect. Refusing is honest, and the caller surfaces it.
+            if (!IsConnected)
+            {
+                throw new InvalidOperationException(
+                    "Bridge is not connected. " + (StatusMessage ?? "Waiting for the connection to be established."));
+            }
+
+            return ConnectClient();
+        }
+    }
+
+    /// <summary>
+    /// The connection loop's own entry point. It is what establishes the connection, so unlike an
+    /// operation it is not subject to the connected check.
+    /// </summary>
+    private LocalHueApi ConnectClient()
+    {
+        lock (_clientLock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            if (_client is not null)
+            {
+                return _client;
+            }
+
+            if (AppKey == null || _bridge == null)
+            {
+                throw new InvalidOperationException("Bridge is not configured or not discovered.");
+            }
+
+            var httpClient = new HttpClient(new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback =
+                    HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+            });
+
+            try
+            {
+                var client = new LocalHueApi(_bridge.IpAddress, AppKey, httpClient);
+                _httpClient = httpClient;
+                _client = client;
+                return client;
+            }
+            catch
+            {
+                httpClient.Dispose();
+                throw;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Stops and releases a failed or shutting-down client. A subsequent connection attempt creates
+    /// a fresh HttpClient because HueApi configures it during construction and .NET forbids changing
+    /// those properties after the first request.
+    /// </summary>
+    internal void ResetClient(LocalHueApi client)
+    {
+        HttpClient? httpClient;
+        lock (_clientLock)
+        {
+            if (!ReferenceEquals(_client, client))
+            {
+                return;
+            }
+
+            _client = null;
+            httpClient = _httpClient;
+            _httpClient = null;
         }
 
-        if (AppKey == null || _bridge == null)
+        try
         {
-            throw new InvalidOperationException("Bridge is not configured or not discovered.");
+            client.StopEventStream();
         }
-
-        _httpClient ??= new HttpClient(new HttpClientHandler
+        finally
         {
-            ServerCertificateCustomValidationCallback =
-                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-        });
-
-        _client = new LocalHueApi(_bridge.IpAddress, AppKey, _httpClient);
-        return _client;
+            httpClient?.Dispose();
+        }
     }
 
     /// <inheritdoc />
@@ -214,7 +293,7 @@ public partial class HueBridge : BackgroundService,
 
                 _bridge = bridge;
 
-                client = GetOrCreateClient();
+                client = ConnectClient();
 
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
@@ -229,6 +308,13 @@ public partial class HueBridge : BackgroundService,
                 var eventStreamTask = RunEventStreamAsync(client, linkedCts.Token);
                 var pollingTask = RunPollingLoopAsync(client, linkedCts.Token);
 
+                // Either one finishing means the connection is no longer whole, so the other is
+                // cancelled and both are observed. Awaiting them together instead let a faulted event
+                // stream sit unobserved behind the polling loop, which never returns: the stream stayed
+                // dead, the reconnect below never ran, and the bridge went on reporting Running while
+                // state changes only arrived at the poll interval.
+                await Task.WhenAny(eventStreamTask, pollingTask);
+                await linkedCts.CancelAsync();
                 await Task.WhenAll(eventStreamTask, pollingTask);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -254,11 +340,10 @@ public partial class HueBridge : BackgroundService,
             finally
             {
                 IsConnected = false;
-                _client = null;
 
                 if (client is not null)
                 {
-                    client.StopEventStream();
+                    ResetClient(client);
                 }
             }
         }
@@ -280,11 +365,16 @@ public partial class HueBridge : BackgroundService,
         }
     }
 
+    // A zero interval would spin the loop and a negative one is rejected outright, so fall back to the
+    // default rather than trusting a hand-edited configuration file.
+    private TimeSpan EffectivePollingInterval =>
+        PollingInterval > TimeSpan.Zero ? PollingInterval : TimeSpan.FromSeconds(60);
+
     private async Task RunPollingLoopAsync(LocalHueApi client, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            await Task.Delay(TimeSpan.FromSeconds(60), cancellationToken);
+            await Task.Delay(EffectivePollingInterval, cancellationToken);
             await PollDevicesAsync(client, cancellationToken);
         }
     }
@@ -635,9 +725,31 @@ public partial class HueBridge : BackgroundService,
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
         IsConnected = false;
-        _client = null;
-        _httpClient?.Dispose();
-        _configChangedSignal.Dispose();
+
+        // Route through ResetClient so the event stream is stopped and the HttpClient is released as
+        // a pair. Clearing _client alone left _httpClient non-null and alive, so a disposal racing an
+        // in-flight operation let GetOrCreateClient build a replacement into abandoned fields.
+        // The disposed flag is set under the same lock that reads the client, which is what makes the
+        // pair a snapshot. Reading the client and then closing the door separately let an operation
+        // racing the shutdown install a replacement in between, and nothing was left to release it.
+        // Cancel first. base.Dispose() is what cancels the stopping token, and running it last let the
+        // loop start a fresh iteration after the door was closed: it would spend up to half a minute
+        // rediscovering the bridge, then fail on the disposed check and overwrite the Stopped status
+        // written above with an Error one.
         base.Dispose();
+
+        LocalHueApi? client;
+        lock (_clientLock)
+        {
+            _disposed = true;
+            client = _client;
+        }
+
+        if (client is not null)
+        {
+            ResetClient(client);
+        }
+
+        _configChangedSignal.Dispose();
     }
 }

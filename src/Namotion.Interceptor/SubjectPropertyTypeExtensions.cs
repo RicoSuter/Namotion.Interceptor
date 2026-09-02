@@ -15,6 +15,9 @@ public static class SubjectPropertyTypeExtensions
     // function of Type. The dependency graph (Reference -> Collection, Dictionary; Collection ->
     // Dictionary; Dictionary -> nothing) is acyclic, so racing factory invocations on different
     // Types converge to the same result without deadlock or inconsistency.
+    // Nullable<T> is normalised to T inside the factories rather than at the entry points, so a
+    // cache hit stays a single dictionary lookup; the nullable and underlying types simply get
+    // one entry each.
     private static readonly ConcurrentDictionary<Type, bool> CanContainSubjectsCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectReferenceTypeCache = new();
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionTypeCache = new();
@@ -110,6 +113,8 @@ public static class SubjectPropertyTypeExtensions
     {
         return IsSubjectReferenceTypeCache.GetOrAdd(type, static t =>
         {
+            t = Nullable.GetUnderlyingType(t) ?? t;
+
             if (typeof(IInterceptorSubject).IsAssignableFrom(t))
             {
                 return true;
@@ -125,6 +130,8 @@ public static class SubjectPropertyTypeExtensions
     {
         return IsSubjectCollectionTypeCache.GetOrAdd(type, static t =>
         {
+            t = Nullable.GetUnderlyingType(t) ?? t;
+
             if (typeof(IInterceptorSubject).IsAssignableFrom(t))
                 return false;
 
@@ -148,6 +155,8 @@ public static class SubjectPropertyTypeExtensions
     {
         return IsSubjectDictionaryTypeCache.GetOrAdd(type, static t =>
         {
+            t = Nullable.GetUnderlyingType(t) ?? t;
+
             if (typeof(IInterceptorSubject).IsAssignableFrom(t))
                 return false;
 

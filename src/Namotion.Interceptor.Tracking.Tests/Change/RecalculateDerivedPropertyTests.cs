@@ -587,7 +587,8 @@ public class RecalculateDerivedPropertyTests
             .Subscribe(change => secondTrackedValue = change.GetNewValue<string?>());
 
         // Act
-        var firstTask = Task.Run(async () =>
+        // Both evaluations must be in flight together for the overlap this test needs.
+        var firstTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(async () =>
         {
             using (await firstContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
             {
@@ -595,7 +596,7 @@ public class RecalculateDerivedPropertyTests
                 new PropertyReference(first, nameof(TransactionCascadeSubject.Probe)).RecalculateDerivedProperty();
             }
         });
-        var secondTask = Task.Run(async () =>
+        var secondTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(async () =>
         {
             using (await secondContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
             {

@@ -56,7 +56,7 @@ public partial class MqttClientLivenessTests
         await source.StartAsync(CancellationToken.None);
 
         await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational,
+            () => source.Diagnostics.IsOperational == true,
             message: "The client should report operational once it has connected to the broker.");
 
         // Assert
@@ -86,7 +86,7 @@ public partial class MqttClientLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == true,
                 message: "The client should report operational once it has connected to the broker.");
 
             var connectedAt = source.Diagnostics.OperationalChangeTime;
@@ -97,11 +97,11 @@ public partial class MqttClientLivenessTests
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == false,
                 message: "A disconnected client should stop reporting that it is serving.");
 
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == true,
                 message: "The client should report operational again once the monitor has reconnected.");
 
             // The rise is a second transition rather than the first one never having been dropped.
@@ -127,7 +127,7 @@ public partial class MqttClientLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == true,
                 message: "The client should report operational once it has connected to the broker.");
 
             var firstClient = GetCurrentClient(source);
@@ -137,13 +137,13 @@ public partial class MqttClientLivenessTests
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == false,
                 timeout: TimeSpan.FromSeconds(3),
                 message: "A force-killed client should report the transport outage.");
             var downAt = source.Diagnostics.OperationalChangeTime;
 
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == true,
                 message: "A force-killed client should become operational on a replacement transport.");
 
             Assert.NotSame(firstClient, GetCurrentClient(source));
@@ -171,7 +171,7 @@ public partial class MqttClientLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == true,
                 message: "The client should report operational once it has connected to the broker.");
             await stateRecorder.WaitForStatesAsync(
                 TimeSpan.FromSeconds(30),
@@ -202,7 +202,7 @@ public partial class MqttClientLivenessTests
                 monitor.SignalReconnectNeeded();
 
                 await AsyncTestHelpers.WaitUntilAsync(
-                    () => !source.Diagnostics.IsOperational,
+                    () => source.Diagnostics.IsOperational == false,
                     message: "The confirmed disconnect should mark the client non-operational.");
                 await stateRecorder.WaitForStatesAsync(
                     TimeSpan.FromSeconds(15),
@@ -211,7 +211,7 @@ public partial class MqttClientLivenessTests
                     SourceState.Synchronizing);
 
                 await AsyncTestHelpers.WaitUntilAsync(
-                    () => source.Diagnostics.IsOperational,
+                    () => source.Diagnostics.IsOperational == true,
                     message: "The client should report operational again once the monitor has reconnected.");
                 await stateRecorder.WaitForStatesAsync(
                     TimeSpan.FromSeconds(30),
@@ -261,7 +261,7 @@ public partial class MqttClientLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial",
+                () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial",
                 message: "The initial transport should receive the broker's retained value.");
 
             var oldClient = GetCurrentClient(source);
@@ -283,7 +283,7 @@ public partial class MqttClientLivenessTests
 
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational &&
+                () => source.Diagnostics.IsOperational == true &&
                     !ReferenceEquals(oldClient, GetCurrentClient(source)) &&
                     clientRoot.Name == "Recovered",
                 message: "The replacement transport should restore the newer retained value.");
@@ -330,7 +330,7 @@ public partial class MqttClientLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial",
+                () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial",
                 message: "The initial transport should receive the broker's retained value.");
 
             brokerRoot.Name = "Recovered";
@@ -371,7 +371,7 @@ public partial class MqttClientLivenessTests
             commitGate.Release();
             await oldCallback.WaitAsync(TimeSpan.FromSeconds(10));
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational && clientRoot.Name == "Recovered",
+                () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Recovered",
                 message: "Recovery should follow an old commit that retirement already admitted.");
 
             // Assert

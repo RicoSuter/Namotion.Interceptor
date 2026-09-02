@@ -7,15 +7,20 @@ namespace Namotion.Interceptor.Connectors.Diagnostics;
 /// never reachable through <see cref="ISubjectConnector"/>, so only the connector itself can move
 /// its liveness or record its errors.
 /// </summary>
+/// <remarks>
+/// An epoch opens with liveness unavailable, which diagnostics expose as <c>null</c>, and closes at
+/// <c>false</c> when <see cref="MarkStopped"/> runs. A connector that reports liveness refines the
+/// value in between, so <c>null</c> means "running and not measured" and never survives a stop.
+/// </remarks>
 public class ConnectorMetrics
 {
-    private sealed record Liveness(bool IsOperational, long ChangeTicks, bool IsStopped);
+    private sealed record Liveness(bool? IsOperational, long ChangeTicks, bool IsStopped);
 
     // Writers serialize on this lock; readers take an immutable snapshot without locking, so no
     // getter can throw or block. Transitions are rare (per connect/disconnect, not per item).
     private readonly Lock _livenessLock = new();
 
-    private Liveness _liveness = new(false, 0, false);
+    private Liveness _liveness = new(null, 0, false);
     private long _startTicks;
     private Exception? _lastError;
     private ImmutableArray<IResettableMetrics> _resettables = [];
@@ -49,9 +54,9 @@ public class ConnectorMetrics
     public QueueMetrics OutboundChanges { get; } = new(nameof(OutboundChanges));
 
     /// <summary>
-    /// Opens a new counter epoch: stamps a fresh start time, clears the last error, releases the
-    /// <see cref="MarkStopped"/> latch and resets every <c>Total</c> counter, including those of
-    /// registered hoisted metrics.
+    /// Opens a new counter epoch: stamps a fresh start time, clears the last error, returns liveness
+    /// to unavailable, releases the <see cref="MarkStopped"/> latch and resets every <c>Total</c>
+    /// counter, including those of registered hoisted metrics.
     /// </summary>
     /// <remarks>
     /// Deliberately not idempotent. Called once per <c>ExecuteAsync</c> entry, so a host stop and
@@ -91,19 +96,23 @@ public class ConnectorMetrics
     }
 
     /// <summary>
-    /// Reports that the connector is now serving. Ignored between <see cref="MarkStopped"/> and the
-    /// next <see cref="MarkStarted"/>.
+    /// Reports that the connector is now serving. The first liveness report establishes the liveness
+    /// change timestamp. Ignored between <see cref="MarkStopped"/> and the next <see cref="MarkStarted"/>.
     /// </summary>
     public void MarkOperational() => SetOperational(true, terminal: false);
 
     /// <summary>
-    /// Reports that the connector is no longer serving but may recover.
+    /// Reports that the connector is no longer serving but may recover. The first liveness report
+    /// establishes the liveness change timestamp. Ignored between <see cref="MarkStopped"/> and the
+    /// next <see cref="MarkStarted"/>.
     /// </summary>
     public void MarkNotOperational() => SetOperational(false, terminal: false);
 
     /// <summary>
-    /// Reports that the connector has stopped for good and latches that for the rest of the epoch,
-    /// until the next <see cref="MarkStarted"/>.
+    /// Reports that the connector has stopped for good and terminally latches liveness for the rest
+    /// of the epoch, until the next <see cref="MarkStarted"/>. Always publishes <c>false</c>, because a
+    /// stopped connector is known not to be serving whether or not it measures liveness itself, and
+    /// rejects later liveness reports until the next start.
     /// </summary>
     /// <remarks>
     /// Terminal because a liveness transition detected off the pump thread can otherwise land after
@@ -123,7 +132,7 @@ public class ConnectorMetrics
         Volatile.Write(ref _lastError, error);
     }
 
-    internal bool IsOperational => Volatile.Read(ref _liveness).IsOperational;
+    internal bool? IsOperational => Volatile.Read(ref _liveness).IsOperational;
 
     internal DateTimeOffset? OperationalChangeTime
     {
@@ -147,17 +156,13 @@ public class ConnectorMetrics
 
     private protected virtual void ResetTotals() => OutboundChanges.Reset();
 
-    // Only the latch is cleared: the transition timestamp is left alone so the pair keeps reading as
-    // "down since T" rather than inventing a new transition.
+    // The value and its timestamp both clear, so a new epoch starts with nothing observed rather than
+    // carrying the previous epoch's liveness and a timestamp from before this run began.
     private void ResetLiveness()
     {
         lock (_livenessLock)
         {
-            var current = _liveness;
-            if (current.IsStopped)
-            {
-                Volatile.Write(ref _liveness, current with { IsStopped = false });
-            }
+            Volatile.Write(ref _liveness, new Liveness(null, 0, false));
         }
     }
 
@@ -177,9 +182,9 @@ public class ConnectorMetrics
                 return;
             }
 
-            // The timestamp moves only when the flag does, so latching the terminal bit on a connector
-            // that was never operational does not invent a transition. It is sampled inside the lock,
-            // so it cannot move backwards relative to an already published transition.
+            // The timestamp moves only when the value does, so a repeated report keeps reading as
+            // "up since T" or "down since T". It is sampled inside the lock, so it cannot move
+            // backwards relative to an already published transition.
             var updated = current.IsOperational == isOperational
                 ? current with { IsStopped = stopped }
                 : new Liveness(isOperational, DateTimeOffset.UtcNow.UtcTicks, stopped);
