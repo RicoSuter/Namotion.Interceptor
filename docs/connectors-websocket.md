@@ -335,8 +335,6 @@ See [Subject Updates](connectors-subject-updates.md) for details on the update f
 
 ## Resilience
 
-> **Internal design:** The fault model, the state machine for each side, the enumerated fault interleavings and the invariants they are checked against are in [WebSocket Sync Reliability](design/websocket-sync.md). Read it before changing anything in the reconnect, retry-queue or sequence paths.
-
 ### Write Retry Queue
 
 Write retry queue behavior (ring buffer, reconcile by commit order on reconnection) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via the client configuration:
