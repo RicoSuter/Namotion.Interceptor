@@ -466,7 +466,7 @@ What the rule does not cover:
 - **Same-thread re-entry.** The gate is reentrant, so re-entering the same context on the same thread stays legal.
 - **Fetching in parallel.** Fetch on as many threads as you like, then assign on the thread already inside the operation, or after it returns. Parallelising the assignments themselves never bought anything anyway: they serialize on the gate whichever thread runs them.
 
-A waiter that finds the gate holder blocked throughout a short window throws `LifecycleContractViolationException` after about 200 ms, naming the pattern and the alternative. Behind it sits a 15-second bound for a wait that cannot be observed, such as one inside unmanaged code, with a different message that points at a slow callback rather than at a dispatch. Older versions hang silently instead.
+A waiter whose gate holder stays blocked, never once seen running, throws `LifecycleContractViolationException` naming the pattern and the alternative. A holder that keeps running is never reported however long it takes, so a large attach is waited out rather than cut short. Behind that sits a last-resort bound of a few minutes for a holder nothing can observe at all, one that spins, polls or waits inside unmanaged code, with a different message saying it cannot tell which cause it was. Older versions hang silently instead.
 
 ```csharp
 // Wrong: the assignment inside Task.Run needs the gate this interceptor is holding, so the
@@ -480,8 +480,8 @@ public class LoadAxesInterceptor : IWriteInterceptor
         if (context.Property.Name == nameof(Machine.Controller) &&
             context.Property.Subject is Machine machine)
         {
-            // The worker throws LifecycleContractViolationException after about 200 ms,
-            // and Wait() rethrows it here wrapped in an AggregateException.
+            // The worker throws LifecycleContractViolationException once the holder is seen
+            // blocked throughout, and Wait() rethrows it here wrapped in an AggregateException.
             Task.Run(() => machine.Axes = BrowseAxes(machine)).Wait();
         }
     }
