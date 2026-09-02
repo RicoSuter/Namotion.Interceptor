@@ -37,9 +37,7 @@ public class SameContextGateDeadlockTests
     {
         // Arrange: a write interceptor downstream of the lifecycle runs while the gate is held, and
         // from there dispatches a structural write on the same context to a worker it then joins.
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithLifecycle();
+        var context = CreateContextConvictingQuickly();
 
         var workerTarget = new Person { FirstName = "worker target" };
         ((IInterceptorSubject)workerTarget).AttachToContext(context);
@@ -72,9 +70,7 @@ public class SameContextGateDeadlockTests
     public void WhenALifecycleHandlerWaitsForStructuralWorkItDispatched_ThenTheDispatchedWriteFails()
     {
         // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithLifecycle();
+        var context = CreateContextConvictingQuickly();
 
         var workerTarget = new Person(context);
         var trigger = new Person { FirstName = "trigger" };
@@ -101,9 +97,7 @@ public class SameContextGateDeadlockTests
     public void WhenAPropertyHandlerWaitsForStructuralWorkItDispatched_ThenTheDispatchedWriteFails()
     {
         // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithLifecycle();
+        var context = CreateContextConvictingQuickly();
 
         var workerTarget = new Person(context);
         var trigger = new Person { FirstName = "trigger" };
@@ -130,9 +124,7 @@ public class SameContextGateDeadlockTests
     public void WhenASubjectAttachedHandlerWaitsForStructuralWorkItDispatched_ThenTheDispatchedWriteFails()
     {
         // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithLifecycle();
+        var context = CreateContextConvictingQuickly();
 
         var workerTarget = new Person(context);
         var trigger = new Person { FirstName = "trigger" };
@@ -160,9 +152,7 @@ public class SameContextGateDeadlockTests
     {
         // Arrange: the explicit attach reads the candidate's structural properties under the gate,
         // so the getter is the one entry point no interceptor ordering can move.
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithLifecycle();
+        var context = CreateContextConvictingQuickly();
 
         var workerTarget = new Person(context) { FirstName = "worker target" };
         var candidate = new Person { FirstName = "candidate" };
@@ -195,9 +185,7 @@ public class SameContextGateDeadlockTests
         // Arrange: a whole-graph attach runs under the gate and holds it for seconds while doing
         // nothing but work, which is the one legitimate hold long enough to be mistaken for a
         // deadlock. A second thread writes into the same context while that attach is in flight.
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithLifecycle();
+        var context = CreateContextConvictingQuickly();
 
         var contendedTarget = new Person { FirstName = "contended" };
         ((IInterceptorSubject)contendedTarget).AttachToContext(context);
@@ -271,12 +259,28 @@ public class SameContextGateDeadlockTests
         return exception;
     }
 
+    /// <summary>
+    /// A context whose gate convicts a continuously blocked holder in milliseconds rather than in
+    /// the production threshold, so these cases cost their dispatch rather than that whole bound.
+    /// </summary>
+    private static IInterceptorSubjectContext CreateContextConvictingQuickly()
+    {
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle();
+
+        ((LifecycleInterceptor)context.TryGetService<ILifecycleInterceptor>()!)
+            .BlockedHolderThresholdMilliseconds = 200;
+
+        return context;
+    }
+
     private static void AssertReportedAsDeadlock(Exception? workerException, TimeSpan elapsed)
     {
         var violation = Assert.IsType<LifecycleContractViolationException>(workerException);
         Assert.Contains("topology gate", violation.Message);
-        Assert.Contains("blocked in a wait", violation.Message);
-        Assert.Contains("dispatched this work to another thread", violation.Message);
+        Assert.Contains("never once seen running", violation.Message);
+        Assert.Contains("dispatched structural work to another thread", violation.Message);
         Assert.Contains("Nothing was read and nothing was changed", violation.Message);
         Assert.True(elapsed < FastFailureBudget,
             $"the deadlock took {elapsed} to report, so the holder check did not decide it");

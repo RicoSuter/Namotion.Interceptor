@@ -52,22 +52,24 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     // turned into an exception instead of a hang.
     //
     // A waiter tells the deadlock from ordinary contention by looking at the holder rather than at
-    // the clock: a gate holder is contractually doing fast work and waiting on nothing, so a holder
-    // parked in a wait is the deadlock while a holder running is a legitimately long hold, such as
-    // the whole-graph attach that runs under the gate. One sample is noise, since a holder dips into
-    // a wait for benign reasons, so the verdict needs the holder blocked across every sample of a
-    // window: long enough that a momentary dip cannot fill it, short enough that the report arrives
-    // in a fraction of a second rather than in the seconds a large attach legitimately takes.
+    // the clock: a holder that is running is making progress, however long it takes, while a holder
+    // that never runs again can only be one that waits for work needing this gate. So a holder seen
+    // running resets the verdict and no amount of elapsed time alone convicts. Only continuous
+    // blocking does, over a threshold far above any lock a holder legitimately waits on and far
+    // below the point an operator calls the process hung.
+    //
+    // The runtime offers no way to ask what a thread waits on, and a dispatch through a task, a
+    // queue or a pool thread carries no link back to its origin, so sampling the holder's state is
+    // the only in-process signal that exists. It costs nothing on any normal path: a waiter reaches
+    // this only after failing to take the gate within HolderSampleIntervalMilliseconds, and it
+    // parks in the same wait it would have parked in anyway.
     private const int HolderSampleIntervalMilliseconds = 20;
-    private const int BlockedHolderSampleCount = 10;
+    private const int DefaultBlockedHolderThresholdMilliseconds = 30_000;
 
-    // The backstop for what the holder check cannot see, such as a holder blocked inside unmanaged
-    // code or in a state the runtime reports as running. Sized against the longest legitimate hold
-    // and not the typical one, which is a single write at microseconds: attaching a quarter of a
-    // million subjects measures at a few seconds, so the bound keeps several times that. It stays
-    // under the deadlines a harness uses to call a run hung, so a stuck thread reports itself with
-    // this message before anything above it reports a bare timeout.
-    private const int GateWaitTimeoutMilliseconds = 15_000;
+    // Per instance rather than constant so a test can convict in milliseconds instead of spending
+    // the full threshold per case. Per instance and not static, so tests running in parallel cannot
+    // shorten each other's threshold. Read only by a thread already waiting on a contended gate.
+    internal int BlockedHolderThresholdMilliseconds { get; set; } = DefaultBlockedHolderThresholdMilliseconds;
 
     // The thread inside a topology transaction of this lifecycle, null when there is none. Written
     // under the gate and read without it, by a waiter that is diagnosing its own wait rather than
@@ -215,9 +217,8 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void WaitForGate()
     {
-        var deadline = Environment.TickCount64 + GateWaitTimeoutMilliseconds;
         Thread? blockedHolder = null;
-        var blockedSamples = 0;
+        var blockedSince = 0L;
 
         while (true)
         {
@@ -227,62 +228,50 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             if (holder is not null && (holder.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0)
             {
                 // Per holder, not per wait: a gate handed from one thread to the next is a queue
-                // draining, and each new holder starts its own window.
-                blockedSamples = ReferenceEquals(holder, blockedHolder) ? blockedSamples + 1 : 1;
-                blockedHolder = holder;
-                if (blockedSamples >= BlockedHolderSampleCount)
+                // draining, and each new holder starts its own window. Measured as elapsed time
+                // rather than as a sample count, so load stretches the sampling rate without
+                // stretching what the threshold means.
+                if (!ReferenceEquals(holder, blockedHolder))
                 {
-                    ThrowHolderBlocked();
+                    blockedHolder = holder;
+                    blockedSince = Environment.TickCount64;
+                }
+                else if (Environment.TickCount64 - blockedSince >= BlockedHolderThresholdMilliseconds)
+                {
+                    ThrowHolderBlocked(BlockedHolderThresholdMilliseconds);
                 }
             }
             else
             {
                 blockedHolder = null;
-                blockedSamples = 0;
             }
 
             if (_gate.TryEnter(HolderSampleIntervalMilliseconds))
             {
                 return;
             }
-
-            if (Environment.TickCount64 >= deadline)
-            {
-                ThrowGateWaitTimedOut();
-            }
         }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void ThrowHolderBlocked()
+    private static void ThrowHolderBlocked(int thresholdMilliseconds)
     {
         throw new LifecycleContractViolationException(
-            "Deadlocked waiting for the topology gate of this context. The thread holding it is not " +
-            "working but blocked in a wait, which is the deadlock this framework cannot prevent: the " +
-            "thread inside the topology transaction dispatched this work to another thread and is " +
-            "waiting for it, so it cannot release the gate until this work finishes and this work " +
-            "cannot start until it releases the gate. Topology changes on one context are serialized, " +
-            "and a dispatch through Task.Run, the thread pool or a queue is invisible here, so this " +
-            "cannot be detected any earlier than by watching the holder. Never wait for structural " +
-            "work on another thread from inside a structural write, a lifecycle callback or an " +
-            "interceptor: complete the enclosing operation first and run the work after it returns, " +
-            "or hand it off without waiting. A holder blocked for any other reason, on a sleep, on " +
-            "input or output or on another lock, breaks the same contract that this code is fast " +
-            "and waits on nothing. Nothing was read and nothing was changed.");
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void ThrowGateWaitTimedOut()
-    {
-        throw new LifecycleContractViolationException(
-            $"Timed out after {GateWaitTimeoutMilliseconds / 1000} seconds waiting for the topology gate " +
-            "of this context, which another thread has held for that whole time while never being seen " +
-            "blocked. The likely cause is a lifecycle callback or an interceptor that genuinely ran " +
-            "that long, which breaks the contract that they are fast; a whole-graph attach of a very " +
-            "large graph is the only legitimate hold that approaches this. The other explanation is a " +
-            "gate holder waiting for topology work it dispatched to another thread, in a wait that " +
-            "cannot be observed from here, such as one inside unmanaged code. Nothing was read and " +
-            "nothing was changed.");
+            $"The thread holding the topology gate of this context has been blocked, never once seen " +
+            $"running, for {thresholdMilliseconds / 1000} seconds. A holder that makes " +
+            "progress is never reported here however long it takes, so this is one of two things, " +
+            "and both break the contract that a gate holder is fast and waits on nothing. The first " +
+            "is the deadlock this framework cannot prevent: the thread inside the topology " +
+            "transaction dispatched structural work to another thread and waits for it, so it cannot " +
+            "release the gate until that work finishes and that work cannot start until the gate is " +
+            "released. A dispatch through Task.Run, the thread pool or a queue carries no link back " +
+            "to its origin, so watching the holder is the only way this can be seen at all. Never " +
+            "wait for structural work on another thread from inside a structural write, a lifecycle " +
+            "callback or an interceptor: complete the enclosing operation first and run the work " +
+            "after it returns, or hand it off without waiting. Dispatching a read, a scalar write or " +
+            "input and output and waiting for it is safe and is not this. The second is a holder " +
+            "blocked that long on a sleep, on input or output, or on a lock of its own. Nothing was " +
+            "read and nothing was changed.");
     }
 
     /// <summary>Releases what <see cref="EnterGate"/> took. A struct, so the using costs nothing.</summary>
@@ -594,6 +583,20 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             }
 
             _graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None);
+
+            // The drain above ran while the anchor was still set, so a back edge inside the
+            // component kept the root anchor-reachable and nothing released it. Re-evaluate now
+            // that the anchor is gone, or the root stays owned with no anchor and no way to
+            // detach it.
+            var ownership = _graph.TryGetOwnership(subject);
+            if (ownership is null)
+            {
+                _graph.ReleaseClaim(subject);
+            }
+            else if (ownership.IncomingCount == 0 || !_reachability.IsAnchorReachable(subject, null))
+            {
+                _release.ReleaseRoot(subject);
+            }
 
             foreach (var claimedSubject in claimed)
             {
