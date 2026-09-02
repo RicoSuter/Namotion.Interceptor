@@ -1,4 +1,9 @@
+using System.Collections;
+using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Collections.Immutable;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -161,6 +166,128 @@ public class SubjectLookupTests
     {
         // Arrange & Act
         var result = SubjectLookup.FindSubjectInDictionary(42, "key");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+
+    /// <summary>
+    /// Every BCL dictionary shape a subject dictionary property can legally hold, keyed by string.
+    /// The non-generic ones (Hashtable, OrderedDictionary, ListDictionary, HybridDictionary) key on
+    /// object, so a "wrong-typed" key is not expressible for them and only the generic ones carry
+    /// the interesting cases.
+    /// </summary>
+    private static IDictionary CreateStringKeyedDictionary(string kind, string key, Person person)
+    {
+        var source = new Dictionary<string, Person> { [key] = person };
+        return kind switch
+        {
+            "Dictionary" => source,
+            "SortedDictionary" => new SortedDictionary<string, Person>(source),
+            "SortedList" => new SortedList<string, Person>(source),
+            "ConcurrentDictionary" => new ConcurrentDictionary<string, Person>(source),
+            "ReadOnlyDictionary" => new ReadOnlyDictionary<string, Person>(source),
+            "FrozenDictionary" => (IDictionary)source.ToFrozenDictionary(),
+            "ImmutableDictionary" => (IDictionary)source.ToImmutableDictionary(),
+            "ImmutableSortedDictionary" => (IDictionary)source.ToImmutableSortedDictionary(),
+            "Hashtable" => new Hashtable { [key] = person },
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null)
+        };
+    }
+
+    [Theory]
+    [InlineData("Dictionary")]
+    [InlineData("SortedDictionary")]
+    [InlineData("SortedList")]
+    [InlineData("ConcurrentDictionary")]
+    [InlineData("ReadOnlyDictionary")]
+    [InlineData("FrozenDictionary")]
+    [InlineData("ImmutableDictionary")]
+    [InlineData("ImmutableSortedDictionary")]
+    [InlineData("Hashtable")]
+    public void WhenDictionaryKeyMatches_ThenReturnsSubjectForEveryDictionaryShape(string kind)
+    {
+        // Arrange
+        var person = new Person { FirstName = "Alice" };
+        var dictionary = CreateStringKeyedDictionary(kind, "key1", person);
+
+        // Act
+        var result = SubjectLookup.FindSubjectInDictionary(dictionary, "key1");
+
+        // Assert
+        Assert.Same(person, result);
+    }
+
+    [Theory]
+    [InlineData("Dictionary")]
+    [InlineData("SortedDictionary")]
+    [InlineData("SortedList")]
+    [InlineData("ConcurrentDictionary")]
+    [InlineData("ReadOnlyDictionary")]
+    [InlineData("FrozenDictionary")]
+    [InlineData("ImmutableDictionary")]
+    [InlineData("ImmutableSortedDictionary")]
+    [InlineData("Hashtable")]
+    public void WhenDictionaryKeyIsAbsent_ThenReturnsNullForEveryDictionaryShape(string kind)
+    {
+        // Arrange
+        var person = new Person { FirstName = "Alice" };
+        var dictionary = CreateStringKeyedDictionary(kind, "key1", person);
+
+        // Act
+        var result = SubjectLookup.FindSubjectInDictionary(dictionary, "absent");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData("Dictionary")]
+    [InlineData("SortedDictionary")]
+    [InlineData("SortedList")]
+    [InlineData("ConcurrentDictionary")]
+    [InlineData("ReadOnlyDictionary")]
+    [InlineData("FrozenDictionary")]
+    [InlineData("ImmutableDictionary")]
+    [InlineData("ImmutableSortedDictionary")]
+    [InlineData("Hashtable")]
+    public void WhenDictionaryKeyHasWrongType_ThenReturnsNullForEveryDictionaryShape(string kind)
+    {
+        // Arrange
+        var person = new Person { FirstName = "Alice" };
+        var dictionary = CreateStringKeyedDictionary(kind, "key1", person);
+
+        // Act
+        var result = SubjectLookup.FindSubjectInDictionary(dictionary, 1);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void WhenIntKeyedImmutableDictionaryIsQueriedWithStringKey_ThenReturnsNull()
+    {
+        // Arrange
+        var person = new Person { FirstName = "Alice" };
+        var dictionary = new Dictionary<int, Person> { [1] = person }.ToImmutableDictionary();
+
+        // Act
+        var result = SubjectLookup.FindSubjectInDictionary(dictionary, "1");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void WhenReadOnlyDictionaryWrapperKeyHasWrongType_ThenReturnsNull()
+    {
+        // Arrange
+        var wrapper = new ReadOnlyDictionaryWrapper<string, Person>(
+            new Dictionary<string, Person> { ["exists"] = new() { FirstName = "A" } });
+
+        // Act
+        var result = SubjectLookup.FindSubjectInDictionary(wrapper, 1);
 
         // Assert
         Assert.Null(result);
