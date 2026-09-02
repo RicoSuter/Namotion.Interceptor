@@ -43,7 +43,7 @@ public class BoundedTeardownRunTests
     public async Task WhenTheCoreFaultsAfterReportingTheFault_ThenTheOriginalExceptionStillPropagates()
     {
         // Arrange
-        var run = new BoundedTeardownRun(ShortBound);
+        var run = new BoundedTeardownRun(UnreachableBound);
         var fault = new InvalidOperationException("core failed");
 
         // Act & Assert
@@ -81,7 +81,7 @@ public class BoundedTeardownRunTests
     }
 
     [Fact]
-    public async Task WhenStopIsRequestedAndTheCoreHangs_ThenTheCallerIsReleasedAtTheBound()
+    public async Task WhenStopIsRequestedAndTheCoreHangs_ThenTheCallerIsReleasedWithAbandonment()
     {
         // Arrange
         var run = new BoundedTeardownRun(ShortBound);
