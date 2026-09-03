@@ -1,5 +1,8 @@
 using HomeBlaze.Components;
+using HomeBlaze.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.E2E.Tests.Infrastructure;
 
@@ -25,6 +28,16 @@ public class PlaywrightFixture : IAsyncLifetime
         // Force server to start by accessing ServerAddress which calls EnsureServer
         var address = _factory.ServerAddress;
         Console.WriteLine($"Test server started at: {address}");
+
+        // The root subject is loaded by a background service, so the server serves requests before
+        // the object graph behind them exists. A page that renders the browser in that window gets
+        // an empty pane list and never rebuilds it, so whichever test runs first waits out its full
+        // timeout for a button that will not appear.
+        var rootManager = _factory.ServerServices.GetRequiredService<RootManager>();
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => rootManager.IsLoaded,
+            TimeSpan.FromSeconds(60),
+            message: "The root subject was not loaded before the tests started");
 
         // Initialize Playwright and launch browser
         _playwright = await Playwright.CreateAsync();
