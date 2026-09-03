@@ -294,6 +294,32 @@ public class SubjectLookupTests
     }
 
     [Fact]
+    public void WhenGenericDictionaryKeyIsNull_ThenReturnsNull()
+    {
+        // Arrange
+        var dictionary = new Dictionary<string, Person> { ["key1"] = new() { FirstName = "Alice" } };
+
+        // Act
+        var result = SubjectLookup.FindSubjectInDictionary(dictionary, null!);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void WhenNonGenericDictionaryKeyIsNull_ThenReturnsNull()
+    {
+        // Arrange
+        var dictionary = new Hashtable { ["key1"] = new Person { FirstName = "Alice" } };
+
+        // Act
+        var result = SubjectLookup.FindSubjectInDictionary(dictionary, null!);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
     public void WhenItemIsKvpWithSubjectValue_ThenReturnsTrueWithKeyAndSubject()
     {
         // Arrange
