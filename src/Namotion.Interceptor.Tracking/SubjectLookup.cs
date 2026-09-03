@@ -116,7 +116,7 @@ public static class SubjectLookup
             // Null until something throws, so a process that never touches an intolerant dictionary
             // pays one null check over reading the indexer directly.
             var intolerant = Volatile.Read(ref _intolerantDictionaryTypes);
-            if (intolerant is null || !IsIntolerant(intolerant, value.GetType()))
+            if (intolerant is null || !intolerant.Contains(value.GetType()))
             {
                 // A null key cannot be of the delegate path's key type, so that path answers null
                 // for it. The object-keyed indexer throws instead, and is guarded to keep the two
@@ -143,41 +143,22 @@ public static class SubjectLookup
             : FindSubjectInDictionaryUntyped(value, key);
     }
 
-    // An array scanned by reference rather than a set: this holds the handful of dictionary shapes
-    // in the BCL that index intolerantly, so a few reference comparisons beat hashing, and every
-    // tolerant lookup in a process that has met one of them pays that scan.
-    private static Type[]? _intolerantDictionaryTypes;
-
-    private static bool IsIntolerant(Type[] intolerant, Type type)
-    {
-        for (var index = 0; index < intolerant.Length; index++)
-        {
-            if (ReferenceEquals(intolerant[index], type))
-                return true;
-        }
-
-        return false;
-    }
+    // Keyed on the closed type, so this grows with the model rather than with the four generic
+    // definitions the BCL contributes: a model declaring immutable dictionaries of twenty value
+    // types puts twenty entries here. Hashed rather than scanned for that reason, since a linear
+    // scan would degrade with the size of the graph it is meant to serve.
+    private static HashSet<Type>? _intolerantDictionaryTypes;
 
     private static void RememberIntolerantDictionaryType(Type type)
     {
         while (true)
         {
             var current = Volatile.Read(ref _intolerantDictionaryTypes);
-            if (current is not null && IsIntolerant(current, type))
+            if (current is not null && current.Contains(type))
                 return;
 
-            Type[] updated;
-            if (current is null)
-            {
-                updated = [type];
-            }
-            else
-            {
-                updated = new Type[current.Length + 1];
-                Array.Copy(current, updated, current.Length);
-                updated[current.Length] = type;
-            }
+            var updated = current is null ? new HashSet<Type>() : new HashSet<Type>(current);
+            updated.Add(type);
 
             if (ReferenceEquals(Interlocked.CompareExchange(ref _intolerantDictionaryTypes, updated, current), current))
                 return;
