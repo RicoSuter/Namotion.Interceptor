@@ -191,10 +191,18 @@ public class SubjectLookupTests
             "FrozenDictionary" => (IDictionary)source.ToFrozenDictionary(),
             "ImmutableDictionary" => (IDictionary)source.ToImmutableDictionary(),
             "ImmutableSortedDictionary" => (IDictionary)source.ToImmutableSortedDictionary(),
+            // The builders are intolerant in the same way their immutable dictionaries are, and the
+            // plain one additionally throws for a null key, so they are covered explicitly.
+            "ImmutableDictionaryBuilder" => (IDictionary)ToBuilder(source.ToImmutableDictionary()),
+            "ImmutableSortedDictionaryBuilder" => (IDictionary)ToBuilder(source.ToImmutableSortedDictionary()),
             "Hashtable" => new Hashtable { [key] = person },
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null)
         };
     }
+
+    private static ImmutableDictionary<string, Person>.Builder ToBuilder(ImmutableDictionary<string, Person> source) => source.ToBuilder();
+
+    private static ImmutableSortedDictionary<string, Person>.Builder ToBuilder(ImmutableSortedDictionary<string, Person> source) => source.ToBuilder();
 
     [Theory]
     [InlineData("Dictionary")]
@@ -205,6 +213,8 @@ public class SubjectLookupTests
     [InlineData("FrozenDictionary")]
     [InlineData("ImmutableDictionary")]
     [InlineData("ImmutableSortedDictionary")]
+    [InlineData("ImmutableDictionaryBuilder")]
+    [InlineData("ImmutableSortedDictionaryBuilder")]
     [InlineData("Hashtable")]
     public void WhenDictionaryKeyMatches_ThenReturnsSubjectForEveryDictionaryShape(string kind)
     {
@@ -228,6 +238,8 @@ public class SubjectLookupTests
     [InlineData("FrozenDictionary")]
     [InlineData("ImmutableDictionary")]
     [InlineData("ImmutableSortedDictionary")]
+    [InlineData("ImmutableDictionaryBuilder")]
+    [InlineData("ImmutableSortedDictionaryBuilder")]
     [InlineData("Hashtable")]
     public void WhenDictionaryKeyIsAbsent_ThenReturnsNullForEveryDictionaryShape(string kind)
     {
@@ -251,6 +263,8 @@ public class SubjectLookupTests
     [InlineData("FrozenDictionary")]
     [InlineData("ImmutableDictionary")]
     [InlineData("ImmutableSortedDictionary")]
+    [InlineData("ImmutableDictionaryBuilder")]
+    [InlineData("ImmutableSortedDictionaryBuilder")]
     [InlineData("Hashtable")]
     public void WhenDictionaryKeyHasWrongType_ThenReturnsNullForEveryDictionaryShape(string kind)
     {
