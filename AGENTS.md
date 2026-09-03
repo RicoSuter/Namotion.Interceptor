@@ -120,6 +120,16 @@ The library has specialized support for:
 - **GraphQL**: Real-time subscription support
 - **Blazor**: UI data binding components
 
+## Native AOT
+
+Native AOT is not supported yet and nothing declares it, but it is the direction, so do not add new obstacles to it. Full compatibility is tracked in issue #516.
+
+- **New code avoids dynamic-code constructs** where a static alternative exists at comparable cost. `Expression.Compile()`, `MakeGenericMethod` and `MakeGenericType` over value types, and `Activator.CreateInstance` on a type the trimmer cannot see are all annotated `RequiresDynamicCode` or `RequiresUnreferencedCode`: under Native AOT they throw or fall back to interpretation.
+- **Existing sites are worth closing when a change already touches them**, and worth leaving alone otherwise. Several exist today, listed in #516.
+- **The generator is the escape hatch.** The declared shape of an `[InterceptorSubject]` type is known at compile time, so what would otherwise be resolved reflectively can often be emitted instead.
+
+This is guidance rather than a rule, because the AOT analyzer is not enabled yet, so nothing mechanically enforces it. Weigh it like any other constraint: a static alternative that costs a measurable amount on a hot path, or a large amount of complexity, is not automatically the right trade. Say in the pull request which way you went and why.
+
 ## Performance Considerations
 
 - All interception logic generated at compile-time (no runtime reflection)
