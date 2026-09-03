@@ -102,15 +102,62 @@ public static class SubjectLookup
     /// <see cref="KeyNotFoundException"/> for an absent one where the rest of the BCL answers null.
     /// The indexer is still used for dictionaries with no generic dictionary interface, whose keys
     /// are typed <see cref="object"/> and therefore cannot be rejected by type.
-    /// Not force-inlined: the body performs a cache lookup rather than a single type test, so
-    /// inlining it into every call site would spend the callers' budget without removing work.
+    /// The indexer stays the first choice rather than being abandoned, so an ordinary dictionary
+    /// costs what it always did and needs no runtime code generation. A type is only routed through
+    /// the delegate once it has actually been seen to throw, so the intolerant set is learned rather
+    /// than enumerated: a shape nobody anticipated behaves exactly as it did before, throwing once,
+    /// and is correct on every call after that.
     /// </remarks>
     public static IInterceptorSubject? FindSubjectInDictionary(object value, object key)
     {
+        if (value is IDictionary dictionary)
+        {
+            // Null until something throws, so a process that never touches an intolerant dictionary
+            // pays one null check over reading the indexer directly.
+            var intolerant = Volatile.Read(ref _intolerantDictionaryTypes);
+            if (intolerant is null || !intolerant.Contains(value.GetType()))
+            {
+                // A null key cannot be of the delegate path's key type, so that path answers null
+                // for it. The object-keyed indexer throws instead, and is guarded to keep the two
+                // symmetric.
+                if (key is null)
+                    return null;
+
+                try
+                {
+                    return dictionary[key] as IInterceptorSubject;
+                }
+                catch (Exception exception) when (exception is KeyNotFoundException or InvalidCastException)
+                {
+                    // This type indexes intolerantly. Remember it so the throw happens at most once
+                    // per type per process, then fall through to the delegate path below.
+                    RememberIntolerantDictionaryType(value.GetType());
+                }
+            }
+        }
+
         var lookup = DictionaryLookupCache.GetOrAdd(value.GetType(), BuildDictionaryLookup);
         return lookup is not null
             ? lookup(value, key) as IInterceptorSubject
             : FindSubjectInDictionaryUntyped(value, key);
+    }
+
+    private static HashSet<Type>? _intolerantDictionaryTypes;
+
+    private static void RememberIntolerantDictionaryType(Type type)
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _intolerantDictionaryTypes);
+            if (current is not null && current.Contains(type))
+                return;
+
+            var updated = current is null ? new HashSet<Type>() : new HashSet<Type>(current);
+            updated.Add(type);
+
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _intolerantDictionaryTypes, updated, current), current))
+                return;
+        }
     }
 
     private static IInterceptorSubject? FindSubjectInDictionaryUntyped(object value, object key)
