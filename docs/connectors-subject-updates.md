@@ -204,6 +204,7 @@ Apply structural changes in two sub-phases:
 **Sub-phase 1a: Remove and Insert operations** are applied sequentially in the order they appear:
 - `Remove` operations are sent in **descending index order** so each remove doesn't affect subsequent removes
 - `Insert` operations reference the final target position
+- All `Remove` operations precede all `Insert` operations, for dictionaries and for collections alike, so replacing the value at an existing key removes the old entry before the replacement is inserted
 
 **Sub-phase 1b: Move operations** are applied atomically using snapshot semantics:
 - All moves reference the state **after** removes/inserts have been applied
