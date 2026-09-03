@@ -429,4 +429,77 @@ public class SubjectLookupTests
         Assert.Equal("k2", key2);
         Assert.Same(person2, subject2);
     }
+
+    /// <summary>
+    /// The intolerant types are learned rather than enumerated, so the mechanism itself needs a test:
+    /// the outcome is correct either way, and only the second lookup distinguishes a type that was
+    /// remembered from one that throws and is caught on every call.
+    /// </summary>
+    [Fact]
+    public void WhenAnIntolerantDictionaryHasThrownOnce_ThenTheTypeIsRoutedAroundTheIndexerAfterwards()
+    {
+        // Arrange: a dictionary whose object indexer throws for an absent key, and which counts how
+        // often that indexer is reached.
+        var person = new Person { FirstName = "found" };
+        var dictionary = new ThrowingCountingDictionary<string, Person> { ["present"] = person };
+
+        // Act: the first absent lookup reaches the indexer and is caught; later ones must not.
+        var first = SubjectLookup.FindSubjectInDictionary(dictionary, "absent");
+        var indexerCallsAfterFirst = dictionary.IndexerCalls;
+        var second = SubjectLookup.FindSubjectInDictionary(dictionary, "absent");
+        var third = SubjectLookup.FindSubjectInDictionary(dictionary, "present");
+
+        // Assert: every call answers correctly, and the throwing indexer was entered exactly once.
+        Assert.Null(first);
+        Assert.Null(second);
+        Assert.Same(person, third);
+        Assert.Equal(1, indexerCallsAfterFirst);
+        Assert.Equal(1, dictionary.IndexerCalls);
+    }
+
+    /// <summary>Throws from the object indexer the way the immutable dictionaries do, and counts entries.</summary>
+    private sealed class ThrowingCountingDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IDictionary
+        where TKey : notnull
+    {
+        private readonly Dictionary<TKey, TValue> _inner = new();
+
+        public int IndexerCalls { get; private set; }
+
+        object? IDictionary.this[object key]
+        {
+            get
+            {
+                IndexerCalls++;
+                return _inner[(TKey)key];
+            }
+            set => throw new NotSupportedException();
+        }
+
+        public TValue this[TKey key] { get => _inner[key]; set => _inner[key] = value; }
+        public ICollection<TKey> Keys => _inner.Keys;
+        public ICollection<TValue> Values => _inner.Values;
+        public int Count => _inner.Count;
+        public bool IsReadOnly => false;
+        public bool IsFixedSize => false;
+        public bool IsSynchronized => false;
+        public object SyncRoot => this;
+        ICollection IDictionary.Keys => _inner.Keys;
+        ICollection IDictionary.Values => _inner.Values;
+        public void Add(TKey key, TValue value) => _inner.Add(key, value);
+        public void Add(KeyValuePair<TKey, TValue> item) => _inner.Add(item.Key, item.Value);
+        public void Add(object key, object? value) => throw new NotSupportedException();
+        public void Clear() => _inner.Clear();
+        public bool Contains(object key) => _inner.ContainsKey((TKey)key);
+        public bool Contains(KeyValuePair<TKey, TValue> item) => _inner.ContainsKey(item.Key);
+        public bool ContainsKey(TKey key) => _inner.ContainsKey(key);
+        public void CopyTo(KeyValuePair<TKey, TValue>[] array, int arrayIndex) => throw new NotSupportedException();
+        public void CopyTo(Array array, int index) => throw new NotSupportedException();
+        public bool Remove(TKey key) => _inner.Remove(key);
+        public bool Remove(KeyValuePair<TKey, TValue> item) => _inner.Remove(item.Key);
+        public void Remove(object key) => throw new NotSupportedException();
+        public bool TryGetValue(TKey key, out TValue value) => _inner.TryGetValue(key, out value!);
+        public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator() => _inner.GetEnumerator();
+        IDictionaryEnumerator IDictionary.GetEnumerator() => _inner.GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => _inner.GetEnumerator();
+    }
 }
