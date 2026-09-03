@@ -94,14 +94,15 @@ public static class SubjectLookup
     /// type, or null: all three answer <c>null</c>.
     /// </summary>
     /// <remarks>
-    /// Generic dictionaries are read through a compiled <c>TryGetValue</c> delegate cached per
-    /// runtime type rather than through <see cref="IDictionary"/>'s object indexer, because that
-    /// indexer is not uniformly tolerant: <c>ImmutableDictionary</c> and
-    /// <c>ImmutableSortedDictionary</c> implement it as an unchecked cast onto the throwing typed
-    /// indexer, so they raise <see cref="InvalidCastException"/> for a wrong-typed key and
-    /// <see cref="KeyNotFoundException"/> for an absent one where the rest of the BCL answers null.
-    /// The indexer is still used for dictionaries with no generic dictionary interface, whose keys
-    /// are typed <see cref="object"/> and therefore cannot be rejected by type.
+    /// <see cref="IDictionary"/>'s object indexer is not uniformly tolerant: <c>ImmutableDictionary</c>,
+    /// <c>ImmutableSortedDictionary</c> and both of their builders implement it as an unchecked cast
+    /// onto the throwing typed indexer, so they raise <see cref="InvalidCastException"/> for a
+    /// wrong-typed key and <see cref="KeyNotFoundException"/> for an absent one where the rest of the
+    /// BCL answers null. A type seen to do that is read instead through a compiled <c>TryGetValue</c>
+    /// delegate cached per runtime type, which answers null for both.
+    /// A null key never reaches the indexer, which is what keeps the two exception types above the
+    /// complete set worth catching: several shapes throw for a null key alone, and one of them throws
+    /// <see cref="KeyNotFoundException"/>, which would otherwise be mistaken for intolerance.
     /// The indexer stays the first choice rather than being abandoned, so an ordinary dictionary
     /// costs what it always did and needs no runtime code generation. A type is only routed through
     /// the delegate once it has actually been seen to throw, so the intolerant set is learned rather
@@ -115,7 +116,7 @@ public static class SubjectLookup
             // Null until something throws, so a process that never touches an intolerant dictionary
             // pays one null check over reading the indexer directly.
             var intolerant = Volatile.Read(ref _intolerantDictionaryTypes);
-            if (intolerant is null || !intolerant.Contains(value.GetType()))
+            if (intolerant is null || !IsIntolerant(intolerant, value.GetType()))
             {
                 // A null key cannot be of the delegate path's key type, so that path answers null
                 // for it. The object-keyed indexer throws instead, and is guarded to keep the two
@@ -142,18 +143,41 @@ public static class SubjectLookup
             : FindSubjectInDictionaryUntyped(value, key);
     }
 
-    private static HashSet<Type>? _intolerantDictionaryTypes;
+    // An array scanned by reference rather than a set: this holds the handful of dictionary shapes
+    // in the BCL that index intolerantly, so a few reference comparisons beat hashing, and every
+    // tolerant lookup in a process that has met one of them pays that scan.
+    private static Type[]? _intolerantDictionaryTypes;
+
+    private static bool IsIntolerant(Type[] intolerant, Type type)
+    {
+        for (var index = 0; index < intolerant.Length; index++)
+        {
+            if (ReferenceEquals(intolerant[index], type))
+                return true;
+        }
+
+        return false;
+    }
 
     private static void RememberIntolerantDictionaryType(Type type)
     {
         while (true)
         {
             var current = Volatile.Read(ref _intolerantDictionaryTypes);
-            if (current is not null && current.Contains(type))
+            if (current is not null && IsIntolerant(current, type))
                 return;
 
-            var updated = current is null ? new HashSet<Type>() : new HashSet<Type>(current);
-            updated.Add(type);
+            Type[] updated;
+            if (current is null)
+            {
+                updated = [type];
+            }
+            else
+            {
+                updated = new Type[current.Length + 1];
+                Array.Copy(current, updated, current.Length);
+                updated[current.Length] = type;
+            }
 
             if (ReferenceEquals(Interlocked.CompareExchange(ref _intolerantDictionaryTypes, updated, current), current))
                 return;
