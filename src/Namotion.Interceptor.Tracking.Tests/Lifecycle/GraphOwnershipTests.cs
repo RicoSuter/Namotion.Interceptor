@@ -329,6 +329,52 @@ public class GraphOwnershipTests
     }
 
     [Fact]
+    public void WhenAnExplicitAttachConsumesAProvisionalAnchor_ThenHandlersObserveTheEdgeWithTheAnchorConsumed()
+    {
+        // Arrange: the anchor is what a handler reads to tell a root from a held subject, so it is
+        // settled before the edge is published, on the attach path exactly as on the write path.
+        var context = CreateContext();
+        var provisional = new Person(context) { FirstName = "P" };
+        var root = new Person { FirstName = "R", Father = provisional };
+        SubjectAttachmentAnchorKind? anchorSeenByHandler = null;
+        context.AddService<ILifecycleHandler>(new DelegateLifecycleHandler(change =>
+        {
+            if (ReferenceEquals(change.Subject, provisional) && change.IsPropertyReferenceAdded)
+            {
+                anchorSeenByHandler = change.Subject.Executor.AttachmentAnchor;
+            }
+        }));
+
+        // Act
+        root.AttachToContext(context);
+
+        // Assert
+        Assert.Equal(SubjectAttachmentAnchorKind.None, anchorSeenByHandler);
+        Assert.Equal(SubjectAttachmentAnchorKind.None, ((IInterceptorSubject)provisional).Executor.AttachmentAnchor);
+    }
+
+    [Fact]
+    public void WhenAProvisionalRootIsAttachedWithABackReference_ThenTheBackEdgeDoesNotConsumeItsAnchor()
+    {
+        // Arrange: the everyday back reference child.Parent = root, seeded by an explicit attach
+        // with a provisional anchor rather than written afterwards. The back edge's parent reaches
+        // no anchor other than the root's own, so it must not consume that anchor.
+        var context = CreateContext();
+        var root = new Person { FirstName = "R" };
+        var child = new Person { FirstName = "C", Father = root };
+        root.Father = child;
+
+        // Act
+        root.AttachToContext(context, SubjectAttachmentAnchorKind.Provisional);
+        root.Father = null;
+
+        // Assert: the root outlives the child it no longer references
+        Assert.Same(context, root.TryGetContext());
+        Assert.Equal(SubjectAttachmentAnchorKind.Provisional, ((IInterceptorSubject)root).Executor.AttachmentAnchor);
+        Assert.Null(child.TryGetContext());
+    }
+
+    [Fact]
     public void WhenExplicitlyAttachedSubjectLosesItsEdge_ThenItStaysAttached()
     {
         // Arrange: an explicit anchor is never cleared by edge changes

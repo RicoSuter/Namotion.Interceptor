@@ -572,6 +572,13 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             }
 
             var claimed = LifecycleScratch.RentSubjectList();
+            var consumedAnchors = LifecycleScratch.RentConsumedAnchorList();
+
+            // Saved and restored rather than assumed null: user code the seed invokes at callback
+            // depth zero can attach another root, and each attach hands back only what it consumed.
+            var enclosingConsumedAnchors = _attach.ConsumedAnchors;
+            _attach.ConsumedAnchors = consumedAnchors;
+
             var published = false;
             try
             {
@@ -581,6 +588,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
             }
             finally
             {
+                _attach.ConsumedAnchors = enclosingConsumedAnchors;
                 if (published)
                 {
                     // Seeding rereads what discovery read, so a structural getter that answers
@@ -592,10 +600,11 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                 }
                 else
                 {
-                    RollbackRejectedAttach(subject, anchor, claimed);
+                    RollbackRejectedAttach(subject, anchor, claimed, consumedAnchors);
                 }
 
                 LifecycleScratch.Return(claimed);
+                LifecycleScratch.Return(consumedAnchors);
             }
         }
     }
@@ -615,15 +624,27 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// The order is deliberate: the root keeps its anchor, its baselines and its claim until the
     /// drain has actually finished, so a rollback that cannot complete leaves the root attached and
     /// detachable rather than stripped of the very state <c>DetachFromContext</c> needs.
+    ///
+    /// A provisional anchor the seed consumed goes back before the drain, because the edge that
+    /// consumed it is among the edges drained, and without the anchor that removal would release a
+    /// subject that was attached and held before the attach began, together with everything it
+    /// holds. The restore is a compare-and-swap against the revision the consumption produced, so
+    /// a subject whose attachment moved since (promoted, detached, released) keeps what it has.
     /// </remarks>
     private void RollbackRejectedAttach(
         IInterceptorSubject subject,
         SubjectAttachmentAnchorKind anchor,
-        List<IInterceptorSubject> claimed)
+        List<IInterceptorSubject> claimed,
+        List<(IInterceptorSubject Subject, long Revision)> consumedAnchors)
     {
         var children = LifecycleScratch.RentChildList();
         try
         {
+            foreach (var (consumedSubject, revision) in consumedAnchors)
+            {
+                consumedSubject.Executor.TryUpdateAttachment(revision, _context, SubjectAttachmentAnchorKind.Provisional, out _);
+            }
+
             _graph.CollectStructuralChildren(subject, children, seed: false);
             foreach (var (property, occurrence) in children)
             {
@@ -654,6 +675,18 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                     // without an anchor that is exactly what DetachFromContext refuses to do.
                     _graph.SetAnchor(subject, anchor);
                     throw;
+                }
+            }
+
+            // An edge that survived the drain (one published from outside the component by user
+            // code the seed invoked) supports its subject exactly as the drained edge did, so the
+            // anchor is consumed again rather than left as a root that nothing ever releases.
+            foreach (var (consumedSubject, _) in consumedAnchors)
+            {
+                if (_graph.TryGetOwnership(consumedSubject) is { IncomingCount: > 0 } &&
+                    _reachability.IsAnchorReachable(consumedSubject, consumedSubject))
+                {
+                    _graph.SetAnchor(consumedSubject, SubjectAttachmentAnchorKind.None, onlyFrom: SubjectAttachmentAnchorKind.Provisional);
                 }
             }
 

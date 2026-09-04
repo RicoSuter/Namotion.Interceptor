@@ -11,6 +11,15 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// </remarks>
 internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph graph, ReachabilityWalk reachability)
 {
+    /// <summary>
+    /// The provisional anchors consumed while an explicit attach is in flight, each with the
+    /// attachment revision the consumption produced, or null when none is. A rejected attach
+    /// drains the edges it published and has to hand back the anchors those edges consumed. It
+    /// cannot tell those apart from one consumed by a nested write the seed invoked, so it records
+    /// every consumption and re-checks after the drain which subjects an edge still supports.
+    /// </summary>
+    public List<(IInterceptorSubject Subject, long Revision)>? ConsumedAnchors { get; set; }
+
     public void SeedChildrenIfNeeded(IInterceptorSubject subject)
     {
         if (!graph.AreBaselinesSeeded(subject))
@@ -135,9 +144,19 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
             return;
         }
 
-        if (reachability.IsAnchorReachable(property.Subject, subject))
+        if (!reachability.IsAnchorReachable(property.Subject, subject))
         {
-            graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None, onlyFrom: SubjectAttachmentAnchorKind.Provisional);
+            return;
+        }
+
+        graph.SetAnchor(subject, SubjectAttachmentAnchorKind.None, onlyFrom: SubjectAttachmentAnchorKind.Provisional);
+        if (ConsumedAnchors is not null)
+        {
+            subject.Executor.TryGetAttachment(out _, out var anchorAfterConsumption, out var consumedRevision);
+            if (anchorAfterConsumption == SubjectAttachmentAnchorKind.None)
+            {
+                ConsumedAnchors.Add((subject, consumedRevision));
+            }
         }
     }
 }
