@@ -71,32 +71,30 @@ internal static class StructuralValueScanner
                 return;
 
             case IEnumerable enumerable:
-                if (HasKeyedEntries(declaredType, enumerable))
+            {
+                // A pair carries its key, but a dictionary type is free to enumerate as its values
+                // instead (IReadOnlyDictionary<string, Device> plus IEnumerable<Device> hides the pair
+                // enumerator behind an explicit implementation), so the keyed arm has to be total: an
+                // item that is itself a subject is recorded at its position rather than dropped.
+                var isKeyed = HasKeyedEntries(declaredType, enumerable);
+                var index = 0;
+                foreach (var item in enumerable)
                 {
-                    foreach (var item in enumerable)
+                    if (isKeyed && item is not null &&
+                        SubjectLookup.TryGetSubjectFromKeyValuePair(item, out var key, out var keyedItem))
                     {
-                        if (item is not null &&
-                            SubjectLookup.TryGetSubjectFromKeyValuePair(item, out var key, out var subjectItem))
-                        {
-                            occurrences.Add(new SubjectOccurrence(subjectItem, key));
-                        }
+                        occurrences.Add(new SubjectOccurrence(keyedItem, key));
                     }
-                }
-                else
-                {
-                    var index = 0;
-                    foreach (var item in enumerable)
+                    else if (item is IInterceptorSubject subjectItem)
                     {
-                        if (item is IInterceptorSubject subjectItem)
-                        {
-                            occurrences.Add(new SubjectOccurrence(subjectItem, index));
-                        }
+                        occurrences.Add(new SubjectOccurrence(subjectItem, index));
+                    }
 
-                        index++;
-                    }
+                    index++;
                 }
 
                 return;
+            }
         }
     }
 
@@ -150,30 +148,27 @@ internal static class StructuralValueScanner
                 return false;
 
             case IEnumerable enumerable:
-                if (HasKeyedEntries(property.Metadata.Type, enumerable))
+            {
+                // Same total keyed arm as CollectOccurrences: a subject the scan records at a
+                // position has to be found here too, or the reachability walk would release it.
+                var isKeyed = HasKeyedEntries(property.Metadata.Type, enumerable);
+                foreach (var item in enumerable)
                 {
-                    foreach (var item in enumerable)
+                    if (ReferenceEquals(item, target))
                     {
-                        if (item is not null &&
-                            SubjectLookup.TryGetSubjectFromKeyValuePair(item, out _, out var subjectItem) &&
-                            ReferenceEquals(subjectItem, target))
-                        {
-                            return true;
-                        }
+                        return true;
                     }
-                }
-                else
-                {
-                    foreach (var item in enumerable)
+
+                    if (isKeyed && item is not null &&
+                        SubjectLookup.TryGetSubjectFromKeyValuePair(item, out _, out var subjectItem) &&
+                        ReferenceEquals(subjectItem, target))
                     {
-                        if (ReferenceEquals(item, target))
-                        {
-                            return true;
-                        }
+                        return true;
                     }
                 }
 
                 return false;
+            }
 
             default:
                 return false;

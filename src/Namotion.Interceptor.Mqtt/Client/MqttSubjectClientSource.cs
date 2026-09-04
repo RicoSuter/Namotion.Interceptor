@@ -603,22 +603,16 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
         var entry = (topic, resolvedMapping);
 
-        // Add first, then validate (guarantees no memory leak). Registry membership is the whole
-        // test: the reference count answers zero for the anchored root, so asking it here would
-        // evict every mapping the root owns and make this cache a per-message mapper call.
-        if (_propertyToTopic.TryAdd(propertyReference, entry))
+        // Add first, then validate (guarantees no memory leak)
+        if (_propertyToTopic.TryAdd(propertyReference, entry) && !IsRetainable(propertyReference.Subject))
         {
-            var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
-            if (registeredSubject is null)
-            {
-                _propertyToTopic.TryRemove(propertyReference, out _);
-            }
+            _propertyToTopic.TryRemove(propertyReference, out _);
         }
 
         return entry;
     }
 
-    private async ValueTask<PropertyReference?> TryGetPropertyForTopicAsync(string topic)
+    internal async ValueTask<PropertyReference?> TryGetPropertyForTopicAsync(string topic)
     {
         if (_topicToProperty.TryGetValue(topic, out var cachedProperty))
         {
@@ -633,19 +627,27 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         var propertyReference = property?.Reference;
 
         // Add first, then validate (guarantees no memory leak)
-        if (_topicToProperty.TryAdd(topic, propertyReference))
+        if (_topicToProperty.TryAdd(topic, propertyReference) &&
+            propertyReference is { } resolvedProperty &&
+            !IsRetainable(resolvedProperty.Subject))
         {
-            if (propertyReference is { } propRef)
-            {
-                var registeredSubject = propRef.Subject.TryGetRegisteredSubject();
-                if (registeredSubject is null)
-                {
-                    _topicToProperty.TryRemove(topic, out _);
-                }
-            }
+            _topicToProperty.TryRemove(topic, out _);
         }
 
         return propertyReference;
+    }
+
+    /// <summary>
+    /// Whether a cache entry for a property of <paramref name="subject"/> may stay. The reference count
+    /// drops before LifecycleInterceptor.SubjectDetaching fires, where the eviction scan runs, and the registry
+    /// deregisters only after that. Only the count catches a lookup that inserts in between. The connector root is
+    /// exempt: it is anchored to the context rather than to a property, so its count is zero for its whole life.
+    /// </summary>
+    private bool IsRetainable(IInterceptorSubject subject)
+    {
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        return registeredSubject is not null &&
+            (registeredSubject.ReferenceCount > 0 || ReferenceEquals(subject, _subject));
     }
 
     private async Task OnMessageReceivedAsync(
