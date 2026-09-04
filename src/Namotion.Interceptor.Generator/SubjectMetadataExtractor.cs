@@ -78,7 +78,11 @@ internal static class SubjectMetadataExtractor
             }
         }
 
-        var className = typeDeclaration.Identifier.ValueText;
+        // Text rather than ValueText: ValueText drops the '@' that escapes a keyword used as a
+        // name, and the bare keyword does not parse. Property names below stay on ValueText,
+        // because they are also emitted as string literals, as nameof arguments and as parts of
+        // derived names such as _Name and OnNameChanged, where the escape would be wrong.
+        var className = typeDeclaration.Identifier.Text;
 
         // Use the symbol rather than the syntax modifiers: a top-level class without a modifier
         // defaults to internal, a nested one to private.
@@ -168,7 +172,7 @@ internal static class SubjectMetadataExtractor
         {
             types.Insert(0, new ContainingType(
                 GetTypeKeyword(typeDeclaration),
-                typeDeclaration.Identifier.ValueText));
+                typeDeclaration.Identifier.Text));
             parent = parent.Parent;
         }
         return types.ToArray();
@@ -518,7 +522,7 @@ internal static class SubjectMetadataExtractor
 
                 var parameters = method.ParameterList.Parameters
                     .Select(p => new ParameterMetadata(
-                        p.Identifier.ValueText,
+                        p.Identifier.Text,
                         GetFullTypeName(p.Type, declarationModel) ?? "object"))
                     .ToList();
 
