@@ -1,6 +1,4 @@
-using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
-using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking;
@@ -20,7 +18,6 @@ public class ChangeQueueProcessor : IDisposable
     /// </summary>
     internal static readonly TimeSpan TeardownFlushBound = TimeSpan.FromSeconds(5);
 
-    private const int ClosedDelivery = -1;
     private const int IdleState = 0;
     private const int ProcessingState = 1;
     private const int DisposedState = 2;
@@ -31,18 +28,17 @@ public class ChangeQueueProcessor : IDisposable
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
     private readonly ChangeDeliveryRule _deliveryRule;
-    private readonly Action<long>? _dropHandler;
     private readonly bool _writeHandlerOwnsChanges;
     private Action? _terminalHandler;
     private readonly Func<CancellationToken, ValueTask>? _completionHandler;
-    private readonly Func<int, bool>? _mergedDeliveryAdmission;
 
-    // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
-    private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
+    // Owns every accepted change and its outcome; see OutboundDeliveryLedger for the invariant.
+    private readonly OutboundDeliveryLedger _ledger;
 
-    private readonly int? _maxQueueDepth;
-    private long _dropCount;
-    private int _deliveryState;
+    // Reentrant, and separate from the ledger: a competing Dispose waits here for the callback to
+    // finish, while callback reentry sees the handler already taken and does not recurse.
+    private readonly Lock _terminalHandlerGate = new();
+
     private int _flushGate; // 0 = free, 1 = flushing
     private int _lifecycleState;
 
@@ -56,14 +52,14 @@ public class ChangeQueueProcessor : IDisposable
     /// Number of changes dropped due to bounded-queue overflow or ordinary write failure, plus changes
     /// whose delivery was still locally unconfirmed when terminal ownership closed.
     /// </summary>
-    public long DropCount => Interlocked.Read(ref _dropCount);
+    public long DropCount => _ledger.DropCount;
 
     /// <summary>
     /// Gets the number of changes currently buffered. Approximate: read without a lock while the
     /// pump is running. Normally 0 on the immediate path, except while a cancelled delivery is being
     /// handed to terminal accounting during teardown.
     /// </summary>
-    public int QueueDepth => _changes.Count;
+    public int QueueDepth => _ledger.Depth;
 
     // Scratch state used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
@@ -124,15 +120,15 @@ public class ChangeQueueProcessor : IDisposable
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
-        _dropHandler = dropHandler;
         _writeHandlerOwnsChanges = false;
-        _mergedDeliveryAdmission = TryAdmitMergedDelivery;
 
         try
         {
             ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
 
-            _maxQueueDepth = maxQueueDepth;
+            _ledger = new OutboundDeliveryLedger(
+                _bufferTime > TimeSpan.Zero ? maxQueueDepth : null,
+                dropHandler, logger, tracksDeliveryOutcome: true);
             _deliveryRule = ValidateRule(deliveryRule);
 
             _changeMerger = new ChangeMerger();
@@ -170,15 +166,15 @@ public class ChangeQueueProcessor : IDisposable
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
-        _dropHandler = dropHandler;
         _writeHandlerOwnsChanges = writeHandlerOwnsChanges;
         _terminalHandler = terminalHandler;
         _completionHandler = completionHandler;
-        _mergedDeliveryAdmission = writeHandlerOwnsChanges ? null : TryAdmitMergedDelivery;
 
         ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
 
-        _maxQueueDepth = maxQueueDepth;
+        _ledger = new OutboundDeliveryLedger(
+            _bufferTime > TimeSpan.Zero ? maxQueueDepth : null,
+            dropHandler, logger, tracksDeliveryOutcome: !writeHandlerOwnsChanges);
         _subscription = subscription;
         _deliveryRule = ValidateRule(deliveryRule);
         _changeMerger = new ChangeMerger();
@@ -228,77 +224,46 @@ public class ChangeQueueProcessor : IDisposable
             cancellationSignal,
             Timeout.InfiniteTimeSpan,
             executeOnlyOnce: true);
-        var previousState = Interlocked.CompareExchange(ref _lifecycleState, ProcessingState, IdleState);
-        if (previousState != IdleState)
-        {
-            cancellationWait.Unregister(null);
-            throw previousState == ProcessingState
-                ? new InvalidOperationException("The processor is already running.")
-                : new ObjectDisposedException(nameof(ChangeQueueProcessor));
-        }
-
-        if (Volatile.Read(ref _lifecycleState) == DisposedState)
-        {
-            // Dispose raced the Idle-to-Processing transition before the processing task was created,
-            // so no live run remains to release the merger in its finally block.
-            cancellationWait.Unregister(null);
-            DisposeMerger();
-            throw new ObjectDisposedException(nameof(ChangeQueueProcessor));
-        }
-
-        var processingTokenSource = new CancellationTokenSource();
-        var teardownTokenSource = new CancellationTokenSource();
-        var teardownStarted = new TaskCompletionSource<ExceptionDispatchInfo?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var processingTask = Task.Run(
-            () => ProcessCoreAsync(processingTokenSource.Token, teardownTokenSource.Token, teardownStarted),
-            CancellationToken.None);
-
-        var completedTask = await Task.WhenAny(processingTask, teardownStarted.Task, cancellationSignal.Task).ConfigureAwait(false);
-        cancellationWait.Unregister(null);
-        if (completedTask == processingTask)
-        {
-            try { await processingTask.ConfigureAwait(false); }
-            finally
-            {
-                processingTokenSource.Dispose();
-                teardownTokenSource.Dispose();
-            }
-            return;
-        }
-
-        var processingCancellationTask = processingTokenSource.CancelAsync();
-        var teardownCancellationTask = Task.CompletedTask;
-        using var teardownDelayCancellation = new CancellationTokenSource();
-        var teardownDelay = Task.Delay(TeardownFlushBound, teardownDelayCancellation.Token);
         try
         {
-            if (await Task.WhenAny(processingTask, teardownDelay).ConfigureAwait(false) == processingTask)
+            var previousState = Interlocked.CompareExchange(ref _lifecycleState, ProcessingState, IdleState);
+            if (previousState != IdleState)
             {
-                await teardownDelayCancellation.CancelAsync().ConfigureAwait(false);
-                await processingTask.ConfigureAwait(false);
+                throw previousState == ProcessingState
+                    ? new InvalidOperationException("The processor is already running.")
+                    : new ObjectDisposedException(nameof(ChangeQueueProcessor));
             }
-            else
+
+            if (Volatile.Read(ref _lifecycleState) == DisposedState)
             {
-                teardownCancellationTask = teardownTokenSource.CancelAsync();
+                // Dispose raced the Idle-to-Processing transition before the processing task was created,
+                // so no live run remains to release the merger in its finally block.
+                DisposeMerger();
+                throw new ObjectDisposedException(nameof(ChangeQueueProcessor));
+            }
+
+            var run = new BoundedTeardownRun(TeardownFlushBound);
+            var outcome = await run.RunAsync(() => ProcessCoreAsync(run), cancellationSignal.Task).ConfigureAwait(false);
+            if (outcome.AbandonedAtBound)
+            {
+                // The abandoned core still holds its batch, so everything terminal settles here before
+                // the caller learns anything: Dispose closes admission to claim and count what is
+                // outstanding, releases an owned subscription, and fires the terminal handler once.
                 Dispose();
-                if (completedTask == teardownStarted.Task)
-                {
-                    (await teardownStarted.Task.ConfigureAwait(false))?.Throw();
-                }
+                outcome.Fault?.Throw();
             }
         }
         finally
         {
-            ObserveLateLifetimeInBackground(
-                processingTask,
-                processingCancellationTask,
-                teardownCancellationTask,
-                processingTokenSource,
-                teardownTokenSource);
+            // The one cleanup path for every exit: the registration pins the caller's token wait
+            // handle, which must stay valid until unregistered, and this finally keeps that inside
+            // ProcessAsync's lifetime. Past the first wait the callback can at most complete a stop
+            // signal that nothing observes any longer.
+            cancellationWait.Unregister(null);
         }
     }
 
-    private async Task ProcessCoreAsync(CancellationToken processingToken, CancellationToken teardownToken, TaskCompletionSource<ExceptionDispatchInfo?> teardownStarted)
+    private async Task ProcessCoreAsync(BoundedTeardownRun run)
     {
         try
         {
@@ -312,12 +277,12 @@ public class ChangeQueueProcessor : IDisposable
                     var flushFailureReported = false;
                     try
                     {
-                        while (await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
+                        while (await periodicTimer.WaitForNextTickAsync(run.ProcessingToken).ConfigureAwait(false))
                         {
                             // Catch per tick so a consumer callback cannot permanently stop delivery while dequeueing continues.
                             try
                             {
-                                await TryFlushAsync(processingToken).ConfigureAwait(false);
+                                await TryFlushAsync(run.ProcessingToken).ConfigureAwait(false);
                                 flushFailureReported = false;
                             }
                             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -345,7 +310,7 @@ public class ChangeQueueProcessor : IDisposable
 
             try
             {
-                while (_subscription.TryDequeue(out var change, processingToken))
+                while (_subscription.TryDequeue(out var change, run.ProcessingToken))
                 {
                     var wasQueuedBeforeStart = queuedBeforeStart > 0;
                     if (wasQueuedBeforeStart)
@@ -383,37 +348,33 @@ public class ChangeQueueProcessor : IDisposable
                         }
 
                         _immediateBuffer[0] = change;
-                        await WriteChangesAsync(_immediateBuffer, processingToken).ConfigureAwait(false);
+                        await WriteChangesAsync(_immediateBuffer, run.ProcessingToken).ConfigureAwait(false);
                     }
                     else
                     {
-                        _changes.Enqueue(change);
-                        if (_maxQueueDepth is int maxQueueDepth && _changes.Count > maxQueueDepth)
-                        {
-                            DropOverflow(maxQueueDepth);
-                        }
+                        _ledger.Enqueue(change);
                     }
                 }
             }
             catch (Exception exception)
             {
-                teardownStarted.TrySetResult(ExceptionDispatchInfo.Capture(exception));
+                run.MarkFinalizationStarted(exception);
                 throw;
             }
             finally
             {
-                teardownStarted.TrySetResult(null);
+                run.MarkFinalizationStarted();
                 periodicTimer?.Dispose();
                 await flushTask.ConfigureAwait(false);
                 try
                 {
-                    await TryFlushAsync(teardownToken).ConfigureAwait(false);
+                    await TryFlushAsync(run.TeardownToken).ConfigureAwait(false);
                 }
                 finally
                 {
                     if (_completionHandler is not null)
                     {
-                        await _completionHandler(teardownToken).ConfigureAwait(false);
+                        await _completionHandler(run.TeardownToken).ConfigureAwait(false);
                     }
                 }
             }
@@ -426,81 +387,6 @@ public class ChangeQueueProcessor : IDisposable
                 DisposeMerger();
             }
         }
-    }
-
-    private static void ObserveLateLifetimeInBackground(
-        Task processingTask,
-        Task processingCancellationTask,
-        Task teardownCancellationTask,
-        CancellationTokenSource processingTokenSource,
-        CancellationTokenSource teardownTokenSource)
-    {
-        _ = Task.WhenAll(processingTask, processingCancellationTask, teardownCancellationTask).ContinueWith(
-            task =>
-            {
-                _ = task.Exception;
-                processingTokenSource.Dispose();
-                teardownTokenSource.Dispose();
-            },
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-    }
-
-    private bool TryAdmitDelivery(int count) =>
-        Interlocked.CompareExchange(ref _deliveryState, count, 0) == 0;
-
-    private bool TryAdmitMergedDelivery(int count)
-    {
-        var admitted = TryAdmitDelivery(count);
-        if (!admitted)
-        {
-            ReportTerminalDrops(count);
-        }
-
-        return admitted;
-    }
-
-    private int CloseDeliveryAndDrain()
-    {
-        // Cancellation requeue and failure accounting must settle before close observes the delivery
-        // state and queue together, or close could miss their ownership transition.
-        lock (_changes)
-        {
-            var count = Math.Max(0, Interlocked.Exchange(ref _deliveryState, ClosedDelivery));
-            while (_changes.TryDequeue(out _))
-            {
-                count++;
-            }
-
-            return count;
-        }
-    }
-
-    private void ReportTerminalDrops(int count)
-    {
-        if (count <= 0)
-        {
-            return;
-        }
-
-        Interlocked.Add(ref _dropCount, count);
-        _ = Task.Run(() =>
-        {
-            InvokeDropHandler(count);
-            try
-            {
-                _logger.LogWarning(
-                    "Gave up waiting after {Timeout} for {Count} changes to be written while stopping. " +
-                    "A write handler may already have completed them remotely or may still complete them.",
-                    TeardownFlushBound,
-                    count);
-            }
-            catch
-            {
-                // Reporting is best effort after ownership has already been settled.
-            }
-        });
     }
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
@@ -527,55 +413,28 @@ public class ChangeQueueProcessor : IDisposable
         }
 
         var count = changes.Length;
-        if (!deliveryAdmitted && !TryAdmitDelivery(count))
+        if (!deliveryAdmitted && !_ledger.TryAdmitOrCountTerminal(count))
         {
-            ReportTerminalDrops(count);
             return;
         }
 
         try
         {
             await _writeHandler(changes, cancellationToken).ConfigureAwait(false);
-            Interlocked.CompareExchange(ref _deliveryState, 0, count);
+            _ledger.CompleteDelivery(count);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            lock (_changes)
-            {
-                if (Interlocked.CompareExchange(ref _deliveryState, 0, count) == count)
-                {
-                    foreach (var change in changes.Span)
-                    {
-                        _changes.Enqueue(change);
-                    }
-                }
-            }
-
+            _ledger.ReturnCancelledDelivery(changes.Span, count);
             throw;
         }
         catch (Exception exception)
         {
-            var counted = false;
-            lock (_changes)
+            if (_ledger.TryCountFailedDelivery(count))
             {
-                if (Interlocked.CompareExchange(ref _deliveryState, 0, count) == count)
-                {
-                    Interlocked.Add(ref _dropCount, count);
-                    counted = true;
-                }
-            }
-
-            if (counted)
-            {
-                InvokeDropHandler(count);
                 _logger.LogError(exception, "Failed to write changes.");
             }
         }
-    }
-
-    private void InvokeDropHandler(long count)
-    {
-        try { _dropHandler?.Invoke(count); } catch { }
     }
 
     // Report only the first consecutive failure and guard the consumer-supplied logger.
@@ -588,26 +447,6 @@ public class ChangeQueueProcessor : IDisposable
 
         alreadyReported = true;
         try { _logger.LogError(exception, "Failed to flush changes."); } catch { }
-    }
-
-    /// <summary>
-    /// Drops the oldest buffered changes until the queue is back within <paramref name="maxQueueDepth"/>,
-    /// incrementing <see cref="DropCount"/> for each. Best-effort: a concurrent flush may drain the queue
-    /// below the bound first, in which case fewer drops occur.
-    /// </summary>
-    private void DropOverflow(int maxQueueDepth)
-    {
-        var droppedCount = 0L;
-        while (_changes.Count > maxQueueDepth && _changes.TryDequeue(out _))
-        {
-            Interlocked.Increment(ref _dropCount);
-            droppedCount++;
-        }
-
-        if (droppedCount > 0)
-        {
-            InvokeDropHandler(droppedCount);
-        }
     }
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
@@ -625,13 +464,7 @@ public class ChangeQueueProcessor : IDisposable
 
         try
         {
-            // Drain the concurrent queue into the scratch buffer under exclusive flush
-            _flushChanges.Clear();
-            while (_changes.TryDequeue(out var change))
-            {
-                _flushChanges.Add(change);
-            }
-
+            _ledger.DrainInto(_flushChanges);
             if (_flushChanges.Count == 0)
             {
                 return;
@@ -641,14 +474,14 @@ public class ChangeQueueProcessor : IDisposable
             var mergedChanges = _changeMerger!.Merge(
                 CollectionsMarshal.AsSpan(_flushChanges),
                 _deliveryRule,
-                _mergedDeliveryAdmission);
+                _ledger.MergedDeliveryAdmission);
 
             if (mergedChanges.Length > 0)
             {
                 await WriteChangesAsync(
                     mergedChanges,
                     cancellationToken,
-                    deliveryAdmitted: !_writeHandlerOwnsChanges).ConfigureAwait(false);
+                    deliveryAdmitted: _ledger.MergedDeliveryAdmission is not null).ConfigureAwait(false);
             }
         }
         finally
@@ -688,7 +521,7 @@ public class ChangeQueueProcessor : IDisposable
             _ownedSubscription?.Dispose();
         }
 
-        ReportTerminalDrops(CloseDeliveryAndDrain());
+        _ledger.CloseAndCountTerminalDrops();
         if (previousState == IdleState)
         {
             DisposeMerger();
@@ -698,10 +531,10 @@ public class ChangeQueueProcessor : IDisposable
 
     private void InvokeTerminalHandlerOnce()
     {
-        lock (_changes)
+        lock (_terminalHandlerGate)
         {
-            // Exchange inside the reentrant delivery monitor: competing threads wait for callback
-            // completion, while callback reentry sees null and does not recurse or retry an exception.
+            // Exchange inside the gate: competing threads wait for callback completion, while callback
+            // reentry sees null and does not recurse or retry an exception.
             Interlocked.Exchange(ref _terminalHandler, null)?.Invoke();
         }
     }
