@@ -5,6 +5,13 @@ namespace Namotion.Interceptor.Interceptors;
 /// <summary>
 /// Interceptor that can intercept and modify property write operations.
 /// </summary>
+/// <remarks>
+/// Runs while the lifecycle holds its topology gate. Never hand structural work to another thread
+/// and wait for it from here: a dispatched structural write, attach or detach needs the same gate
+/// this thread is holding, so the two wait on each other. Dispatching a read, a scalar write or
+/// input and output and waiting for it is safe, and so is handing structural work off without
+/// waiting. Changing topology directly from here is rejected outright.
+/// </remarks>
 public interface IWriteInterceptor
 {
     /// <summary>
@@ -40,10 +47,6 @@ public struct PropertyWriteContext<TProperty>
     // Cascade re-entries skip the resolve entirely: the internal ctor seeds this field with the
     // trigger's already-resolved value.
     private long _writeTimestamp;
-
-    // Set by the first PropertyChangeInterceptor instance that resolves this write's per-property
-    // observers (whether or not any were found), so outer aggregated instances skip resolution.
-    internal bool ArePropertyObserversResolved;
 
     // The terminal write action for this call. Threaded through the per-call context (which already
     // flows by ref to the end of the chain) instead of a ThreadStatic on the shared chain instance:
@@ -271,7 +274,7 @@ public struct PropertyWriteContext<TProperty>
 
         // A derived property's stored value is recomputed by its getter, never literally the sent value,
         // so a stamped origin never survives. Demoted without invoking the getter, which must not run
-        // here (this executes under the subject's SyncRoot).
+        // here (this executes under the executor's terminal lock).
         if (Property.Metadata.IsDerived)
         {
             return default;

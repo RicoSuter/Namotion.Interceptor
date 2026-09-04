@@ -3,7 +3,6 @@ using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
-using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.Registry;
 
@@ -11,18 +10,20 @@ namespace Namotion.Interceptor.Registry;
 /// Registers subjects and their property edges as they enter the object graph.
 /// </summary>
 /// <remarks>
-/// Runs before <see cref="ContextInheritanceHandler"/>, which walks down into a newly attached
-/// subtree, so a subject is registered before the descent reaches its children. That holds at every
-/// level, so while attaching, any handler running at or behind this one finds every ancestor of a
-/// subject already registered. Detach does not mirror that; see the design doc. Also ordered ahead
-/// of <see cref="ParentTrackingHandler"/>, which fixes the order of
-/// the two recorders instead of leaving it to registration order. See "Handler Order Around the
-/// Descent" in docs/design/tracking-lifecycle.md.
+/// Runs before <see cref="LifecycleInterceptor"/>'s handler slot, which walks down into a newly
+/// attached subtree, so a subject is registered before the descent reaches its children. That holds
+/// at every level, so while attaching, any handler running at or behind this one finds every
+/// ancestor of a subject already registered. Detach does not mirror that; see the design doc and
+/// "Handler Order" in docs/design/tracking-lifecycle.md.
+///
+/// A projection only: no registry state participates in ownership or reachability.
 /// </remarks>
-[RunsBefore(typeof(ParentTrackingHandler), typeof(ContextInheritanceHandler))]
+[RunsBefore(typeof(LifecycleInterceptor))]
 public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
 {
-    private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
+    // Reference equality, explicitly: registry membership is identity and must agree with the
+    // lifecycle graph, so a hand-written subject overriding Equals/GetHashCode cannot merge nodes.
+    private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
     private ImmutableDictionary<IInterceptorSubject, RegisteredSubject>? _knownSubjectsSnapshot;
 
@@ -45,7 +46,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
             if (snapshot is not null)
                 return snapshot;
 
-            snapshot = _knownSubjects.ToImmutableDictionary();
+            snapshot = _knownSubjects.ToImmutableDictionary(ReferenceEqualityComparer.Instance);
             Volatile.Write(ref _knownSubjectsSnapshot, snapshot);
             return snapshot;
         }
@@ -234,6 +235,17 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     void IPropertyLifecycleHandler.AttachProperty(SubjectPropertyLifecycleChange change)
     {
         var property = TryGetRegisteredProperty(change.Property);
+        if (property is null &&
+            change.Subject.Properties.TryGetValue(change.Property.Name, out var metadata))
+        {
+            // A property admitted through AddProperties publishes its metadata and this callback
+            // before any manual Registry insert can run, so the projection is created here, which
+            // is also what makes it exist before the property's initial structural edge
+            // notifications resolve it.
+            property = TryGetRegisteredSubject(change.Subject)?
+                .GetOrAddPropertyProjection(change.Property.Name, metadata.Type, metadata.Attributes);
+        }
+
         if (property is not null)
         {
             // handle property initializers from attributes
@@ -242,8 +254,9 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                 attribute.InitializeProperty(property);
             }
 
-            // handle property initializers from context
-            foreach (var initializer in change.Subject.Context.GetServices<ISubjectPropertyInitializer>())
+            // handle property initializers from context; the subject is attached here, because
+            // this runs from inside its own lifecycle change
+            foreach (var initializer in change.Subject.GetContext().GetServices<ISubjectPropertyInitializer>())
             {
                 initializer.InitializeProperty(property);
             }

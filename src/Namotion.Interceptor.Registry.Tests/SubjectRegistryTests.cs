@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using Namotion.Interceptor.AspNetCore.Extensions;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Tests.Models;
 using Namotion.Interceptor.Testing;
@@ -153,7 +154,6 @@ public class SubjectRegistryTests
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
-            .WithParents()
             .WithRegistry();
 
         // Act
@@ -352,6 +352,32 @@ public class SubjectRegistryTests
     }
 
     [Fact]
+    public void WhenADictionaryKeyIsRenamed_ThenTheChildAndParentEntriesFollowTheNewKey()
+    {
+        // Arrange: the subject stays in the new value, so the lifecycle moves its edge instead of
+        // republishing it, and only the index refresh can keep the projection in step with it.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var light = new Light();
+        var group = new LightGroup(context)
+        {
+            LightsByName = new Dictionary<string, Light> { ["x"] = light }
+        };
+
+        // Act
+        group.LightsByName = new Dictionary<string, Light> { ["y"] = light };
+
+        // Assert
+        var lightsProperty = group.TryGetRegisteredSubject()!
+            .TryGetProperty(nameof(LightGroup.LightsByName))!;
+
+        Assert.Equal("y", Assert.Single(lightsProperty.Children).Index);
+        Assert.Equal("y", Assert.Single(light.TryGetRegisteredSubject()!.Parents).Index);
+    }
+
+    [Fact]
     public void WhenInsertingInMiddleOfCollection_ThenIndicesAreCorrect()
     {
         // Arrange
@@ -387,4 +413,66 @@ public class SubjectRegistryTests
         Assert.Equal(1, child2.TryGetRegisteredSubject()!.Parents[0].Index);
         Assert.Equal(2, child3.TryGetRegisteredSubject()!.Parents[0].Index); // updated from 1 to 2
     }
+
+    [Fact]
+    public void WhenTwoEqualButDistinctSubjectsAreAttached_ThenBothAreRegisteredSeparately()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var first = new ValueEqualitySubject { Name = "same" };
+        var second = new ValueEqualitySubject { Name = "same" };
+
+        // Act
+        first.AttachToContext(context);
+        second.AttachToContext(context);
+
+        // Assert
+        var registry = context.GetService<ISubjectRegistry>();
+        Assert.Equal(2, registry.KnownSubjects.Count);
+        Assert.Same(first, registry.TryGetRegisteredSubject(first)?.Subject);
+        Assert.Same(second, registry.TryGetRegisteredSubject(second)?.Subject);
+    }
+
+    [Fact]
+    public void WhenTwoEqualButDistinctSubjectsShareACollection_ThenEachKeepsItsOwnPosition()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var first = new ValueEqualitySubject { Name = "same" };
+        var second = new ValueEqualitySubject { Name = "same" };
+        var parent = new ValueEqualitySubject(context) { Children = [first, second] };
+
+        // Act: a reorder refreshes every child's position against the live collection.
+        parent.Children = [second, first];
+
+        // Assert
+        Assert.Equal(0, second.TryGetRegisteredSubject()!.Parents[0].Index);
+        Assert.Equal(1, first.TryGetRegisteredSubject()!.Parents[0].Index);
+    }
+}
+/// <summary>
+/// A subject whose <see cref="object.Equals(object?)"/> and <see cref="object.GetHashCode"/> compare by value,
+/// which is legal for a hand-written subject and must not merge distinct graph nodes.
+/// </summary>
+[InterceptorSubject]
+public partial class ValueEqualitySubject
+{
+    public ValueEqualitySubject()
+    {
+        Children = [];
+    }
+
+    public partial string? Name { get; set; }
+
+    public partial ValueEqualitySubject[] Children { get; set; }
+
+    public override bool Equals(object? obj) => obj is ValueEqualitySubject other && other.Name == Name;
+
+    public override int GetHashCode() => Name?.GetHashCode() ?? 0;
 }
