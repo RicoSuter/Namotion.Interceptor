@@ -18,6 +18,10 @@ public class RootManager : BackgroundService, IConfigurationWriter
     private readonly IInterceptorSubjectContext _context;
     private readonly IConfiguration? _configuration;
     private readonly ILogger<RootManager>? _logger;
+
+    // Continuations run off the loading thread so a UI waiter cannot resume inline inside the load.
+    private readonly TaskCompletionSource<IInterceptorSubject> _rootLoaded = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private string? _configurationPath;
 
     /// <summary>
@@ -63,16 +67,37 @@ public class RootManager : BackgroundService, IConfigurationWriter
         }
     }
 
+    /// <summary>
+    /// Completes with the root subject once the background load has attached its context, and faults
+    /// with the load exception so waiters do not hang on a root that will never appear.
+    /// Assigning <see cref="Root"/> directly does not complete it.
+    /// </summary>
+    public Task<IInterceptorSubject> RootLoaded => _rootLoaded.Task;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await LoadAsync(stoppingToken);
+        try
+        {
+            _rootLoaded.TrySetResult(await LoadAsync(stoppingToken));
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Cancelled rather than faulted, so a waiting UI treats a normal shutdown as one.
+            _rootLoaded.TrySetCanceled(stoppingToken);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _rootLoaded.TrySetException(exception);
+            throw;
+        }
     }
 
-    private async Task LoadAsync(CancellationToken cancellationToken)
+    private async Task<IInterceptorSubject> LoadAsync(CancellationToken cancellationToken)
     {
         if (Root != null)
         {
-            return;
+            return Root;
         }
 
         var configFileName = _configuration?["HomeBlaze:RootConfigFile"] ?? "root.json";
@@ -93,6 +118,8 @@ public class RootManager : BackgroundService, IConfigurationWriter
 
         _logger?.LogInformation("Root loaded: {Type}", Root.GetType().FullName);
         _context.AddService(Root);
+
+        return Root;
     }
 
     /// <summary>
