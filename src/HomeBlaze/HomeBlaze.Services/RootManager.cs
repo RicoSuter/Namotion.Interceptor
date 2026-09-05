@@ -30,7 +30,8 @@ public class RootManager : BackgroundService, IConfigurationWriter
     public IInterceptorSubject? Root { get; internal set; }
 
     /// <summary>
-    /// Whether the root has been loaded.
+    /// Whether the root has been loaded. This turns true before the root's context is wired, so it
+    /// is a state probe rather than a gate. Wait on <see cref="RootLoaded"/> to use the graph.
     /// </summary>
     public bool IsLoaded => Root != null;
 
