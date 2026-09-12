@@ -125,19 +125,25 @@ public static class InterceptorHostingExtensions
             // installed here is one nothing retires before shutdown, and a host that retries failed
             // attaches leaks a subject per failure.
             //
-            // Released rather than only retired, which is the opposite of what an explicit detach does,
-            // because no stop is left holding an instance: the awaited start has run and faulted.
-            //
-            // A start queued against this target while the awaited one was in flight is not ruled out,
-            // and these statements do not order themselves against it: the same completion releases
-            // both, so that body reaches its own guards while this runs. Winning the race leaves an
-            // instance nothing stops or disposes. Recorded in
-            // docs/design/hosting-service-ownership.md#faults-and-failed-starts rather than closed
-            // here, because ordering the two is a design decision.
-            //
             // Marked first, so a context attach that snapshotted this attachment before the removal
             // cannot take the target in the gap.
             attachment.Target.MarkDetached();
+
+            // The awaited start faulted, so it left no instance. One queued against this target while
+            // it was in flight did not, and nothing here orders itself against that body: the same
+            // completion releases it and this caller. So a stop is appended rather than skipped, which
+            // the chain puts behind that start, and whatever it created is stopped and disposed. The
+            // mark above refuses every later append, so nothing queues behind this stop.
+            //
+            // Not awaited. That start may be parked on a startup scope this caller cannot close, which
+            // is the wedge the consumer rules name under
+            // docs/hosting.md#deferred-starts-and-startup-completion. The append is attributed, so
+            // shutdown waits for it.
+            _ = handler.AppendStop(subject, attachment.Target, signal: null, waitFor: null, CancellationToken.None);
+
+            // Released rather than only retired, which is the opposite of what an explicit detach does:
+            // the removal above is what puts this target out of reach, so an ownership left installed
+            // is one nothing retires before shutdown. The stop appended above reads no ownership.
             attachment.Target.ReleaseOwnership(handler);
 
             // Captured rather than rethrown: the fault was raised on the transition thread, and a

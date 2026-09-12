@@ -1327,6 +1327,108 @@ public class HostedServiceHandlerRaceTests
     }
 
     [Fact]
+    public async Task WhenAFaultedAwaitedAttachReleasesATargetWhoseQueuedStartIsCommitted_ThenThatStartsInstanceIsStoppedAndDisposed()
+    {
+        // Arrange - the awaited attach publishes its attachment before it waits, so a start can be
+        // appended against the same target while that wait is in flight. Its fault path then removes
+        // the attachment, marks the target detached and releases it, while the same completion lets the
+        // queued body reach its own guards, and nothing orders the two. A body that gets past those
+        // guards is committed to creating an instance the removal has already put out of reach, so only
+        // a stop appended between the mark and the release covers it.
+        //
+        // Which side wins is decided rather than raced: the factory parks each start in turn, and the
+        // subject's data seam parks the caller between the fault it has read and the removal that acts
+        // on it, which is the one window in which a start can still be queued and still commit.
+        var (host, context) = await HostingTestHost.StartAsync();
+
+        try
+        {
+            var handler = context.TryGetService<HostedServiceHandler>()!;
+
+            // The hand written subject, because its data accessor is the only seam that reaches inside
+            // the fault path.
+            var subject = new DataGatedSubject();
+            subject.Context.AddFallbackContext(context);
+
+            var created = new ConcurrentQueue<TrackedBackgroundService>();
+            var faultingStartReachedFactory = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseFaultingStart = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var queuedStartReachedFactory = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseQueuedStart = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var factoryCalls = 0;
+
+            var attaching = subject.AttachHostedServiceAsync<TrackedBackgroundService>(
+                () =>
+                {
+                    if (Interlocked.Increment(ref factoryCalls) == 1)
+                    {
+                        faultingStartReachedFactory.SetResult();
+                        releaseFaultingStart.Task.Wait(TimeSpan.FromSeconds(30));
+                        throw new InvalidOperationException("the awaited start fails");
+                    }
+
+                    // Reached only after the gate read, the liveness read, the ownership read and the
+                    // one instance guard, so a start parked here cannot refuse itself afterwards.
+                    queuedStartReachedFactory.SetResult();
+                    releaseQueuedStart.Task.Wait(TimeSpan.FromSeconds(30));
+
+                    var instance = new TrackedBackgroundService();
+                    created.Enqueue(instance);
+                    return instance;
+                },
+                CancellationToken.None);
+
+            await faultingStartReachedFactory.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+            // Read while the attachment is still published and before the seam below is armed: the
+            // removal takes the attachment out of the subject's data, and the assertions need the
+            // chain afterwards.
+            var target = ((IHostedServiceAttachmentTarget)Assert.Single(subject.GetHostedServiceAttachments())).Target;
+
+            // Armed while the faulting start is parked, so the read it holds is the caller's own
+            // removal: nothing between that fault and the removal reaches the subject's data. The
+            // wrapper is what lets a seam taking a non nullable action be disarmed with a null one.
+            using var removal = TestGate.ArmBlocking(hold => subject.GateNextDataRead(() => hold?.Invoke()));
+
+            releaseFaultingStart.SetResult();
+            await removal.WaitUntilReachedAsync();
+
+            // Act - the start a second context attach would append lands while the caller holds a fault
+            // it has read and not yet acted on, and passes every guard of its own before that caller
+            // marks the target detached and releases it.
+            Assert.NotNull(handler.TryTakeOwnershipAndStart(subject, target));
+            await queuedStartReachedFactory.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+            removal.Release();
+            await Assert.ThrowsAsync<InvalidOperationException>(() => attaching);
+
+            // The premise of the ordering claim: the fault path appended its stop before the instance
+            // that stop has to reach existed, so only the chain puts the two in that order.
+            Assert.Empty(created);
+
+            releaseQueuedStart.SetResult();
+
+            // Assert - an empty transition behind whatever the fault path appended, so the reads below
+            // are deterministic rather than timed.
+            await target.DrainAsync();
+
+            Assert.True(
+                created.ToArray() is [{ IsStarted: true, IsStopped: true, DisposeCount: 1 }],
+                "The fault path abandoned a target whose queued start was already committed, so its "
+                + "instance outlived the attach with nothing able to reach it: "
+                + string.Join(
+                    ", ",
+                    created.ToArray().Select(i => $"started={i.IsStarted} stopped={i.IsStopped} disposed={i.DisposeCount}")));
+
+            Assert.Null(target.Current);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task WhenASubjectJoinsASecondHostWhileTheFirstIsDraining_ThenTheSecondHostsInstanceSurvives()
     {
         // Arrange - the drain reads its owned set holding nothing and appends afterwards, so ownership
