@@ -22,12 +22,14 @@ internal sealed class TestGate : IDisposable
     private readonly Action _disarm;
     private readonly TaskCompletionSource _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _reported;
 
     private TestGate(Action disarm) => _disarm = disarm;
 
     /// <summary>
     /// Runs inside the seam before it reports being reached, so whatever it does is in place by the time
-    /// a test thread waiting for the seam returns.
+    /// a test thread waiting for the seam returns. Runs for the first entry only: releasing the gate is
+    /// permanent, so every later pass through the seam would otherwise repeat the side effect.
     /// </summary>
     public Action? OnReached { get; set; }
 
@@ -42,8 +44,18 @@ internal sealed class TestGate : IDisposable
 
     public Task WaitUntilReachedAsync() => _reached.Task.WaitAsync(GateTimeout);
 
-    /// <summary>Waits for the seam from a thread that cannot await, such as another seam's body.</summary>
-    public void WaitUntilReached() => _reached.Task.Wait(GateTimeout);
+    /// <summary>
+    /// Waits for the seam from a thread that cannot await, such as another seam's body. Throws on the
+    /// timeout rather than returning, symmetrically with the awaitable form: a seam that is never reached
+    /// otherwise lets the test carry on and assert against a state nothing produced.
+    /// </summary>
+    public void WaitUntilReached()
+    {
+        if (!_reached.Task.Wait(GateTimeout))
+        {
+            throw new TimeoutException($"The seam was not reached within {GateTimeout.TotalSeconds:0} seconds.");
+        }
+    }
 
     public void Dispose()
     {
@@ -69,16 +81,27 @@ internal sealed class TestGate : IDisposable
 
     private Task EnterAsync()
     {
-        OnReached?.Invoke();
-        _reached.TrySetResult();
+        ReportReached();
         return _released.Task;
     }
 
     private void EnterAndBlock()
     {
-        OnReached?.Invoke();
-        _reached.TrySetResult();
+        ReportReached();
         _released.Task.Wait(GateTimeout);
+    }
+
+    /// <summary>
+    /// Reports the first entry and nothing after it. The completion is set inside the same guard, so a
+    /// waiter never returns before <see cref="OnReached"/> has finished.
+    /// </summary>
+    private void ReportReached()
+    {
+        if (Interlocked.Exchange(ref _reported, 1) == 0)
+        {
+            OnReached?.Invoke();
+            _reached.TrySetResult();
+        }
     }
 }
 
