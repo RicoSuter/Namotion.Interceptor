@@ -174,8 +174,10 @@ internal sealed class SingleAttachmentHost<TService>
 
         try
         {
-            _owner.Status = ServiceStatus.Starting;
+            // Cleared ahead of the status, for the reason the stop path states in full: the text stands
+            // under Error alone, so a status leaving Error has to leave it behind first.
             _owner.StatusMessage = null;
+            _owner.Status = ServiceStatus.Starting;
 
             if (_owner.GetConfigurationError() is { } configurationError)
             {
@@ -306,8 +308,10 @@ internal sealed class SingleAttachmentHost<TService>
     /// </summary>
     private void ReportStopped()
     {
-        _owner.Status = ServiceStatus.Stopped;
+        // Cleared first, same rule as the start and the stop: both callers reach this from Error, so
+        // writing the status first would stand Stopped beside the text of the failure that caused it.
         _owner.StatusMessage = null;
+        _owner.Status = ServiceStatus.Stopped;
         _owner.ResetDiagnostics();
     }
 

@@ -297,6 +297,75 @@ public class OpcUaClientTests
     }
 
     [Fact]
+    public async Task WhenAWrapperThatNeverAttachedIsDisabled_ThenTheErrorTextIsGoneBeforeTheStoppedStatus()
+    {
+        // Arrange
+        await using var testHost = await OpcUaTestHost.StartAsync();
+        var client = testHost.CreateClient(serverUrl: null);
+        testHost.Container.Client = client;
+        await OpcUaTestHost.WaitForStatusAsync(() => client.Status, ServiceStatus.Error);
+        Assert.NotNull(client.StatusMessage);
+
+        // Each of the two writes is its own pass of the interceptor chain, so the window between them is
+        // wide and observable. Read it from the status write, because nothing here can hold it open to
+        // read afterwards.
+        var messageBesideStopped = default(string);
+        var reachedStopped = 0;
+        testHost.WriteSeam.ArmAfterWrite((property, value) =>
+        {
+            if (ReferenceEquals(property.Subject, client) &&
+                property.Name == nameof(OpcUaClient.Status) &&
+                value is ServiceStatus.Stopped &&
+                Interlocked.Increment(ref reachedStopped) == 1)
+            {
+                messageBesideStopped = client.StatusMessage;
+            }
+        });
+
+        // Act
+        client.IsEnabled = false;
+        await client.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        // The text stands under Error alone, so the status that leaves Error may not be written while it
+        // is still there.
+        Assert.Equal(1, reachedStopped);
+        Assert.Null(messageBesideStopped);
+    }
+
+    [Fact]
+    public async Task WhenAFaultedWrapperIsStartedAgain_ThenTheErrorTextIsGoneBeforeTheStartingStatus()
+    {
+        // Arrange
+        await using var testHost = await OpcUaTestHost.StartAsync();
+        var client = testHost.CreateClient(serverUrl: null);
+        testHost.Container.Client = client;
+        await OpcUaTestHost.WaitForStatusAsync(() => client.Status, ServiceStatus.Error);
+        Assert.NotNull(client.StatusMessage);
+
+        var messageBesideStarting = default(string);
+        var reachedStarting = 0;
+        testHost.WriteSeam.ArmAfterWrite((property, value) =>
+        {
+            if (ReferenceEquals(property.Subject, client) &&
+                property.Name == nameof(OpcUaClient.Status) &&
+                value is ServiceStatus.Starting &&
+                Interlocked.Increment(ref reachedStarting) == 1)
+            {
+                messageBesideStarting = client.StatusMessage;
+            }
+        });
+
+        // Act
+        // The one operation the UI offers at Error, and the other status that leaves it.
+        await client.StartAsync();
+
+        // Assert
+        Assert.Equal(1, reachedStarting);
+        Assert.Null(messageBesideStarting);
+    }
+
+    [Fact]
     public async Task WhenAStartFaultedAfterPublishingItsTree_ThenDisablingTheClientDropsIt()
     {
         // Arrange
