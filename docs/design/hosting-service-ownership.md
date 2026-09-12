@@ -26,6 +26,7 @@ _lastFactoryInstance  IHostedService?          the instance the previous factory
 _detached             bool                     set by an explicit detach, refuses every later start
 _tail                 Task                     the transition chain
 _sync                 object                   guards _tail and _detached
+_ownershipSync        object                   guards the owner exchange and the handler's record of it; the take and its own undo run under _sync, every other release does not, deliberately so for the context detach
 TransitionGate        Func<Task>?              test seam awaited at the top of every body, null in production
 ChainLockGate         Action?                  test seam invoked inside _sync between the take and the append, null in production
 ```
@@ -47,6 +48,7 @@ _gate            HostedServiceGate       NotStarted, Running, Draining, Drained
 _owned           ConcurrentDictionary    target -> subject, for targets whose ownership this handler installed
 _liveSubjects    ConcurrentDictionary    subject -> unused, for subjects in the graph that host something
 _inFlight        int                     transitions this handler appended that have not finished
+_startupScope    AsyncLocal              the ambient startup scope an appending flow is inside, cleared in every transition body a handler attributed
 DrainGate          Func<Task>?           test seam, null in production
 OwnershipTakenGate Action?               test seam, null in production
 LivenessWriteGate  Action?               test seam, null in production
@@ -73,11 +75,7 @@ Two facts keep that safe, and both are load bearing:
 
 Retained memory is therefore linear in the number of hosted services rather than in the size of the graph, and a graph with no hosted services anywhere pays nothing. `_owned` is bounded the same way, because a target only enters it through a take.
 
-One limit is accepted rather than guarded. `MarkLiveIfAttached` asks every `LifecycleInterceptor` reachable from the subject and records if any reports the subject attached, because a subject in two hosting enabled contexts is live for both handlers and one interceptor not holding it says nothing about the other. A handler can therefore be marked live on the strength of a graph it does not itself serve, and the consequence goes one step further than that phrasing suggests: the handler then takes ownership and starts the service, and no context detach on the other interceptor's side ever reaches it, so nothing stops that instance before host shutdown drains what the handler owns.
-
-The reachable shape is one hosting enabled context plus one lifecycle only context, not two hosting contexts, because `TryGetService<HostedServiceHandler>()` throws when two hosting contexts are reachable. Reaching it needs a manual `AddFallbackContext` to put a subject in a second lifecycle enabled graph: `ContextInheritanceHandler` fires only at reference count one, so a subject already in one graph never gains a second context through ordinary assignment. Recorded here rather than defended against, because the guard would have to distinguish which interceptor's graph a handler serves, which the handler does not know.
-
-The logger is resolved through a callback rather than injected because `WithHostedServices` constructs the handler while the context is being configured, which is before any service provider exists; the registration it adds to the `IServiceCollection` assigns the logger when the provider builds it.
+The logger is assigned after construction rather than injected because `WithHostedServices` constructs the handler while the context is being configured, which is before any service provider exists; the registration it adds to the `IServiceCollection` calls `SetLogger` when the provider builds it.
 
 ### Where records live
 
@@ -201,7 +199,7 @@ Reading it that way was measured wrong: a subject reachable from two hosting ena
 
 Chain order covers lifecycle driven appends, because every lifecycle event fires under the lifecycle lock and the handler appends inside it. A user driven `AttachHostedService` appends under the target's own lock only and is unordered against them, so a start needs a second check. Target ownership cannot be that check, and the failure was measured: the attaching path takes ownership itself, so an attach racing a detach passes its own check and leaves the attachment running on a detached subject.
 
-The flag is read on both of the paths a start passes through. On the append path it is read twice inside the chain lock, on entry and again after the take, and what the suite discriminates is the pair rather than either half. Deleting the read on entry alone leaves every test green, because the read after the take absorbs it: the take is installed and then undone instead of never being made. Deleting the read after the take alone fails `HostedServiceHandlerRaceTests.WhenADetachReleasesOwnershipBeforeAnAttachTakesIt_ThenTheAttachUndoesItsOwnTake`, which is the interleaving only that read covers. Deleting both additionally fails `HostedServiceHandlerRaceTests.WhenASubjectLeavesTheGraphBeforeItsAttachTakesTheTarget_ThenTheNextHandlerStillClaimsIt`, whose detach lands before the take rather than inside it, so either read alone refuses it. Inside the start body the flag is still masked by the ownership read beside it: deleting the flag read alone leaves every test green, and deleting the whole body guard fails three.
+The flag is read on both of the paths a start passes through. On the append path it is read twice inside the chain lock, on entry and again after the take, and what the suite discriminates is the pair rather than either half. Deleting the read on entry alone leaves every test green, because the read after the take absorbs it: the take is installed and then undone instead of never being made. Deleting the read after the take alone fails `HostedServiceHandlerRaceTests.WhenADetachReleasesOwnershipBeforeAnAttachTakesIt_ThenTheAttachUndoesItsOwnTake`, which is the interleaving only that read covers. Deleting both additionally fails `HostedServiceHandlerRaceTests.WhenASubjectLeavesTheGraphBeforeItsAttachTakesTheTarget_ThenTheNextHandlerStillClaimsIt`, whose detach lands before the take rather than inside it, so either read alone refuses it. Inside the start body the masking runs the other way, which was measured rather than reasoned: deleting the flag read alone fails `HostedServiceHandlerTests.WhenAnAttachmentIsDetachedAndTheSubjectLeavesBeforeItsQueuedStartRuns_ThenNothingIsCreated`, because an explicit detach retires the record without releasing ownership, so the body still reads this handler as the owner and the flag is the only thing that refuses it. Deleting the ownership read alone leaves every test green. Deleting the whole body guard fails four.
 
 ### The read inside the chain lock
 
@@ -213,7 +211,11 @@ That order is what `HostedServiceHandlerRaceTests.WhenADetachRacesTheAppendInsid
 
 The body re-reads liveness **and** ownership before creating anything, covering a detach that lands after the append and before the body runs. The pair is pinned by `HostedServiceHandlerRaceTests.WhenAQueuedStartRunsAfterTheSubjectDetached_ThenNothingIsStarted`, which fails when both reads are deleted.
 
-Neither read alone is discriminated by the suite, and that is a coverage limit rather than redundancy. The two cover different windows, which the comment on `RunStartAsync` sets out. Forcing a body into the window between the liveness clear and the ownership release would mean holding the lifecycle lock open, which blocks every graph write a test needs to make progress, so no seam can drive it.
+The flag read is discriminated, by the explicit detach above, which retires the ownership record without releasing it, so the body still reads this handler as the owner and only the flag refuses it. The ownership read alone is not discriminated: deleting it leaves the suite green. That is a coverage gap rather than redundancy.
+
+One shape that reaches it is settled. A context detach clears liveness and releases, an explicit detach of one of two attachments then keeps the re-attach from re-taking that target, and the context attach behind it writes liveness again, leaving a queued body live and unowned. It needs no race and no second interceptor, and with the ownership read deleted the body creates an instance the queued stops then stop and dispose, so the cost is bounded.
+
+Every attempt to write down a second shape has been wrong under review, so what stands here is only what was measured. A start can be queued behind the one a faulted awaited attach releases for, because the attachment is published before that start is awaited. Reaching it needs a second `LifecycleInterceptor`, since one interceptor dispatches an attach only once for a subject already in its graph. What that queued start meets is not the ownership read but a race with the caller's own release, and it is recorded under [Faults and Failed Starts](#faults-and-failed-starts) as a defect rather than here as a gap.
 
 The consequence if the liveness read were removed is bounded rather than a leak: the same detach has already appended a stop for that target, chains are first in first out, so the instance the start creates is stopped and disposed by that stop. The cost is a needless create and teardown against a subject that has left the graph, which for a connector means a session opened and closed. That is also exactly the damage a context detach skipping its liveness clear reintroduces, which is why the detach fast path turns on "has ever hosted" rather than on "hosts now". Removing the window instead, by releasing ownership before appending the stops, reopens a defect that was measured, so the guard stays and the limit is recorded here.
 
@@ -231,6 +233,12 @@ An explicit `DetachHostedService` clears no liveness, so the flag cannot see it.
 Without the mark that start runs after the attachment has already been removed, and the instance it creates is reachable from nothing; the remarks on `TryTakeOwnershipAndAppendAsync` carry that argument.
 
 The two marks are independent, so each needs a test that drives its own overload: deleting the mark from one of them leaves every test that reaches the window through the other green. Pinned by the three cases of `HostedServiceHandlerRaceTests.WhenAnAttachmentIsDetachedBeforeItsStartIsAppended_ThenNothingIsStarted`: two detach through the synchronous overload, the second of those against the awaiting attach, and the third drives the awaiting detach.
+
+### A handler can be marked live for a graph it does not serve
+
+`MarkLiveIfAttached` asks every `LifecycleInterceptor` reachable from the subject and records if any reports the subject attached, because a subject in two hosting enabled contexts is live for both handlers and one interceptor not holding it says nothing about the other. A handler can therefore be marked live on the strength of a graph it does not itself serve, and the consequence goes one step further than that phrasing suggests: the handler then takes ownership and starts the service, and no context detach on the other interceptor's side ever reaches it, so nothing stops that instance before host shutdown drains what the handler owns.
+
+The reachable shape is one hosting enabled context plus one lifecycle only context, not two hosting contexts, because `TryGetService<HostedServiceHandler>()` throws when two hosting contexts are reachable. Reaching it needs a manual `AddFallbackContext` to put a subject in a second lifecycle enabled graph: `ContextInheritanceHandler` fires only at reference count one, so a subject already in one graph never gains a second context through ordinary assignment. Recorded here rather than defended against, because the guard would have to distinguish which interceptor's graph a handler serves, which the handler does not know.
 
 ## Resolving the Handler on the Public Paths
 
@@ -257,7 +265,7 @@ Each attach overload adds its attachment from its own code, so each needs its ow
 
 The gate state is read at append time as well as inside transition bodies, and the two reads answer different questions. The property that matters is narrower than "never at append time":
 
-**Stops are never refused at append time, and a start's gating decision is re-read in the body.**
+**Stops are never refused by the gate at append time, and a start's gating decision is re-read in the body.**
 
 `AppendStop` reads no gate state at all. A stop short circuited at append time would have no body, therefore no `finally`, therefore would never set its `subjectStopped` completion, so the paired attachment stop would park on that signal forever and wedge that chain against every later append.
 
@@ -316,6 +324,8 @@ The check is one reference comparison against `_lastFactoryInstance`, and it sit
 
 A cancelled stop is caught and **not** recorded as a fault, and the dispose after it still runs; the comment at that `catch` records why, and `HostedServiceHandlerTests.WhenAStopIsCancelled_ThenTheInstanceIsStillDisposed` pins both halves.
 
+**A start queued behind a faulted awaited attach races that attach's cleanup, and can outlive it.** `AttachHostedServiceAsync` publishes the attachment before it awaits the start, so a second start can be appended against the same target while the first is in flight. When the awaited start faults, the caller removes the attachment, marks the target detached and releases ownership, while the queued body is released by the same completion and runs its own guards concurrently. Nothing orders the two. The body's ownership read refuses it only if the release lands first, and a probe that forces the queue measured the body winning between a quarter and a half of the time, leaving an instance started, never stopped and never disposed after the host had stopped, with every current guard in place. Reaching it needs a second `LifecycleInterceptor` over the subject, because one interceptor raises a context attach only once for a subject already in its graph, so it shares the precondition with [A handler can be marked live for a graph it does not serve](#a-handler-can-be-marked-live-for-a-graph-it-does-not-serve). The cleanup itself is new. Master performs none on this path, leaking the attachment entry on every failed attach instead, which is the defect the cleanup exists to fix, so this race arrives with the fix rather than being inherited. Found by review of this document rather than of the code, and not fixed here: ordering the release against a queued body is a design decision, not a comment.
+
 Both places that rethrow a recorded fault to a caller, `HostedServiceHandler.WaitForStartAsync` and `InterceptorHostingExtensions.AttachHostedServiceAsync`, use `ExceptionDispatchInfo.Capture(fault).Throw()` rather than `throw fault`, for the reason recorded at the second of them. Pinned by `HostedServiceHandlerTests.WhenAFailedStartIsRethrownToTheAttachingCaller_ThenTheOriginalStackSurvives` and `HostedServiceHandlerTests.WhenAStartFaultedForAWaitingCaller_ThenTheFaultIsRethrown`.
 
 ## Shutdown
@@ -325,7 +335,7 @@ Both places that rethrow a recorded fault to a caller, `HostedServiceHandler.Wai
 `StopAsync` is built from the pieces above rather than around them:
 
 1. `BeginDraining`, which stops new targets being taken and releases parked waiters.
-2. Clear `_liveSubjects`, for the reason recorded there, and because it is also what stops `WaitForStartAsync` appending an empty transition behind the drain's own stop, which is what `HostedServiceHandlerTests.WhenAHandlerIsAskedToWaitWhileItsOwnDrainIsStopping_ThenItAnswersWithoutQueueingBehindTheStop` pins: deleting the clear is the one change that fails it.
+2. Clear `_liveSubjects`, for the reason recorded there, and because it is also what stops `WaitForStartAsync` appending an empty transition behind the drain's own stop, which is what `HostedServiceHandlerTests.WhenAHandlerIsAskedToWaitWhileItsOwnDrainIsStopping_ThenItAnswersWithoutQueueingBehindTheStop` pins: deleting the clear fails that test and `HostedServiceHandlerTests.WhenAnAttachmentIsAddedAfterTheDrainClearedLiveness_ThenTheSubjectIsNotLeftLive`, which waits on liveness going false and so observes the clear's effect rather than the statement. That one fails at the wait rather than at an assertion, so it reports the mutation as a timeout rather than as the property it went on to check.
 3. Snapshot `_owned`.
 4. Append stops for that snapshot in the same per subject shape a context detach uses: a stop carrying a `subjectStopped` signal for every subject target, then a stop for every attachment target that awaits its own subject's signal when that subject was in the snapshot. Each append is refused unless this handler still owns the target, decided inside the chain lock.
 5. Wait for `_inFlight` to reach zero, bounded by the host's stopping token.
@@ -370,7 +380,7 @@ Several tests named above assert that `StopAsync` did **not** return within a bo
 
 ### Cost
 
-A subject that hosts nothing never gets a target and never reaches `AppendCore`, so it pays nothing at all. On the detach path the change is cheaper: one increment and one decrement replace a per stop continuation and a dictionary entry. The unit suite's hosting project runs in the same 10 seconds it did before, and both shutdown deadline tests are unchanged.
+A subject that hosts nothing never gets a target and never reaches `AppendCore`, so it pays nothing at all. On the detach path the change is cheaper: one increment and one decrement replace a per stop continuation and a dictionary entry. The unit suite's hosting project runs in the same 10 seconds of wall clock it did before, about 7 of them inside the tests, and both shutdown deadline tests are unchanged.
 
 Two shapes get slower, and the second is a correctness gain being paid for:
 
@@ -501,7 +511,7 @@ Stated for consumers in [Configuration Before Startup](../hosting.md#configurati
 
 The handler disposing what it created puts a constraint on connectors that nothing enforces and no test covers: it disposes from a transition that can run while a detach cascade still holds `_attachedSubjects`, so a connector's dispose path and that lock interleave.
 
-The concrete collision is `SourceOwnershipManager`. Both its `Dispose` and its `SubjectDetaching` handler take its own lock and invoke `onReleasing` from inside it, and the `SubjectDetaching` handler runs from inside `_attachedSubjects`. That fixes one lock order, `_attachedSubjects` then the manager's lock, and a dispose that runs from a handler transition takes the manager's lock without holding `_attachedSubjects`. The order reverses the moment anything on that dispose path enters `_attachedSubjects`, which is what an `onReleasing` callback that writes a subject typed property or attaches or detaches a subject does.
+The concrete collision worked through here is `SourceOwnershipManager`, and the shape is general: any component whose dispose path re-enters a lock it also takes from a lifecycle callback has it. Every consumer of the manager inherits this one, the OPC UA client source included. Whether any of them also carries a second lock of its own with the same shape has not been established. Both its `Dispose` and its `SubjectDetaching` handler take its own lock and invoke `onReleasing` from inside it, and the `SubjectDetaching` handler runs from inside `_attachedSubjects`. That fixes one lock order, `_attachedSubjects` then the manager's lock, and a dispose that runs from a handler transition takes the manager's lock without holding `_attachedSubjects`. The order reverses the moment anything on that dispose path enters `_attachedSubjects`, which is what an `onReleasing` callback that writes a subject typed property or attaches or detaches a subject does.
 
 The constraint that follows is stated in [the user documentation](../hosting.md#keep-the-dispose-path-out-of-the-lifecycle-lock). Note that `LifecycleInterceptor.WriteProperty` takes the lock only when the property type can contain subjects, which is why writing a scalar from a dispose path is harmless and writing a subject typed or collection typed property is not, and why attaching or detaching a subject enters the same lock without being a property write at all.
 
@@ -517,6 +527,7 @@ Most guards in this file are recorded with the test that fails when they are del
 - **`DetachSubject`'s owner read is not atomic against the drain either**, and that makes the second wait's argument one statement weaker than it reads. The detach reads `Owner`, then appends, and the two are separate statements: a detach preempted between them, having read this handler as the owner before the release loop, can append its stop after the second wait's read returned zero. It is the same shape as the `DetachHostedService` residual above, one statement narrower, and no seam exists between those two statements to drive it. The shape self-protects for a subject with both a subject target and attachments, because the subject stop's own increment covers the attachment appends behind it. Reasoned, not demonstrated.
 - **Not clearing `_owned` at the end of the drain.** Leaves the suite green, and is an equivalent mutant as far as anything can currently observe: every entry left after the release loop is either one the loop released or one whose own gate re-read releases it while the gate still reads `Draining`. It stays uncleared because the argument for that, rather than the test for it, is what makes it safe.
 - **`WaitForStartAsync` attributing its empty transition.** Leaving it unattributed is green, and provably inert: the body is `Task.CompletedTask`, so nothing it does can outlive the provider. It is attributed for the rule rather than for a case.
+- **The ownership read inside the start body, taken alone.** Deleting it leaves the suite green while deleting the flag read beside it fails a test, so this is the half of the pair with nothing behind it. It is not an equivalent mutant: [The read inside the start body](#the-read-inside-the-start-body) gives a race free shape that reaches it, and a test for that one is worth writing. The second shape recorded there is a race, and a test that forced its ordering would pin something production does not provide, which is worse than leaving it uncovered.
 - **Two overlapping drains.** The gate's ratchet makes a repeat `StopAsync` legal, and the second would observe the same counter and the same set. Sequential in practice.
 
 Two more mutations survive the suite and are recorded here as **equivalent mutants** rather than as coverage gaps, because in each case the difference is unreachable rather than untested:

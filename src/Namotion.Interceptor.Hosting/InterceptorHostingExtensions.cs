@@ -126,10 +126,17 @@ public static class InterceptorHostingExtensions
             // attaches leaks a subject per failure.
             //
             // Released rather than only retired, which is the opposite of what an explicit detach does,
-            // because the reason for that asymmetry is absent here: the awaited start has run and
-            // faulted, so there is no queued start to refuse itself on a null owner and no stop left
-            // holding an instance. Marked first, so a context attach that snapshotted this attachment
-            // before the removal cannot take the target in the gap and start something unreachable.
+            // because no stop is left holding an instance: the awaited start has run and faulted.
+            //
+            // A start queued against this target while the awaited one was in flight is not ruled out,
+            // and these statements do not order themselves against it: the same completion releases
+            // both, so that body reaches its own guards while this runs. Winning the race leaves an
+            // instance nothing stops or disposes. Recorded in
+            // docs/design/hosting-service-ownership.md#faults-and-failed-starts rather than closed
+            // here, because ordering the two is a design decision.
+            //
+            // Marked first, so a context attach that snapshotted this attachment before the removal
+            // cannot take the target in the gap.
             attachment.Target.MarkDetached();
             attachment.Target.ReleaseOwnership(handler);
 

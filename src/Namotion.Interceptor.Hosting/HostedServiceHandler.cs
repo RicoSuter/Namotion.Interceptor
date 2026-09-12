@@ -35,8 +35,9 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// runs inside a property write with nothing to pass a scope through.
     /// </summary>
     /// <remarks>
-    /// Cleared at the top of every transition body through <see cref="ClearAmbientStartupScope"/>, or a
-    /// stop body would capture the scope of the flow that appended it for anything it attaches.
+    /// Cleared at the top of every transition body a handler attributed, through
+    /// <see cref="ClearAmbientStartupScope"/>, or a stop body would capture the scope of the flow that
+    /// appended it for anything it attaches.
     /// </remarks>
     private readonly AsyncLocal<HostedServiceStartupScope?> _startupScope = new();
 
@@ -325,10 +326,11 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 return;
             }
 
-            // Two windows, so neither condition is redundant: a detach clears liveness before it
-            // releases ownership, so a body reading in between is refused by liveness alone, while one
-            // appended after the detach finished is refused by ownership alone. No test separates them,
-            // because holding a body in that window means holding the lifecycle lock.
+            // Two windows, and neither condition is redundant. An explicit detach retires the record
+            // without releasing, so a body behind it still reads this handler as the owner and only
+            // liveness refuses it. A body that reads liveness after a later attach rebuilt it finds
+            // the owner released with liveness set, and only ownership refuses it. Only the first has
+            // a test behind it.
             if (!_liveSubjects.ContainsKey(subject) || !ReferenceEquals(target.Owner, this))
             {
                 return;
@@ -676,9 +678,10 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// </para>
     /// <para>
     /// Every reachable interceptor is asked, because one not holding the subject says nothing about
-    /// another. A handler can therefore be marked live on the strength of a graph it does not serve.
-    /// What makes that harmless is the one instance guard rather than liveness, which is argued in
-    /// docs/design/hosting-service-ownership.md#ownership-is-not-what-makes-two-contexts-over-one-subject-benign.
+    /// another. A handler can therefore be marked live on the strength of a graph it does not serve, and
+    /// then start a service no detach on that other graph's side ever reaches. That limit is accepted
+    /// rather than guarded, for the reason given in
+    /// docs/design/hosting-service-ownership.md#a-handler-can-be-marked-live-for-a-graph-it-does-not-serve.
     /// </para>
     /// </remarks>
     internal void MarkLiveIfAttached(IInterceptorSubject subject)
