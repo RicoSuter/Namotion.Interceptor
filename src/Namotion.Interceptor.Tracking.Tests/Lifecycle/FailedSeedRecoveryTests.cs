@@ -175,8 +175,13 @@ public class FailedSeedRecoveryTests
         SupportContractAssertions.Settled(context, [originalRoot, descendedRoot], originalRoot, descendedRoot, trigger, leaf);
     }
 
+    /// <summary>
+    /// Releasing the subject drops its failed-seed marker along with the rest of its baselines, so
+    /// the re-set is an ordinary fresh seed and no resume is involved. What this pins is that the
+    /// release leaves nothing of the interrupted lifetime behind.
+    /// </summary>
     [Fact]
-    public void WhenAnIncompleteSeedIsReleasedAndReattached_ThenItIsResumed()
+    public void WhenAnIncompleteSeedIsReleasedAndReattached_ThenItIsSeededAfresh()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
