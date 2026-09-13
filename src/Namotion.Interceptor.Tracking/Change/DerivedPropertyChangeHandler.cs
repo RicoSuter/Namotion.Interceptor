@@ -151,7 +151,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// Committed writes recalculate their dependents even when downstream processing throws.
     /// This requires a truthful <see cref="PropertyWriteContext{TProperty}.IsWritten"/> marker.
     /// Remaining dependents are attempted after a recalculation failure; failures are reported
-    /// after completion, with any downstream write failure first.
+    /// after completion as one flat list in the order they were raised, with any downstream write
+    /// failure first and a nested aggregate replaced by its parts where it stood.
     /// </remarks>
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
@@ -167,9 +168,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
             catch (Exception completionFailure)
             {
-                // Flattened so the reported failures stay one flat list whatever nesting the
-                // completion produced; the write failure keeps its leading position either way.
-                throw new AggregateException(writeFailure, completionFailure).Flatten();
+                // Flattened by hand rather than through AggregateException.Flatten, which is
+                // breadth first and would move the parts of a nested write failure behind the
+                // completion failure instead of keeping the write side in front.
+                var reported = new List<Exception>();
+                AddFlattened(reported, writeFailure);
+                AddFlattened(reported, completionFailure);
+                throw new AggregateException(reported);
             }
 
             throw;
@@ -228,8 +233,26 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             // A lone failure keeps its own type so callers can still catch it directly; several are
             // reported flat, because a recalculation can itself surface an aggregate.
             if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
-            throw new AggregateException(failures).Flatten();
+            var reported = new List<Exception>(failures.Count);
+            foreach (var failure in failures) AddFlattened(reported, failure);
+            throw new AggregateException(reported);
         }
+    }
+
+    /// <summary>
+    /// Appends a failure to the reported list, replacing an aggregate with its parts in place so
+    /// the flat list keeps the order the failures were raised in. An empty aggregate carries no
+    /// part to report, so it is kept as itself rather than disappearing.
+    /// </summary>
+    private static void AddFlattened(List<Exception> reported, Exception failure)
+    {
+        if (failure is AggregateException aggregate && aggregate.InnerExceptions.Count > 0)
+        {
+            foreach (var inner in aggregate.InnerExceptions) AddFlattened(reported, inner);
+            return;
+        }
+
+        reported.Add(failure);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

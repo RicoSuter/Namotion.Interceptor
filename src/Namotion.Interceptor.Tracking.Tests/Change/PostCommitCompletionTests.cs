@@ -220,6 +220,57 @@ public class PostCommitCompletionTests
     }
 
     [Fact]
+    public void WhenACommittedWriteFailsWithAnAggregate_ThenItsPartsStayAheadOfTheCompletionFailure()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var subject = new CompletionSubject(context) { Name = "old" };
+        var writePartOne = new InvalidOperationException("write part one");
+        var writePartTwo = new InvalidOperationException("write part two");
+        var dependentFailure = new InvalidOperationException("dependent");
+        using var dependent = new PropertyReference(subject, nameof(CompletionSubject.First))
+            .SubscribeInline((in SubjectPropertyChange _) => throw dependentFailure);
+        context.WithService(() => new ThrowingInterceptor(new AggregateException(writePartOne, writePartTwo), () => { }));
+
+        // Act
+        var exception = Record.Exception(() => subject.Name = "new");
+
+        // Assert
+        var aggregate = Assert.IsType<AggregateException>(exception);
+        Assert.Equal(new[] { writePartOne, writePartTwo, dependentFailure }, aggregate.InnerExceptions);
+        AssertSettled(subject);
+    }
+
+    [Fact]
+    public void WhenTheFirstFailingDependentReportsAnAggregate_ThenItsPartsStayAheadOfTheLaterFailure()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var subject = new CompletionSubject(context) { Name = "old" };
+        var partOne = new InvalidOperationException("first part one");
+        var partTwo = new InvalidOperationException("first part two");
+        var lateFailure = new InvalidOperationException("late");
+        var raised = 0;
+
+        // Which dependent recalculates first is not part of the contract, so whichever one runs
+        // first raises the aggregate and the reported order has to start with its parts.
+        Exception NextFailure() => ++raised == 1 ? new AggregateException(partOne, partTwo) : lateFailure;
+        using var first = new PropertyReference(subject, nameof(CompletionSubject.First))
+            .SubscribeInline((in SubjectPropertyChange _) => throw NextFailure());
+        using var second = new PropertyReference(subject, nameof(CompletionSubject.Second))
+            .SubscribeInline((in SubjectPropertyChange _) => throw NextFailure());
+
+        // Act
+        var exception = Record.Exception(() => subject.Name = "new");
+
+        // Assert
+        var aggregate = Assert.IsType<AggregateException>(exception);
+        Assert.Equal(new[] { partOne, partTwo, lateFailure }, aggregate.InnerExceptions);
+        Assert.Equal(2, raised);
+        AssertSettled(subject);
+    }
+
+    [Fact]
     public void WhenASingleDependentFails_ThenItPropagatesAsItsOwnType()
     {
         // Arrange
