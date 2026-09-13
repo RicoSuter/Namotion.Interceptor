@@ -1,9 +1,12 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Tests.Serialization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -11,6 +14,58 @@ namespace HomeBlaze.Services.Tests;
 
 public class RootManagerTests
 {
+    [Fact]
+    public async Task WhenRootAttachmentIsInProgress_ThenLoadingWaitsForRegistryPublication()
+    {
+        // Arrange
+        using var barrier = new AttachBarrier();
+        using var fixture = new RootFixture(barrier);
+        var manager = fixture.Manager;
+
+        // Act
+        await manager.StartAsync(CancellationToken.None);
+        await barrier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            // Assert
+            Assert.NotNull(manager.Root);
+            Assert.Same(manager.Root, fixture.Resolver.ResolveSubject("/", PathStyle.Canonical));
+            Assert.Null(fixture.Registry.TryGetRegisteredSubject(manager.Root));
+            Assert.False(manager.RootLoaded.IsCompleted);
+        }
+        finally
+        {
+            barrier.Release.Set();
+            await manager.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        await manager.RootLoaded.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.NotNull(fixture.Registry.TryGetRegisteredSubject(manager.Root));
+        Assert.Same(manager.Root, fixture.Context.GetService<TestSubject>());
+    }
+
+    [Fact]
+    public async Task WhenRootAttachmentFails_ThenLoadingReportsTheFailure()
+    {
+        // Arrange
+        var failure = new InvalidOperationException("Attach failed");
+        using var barrier = new AttachBarrier(failure);
+        using var fixture = new RootFixture(barrier);
+
+        // Act
+        await fixture.Manager.StartAsync(CancellationToken.None);
+        await barrier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        barrier.Release.Set();
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => fixture.Manager.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        // Assert
+        Assert.Same(failure, exception);
+        Assert.NotNull(fixture.Manager.Root);
+        Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(
+            () => fixture.Manager.RootLoaded.WaitAsync(TimeSpan.FromSeconds(10))));
+    }
+
     [Theory]
     [InlineData(SubjectAttachmentAnchorKind.Provisional, false)]
     [InlineData(SubjectAttachmentAnchorKind.Explicit, false)]
@@ -62,6 +117,61 @@ public class RootManagerTests
         finally
         {
             File.Delete(path);
+        }
+    }
+
+    private sealed class RootFixture : IDisposable
+    {
+        private readonly string _configurationPath = Path.Combine(Path.GetTempPath(), $"root-readiness-{Guid.NewGuid():N}.json");
+        private readonly ServiceProvider _services = new ServiceCollection().BuildServiceProvider();
+
+        public IInterceptorSubjectContext Context { get; }
+        public ISubjectRegistry Registry { get; }
+        public SubjectPathResolver Resolver { get; }
+        public RootManager Manager { get; }
+
+        public RootFixture(AttachBarrier barrier)
+        {
+            var types = new TypeProvider();
+            types.AddTypes([typeof(TestSubject)]);
+            Context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+            Context.AddService(barrier);
+            Registry = Context.GetService<ISubjectRegistry>();
+            RootManager? manager = null;
+            Resolver = new SubjectPathResolver(() => manager?.Root);
+            File.WriteAllText(_configurationPath, """{"$type":"HomeBlaze.Services.Tests.Serialization.TestSubject"}""");
+            var configuration = new Mock<IConfiguration>();
+            configuration.Setup(value => value["HomeBlaze:RootConfigFile"]).Returns(_configurationPath);
+            Manager = manager = new RootManager(new SubjectTypeRegistry(types),
+                new ConfigurableSubjectSerializer(types, _services), Context, Resolver, configuration.Object);
+        }
+
+        public void Dispose()
+        {
+            Manager.Dispose();
+            _services.Dispose();
+            File.Delete(_configurationPath);
+        }
+    }
+
+    [RunsBefore(typeof(SubjectRegistry))]
+    private sealed class AttachBarrier(Exception? failure = null) : ILifecycleHandler, IDisposable
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ManualResetEventSlim Release { get; } = new();
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (!change.IsContextAttach) return;
+            Entered.TrySetResult();
+            if (!Release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Attachment was not released");
+            if (failure is not null) throw failure;
+        }
+
+        public void Dispose()
+        {
+            Release.Set();
+            Release.Dispose();
         }
     }
 }
