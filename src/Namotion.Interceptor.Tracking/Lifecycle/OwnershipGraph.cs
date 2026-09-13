@@ -168,7 +168,11 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     public PropertyEdgeJournal? GetPropertyJournal(PropertyReference property, SubjectOwnership? ownership)
     {
         var first = _firstPropertyJournal;
-        if (first is not null && first.Property == property && ReferenceEquals(first.Ownership, ownership)) return first;
+        if (first is not null && first.Property == property && ReferenceEquals(first.Ownership, ownership))
+        {
+            return first;
+        }
+
         return _additionalPropertyJournals is { Count: > 0 } &&
                _additionalPropertyJournals.TryGetValue(property, out var journal) &&
                ReferenceEquals(journal.Ownership, ownership) ? journal : null;
@@ -185,18 +189,34 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
 
         journal = LifecycleScratch.RentPropertyJournal();
         journal.Initialize(property, ownership, installed);
-        if (_firstPropertyJournal is null) _firstPropertyJournal = journal;
+        if (_firstPropertyJournal is null)
+        {
+            _firstPropertyJournal = journal;
+        }
+
         else (_additionalPropertyJournals ??= new(PropertyReference.Comparer))[property] = journal;
         return journal;
     }
 
     public void EndPropertyJournal(PropertyEdgeJournal journal)
     {
-        if (--journal.Users > 0) return;
+        if (--journal.Users > 0)
+        {
+            return;
+        }
+
         // A failed descent can leave desired edges unpublished. Keep its actual occurrences until
         // a later write settles the property or releasing the owner drains what was installed.
-        if (!journal.IsComplete && ReferenceEquals(TryGetOwnership(journal.Property.Subject), journal.Ownership)) return;
-        if (ReferenceEquals(_firstPropertyJournal, journal)) _firstPropertyJournal = null;
+        if (!journal.IsComplete && ReferenceEquals(TryGetOwnership(journal.Property.Subject), journal.Ownership))
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_firstPropertyJournal, journal))
+        {
+            _firstPropertyJournal = null;
+        }
+
         else if (_additionalPropertyJournals is not null &&
                  _additionalPropertyJournals.TryGetValue(journal.Property, out var current) && ReferenceEquals(current, journal))
         {
@@ -228,13 +248,21 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
 
     public void RecordIncomingAdded(PropertyReference property, IInterceptorSubject child, object? index)
     {
-        if (_firstPropertyJournal is null && _additionalPropertyJournals is not { Count: > 0 }) return;
+        if (_firstPropertyJournal is null && _additionalPropertyJournals is not { Count: > 0 })
+        {
+            return;
+        }
+
         GetPropertyJournal(property, TryGetOwnership(property.Subject))?.Add(child, index);
     }
 
     public void RecordIncomingRemoved(PropertyReference property, IInterceptorSubject child)
     {
-        if (_firstPropertyJournal is null && _additionalPropertyJournals is not { Count: > 0 }) return;
+        if (_firstPropertyJournal is null && _additionalPropertyJournals is not { Count: > 0 })
+        {
+            return;
+        }
+
         GetPropertyJournal(property, TryGetOwnership(property.Subject))?.RemoveLast(child);
     }
 
@@ -279,31 +307,61 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
             foreach (var entry in subject.Properties)
             {
                 var metadata = entry.Value;
-                if (!IsStructural(metadata)) continue;
+                if (!IsStructural(metadata))
+                {
+                    continue;
+                }
+
                 var property = new PropertyReference(subject, entry.Key);
                 var hadBaseline = _baselines.TryGetValue(property, out var previousBaseline);
                 if (!seed)
                 {
                     occurrences.Clear();
-                    if (GetPropertyJournal(property, ownership) is { } installedJournal) installedJournal.CopyTo(occurrences);
+                    if (GetPropertyJournal(property, ownership) is { } installedJournal)
+                    {
+                        installedJournal.CopyTo(occurrences);
+                    }
+
                     else previousBaseline.CopyTo(occurrences);
                     foreach (var occurrence in occurrences) children.Add((property, occurrence, previousBaseline.Revision));
                     continue;
                 }
 
                 // A nested write to another property already committed and published it.
-                if (hadBaseline) continue;
-                if (!IsSeedOwnerCurrent(subject, ownership)) return;
+                if (hadBaseline)
+                {
+                    continue;
+                }
+
+                if (!IsSeedOwnerCurrent(subject, ownership))
+                {
+                    return;
+                }
+
                 var value = ReadSeedingGetter(property, metadata, ownership);
-                if (!IsSeedOwnerCurrent(subject, ownership)) return;
-                if (previousBaseline.Revision != GetBaselineRevision(property)) continue;
+                if (!IsSeedOwnerCurrent(subject, ownership))
+                {
+                    return;
+                }
+
+                if (previousBaseline.Revision != GetBaselineRevision(property))
+                {
+                    continue;
+                }
 
                 occurrences.Clear();
                 StructuralValueScanner.CollectOccurrences(metadata.Type, value, occurrences);
                 // Getters and enumerators can release this owner or publish a newer property.
                 // Neither continuation may recreate their obsolete edges.
-                if (!IsSeedOwnerCurrent(subject, ownership)) return;
-                if (previousBaseline.Revision != GetBaselineRevision(property)) continue;
+                if (!IsSeedOwnerCurrent(subject, ownership))
+                {
+                    return;
+                }
+
+                if (previousBaseline.Revision != GetBaselineRevision(property))
+                {
+                    continue;
+                }
 
                 var journal = occurrences.Count > 0 ? BeginPropertyJournal(property, ownership!) : null;
                 var revision = SetBaseline(property, value, occurrences);
@@ -355,7 +413,11 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
             if (isNested)
             {
                 var remaining = _suspendedSeedingGetters![preceding] - 1;
-                if (remaining == 0) _suspendedSeedingGetters.Remove(preceding);
+                if (remaining == 0)
+                {
+                    _suspendedSeedingGetters.Remove(preceding);
+                }
+
                 else _suspendedSeedingGetters[preceding] = remaining;
             }
         }
@@ -404,7 +466,10 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
                 if (first is not null && first.Property == property)
                 {
                     _firstPropertyJournal = null;
-                    if (first.Users == 0) LifecycleScratch.Return(first);
+                    if (first.Users == 0)
+                    {
+                        LifecycleScratch.Return(first);
+                    }
                 }
 
                 if (_additionalPropertyJournals is not null &&

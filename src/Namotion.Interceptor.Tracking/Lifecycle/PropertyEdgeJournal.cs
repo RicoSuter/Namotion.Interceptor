@@ -113,9 +113,17 @@ internal sealed class PropertyEdgeJournal
             return;
         }
 
-        if (_first < 0 || !_lastForSubject!.TryGetValue(subject, out var entryIndex)) return;
+        if (_first < 0 || !_lastForSubject!.TryGetValue(subject, out var entryIndex))
+        {
+            return;
+        }
+
         var entry = _entries![entryIndex];
-        if (entry.PreviousForSubject < 0) _lastForSubject.Remove(subject);
+        if (entry.PreviousForSubject < 0)
+        {
+            _lastForSubject.Remove(subject);
+        }
+
         else _lastForSubject[subject] = entry.PreviousForSubject;
 
         if (entry.Previous >= 0)

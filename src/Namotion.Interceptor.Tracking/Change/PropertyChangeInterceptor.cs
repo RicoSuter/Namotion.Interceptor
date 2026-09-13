@@ -228,13 +228,20 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             var change = Change;
             foreach (var subscription in QueueSubscriptions) subscription.Enqueue(in change);
             SyncSubject?.OnNext(change);
-            if (Listeners is not null) PropertyChangeSubscription.Dispatch(Listeners, in change);
+            if (Listeners is not null)
+            {
+                PropertyChangeSubscription.Dispatch(Listeners, in change);
+            }
         }
     }
 
     private static void Publish(Publication publication)
     {
-        if (publication.Change.Property.Subject.TryGetContext()?.TryGetLifecycleInterceptor()?.TryQueuePropertyChange(publication) == true) return;
+        if (publication.Change.Property.Subject.TryGetContext()?.TryGetLifecycleInterceptor()?.TryQueuePropertyChange(publication) == true)
+        {
+            return;
+        }
+
         publication.Dispatch();
     }
 

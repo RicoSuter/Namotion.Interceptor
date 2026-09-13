@@ -232,7 +232,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         {
             // A lone failure keeps its own type so callers can still catch it directly; several are
             // reported flat, because a recalculation can itself surface an aggregate.
-            if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+            if (failures.Count == 1)
+            {
+                ExceptionDispatchInfo.Capture(failures[0]).Throw();
+            }
+
             var reported = new List<Exception>(failures.Count);
             foreach (var failure in failures) AddFlattened(reported, failure);
             throw new AggregateException(reported);

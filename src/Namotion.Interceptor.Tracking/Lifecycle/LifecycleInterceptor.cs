@@ -175,14 +175,22 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
 
     internal bool TryQueuePropertyCallback(PropertyReference property, bool attach)
     {
-        if (!_gate.IsHeldByCurrentThread) return false;
+        if (!_gate.IsHeldByCurrentThread)
+        {
+            return false;
+        }
+
         _notifier.QueueProperty(property, attach);
         return true;
     }
 
     internal bool TryQueuePropertyChange(Change.PropertyChangeInterceptor.Publication publication)
     {
-        if (!_gate.IsHeldByCurrentThread) return false;
+        if (!_gate.IsHeldByCurrentThread)
+        {
+            return false;
+        }
+
         _notifier.QueuePropertyChange(publication);
         return true;
     }
@@ -191,7 +199,10 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     {
         try
         {
-            if (_heldGateCount == 1) _notifier.Drain();
+            if (_heldGateCount == 1)
+            {
+                _notifier.Drain();
+            }
         }
         finally
         {
@@ -282,7 +293,10 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
 
         public void DrainOnFailure(Exception operationFailure)
         {
-            if (_heldGateCount == 1) lifecycle._notifier.Drain(operationFailure);
+            if (_heldGateCount == 1)
+            {
+                lifecycle._notifier.Drain(operationFailure);
+            }
         }
     }
 

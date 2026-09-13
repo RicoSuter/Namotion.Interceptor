@@ -560,7 +560,10 @@ public class RegisteredSubjectProperty
                 if (list[index] is IInterceptorSubject subject)
                 {
                     collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
-                    if (!collectionPositions.TryAdd(subject, index)) hasDuplicates = true;
+                    if (!collectionPositions.TryAdd(subject, index))
+                    {
+                        hasDuplicates = true;
+                    }
                 }
             }
         }
@@ -572,7 +575,10 @@ public class RegisteredSubjectProperty
                 if (item is IInterceptorSubject subject)
                 {
                     collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint, ReferenceEqualityComparer.Instance);
-                    if (!collectionPositions.TryAdd(subject, index)) hasDuplicates = true;
+                    if (!collectionPositions.TryAdd(subject, index))
+                    {
+                        hasDuplicates = true;
+                    }
                 }
                 index++;
             }

@@ -74,15 +74,30 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
     /// <summary>Resumes captured and unread properties of a retained subject whose seed failed.</summary>
     public bool ResumeFailedSeed(IInterceptorSubject subject)
     {
-        if (!graph.TryBeginSeedRecovery(subject, out var ownership)) return false;
+        if (!graph.TryBeginSeedRecovery(subject, out var ownership))
+        {
+            return false;
+        }
+
         try
         {
             foreach (var entry in subject.Properties)
             {
-                if (!OwnershipGraph.IsStructural(entry.Value)) continue;
+                if (!OwnershipGraph.IsStructural(entry.Value))
+                {
+                    continue;
+                }
+
                 var property = new PropertyReference(subject, entry.Key);
-                if (graph.HasBaseline(property)) Reconciler.Reconcile(property, entry.Value, null, useCapturedBaseline: true);
-                if (!ReferenceEquals(graph.TryGetOwnership(subject), ownership)) return true;
+                if (graph.HasBaseline(property))
+                {
+                    Reconciler.Reconcile(property, entry.Value, null, useCapturedBaseline: true);
+                }
+
+                if (!ReferenceEquals(graph.TryGetOwnership(subject), ownership))
+                {
+                    return true;
+                }
             }
 
             SeedAndAttachChildren(subject);

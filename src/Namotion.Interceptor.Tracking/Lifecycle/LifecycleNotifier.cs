@@ -33,13 +33,20 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context, Owne
         }
         finally
         {
-            if (subject is ILifecycleHandler handler) _notifications.Add(new(NotificationKind.LifecycleHandler, change, Value: handler));
+            if (subject is ILifecycleHandler handler)
+            {
+                _notifications.Add(new(NotificationKind.LifecycleHandler, change, Value: handler));
+            }
         }
     }
 
     public void InvokeRemovedLifecycleHandlers(IInterceptorSubject subject, SubjectLifecycleChange change)
     {
-        if (subject is ILifecycleHandler handler) _notifications.Add(new(NotificationKind.LifecycleHandler, change, Value: handler));
+        if (subject is ILifecycleHandler handler)
+        {
+            _notifications.Add(new(NotificationKind.LifecycleHandler, change, Value: handler));
+        }
+
         QueueLifecycleHandlers(change);
     }
 
@@ -78,7 +85,11 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context, Owne
 
     public void Drain(Exception? operationFailure = null)
     {
-        if (_draining || (_notifications.Count == 0 && _propertyChanges.Count == 0)) return;
+        if (_draining || (_notifications.Count == 0 && _propertyChanges.Count == 0))
+        {
+            return;
+        }
+
         _draining = true;
         List<Exception>? failures = null;
         try
@@ -147,8 +158,16 @@ internal sealed class LifecycleNotifier(IInterceptorSubjectContext context, Owne
         }
         if (failures is not null)
         {
-            if (operationFailure is not null) failures.Insert(0, operationFailure);
-            if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+            if (operationFailure is not null)
+            {
+                failures.Insert(0, operationFailure);
+            }
+
+            if (failures.Count == 1)
+            {
+                ExceptionDispatchInfo.Capture(failures[0]).Throw();
+            }
+
             throw new AggregateException(failures);
         }
     }

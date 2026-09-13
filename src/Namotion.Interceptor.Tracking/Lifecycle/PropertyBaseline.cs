@@ -9,17 +9,28 @@ internal readonly struct PropertyBaseline(object? value, long revision, SubjectO
 
     public void CopyTo(List<SubjectOccurrence> target)
     {
-        if (Value is IInterceptorSubject subject) target.Add(new SubjectOccurrence(subject, null));
+        if (Value is IInterceptorSubject subject)
+        {
+            target.Add(new SubjectOccurrence(subject, null));
+        }
+
         else if (occurrences is not null) target.AddRange(occurrences);
     }
 
     public bool Contains(IInterceptorSubject target)
     {
-        if (Value is IInterceptorSubject subject) return ReferenceEquals(subject, target);
+        if (Value is IInterceptorSubject subject)
+        {
+            return ReferenceEquals(subject, target);
+        }
+
         if (occurrences is not null)
         {
             foreach (var occurrence in occurrences)
-                if (ReferenceEquals(occurrence.Subject, target)) return true;
+                if (ReferenceEquals(occurrence.Subject, target))
+                {
+                    return true;
+                }
         }
 
         return false;
