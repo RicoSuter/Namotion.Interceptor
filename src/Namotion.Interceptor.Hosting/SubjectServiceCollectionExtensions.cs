@@ -4,9 +4,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Namotion.Interceptor.Hosting;
 
-/// <summary>
-/// Extension methods for registering subjects with dependency injection.
-/// </summary>
+/// <summary>Extension methods for registering subjects with dependency injection.</summary>
 public static class SubjectServiceCollectionExtensions
 {
     /// <summary>
@@ -52,14 +50,12 @@ public static class SubjectServiceCollectionExtensions
 
             // Held across construction as well as configuration, because a generated context
             // constructor attaches the subject before this factory regains control. Taken from
-            // dependency injection when the resolver declined a context, since the constructor
-            // dependency injection resolves can still be given one.
+            // dependency injection when the resolver declined one, which the constructor may still get.
             using var startup = (context ?? serviceProvider.GetService<IInterceptorSubjectContext>())
                 ?.DeferHostedServiceStartup();
 
-            // The factory is the decision, not a reflection query: reflection answers the looser question
-            // of whether a constructor mentions the type, which can be true of one that cannot be called
-            // with it.
+            // The factory is the decision, not a reflection query: reflection answers the looser
+            // question of whether a constructor mentions the type, not whether it can be called with it.
             var instance = context is not null && contextFactory is not null
                 ? (T)contextFactory(serviceProvider, [context])
                 : ActivatorUtilities.CreateInstance<T>(serviceProvider);
@@ -84,8 +80,7 @@ public static class SubjectServiceCollectionExtensions
 
     /// <summary>
     /// Throws on a second registration of the same type. Keyed on the activation rather than on
-    /// <typeparamref name="T"/>, so a caller who registered the type themselves is not caught. Keeping
-    /// the first silently would drop this call's configure and resolver and still read as registered.
+    /// <typeparamref name="T"/>, so a caller who registered the type themselves is not caught.
     /// </summary>
     private static void GuardDuplicateRegistration<T>(IServiceCollection services)
         where T : class, IInterceptorSubject

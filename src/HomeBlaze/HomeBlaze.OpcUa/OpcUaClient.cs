@@ -25,9 +25,7 @@ public partial class OpcUaClient
 {
     private readonly ILogger<OpcUaClient> _logger;
 
-    /// <summary>
-    /// The attachment this wrapper owns and every path that maintains it.
-    /// </summary>
+    /// <summary>The attachment this wrapper owns and every path that maintains it.</summary>
     private readonly SingleAttachmentHost<IOpcUaSubjectClientSource> _attachmentHost;
 
     // Configuration properties
@@ -203,9 +201,7 @@ public partial class OpcUaClient
         return _attachmentHost.ApplyConfigurationAsync(cancellationToken);
     }
 
-    // What the attachment host reads back from this wrapper. Status, StatusMessage and IsEnabled are
-    // the generated partial properties above; the rest is implemented explicitly, so hosting an OPC UA
-    // client source adds nothing to what this subject publishes.
+    // Attachment host callbacks
 
     string IAttachmentOwner<IOpcUaSubjectClientSource>.LogName => "OPC UA client";
 

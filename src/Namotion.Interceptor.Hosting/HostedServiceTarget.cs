@@ -12,10 +12,9 @@ internal sealed class HostedServiceTarget
     private readonly object _sync = new();
 
     /// <summary>
-    /// Pairs the ownership exchange with the handler's record of it, which are one fact and were not
-    /// atomic against each other: a release landing between an install and its record nulls the owner,
-    /// finds no record to retire, and leaves one that no later release can match, because the owner it
-    /// would have matched on is already gone. Measured at tens of leaks per two million races.
+    /// Pairs the ownership exchange with the handler's record of it, which are one fact: a release
+    /// landing between an install and its record nulls the owner, finds no record to retire, and leaves
+    /// one that no later release can ever match.
     /// </summary>
     /// <remarks>
     /// Its own lock rather than <c>_sync</c>. A context detach releases every attachment target it
@@ -50,11 +49,7 @@ internal sealed class HostedServiceTarget
     /// <summary>Test seam, awaited at the top of every transition body. Null in production.</summary>
     internal Func<Task>? TransitionGate { get; set; }
 
-    /// <summary>
-    /// Test seam, invoked inside the chain lock between the take and the append. Null in production.
-    /// Holds the critical section open where a split would put its gap, which is the only way an
-    /// appender racing that gap is reachable from a test.
-    /// </summary>
+    /// <summary>Test seam, invoked inside the chain lock between the take and the append. Null in production.</summary>
     internal Action? ChainLockGate { get; set; }
 
     public IHostedService? Current => Volatile.Read(ref _current);
@@ -121,9 +116,7 @@ internal sealed class HostedServiceTarget
         }
     }
 
-    /// <summary>
-    /// Releases an ownership this handler installed and retires its record.
-    /// </summary>
+    /// <summary>Releases an ownership this handler installed and retires its record.</summary>
     /// <remarks>
     /// The record is retired only when the exchange matched, because the record and <c>_owner</c> are
     /// one fact: a release that matched nothing released nothing.
@@ -140,11 +133,10 @@ internal sealed class HostedServiceTarget
     }
 
     /// <summary>
-    /// Appends a transition and returns a task completing when it has run. Appending never blocks and
-    /// never runs the body, so callers may append while holding a lock.
+    /// Appends a transition counted against <paramref name="handler"/>, so its drain waits for it, and
+    /// returns a task completing when it has run. Appending never blocks and never runs the body, so
+    /// callers may append while holding a lock.
     /// </summary>
-    /// <param name="body">The transition.</param>
-    /// <param name="handler">The handler the transition is counted against, so its drain waits for it.</param>
     public Task AppendAsync(HostedServiceHandler handler, Func<Task> body)
     {
         lock (_sync)
@@ -153,9 +145,7 @@ internal sealed class HostedServiceTarget
         }
     }
 
-    /// <summary>
-    /// Appends a transition no drain waits for.
-    /// </summary>
+    /// <summary>Appends a transition no drain waits for.</summary>
     /// <remarks>
     /// Test only. Every production append is attributed, or shutdown returns while the transition is
     /// still about to touch a service provider the host is disposing, and the body keeps the appending
@@ -175,9 +165,8 @@ internal sealed class HostedServiceTarget
     /// nothing was appended.
     /// </summary>
     /// <remarks>
-    /// The drain snapshots what it owns while holding nothing and appends afterwards. Deciding outside
-    /// this lock lets a subject that left one host's graph and joined another's have the second host's
-    /// instance stopped and disposed by the first host's drain.
+    /// The drain snapshots what it owns while holding nothing and appends afterwards, so deciding
+    /// outside this lock lets one host's drain stop and dispose an instance a second host started.
     /// </remarks>
     public Task? AppendIfOwnedAsync(HostedServiceHandler handler, Func<Task> body)
     {
@@ -191,27 +180,13 @@ internal sealed class HostedServiceTarget
     /// Confirms the subject is still live for <paramref name="handler"/>, takes ownership and appends
     /// the transition, all under one acquisition of the chain lock. Returns null when the subject is
     /// no longer live or another handler owns the target, in which case nothing was appended and no
-    /// ownership was taken. <paramref name="ownershipTaken"/> distinguishes an owner this call
-    /// installed from one it found already installed for the same handler, which the caller must not
-    /// undo: that one belongs to an earlier attach whose instance may still be running.
+    /// ownership was taken. <paramref name="ownershipTaken"/> is as on <see cref="TryTakeOwnership"/>.
     /// </summary>
     /// <remarks>
-    /// One critical section, because a context detach clears liveness before appending its stops under
-    /// this same lock. That leaves two orders and no third: this call first, and the detach's stop lands
-    /// behind a start that finds the subject dead; or the stop first, and this call appends nothing.
-    /// Split them and a start lands behind an attachment stop waiting for the subject's stop, which
-    /// waits for the caller awaiting this start.
-    /// <para>
-    /// The detached read is the same argument for an explicit detach, which clears no liveness: without
-    /// it the start runs and creates an instance no later detach can reach, because the attachment it
-    /// would be enumerated from is gone.
-    /// </para>
-    /// <para>
-    /// The record the take writes lands inside this lock and ahead of the append, which is what makes
-    /// the body dispatchable: a drain that snapshots between the two queues behind this section for its
-    /// own append and then reads the ownership the liveness undo below may just have released, so it
-    /// appends nothing for a take that was undone and appends behind the start for one that stood.
-    /// </para>
+    /// The three steps must stay under one acquisition. Splitting them deadlocks a start against the
+    /// stops a context detach appends under this same lock, and leaves a start able to outlive an
+    /// explicit detach. Worked through in
+    /// docs/design/hosting-service-ownership.md#the-read-inside-the-chain-lock.
     /// </remarks>
     public Task? TryTakeOwnershipAndAppendAsync(
         HostedServiceHandler handler,
@@ -237,16 +212,13 @@ internal sealed class HostedServiceTarget
 
             if (!handler.IsLive(subject))
             {
-                // A detach clears liveness, then reads Owner and releases, and it does the last two
-                // outside this lock. A take landing after that release is one the detach never saw and
-                // never releases, so the target stays owned and rooted here until shutdown.
+                // A detach clears liveness, then reads Owner and releases, the last two outside this
+                // lock, so a take landing after that release is one it never saw and never releases.
                 //
-                // Undone inside the lock, not after it: ReleaseOwnership matches on the handler, not on
-                // the take, so outside the lock a re-attach can install a fresh ownership that the undo
-                // then destroys. No install can interleave in here, because every install takes it.
-                //
-                // Only an ownership this call installed. An earlier take's is the detach's to release,
-                // having read Owner as non-null.
+                // Undone inside the lock, not after it: ReleaseOwnership matches on the handler rather
+                // than on the take, so outside the lock the undo destroys an ownership a concurrent
+                // re-attach installed. Only for an ownership this call installed: an earlier take's is
+                // the detach's to release, having read Owner as non-null.
                 if (ownershipTaken)
                 {
                     ReleaseOwnership(handler);
@@ -304,8 +276,7 @@ internal sealed class HostedServiceTarget
         }
         catch (Exception)
         {
-            // Handled by the body itself, which records into Fault and logs. This catch only
-            // guarantees the chain stays unfaulted.
+            // Handled by the body itself, which records into Fault and logs.
         }
         finally
         {

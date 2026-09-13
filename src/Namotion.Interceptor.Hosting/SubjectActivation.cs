@@ -22,8 +22,7 @@ internal sealed class SubjectActivation<T> : IHostedService
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // Resolving constructs the subject, which attaches it to the context, which makes the
-        // handler append its start. Start ownership stays with the handler.
+        // Resolving constructs and attaches the subject, which makes the handler append its start.
         var subject = _serviceProvider.GetRequiredService<T>();
 
         if (subject is not IHostedService hostedService)
@@ -43,14 +42,12 @@ internal sealed class SubjectActivation<T> : IHostedService
         }
 
         // Opens the gate before awaiting, so a handler registered after this activation cannot
-        // deadlock host startup on registration order, and awaits the start so a failing subject
-        // still aborts host startup the way AddHostedService does.
+        // deadlock host startup on registration order.
         handler.EnsureStarted();
 
-        // A false result is deliberately not a fallback into starting the subject here: it means the
-        // handler has no start for it, either because another handler owns it, in which case a start
-        // here would be a second instance, or because this handler is draining, in which case a start
-        // here would be something nothing stops.
+        // A false result is deliberately not a fallback into starting the subject here: another
+        // handler owning it would make that a second instance, and a draining handler would make it
+        // something nothing stops.
         await handler.WaitForStartAsync(subject, cancellationToken).ConfigureAwait(false);
     }
 

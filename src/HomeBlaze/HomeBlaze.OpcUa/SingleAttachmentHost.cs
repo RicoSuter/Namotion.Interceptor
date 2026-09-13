@@ -41,8 +41,8 @@ internal interface IAttachmentOwner<TService> : IInterceptorSubject
 
     /// <summary>
     /// Waits for whatever has to be in place before the attach, and returns false when the start must
-    /// abandon, in which case the implementation has reported that outcome itself. The start path is never reached through the subject's own StopAsync, so parking here
-    /// cannot sit inside the handler's stop transition for that subject.
+    /// abandon, in which case the implementation has reported that outcome itself. Parking here cannot
+    /// sit inside the handler's stop transition: the start path is never reached through StopAsync.
     /// </summary>
     ValueTask<bool> WaitUntilStartableAsync(CancellationToken cancellationToken) => new(true);
 
@@ -95,16 +95,14 @@ internal sealed class SingleAttachmentHost<TService>
 
     /// <summary>
     /// The single attachment the wrapper owns, or null when nothing is attached. Read and written only
-    /// under <see cref="_attachmentGate"/>. Each attach builds its own instance, so a second one would
-    /// leave both live with the subject's state bound to one of them, while the other is unreachable
-    /// from here and so can never be stopped from here.
+    /// under <see cref="_attachmentGate"/>. Each attach builds its own instance, so a second one leaves
+    /// one of them unreachable from here and therefore impossible to stop from here.
     /// </summary>
     private IHostedServiceAttachment<TService>? _attachment;
 
     /// <remarks>
-    /// <paramref name="pollInterval"/> is null for the default. It is injectable because the
-    /// reconciliation is the only path into several of the states below, and a suite that runs in
-    /// seconds cannot reach them on the production interval.
+    /// <paramref name="pollInterval"/> is null for the default, and injectable because a suite that
+    /// runs in seconds cannot reach the reconciled states on the production interval.
     /// </remarks>
     public SingleAttachmentHost(IAttachmentOwner<TService> owner, ILogger logger, TimeSpan? pollInterval = null)
     {
@@ -138,14 +136,8 @@ internal sealed class SingleAttachmentHost<TService>
 
         // Deliberately does NOT detach, and deliberately does not take the gate: this unwind runs inside
         // the handler's own stop transition for this subject, and either one would wait on that
-        // transition. See docs/hosting.md#do-not-detach-from-your-own-stop-path. The handler owns the
-        // detach on graph events; the explicit detach lives on the Stop operation and
-        // ApplyConfigurationAsync, neither of which is reached through StopAsync.
-        //
-        // What the instance published is left alone for the same reason: it is still running here and is
-        // stopped only after this unwind returns, so dropping its output would pull it out from under
-        // something live. UpdateFromAttachment drops it instead, on the first poll or restart that sees
-        // the attachment holding no instance.
+        // transition. See docs/hosting.md#do-not-detach-from-your-own-stop-path. What the instance
+        // published is left alone for the same reason, and UpdateFromAttachment drops it instead.
         ReportStopped();
     }
 
@@ -174,8 +166,7 @@ internal sealed class SingleAttachmentHost<TService>
 
         try
         {
-            // Cleared ahead of the status, for the reason the stop path states in full: the text stands
-            // under Error alone, so a status leaving Error has to leave it behind first.
+            // Cleared ahead of the status: the text stands under Error alone.
             _owner.StatusMessage = null;
             _owner.Status = ServiceStatus.Starting;
 
@@ -196,21 +187,17 @@ internal sealed class SingleAttachmentHost<TService>
             // alongside the one the handler just re-created.
             if (_attachment is null)
             {
-                // The awaited overload, and CancellationToken.None rather than the caller's token. The
-                // returned handle is the only record of the attachment, and the transition runs to
-                // completion whatever the token does, so a cancelled wait would strand a live
-                // attachment with nothing pointing at it and let the next start attach a second
-                // instance. The wait is bounded: the instance is a BackgroundService whose StartAsync
-                // returns at its first await, and a start appended during shutdown returns without
-                // creating anything.
+                // CancellationToken.None rather than the caller's token: the returned handle is the
+                // only record of the attachment and the transition runs to completion whatever the
+                // token does, so a cancelled wait strands a live attachment with nothing pointing at
+                // it and lets the next start attach a second instance.
                 var attachment = await _owner.AttachHostedServiceAsync(_owner.CreateInstance, CancellationToken.None);
                 if (attachment.Current is null)
                 {
-                    // The awaited overload appends nothing when the context has no handler, when the
-                    // subject is not in the graph and when the host is draining, and it throws rather
-                    // than returning when a start faulted, so no instance here means nothing was
-                    // started and nothing will be before a context re-attach. Reported as an error and
-                    // dropped rather than kept, which would report Starting forever.
+                    // No instance means nothing was started and nothing will be before a context
+                    // re-attach: the awaited overload appends nothing without a handler, outside the
+                    // graph or while draining, and throws rather than returning when a start faulted.
+                    // Dropped rather than kept, which would report Starting forever.
                     _owner.DetachHostedService(attachment);
 
                     _owner.Status = ServiceStatus.Error;
@@ -229,10 +216,9 @@ internal sealed class SingleAttachmentHost<TService>
         }
         catch (Exception exception)
         {
-            // No OperationCanceledException filter: the only wait on the caller's token inside this try
-            // is the startable wait, which reports its own cancellation and returns instead of throwing,
-            // so the filter could only catch a genuine start failure that happens to surface as one and
-            // would report it as a clean stop. A cancelled gate wait leaves through the gate helper.
+            // No OperationCanceledException filter: the only wait on the caller's token in this try is
+            // the startable wait, which reports its own cancellation and returns instead of throwing,
+            // so a filter could only swallow a genuine start failure and report it as a clean stop.
             _owner.Status = ServiceStatus.Error;
             _owner.StatusMessage = exception.Message;
             _logger.LogError(exception, "Failed to start {Service} for {Target}", _owner.LogName, _owner.LogTarget);
@@ -255,27 +241,23 @@ internal sealed class SingleAttachmentHost<TService>
             if (_attachment is not { } attachment)
             {
                 // A wrapper whose start failed sits at Error with no attachment, and a stop is the only
-                // thing that can take it out of there: disabling it in the configuration stops it and
-                // never starts it again, so a status left alone here is left alone forever. What such a
-                // start published before it failed goes with it: nothing is attached, so dropping it
-                // cannot pull anything out from under a live instance.
+                // thing that takes it out of there. Dropping what that start published is safe here
+                // because nothing is attached.
                 _owner.DropInstanceState();
                 ReportStopped();
                 return;
             }
 
-            // A wrapper that faulted with its attachment still held arrives here from Error. The message
-            // is the text behind that status alone, and is cleared ahead of the status write so it never
-            // stands under one that is not Error.
+            // Cleared ahead of the status: a wrapper that faulted with its attachment still held
+            // arrives here from Error, and the text stands under Error alone.
             _owner.StatusMessage = null;
             _owner.Status = ServiceStatus.Stopping;
 
             try
             {
                 // CancellationToken.None, symmetrically with the attach: the detach removes the
-                // attachment before it stops anything, so a cancelled wait would return while the
-                // instance is still stopping with nothing left pointing at it, and the next start would
-                // create a second one alongside it. The wait is bounded by the stop the handler runs.
+                // attachment before it stops anything, so a cancelled wait returns while the instance
+                // is still stopping with nothing left pointing at it.
                 await _owner.DetachHostedServiceAsync(attachment, CancellationToken.None);
                 _logger.LogInformation("{Service} stopped", _owner.LogName);
             }
@@ -286,8 +268,7 @@ internal sealed class SingleAttachmentHost<TService>
 
             // Cleared from the subject's own attachment set rather than from the detach having
             // returned: the field must never read null while an attachment is still live, or the guard
-            // in the start path attaches a second instance over it. A detach that threw before removing
-            // the attachment did not stop anything.
+            // in the start path attaches a second instance over it.
             if (!_owner.GetHostedServiceAttachments().Contains(attachment))
             {
                 _attachment = null;
@@ -308,8 +289,7 @@ internal sealed class SingleAttachmentHost<TService>
     /// </summary>
     private void ReportStopped()
     {
-        // Cleared first, same rule as the start and the stop: both callers reach this from Error, so
-        // writing the status first would stand Stopped beside the text of the failure that caused it.
+        // Cleared first: both callers reach this from Error, and the text stands under Error alone.
         _owner.StatusMessage = null;
         _owner.Status = ServiceStatus.Stopped;
         _owner.ResetDiagnostics();
@@ -318,9 +298,8 @@ internal sealed class SingleAttachmentHost<TService>
     /// <summary>
     /// Polls the attachment from the run loop. Skips the round rather than waiting when a start or a
     /// stop holds the gate: that caller reconciles the state itself before it releases, and a poll that
-    /// waited here would sit in the way of the shutdown that cancels it. Ungated, a poll preempted
-    /// inside <see cref="UpdateFromAttachment"/> resumes after a completed stop and writes Running over
-    /// Stopped, which no later poll corrects because the attachment is null by then.
+    /// waited here would sit in the way of the shutdown that cancels it. Ungated, a preempted poll
+    /// resumes after a completed stop and writes Running over Stopped for good.
     /// </summary>
     private void TryUpdateFromAttachment()
     {
@@ -341,9 +320,8 @@ internal sealed class SingleAttachmentHost<TService>
 
     /// <summary>
     /// Reconciles the reported status and the diagnostics with what the attachment actually holds. The
-    /// handler creates, faults and disposes the instance on its own chain (a context re-attach re-invokes
-    /// the factory without going through the wrapper), so polling the handle is the only way those
-    /// outcomes reach the UI. Must be called with <see cref="_attachmentGate"/> held.
+    /// handler creates, faults and disposes the instance on its own chain, so polling the handle is the
+    /// only way those outcomes reach the UI. Must be called with <see cref="_attachmentGate"/> held.
     /// </summary>
     private void UpdateFromAttachment()
     {
@@ -368,9 +346,8 @@ internal sealed class SingleAttachmentHost<TService>
 
         if (attachment.Current is not { } instance)
         {
-            // Attached but not yet created: the handler's start transition has not run, or it has just
-            // disposed the previous instance on a re-attach. Dropping what that instance published
-            // belongs here rather than in the unwind, which runs while it is still live.
+            // Attached but not yet created: the start transition has not run, or it has just disposed
+            // the previous instance on a re-attach.
             _owner.DropInstanceState();
             _owner.Status = ServiceStatus.Starting;
             return;
@@ -381,10 +358,9 @@ internal sealed class SingleAttachmentHost<TService>
     }
 
     /// <summary>
-    /// Waits for the attachment gate. Returns false when the wait was cancelled, in which case the caller
-    /// holds nothing, must not release it and must report nothing: whoever holds the gate is maintaining
-    /// the reported state. The caller's token is honoured so the wait can never stand in the way of the
-    /// stop that cancels it, which is what keeps the run loop's own start off the handler's stop chain.
+    /// Waits for the attachment gate. Returns false when the wait was cancelled, in which case the
+    /// caller holds nothing, must not release it and must report nothing. The caller's token is honoured
+    /// so the wait can never stand in the way of the stop that cancels it.
     /// </summary>
     private async Task<bool> TryEnterAttachmentGateAsync(CancellationToken cancellationToken)
     {

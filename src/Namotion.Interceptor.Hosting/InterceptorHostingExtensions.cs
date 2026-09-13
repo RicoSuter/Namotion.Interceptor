@@ -4,17 +4,13 @@ using Microsoft.Extensions.Hosting;
 
 namespace Namotion.Interceptor.Hosting;
 
-/// <summary>
-/// Extension methods for attaching and detaching hosted services to and from interceptor subjects.
-/// </summary>
+/// <summary>Extension methods for attaching and detaching hosted services to and from interceptor subjects.</summary>
 public static class InterceptorHostingExtensions
 {
     private const string AttachmentsKey = "Namotion.Hosting.HostedServiceAttachments";
     private const string SubjectTargetKey = "Namotion.Hosting.SubjectTarget";
 
-    /// <summary>
-    /// Gets an immutable snapshot of the hosted service attachments on the subject.
-    /// </summary>
+    /// <summary>Gets an immutable snapshot of the hosted service attachments on the subject.</summary>
     public static ImmutableArray<IHostedServiceAttachment> GetHostedServiceAttachments(this IInterceptorSubject subject)
     {
         subject.TryGetHostedServiceAttachments(out var attachments);
@@ -55,28 +51,22 @@ public static class InterceptorHostingExtensions
         this IInterceptorSubject subject, Func<T> factory)
         where T : class, IHostedService
     {
-        // Resolved before the attachment is published, because the lookup throws when the subject is
-        // reachable from two hosting contexts. After the add, that throw would leave the caller with no
-        // attachment it knows about and the subject with a factory the next context attach starts.
-        // Nothing ahead of the add may read subject.Data: DataGatedSubject gates on the first read.
-        //
-        // Resolved again when the first lookup found none, because a lookup ahead of the add is the
-        // wrong way round against a context entering the graph: that path publishes the context and
-        // then reads the subject's attachments, so a publication landing between the two is missed by
-        // both sides and leaves the subject inside a hosting graph holding a factory nothing will ever
-        // invoke, with no fault and nothing logged.
+        // Resolved before the add, because the lookup throws when the subject is reachable from two
+        // hosting contexts and that throw after the add leaves the caller holding no attachment and the
+        // subject holding a factory the next context attach starts. Resolved again when the first found
+        // none, because a context published between the two is otherwise missed by both sides. Nothing
+        // ahead of the add may read subject.Data: DataGatedSubject gates on the first read. See
+        // docs/design/hosting-service-ownership.md#an-attach-and-a-context-entry-are-the-same-two-facts-in-opposite-orders.
         var handler = subject.Context.TryGetService<HostedServiceHandler>();
         var attachment = AddAttachment(subject, factory);
         handler ??= TryResolveHandlerAfterPublish(subject);
 
-        // Liveness before the take, because the take reads it: the attach path records only subjects
-        // that host something, so a subject that hosted nothing when it entered the graph has no entry
-        // and this is the moment it earns one.
+        // Liveness before the take, because the take reads it: a subject that hosted nothing when it
+        // entered the graph has no entry, and this is the moment it earns one.
         handler?.MarkLiveIfAttached(subject);
 
-        // The handler decides whether it may take the target: the liveness read, the ownership take
-        // and the append have to be one step, and a caller cannot compose them without reopening the
-        // window a concurrent context detach slips through.
+        // The liveness read, the ownership take and the append have to be one step, which a caller
+        // cannot compose without reopening the window a concurrent context detach slips through.
         handler?.TryTakeOwnershipAndStart(subject, attachment.Target);
 
         return attachment;
@@ -111,8 +101,7 @@ public static class InterceptorHostingExtensions
 
         if (handler.TryTakeOwnershipAndStart(subject, attachment.Target) is { } start)
         {
-            // The token bounds this wait only. The transition itself runs to completion, so a caller
-            // that gives up waiting still ends with a started instance rather than a half started one.
+            // The token bounds this wait only; the transition runs to completion either way.
             await start.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -120,36 +109,26 @@ public static class InterceptorHostingExtensions
         {
             RemoveAttachment(subject, attachment);
 
-            // The removal above is what puts this target out of reach: no later attach or detach
-            // enumerates an attachment that is gone from the subject's data, so an ownership left
-            // installed here is one nothing retires before shutdown, and a host that retries failed
-            // attaches leaks a subject per failure.
-            //
+            // The removal above puts this target out of reach, so nothing retires an ownership left
+            // installed here and a host that retries failed attaches leaks a subject per failure.
             // Marked first, so a context attach that snapshotted this attachment before the removal
             // cannot take the target in the gap.
             attachment.Target.MarkDetached();
 
-            // The awaited start faulted, so it left no instance. One queued against this target while
-            // it was in flight did not, and nothing here orders itself against that body: the same
-            // completion releases it and this caller. So a stop is appended rather than skipped, which
-            // the chain puts behind that start, and whatever it created is stopped and disposed. The
-            // mark above refuses every later append, so nothing queues behind this stop.
-            //
-            // Not awaited. That start may be parked on a startup scope this caller cannot close, which
-            // is the wedge the consumer rules name under
-            // docs/hosting.md#deferred-starts-and-startup-completion. The append is attributed, so
-            // shutdown waits for it.
+            // The faulted start left no instance, but one queued behind it can, and the same completion
+            // releases that body and this caller. Appended rather than awaited: the chain orders it
+            // behind that start, while awaiting it would wedge on a startup scope this caller cannot
+            // close.
             _ = handler.AppendStop(subject, attachment.Target, signal: null, waitFor: null, CancellationToken.None);
 
-            // Released rather than only retired, which is the opposite of what an explicit detach does:
-            // the removal above is what puts this target out of reach, so an ownership left installed
-            // is one nothing retires before shutdown. The stop appended above reads no ownership.
+            // Released rather than only retired, unlike an explicit detach: the removal above is what
+            // puts this target out of reach, so an ownership left installed is never retired. Safe to
+            // release ahead of the stop because that body reads Current and never Owner.
             attachment.Target.ReleaseOwnership(handler);
 
-            // Captured rather than rethrown: the fault was raised on the transition thread, and a
-            // plain throw overwrites its stack trace with this one, which is the stack a user reads
-            // when a failing subject aborts host startup. Two callers can also reach the same
-            // instance concurrently, and only one of them would keep a usable trace.
+            // Captured rather than rethrown: the fault was raised on the transition thread, and a plain
+            // throw overwrites its stack trace with this one, which is the stack a user reads when a
+            // failing subject aborts host startup.
             ExceptionDispatchInfo.Capture(fault).Throw();
         }
 
@@ -162,9 +141,8 @@ public static class InterceptorHostingExtensions
     /// </summary>
     public static bool DetachHostedService(this IInterceptorSubject subject, IHostedServiceAttachment attachment)
     {
-        // Resolved before the attachment is removed, because the lookup throws when the subject is
-        // reachable from two hosting contexts. After the removal, that throw would leave the instance
-        // running with no stop appended and no attachment left for any graph event to reach it through.
+        // Resolved before the removal, for the reason on AttachHostedService. Here the throw would
+        // leave the instance running with no stop appended and nothing left to reach it through.
         var handler = subject.Context.TryGetService<HostedServiceHandler>();
 
         if (!RemoveAttachment(subject, attachment))
@@ -189,9 +167,7 @@ public static class InterceptorHostingExtensions
         return true;
     }
 
-    /// <summary>
-    /// Detaches a hosted service attachment and waits for the instance to stop and be disposed.
-    /// </summary>
+    /// <summary>Detaches a hosted service attachment and waits for the instance to stop and be disposed.</summary>
     public static async Task<bool> DetachHostedServiceAsync(
         this IInterceptorSubject subject, IHostedServiceAttachment attachment, CancellationToken cancellationToken)
     {
@@ -229,16 +205,14 @@ public static class InterceptorHostingExtensions
     /// </summary>
     /// <remarks>
     /// Counts the reachable handlers instead of going through TryGetService, whose throw on two of them
-    /// would land after the subject has already been mutated and hand back exactly the half changed
-    /// call the first lookup exists to rule out. Two reachable handlers is therefore the one shape this
-    /// declines to act on, and it is the shape every other path on this subject throws on anyway.
+    /// would land after the subject has already been mutated. Two reachable handlers is therefore the
+    /// one shape this declines to act on, and every other path on this subject throws on it anyway.
     /// </remarks>
     private static HostedServiceHandler? TryResolveHandlerAfterPublish(IInterceptorSubject subject)
     {
-        // The add is a release store under a data bucket lock, and release does not order a store
-        // against this later load, so without the fence the two sides miss each other however they are
-        // ordered in time. The publishing side needs no fence of its own: its publish is an
-        // Interlocked.Exchange, see InterceptorSubjectContext.PublishState.
+        // The add is a release store, and release does not order it against this later load, so without
+        // the fence the two sides miss each other however they are ordered in time. The publishing side
+        // needs none: InterceptorSubjectContext.PublishState publishes with an Interlocked.Exchange.
         Interlocked.MemoryBarrier();
 
         var handlers = subject.Context.GetServices<HostedServiceHandler>();
@@ -288,14 +262,11 @@ public static class InterceptorHostingExtensions
             });
 
         // Deliberately leaves liveness alone: clearing it here would retroactively cancel a start
-        // ordered ahead of this detach. The entry is ended by the context detach instead, which is why
-        // that fast path turns on "has ever hosted" rather than on "hosts now".
+        // ordered ahead of this detach. The context detach ends the entry instead.
         return removed;
     }
 
-    /// <summary>
-    /// Gets the subject's own target, creating it on first use.
-    /// </summary>
+    /// <summary>Gets the subject's own target, creating it on first use.</summary>
     /// <remarks>
     /// Extends <see cref="IHostedService"/> rather than taking one, so a subject target cannot exist on
     /// a subject that is not one. A context detach relies on that, using the type test in place of a

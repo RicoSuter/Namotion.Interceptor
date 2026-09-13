@@ -23,9 +23,7 @@ public sealed class HostedServiceStartupScope : IDisposable
         current.Value = this;
     }
 
-    /// <summary>
-    /// Releases the starts captured in this scope, once its enclosing scopes are released too.
-    /// </summary>
+    /// <summary>Releases the starts captured in this scope, once its enclosing scopes are released too.</summary>
     public void Dispose()
     {
         // Restore this flow's parent even if another flow already disposed the scope.

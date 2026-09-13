@@ -29,9 +29,7 @@ public partial class OpcUaServer
     private readonly SubjectPathResolver _pathResolver;
     private readonly ILogger<OpcUaServer> _logger;
 
-    /// <summary>
-    /// The attachment this wrapper owns and every path that maintains it.
-    /// </summary>
+    /// <summary>The attachment this wrapper owns and every path that maintains it.</summary>
     private readonly SingleAttachmentHost<IOpcUaSubjectServer> _attachmentHost;
 
     // Configuration properties (persisted to JSON)
@@ -197,9 +195,7 @@ public partial class OpcUaServer
         return _attachmentHost.ApplyConfigurationAsync(cancellationToken);
     }
 
-    // What the attachment host reads back from this wrapper. Status, StatusMessage and IsEnabled are
-    // the generated partial properties above; the rest is implemented explicitly, so hosting an OPC UA
-    // server adds nothing to what this subject publishes.
+    // Attachment host callbacks
 
     string IAttachmentOwner<IOpcUaSubjectServer>.LogName => "OPC UA server";
 
@@ -231,19 +227,19 @@ public partial class OpcUaServer
     {
         // Blocks rather than awaits, because a synchronous Func<T> cannot await and the handler invokes
         // this directly on a re-attach, which never passes through the awaited wait in the start path.
-        // Returns at once in every reachable case: the root manager publishes the root before it attaches
-        // the graph this subject belongs to, so no attach of this subject can precede the load. Bounded
-        // so that a wait that is somehow not satisfied fails the start rather than pinning a thread.
+        // Returns at once in every reachable case, because the root manager publishes the root before it
+        // attaches the graph this subject belongs to, so no attach of this subject can precede the load.
+        // Bounded anyway, so a case that is somehow not satisfied fails the start rather than pinning a
+        // thread.
         if (!SpinWait.SpinUntil(() => _rootManager.IsLoaded, RootLoadWaitTimeout))
         {
             throw new InvalidOperationException(
                 $"The root manager did not load within {RootLoadWaitTimeout.TotalSeconds:F0} seconds, so the path could not be resolved: {Path}");
         }
 
-        // A synchronous factory can only signal a failed lookup by throwing. AttachHostedServiceAsync
-        // rethrows it, and the catch on the start path turns it into a StatusMessage. The path is
-        // re-resolved on every attach rather than captured, because it is a lookup into the graph, which
-        // may have replaced the subject at that path since the previous one.
+        // A synchronous factory can only signal a failed lookup by throwing, which
+        // AttachHostedServiceAsync rethrows into a StatusMessage. Re-resolved on every attach rather
+        // than captured: the graph may have replaced the subject at that path since the previous one.
         var targetSubject = _pathResolver.ResolveSubject(Path, PathStyle.Canonical)
             ?? throw new InvalidOperationException($"Could not resolve subject at path: {Path}");
 
