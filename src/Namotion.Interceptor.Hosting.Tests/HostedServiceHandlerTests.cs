@@ -1267,6 +1267,62 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
+    public async Task WhenAQueuedStartsSubjectIsLiveAgainButItsOwnershipWasNotRetaken_ThenNothingIsCreated()
+    {
+        // Arrange - the host is built but never started, so the queued start parks at the startup gate
+        // and the whole sequence is deterministic rather than a race. Two attachments, because with a
+        // single one the re-attach below finds nothing left to host and returns before it writes
+        // liveness, which leaves the queued body refused by the liveness read rather than by the
+        // ownership read this pins.
+        var builder = HostingTestHost.CreateBuilder();
+        var context = HostingTestHost.CreateContext(builder);
+        var host = builder.Build();
+
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+        var parent = new Parent(context);
+        var child = new Person();
+        parent.Child = child;
+
+        var created = 0;
+        var first = child.AttachHostedService(() =>
+        {
+            Interlocked.Increment(ref created);
+            return new TrackedBackgroundService();
+        });
+
+        var second = child.AttachHostedService(() => new TrackedBackgroundService());
+        var firstTarget = ((IHostedServiceAttachmentTarget)first).Target;
+
+        // The context detach releases both targets, the explicit detach then keeps the re-attach from
+        // retaking the first one, and the re-attach writes liveness again for the second.
+        parent.Child = null;
+        child.DetachHostedService(first);
+        parent.Child = child;
+
+        // The premise the parked body meets, asserted so it fails loudly if the mechanism moves: the
+        // subject is live again because the re-attach retook the second target, and this handler no
+        // longer owns the first, so liveness lets the body through and only ownership refuses it.
+        Assert.True(handler.IsLive(child));
+        Assert.Same(handler, ((IHostedServiceAttachmentTarget)second).Target.Owner);
+        Assert.Null(firstTarget.Owner);
+
+        // Act - opening the startup gate releases the parked body into its guard.
+        await host.StartAsync();
+        await first.DrainAsync();
+
+        try
+        {
+            // Assert
+            Assert.Equal(0, Volatile.Read(ref created));
+            Assert.Null(first.Current);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task WhenASubjectThatOnceHostedSomethingLeavesTheGraph_ThenItsLivenessIsCleared()
     {
         // Arrange - the retention side of the same fact. Liveness is recorded lazily, so a context
