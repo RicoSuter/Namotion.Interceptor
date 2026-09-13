@@ -150,12 +150,114 @@ public class ConstructorSelectionTests
     }
 
     /// <summary>
+    /// Displacement is decided per call site, not by whether an arbitrary outsider can reach the
+    /// constructor. Every one of these is bindable from inside the declaring class, where the
+    /// generated arity-one overload would win the call and leave the hand-written body unreachable.
+    /// </summary>
+    [Theory]
+    [InlineData("internal")]
+    [InlineData("protected")]
+    [InlineData("private protected")]
+    [InlineData("private")]
+    public void WhenANonPublicContextConstructorIsCallableWithTheContextAlone_ThenNoGeneratedOverloadDisplacesIt(
+        string accessibility)
+    {
+        // Arrange
+        var source = $$"""
+            using Namotion.Interceptor.Attributes;
+            [InterceptorSubject]
+            public partial class Subject
+            {
+                public Subject() { }
+                {{accessibility}} Subject(Namotion.Interceptor.IInterceptorSubjectContext context, bool initialize = true) { WasHandWritten = true; }
+                public bool WasHandWritten { get; }
+                public partial string Name { get; set; }
+                public static Subject CreateFromInside(Namotion.Interceptor.IInterceptorSubjectContext context) => new Subject(context);
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunForExecution(source);
+
+        // Assert
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+        var type = result.LoadAssembly().GetType("Subject")!;
+        var subject = type.GetMethod("CreateFromInside")!.Invoke(null, [InterceptorSubjectContext.Create()])!;
+        Assert.True((bool)type.GetProperty("WasHandWritten")!.GetValue(subject)!);
+    }
+
+    [Fact]
+    public void WhenAnInternalContextConstructorIsCallableWithTheContextAlone_ThenASameAssemblyCallSiteRunsIt()
+    {
+        // Arrange
+        const string source = """
+            using Namotion.Interceptor.Attributes;
+            [InterceptorSubject]
+            public partial class Subject
+            {
+                public Subject() { }
+                internal Subject(Namotion.Interceptor.IInterceptorSubjectContext context, bool initialize = true) { WasHandWritten = true; }
+                public bool WasHandWritten { get; }
+                public partial string Name { get; set; }
+            }
+            public static class SubjectFactory
+            {
+                public static Subject Create(Namotion.Interceptor.IInterceptorSubjectContext context) => new Subject(context);
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunForExecution(source);
+
+        // Assert
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+        var assembly = result.LoadAssembly();
+        var subject = assembly.GetType("SubjectFactory")!.GetMethod("Create")!
+            .Invoke(null, [InterceptorSubjectContext.Create()])!;
+        Assert.True((bool)assembly.GetType("Subject")!.GetProperty("WasHandWritten")!.GetValue(subject)!);
+    }
+
+    [Theory]
+    [InlineData("protected")]
+    [InlineData("private protected")]
+    public void WhenAProtectedContextConstructorIsCallableWithTheContextAlone_ThenADerivedClassRunsIt(string accessibility)
+    {
+        // Arrange
+        var source = $$"""
+            using Namotion.Interceptor.Attributes;
+            [InterceptorSubject]
+            public partial class Subject
+            {
+                public Subject() { }
+                {{accessibility}} Subject(Namotion.Interceptor.IInterceptorSubjectContext context, bool initialize = true) { WasHandWritten = true; }
+                public bool WasHandWritten { get; }
+                public partial string Name { get; set; }
+            }
+            public class DerivedSubject : Subject
+            {
+                public DerivedSubject(Namotion.Interceptor.IInterceptorSubjectContext context) : base(context) { }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunForExecution(source);
+
+        // Assert
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+        var assembly = result.LoadAssembly();
+        var subject = Activator.CreateInstance(assembly.GetType("DerivedSubject")!, [InterceptorSubjectContext.Create()])!;
+        Assert.True((bool)assembly.GetType("Subject")!.GetProperty("WasHandWritten")!.GetValue(subject)!);
+    }
+
+    /// <summary>
     /// None of these can take the context alone, so dropping the generated overload would leave the
     /// subject with no way to receive a context at all.
     /// </summary>
     [Theory]
     [InlineData("public", "Namotion.Interceptor.IInterceptorSubjectContext context, int value")]
-    [InlineData("private", "Namotion.Interceptor.IInterceptorSubjectContext context, bool initialize = true")]
     [InlineData("public", "in Namotion.Interceptor.IInterceptorSubjectContext context")]
     [InlineData("public", "ref Namotion.Interceptor.IInterceptorSubjectContext context")]
     [InlineData("public", "params Namotion.Interceptor.IInterceptorSubjectContext[] contexts")]

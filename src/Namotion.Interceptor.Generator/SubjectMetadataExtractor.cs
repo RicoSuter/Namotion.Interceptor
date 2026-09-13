@@ -893,8 +893,10 @@ internal static class SubjectMetadataExtractor
     /// <remarks>
     /// A by-reference or params context parameter is a legal overload alongside the by-value form
     /// and does not take the call, and neither does a derived interface or the concrete context
-    /// class, so those keep the generated overload. Accessibility only matters beyond arity one,
-    /// because a non-public constructor of the exact context-only signature still collides.
+    /// class, so those keep the generated overload. Accessibility does not enter into it: which
+    /// call sites can see the declared constructor decides nothing, because the generated overload
+    /// wins the call wherever both are visible, so a non-public declaration is displaced from
+    /// inside the declaring class exactly as a public one is from outside it.
     /// </remarks>
     private static bool HasDeclaredContextConstructor(INamedTypeSymbol typeSymbol, Compilation compilation)
     {
@@ -921,11 +923,6 @@ internal static class SubjectMetadataExtractor
             if (constructor.Parameters.Length == 1)
             {
                 return true;
-            }
-
-            if (constructor.DeclaredAccessibility != Accessibility.Public)
-            {
-                continue;
             }
 
             var takesContextAlone = true;

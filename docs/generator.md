@@ -49,7 +49,11 @@ public Person(IInterceptorSubjectContext context) : this()
 }
 ```
 
-If a non-obsolete parameterless constructor already exists, only the context constructor is generated. Selection is independent of declaration order, including across partial declarations. The context-only overload is public even when the parameterless constructor is private; an explicitly declared context-only constructor takes precedence.
+If a non-obsolete parameterless constructor already exists, only the context constructor is generated. Selection is independent of declaration order, including across partial declarations. The context-only overload is public even when the parameterless constructor is private.
+
+A declared constructor the context alone can call takes precedence and no context-only overload is generated. That covers the exact `Person(IInterceptorSubjectContext)` signature and any constructor whose later parameters are all optional or `params`, such as `Person(IInterceptorSubjectContext context, bool initialize = true)`. Accessibility does not change it. The generated overload would win the call at every site that sees both, so an `internal`, `protected`, `private protected` or `private` declaration is displaced from inside the declaring class or a derived one exactly as a public declaration is from outside. Suppressing the overload is what keeps the hand-written body reachable.
+
+The constructor that takes precedence therefore owns the attach. It has to call `InterceptorSubjectExtensions.AttachToContext(this, context, SubjectAttachmentAnchorKind.Provisional)` itself, or chain to a constructor that does. There is no diagnostic for a body that does not, because the generator cannot tell an intentional detached construction from a forgotten attach, so a subject built through it is silently left detached and reports nothing. This is the same failure as a skipped mirror, described below.
 
 Primary constructors follow the same rules as ordinary constructors, including a parameterless primary constructor and a primary constructor in another partial declaration. Every other declared constructor is mirrored by one that appends an `IInterceptorSubjectContext` parameter, chains to the original and attaches the subject provisionally:
 
@@ -551,6 +555,8 @@ The generator is optimized for performance:
    ```csharp
    var person = new Person(context);  // Not: new Person()
    ```
+
+4. If the class declares its own constructor that the context alone can call, check that its body attaches the context. No overload is generated for that call, so nothing else does it. See [Constructors](#constructors).
 
 ## Hand-written base classes and subclasses
 
