@@ -752,10 +752,9 @@ public class DerivedPropertyConcurrencyTests
         //
         // SideEffectPerson.Greeting getter writes to Companion (subject-typed property),
         // which triggers LifecycleInterceptor.WriteProperty → lock(_attachedSubjects). The write
-        // only happens for real on the recalculation path: attach-time evaluation runs inside
-        // the derived handler's attach callback, where the callback contract rejects it, and the
-        // model absorbs that rejection so attach and re-attach complete and the toggling below
-        // keeps producing lock contention.
+        // The write happens on the recalculation path. Attach-time evaluation runs inside the
+        // derived handler's attach callback, and the model absorbs whatever that write throws, so
+        // attach and re-attach complete and the toggling below keeps producing lock contention.
         //
         // The deadlock (fixed by evaluating getter outside lock(data)):
         //   Thread A: RecalculateDerivedProperty(Greeting) → lock(data_Greeting) → getter
@@ -846,9 +845,9 @@ public class DerivedPropertyConcurrencyTests
             Assert.Equal($"Hello, {person.Name}", person.Greeting);
         }
 
-        // The getter absorbs the contract violation thrown inside callback scopes, so if
-        // recalculation ever moves inside one, every write is eaten and this test passes while
-        // pinning nothing. At least one landed write proves the recalculation path stayed alive.
+        // The getter swallows whatever the nested write throws, so a recalculation path that
+        // stopped landing writes would leave this test green while pinning nothing. At least one
+        // landed write proves the path stayed alive.
         Assert.True(totalSuccessfulWrites > 0, "No Companion write ever landed; the getter absorbed all of them and the test went vacuous.");
     }
 
