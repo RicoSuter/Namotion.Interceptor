@@ -221,6 +221,40 @@ public class FailedSeedRecoveryTests
         SupportContractAssertions.Settled(context, [root, trigger], root, trigger, leaf);
     }
 
+    /// <summary>
+    /// Resuming from the edge is what removes the orphan a half seeded subject would otherwise
+    /// keep, and it prices that in: a permanently failing structural getter is no longer contained
+    /// to the operation that first hit it. Every later attach whose graph touches that subject
+    /// fails on the resume and rolls back, including one for an unrelated new root.
+    /// </summary>
+    [Fact]
+    public void WhenAnEdgeReachesAPermanentlyFailingSeed_ThenTheUnrelatedArrivingRootIsRolledBackToo()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var originalRoot = new CallbackSpikeNode(context);
+        var leaf = new CallbackSpikeNode();
+        var trigger = new CallbackSpikeSegmentWrapper { Children = new([leaf]) };
+        var failure = new InvalidOperationException("seed getter failed");
+        trigger.OnRead = () => { if (trigger.GetReferenceCount() > 0) throw failure; };
+
+        // Act
+        var seed = Record.Exception(() => originalRoot.Payload = trigger);
+
+        // The getter is never healed, so the descent of a new root that happens to reference the
+        // half seeded subject resumes it and fails on it.
+        var otherLeaf = new CallbackSpikeNode();
+        var descendedRoot = new CallbackSpikeNode { Payload = new object[] { otherLeaf, trigger } };
+        var rejected = Record.Exception(() => descendedRoot.AttachToContext(context));
+
+        // Assert
+        Assert.Same(failure, seed);
+        Assert.Same(failure, rejected);
+        SupportContractAssertions.AssertReleased(context, descendedRoot, otherLeaf);
+        SupportContractAssertions.AssertAttached(context, trigger, 1);
+        Assert.Null(leaf.TryGetContext());
+    }
+
     [Fact]
     public void WhenTheResumeOfAnExplicitAttachFails_ThenTheAttachCanBeRetriedOnceTheGetterIsHealed()
     {
