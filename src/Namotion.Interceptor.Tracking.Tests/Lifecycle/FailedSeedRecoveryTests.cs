@@ -221,6 +221,30 @@ public class FailedSeedRecoveryTests
         SupportContractAssertions.Settled(context, [root, trigger], root, trigger, leaf);
     }
 
+    [Fact]
+    public void WhenTheResumeOfAnExplicitAttachFails_ThenTheAttachCanBeRetriedOnceTheGetterIsHealed()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var root = new CallbackSpikeNode(context);
+        var leaf = new CallbackSpikeNode();
+        var trigger = new CallbackSpikeSegmentWrapper { Children = new([leaf]) };
+        var failure = new InvalidOperationException("seed getter failed");
+        trigger.OnRead = () => { if (trigger.GetReferenceCount() > 0) throw failure; };
+
+        // Act
+        var seed = Record.Exception(() => root.Payload = trigger);
+        var rejected = Record.Exception(() => ((IInterceptorSubject)trigger).AttachToContext(context));
+        trigger.OnRead = null;
+        var retry = Record.Exception(() => ((IInterceptorSubject)trigger).AttachToContext(context));
+
+        // Assert
+        Assert.Same(failure, seed);
+        Assert.Same(failure, rejected);
+        Assert.Null(retry);
+        SupportContractAssertions.Settled(context, [root, trigger], root, trigger, leaf);
+    }
+
     [RunsBefore(typeof(LifecycleInterceptor))]
     private sealed class BeforeSeedProbe(IInterceptorSubject target, List<string> calls) : ILifecycleHandler
     {

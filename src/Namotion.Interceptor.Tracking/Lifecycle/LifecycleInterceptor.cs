@@ -571,7 +571,21 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
                 {
                     // Anchoring reaches an already owned subject without recording an edge, so this
                     // is the one route that has to resume a failed seed itself.
-                    _attach.ResumeFailedSeed(subject);
+                    executor.TryGetAttachment(out _, out _, out var anchoredRevision);
+                    try
+                    {
+                        _attach.ResumeFailedSeed(subject);
+                    }
+                    catch
+                    {
+                        // The anchor is committed before the resume runs user code, so leaving it
+                        // behind would make the caller's retry read as a second explicit attach and
+                        // be rejected as one. The revision guard leaves an anchor the resume itself
+                        // installed alone, exactly as the rejected-attach rollback does.
+                        executor.TryUpdateAttachment(anchoredRevision, context, currentAnchor, out _);
+                        throw;
+                    }
+
                     return;
                 }
 
