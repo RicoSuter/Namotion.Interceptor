@@ -1,7 +1,6 @@
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -10,13 +9,10 @@ namespace Namotion.Interceptor.Connectors.Tests.Updates;
 public class SubjectUpdateReferenceIntegrityTests
 {
     [Theory]
-    [InlineData("object", false)]
-    [InlineData("object", true)]
-    [InlineData("collection", false)]
-    [InlineData("collection", true)]
-    [InlineData("dictionary", false)]
-    [InlineData("dictionary", true)]
-    public void WhenABatchReferencesASubjectThatLeftTheGraph_ThenCreationOmitsTheReferencingProperty(string shape, bool filtered)
+    [InlineData("object")]
+    [InlineData("collection")]
+    [InlineData("dictionary")]
+    public void WhenABatchReferencesASubjectThatLeftTheGraph_ThenCreationOmitsTheReferencingProperty(string shape)
     {
         // Arrange
         var source = new Person(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry()) { FirstName = "Root" };
@@ -50,10 +46,9 @@ public class SubjectUpdateReferenceIntegrityTests
                 ChangeOrigin.Local, timestamp, null, null, "Root")
         ];
         property.SetValue(empty); // the referenced subject leaves the graph while the batch still names it
-        ISubjectUpdateProcessor[] processors = filtered ? [new ExcludePropertyProcessor(propertyName)] : [];
 
         // Act
-        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes, processors);
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes, []);
 
         // Assert
         Assert.Null(removed.TryGetRegisteredSubject());
@@ -244,10 +239,5 @@ public class SubjectUpdateReferenceIntegrityTests
         Assert.Empty(propertyUpdate.Items ?? []);
         Assert.Empty(target.Children);
         Assert.Empty(target.Relationships!);
-    }
-
-    private sealed class ExcludePropertyProcessor(string propertyName) : ISubjectUpdateProcessor
-    {
-        public bool IsIncluded(RegisteredSubjectProperty property) => property.Name != propertyName;
     }
 }

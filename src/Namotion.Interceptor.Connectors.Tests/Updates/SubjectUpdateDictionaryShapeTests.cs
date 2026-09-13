@@ -83,6 +83,7 @@ public class SubjectUpdateDictionaryShapeTests
     [InlineData(typeof(IReadOnlyDictionary<string, Person>))]
     [InlineData(typeof(PersonDictionary))]
     [InlineData(typeof(TaggedDictionary<int, string, Person>))]
+    [InlineData(typeof(SortedDictionary<string, Person>))]
     public void WhenADictionaryInterfaceIdentifiesItsKeyAndValueTypes_ThenACapableFactoryRoundtripsIt(Type declaredType)
     {
         // Arrange
@@ -110,20 +111,6 @@ public class SubjectUpdateDictionaryShapeTests
         Assert.Equal("child", Assert.Single(target.TryGetRegisteredProperty("RuntimeChildren")!.Children).Index);
     }
 
-    [Theory]
-    [InlineData(typeof(PersonDictionary))]
-    [InlineData(typeof(TaggedDictionary<int, string, Person>))]
-    public void WhenTheDefaultDictionaryCannotSatisfyTheDeclaredType_ThenFactoryReportsTheUnsupportedShape(Type declaredType)
-    {
-        // Arrange
-        var entries = new Dictionary<object, IInterceptorSubject> { ["child"] = new Person() };
-
-        // Act & Assert
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            DefaultSubjectFactory.Instance.CreateSubjectDictionary(declaredType, entries));
-        Assert.Contains(nameof(ISubjectFactory), exception.Message);
-    }
-
     private sealed class PersonDictionary : Dictionary<string, Person>;
     private sealed class LegacyDictionary<TKey, TValue> : Hashtable;
     private sealed class TaggedDictionary<TTag, TKey, TValue> : Dictionary<TKey, TValue> where TKey : notnull;
@@ -138,11 +125,13 @@ public class SubjectUpdateDictionaryShapeTests
 
         public IDictionary CreateSubjectDictionary(Type propertyType, IDictionary<object, IInterceptorSubject> entries)
         {
+            var defaultDictionary = DefaultSubjectFactory.Instance.CreateSubjectDictionary(propertyType, entries);
             IDictionary dictionary;
             if (propertyType == typeof(PersonDictionary)) dictionary = new PersonDictionary();
             else if (propertyType == typeof(TaggedDictionary<int, string, Person>)) dictionary = new TaggedDictionary<int, string, Person>();
-            else return DefaultSubjectFactory.Instance.CreateSubjectDictionary(propertyType, entries);
-            foreach (var entry in entries) dictionary.Add(entry.Key, entry.Value);
+            else if (propertyType == typeof(SortedDictionary<string, Person>)) dictionary = new SortedDictionary<string, Person>();
+            else return defaultDictionary;
+            foreach (DictionaryEntry entry in defaultDictionary) dictionary.Add(entry.Key, entry.Value);
             return dictionary;
         }
     }

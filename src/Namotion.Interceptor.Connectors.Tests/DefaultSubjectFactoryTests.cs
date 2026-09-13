@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Collections.ObjectModel;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -37,6 +38,7 @@ public class DefaultSubjectFactoryTests
     [InlineData(typeof(IEnumerable<Person>))]
     [InlineData(typeof(PersonList))]
     [InlineData(typeof(TaggedCollection<Person, int>))]
+    [InlineData(typeof(LegacyCollection<Person>))]
     [InlineData(typeof(Dictionary<string, Person>))]
     [InlineData(typeof(PersonMap))]
     public void WhenACollectionHasAKnownElementType_ThenFactoryCreatesTheSubject(Type propertyType)
@@ -52,20 +54,23 @@ public class DefaultSubjectFactoryTests
     }
 
     [Fact]
-    public void WhenTheDefaultCollectionCannotSatisfyTheDeclaredType_ThenFactoryReportsTheUnsupportedShape()
+    public void WhenACollectionFactoryWrapsTheDefaultCollection_ThenItPreservesTheChildren()
     {
         // Arrange
         var child = new Person();
 
-        // Act & Assert
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            DefaultSubjectFactory.Instance.CreateSubjectCollection(typeof(PersonList), child));
-        Assert.Contains(nameof(ISubjectFactory), exception.Message);
+        // Act
+        var items = DefaultSubjectFactory.Instance.CreateSubjectCollection(typeof(ObservableCollection<Person>), child);
+        var collection = new ObservableCollection<Person>(items.Cast<Person>());
+
+        // Assert
+        Assert.Same(child, Assert.Single(collection));
     }
 
     private sealed class PersonList : List<Person>;
     private sealed class PersonMap : Dictionary<string, Person>;
     private sealed class TaggedCollection<TItem, TTag> : List<TItem>;
+    private sealed class LegacyCollection<TItem> : CollectionBase;
     private sealed class TaggedAmbiguousSequence<TTag> : AmbiguousSequence;
 
     private class AmbiguousSequence : IEnumerable<Person>, IEnumerable<MyClass>

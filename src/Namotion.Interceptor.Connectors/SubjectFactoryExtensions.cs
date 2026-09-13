@@ -66,6 +66,12 @@ public static class SubjectFactoryExtensions
                 return (genericArguments[0], genericArguments[1]);
             }
 
+            if (!shape.Dictionary && itemTypes.Length == 0 && typeof(ICollection).IsAssignableFrom(shape.Type) &&
+                shape.Type.GenericTypeArguments is { Length: 1 } collectionArguments)
+            {
+                return (null, collectionArguments[0]);
+            }
+
             return itemTypes.Length == 1
                 ? itemTypes[0]
                 : throw new NotSupportedException($"Cannot infer a unique collection element type from '{shape.Type}'. Declare a collection with a known element type.");

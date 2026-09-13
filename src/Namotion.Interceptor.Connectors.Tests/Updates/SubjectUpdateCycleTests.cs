@@ -173,7 +173,12 @@ public class SubjectUpdateCycleTests
         Assert.NotNull(json);
         var operations = partialSubjectUpdate.Subjects[partialSubjectUpdate.Root]["children"].Operations;
         Assert.NotNull(operations);
-        Assert.All(operations, operation => Assert.True(partialSubjectUpdate.Subjects.ContainsKey(operation.Id!)));
+        Assert.Equal(2, operations.Count);
+        Assert.All(operations, operation =>
+        {
+            Assert.Equal(SubjectCollectionOperationType.Insert, operation.Action);
+            Assert.True(partialSubjectUpdate.Subjects.ContainsKey(operation.Id!));
+        });
     }
 
     [Fact]

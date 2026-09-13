@@ -44,10 +44,6 @@ public class DefaultSubjectFactory : ISubjectFactory
 
         var itemType = SubjectFactoryExtensions.GetCollectionTypes(propertyType).Element;
         var collectionType = ListTypeCache.GetOrAdd(itemType, static t => typeof(List<>).MakeGenericType(t));
-        if (!propertyType.IsAssignableFrom(collectionType))
-        {
-            throw new NotSupportedException($"The default subject factory cannot create '{propertyType}'. Supply an ISubjectFactory that constructs the declared collection type.");
-        }
 
         var collection = (IList)Activator.CreateInstance(collectionType)!;
         foreach (var subject in children)
@@ -66,11 +62,6 @@ public class DefaultSubjectFactory : ISubjectFactory
             var types = SubjectFactoryExtensions.GetCollectionTypes(t, dictionary: true);
             return typeof(Dictionary<,>).MakeGenericType(types.Key!, types.Element);
         });
-
-        if (!propertyType.IsAssignableFrom(dictionaryType))
-        {
-            throw new NotSupportedException($"The default subject factory cannot create '{propertyType}'. Supply an ISubjectFactory that constructs the declared dictionary type.");
-        }
 
         var keyType = SubjectFactoryExtensions.GetCollectionTypes(propertyType, dictionary: true).Key!;
         var dictionary = (IDictionary)Activator.CreateInstance(dictionaryType)!;

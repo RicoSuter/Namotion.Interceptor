@@ -19,8 +19,15 @@ internal static class SubjectItemsUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var workingItems = SubjectValueConvert.ToSubjectMutableList(property.GetValue());
-        var structureChanged = false;
+        var existingValue = property.GetValue();
+        var workingItems = SubjectValueConvert.ToSubjectMutableList(existingValue);
+        var completeIndices = GetCompleteMembership(propertyUpdate, context, static (index, _) => ConvertIndexToInt(index));
+        var structureChanged = completeIndices is not null && existingValue is null;
+        if (completeIndices is not null && workingItems.Count > completeIndices.Count)
+        {
+            workingItems.RemoveRange(completeIndices.Count, workingItems.Count - completeIndices.Count);
+            structureChanged = true;
+        }
 
         // Apply structural operations in two phases:
         // Phase 1: Remove and Insert operations (applied sequentially)
@@ -82,7 +89,10 @@ internal static class SubjectItemsUpdateApplier
         // Apply sparse property updates
         if (propertyUpdate.Items is { Count: > 0 })
         {
-            foreach (var collectionUpdate in propertyUpdate.Items)
+            var itemUpdates = completeIndices is not null && workingItems.Count < completeIndices.Count
+                ? propertyUpdate.Items.OrderBy(item => ConvertIndexToInt(item.Index))
+                : (IEnumerable<SubjectPropertyItemUpdate>)propertyUpdate.Items;
+            foreach (var collectionUpdate in itemUpdates)
             {
                 var index = ConvertIndexToInt(collectionUpdate.Index);
 
@@ -97,7 +107,8 @@ internal static class SubjectItemsUpdateApplier
                 if (collectionUpdate.Id is not null)
                 {
                     var itemProps = context.GetSubjectProperties(collectionUpdate.Id);
-                    if (index >= 0 && index < workingItems.Count)
+                    if (index >= 0 && index < workingItems.Count &&
+                        (completeIndices is null || workingItems[index] is not null))
                     {
                         // Update existing item
                         if (context.TryMarkAsProcessed(collectionUpdate.Id))
@@ -147,6 +158,22 @@ internal static class SubjectItemsUpdateApplier
                 if (entry.Value is IInterceptorSubject subject)
                     workingDictionary[entry.Key] = subject;
             }
+        }
+
+        var completeKeys = GetCompleteMembership(propertyUpdate, context,
+            static (key, keyType) => ConvertDictionaryKey(key, keyType!), targetKeyType);
+        if (completeKeys is not null)
+        {
+            foreach (var key in workingDictionary.Keys.Where(key => !completeKeys.Contains(key)).ToArray())
+            {
+                workingDictionary.Remove(key);
+                structureChanged = true;
+            }
+            // The working dictionary omits null/non-subject entries; count the original container too.
+            structureChanged |= existingValue is null ||
+                (existingValue is ICollection collection
+                    ? collection.Count
+                    : ((IEnumerable)existingValue).Cast<object>().Count()) != completeKeys.Count;
         }
 
         // Apply structural operations
@@ -207,6 +234,30 @@ internal static class SubjectItemsUpdateApplier
             var dictionary = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDictionary);
             context.SetPropertyValue(property, propertyUpdate.Timestamp, dictionary);
         }
+    }
+
+    private static HashSet<TIndex>? GetCompleteMembership<TIndex>(
+        SubjectPropertyUpdate update,
+        SubjectUpdateApplyContext context,
+        Func<object, Type?, TIndex> convertIndex,
+        Type? keyType = null) where TIndex : notnull
+    {
+        // Complete membership can carry sparse child properties; only the item coverage matters.
+        if (update.Count is not { } count || count < 0 ||
+            update.Operations is { Count: > 0 } || (update.Items?.Count ?? 0) != count)
+            return null;
+
+        var indices = new HashSet<TIndex>();
+        foreach (var item in update.Items ?? [])
+        {
+            var index = convertIndex(item.Index, keyType);
+            if (update.Kind == SubjectPropertyUpdateKind.Collection &&
+                index is int position && (position < 0 || position >= count))
+                return null;
+            if (!indices.Add(index) || item.Id is null || !context.Subjects.ContainsKey(item.Id))
+                return null;
+        }
+        return indices;
     }
 
     private static int ConvertIndexToInt(object index) => index switch

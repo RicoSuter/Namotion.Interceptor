@@ -178,7 +178,7 @@ For index-based collections (arrays, lists):
 
 ### Dictionary Property
 
-For key-based dictionaries. Works the same as Collection but uses string keys instead of integer indices, and does not support Move operations:
+For key-based dictionaries. Works the same as Collection but uses keys instead of positional indices, and does not support Move operations:
 
 ```json
 {
@@ -350,7 +350,30 @@ When applying sparse property updates from the `items` array, the `index` must b
 
 **Important:** The `count` field declares the final expected size of the collection. Any `index` in the `items` array must satisfy `index < count`. An index >= count indicates a malformed update (bug in the sender) and will throw an exception.
 
-For complete updates (no `operations`), items at indices that don't exist locally are created sequentially. For partial updates, indices reference the final position after structural operations have been applied.
+### Reconciling Complete Membership
+
+Appliers can recognize complete collection or dictionary membership inside either a complete update or a partial update. All of these conditions must hold:
+
+- `operations` is absent or empty.
+- `count` is a nonnegative integer and equals the number of entries in `items`.
+- Each item has a non-null `id` present in `subjects`. An empty subject property dictionary is a valid payload.
+- Collection indices are distinct and cover every position from zero through `count - 1`.
+- Dictionary keys are distinct after conversion to the declared key type.
+
+For this shape, remove local list entries beyond `count` or dictionary entries whose keys are not listed. Create missing members, processing list indices in ascending order when rebuilding a collection. Retain existing child instances at matching positions or keys and apply only the child properties present in the payload. Complete membership does not imply complete child properties.
+
+`count: 0` with absent or empty `items` and no operations declares an empty collection or dictionary. Applying it creates an empty container even when the receiver currently holds null. A null value remains represented by `kind: Value` with a null value.
+
+| Receiver before | Incoming membership | Receiver after |
+|---|---|---|
+| `[A, B, C]` | `count: 1`, item A at index 0, no operations | `[A]`, preserving A's unspecified properties |
+| `{a: A, b: B}` | `count: 1`, item A at key a, no operations | `{a: A}` |
+| `[null]` | `count: 1`, item A at index 0, no operations | Create A at index 0 |
+| `{a: A, stale: null}` | `count: 1`, item A at key a, no operations | `{a: A}` |
+| `null` or `[A]` | `count: 0`, no items or operations | `[]` |
+| `[A, B, C]` | An item update for A without `count` | Update A; retain B and C |
+
+Updates with operations or incomplete membership keep the existing structural-operation and sparse-item behavior. Missing payloads still report failures as described above; a duplicate position or converted key does not establish complete membership. The wire format is unchanged. Other applier implementations, including TypeScript consumers, need the equivalent reconciliation logic if they currently leave stale members behind.
 
 ## Circular References
 
@@ -387,15 +410,15 @@ When a collection or dictionary property is set to `null`, it is represented as 
 }
 ```
 
-Note: In partial updates, `Kind=Collection/Dictionary` entries with no operations are **path nodes**: they describe the structural parent-to-child reference so the apply side can navigate the tree, not the collection's new state. An empty collection in a complete update is represented with `count: 0` and no items.
+In partial updates, collection or dictionary entries without `count` are sparse path nodes: they describe the parent-to-child reference so the applier can navigate the tree. Entries with `count` may instead establish [complete membership](#reconciling-complete-membership).
 
 ## Limitations
 
 - **No "clear collection" operation**: clearing N items emits N individual Remove operations.
 - **Non-subject collections** (`List<int>`, `Dictionary<string, string>`) use value-replacement semantics (full replacement, no granular diffing). Only `IInterceptorSubject` collections support structural diffs.
 - **Conflict resolution** is last-applied-wins by message arrival order with eventual consistency via reconnection.
-- **Dictionary keys** are normalized to strings during transport. Non-string keys (int, enum) must be convertible via `Convert.ChangeType` or `Enum.Parse`. Dictionary entries require a dictionary-declared property; attempting to encode them through a positional collection declaration throws `NotSupportedException`. Dictionary wrappers must expose subject values as key/value pairs through non-generic enumeration; value-only subject enumerators are rejected because their keys cannot be preserved.
-- **Collection factories** infer a unique element type from the declared collection or dictionary interfaces. Legacy dictionaries implementing only non-generic `IDictionary` retain the convention of using their two generic arguments as key and value types. Untyped or ambiguous declarations throw `NotSupportedException`. The default factory creates arrays, `List<T>`, and `Dictionary<TKey, TValue>`; supply an `ISubjectFactory` for declarations requiring another concrete container type.
+- **Dictionary keys** are carried in the item or operation's `index` field and converted to the declared key type before lookup. Dictionary entries require a dictionary-declared property; attempting to encode them through a positional collection declaration throws `NotSupportedException`. Dictionary wrappers must expose subject values as key/value pairs through non-generic enumeration; value-only subject enumerators are rejected because their keys cannot be preserved.
+- **Collection factories** infer a unique element type from the declared collection or dictionary interfaces. Legacy collections implementing only non-generic `ICollection` retain the convention of using their single generic argument as the element type; legacy dictionaries implementing only non-generic `IDictionary` use their two generic arguments as key and value types. Untyped or ambiguous declarations throw `NotSupportedException`. The default factory creates arrays, `List<T>`, and `Dictionary<TKey, TValue>`; supply an `ISubjectFactory` for declarations requiring another concrete container type.
 
 ## Attributes
 
