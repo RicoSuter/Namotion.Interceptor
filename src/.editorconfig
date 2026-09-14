@@ -19,9 +19,14 @@ dotnet_diagnostic.S2743.severity = none
 # Instance operations manage thread-local buffers and restore ambient scopes.
 dotnet_diagnostic.S2696.severity = none
 
-# Test fixtures use generic type identity and members reached through metadata or reflection.
-[**.Tests/**.cs]
+# Generic arguments can intentionally define type identity and per-type static caches.
 dotnet_diagnostic.S2326.severity = none
+
+# Inline TODOs are allowed for now; the long-term policy is undecided.
+dotnet_diagnostic.S1135.severity = none
+
+# Test fixtures have members reached through metadata, reflection, or generated code.
+[**.Tests/**.cs]
 dotnet_diagnostic.S1144.severity = none
 
 # Verify snapshots must preserve their exact text representation.

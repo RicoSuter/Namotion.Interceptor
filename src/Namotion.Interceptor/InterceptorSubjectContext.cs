@@ -44,7 +44,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// plain array read; the cost is that an array is as long as the largest index its context has
     /// seen rather than the number of types it uses.
     /// </summary>
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2326", Justification = "Each closed property type needs its own runtime-assigned index.")]
     private static class PropertyTypeIndex<TProperty>
     {
         // ReSharper disable once StaticMemberInGenericType

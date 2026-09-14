@@ -20,6 +20,7 @@ public readonly record struct SubjectPropertyMetadata
     /// </summary>
     public IReadOnlyCollection<Attribute> Attributes { get; }
     
+    // TODO(perf): Use generic instead of object? here?
     
     /// <summary>
     /// Gets the getter delegate for the property.
