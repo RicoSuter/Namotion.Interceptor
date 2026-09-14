@@ -1,32 +1,51 @@
 [*.cs]
+# S104: Files should not have too many lines of code.
 dotnet_diagnostic.S104.severity = warning
+# S107: Methods and constructors should not have too many parameters.
 dotnet_diagnostic.S107.severity = warning
+# S134: Control flow statements should not be nested too deeply.
 dotnet_diagnostic.S134.severity = warning
+# S138: Methods should not have too many lines of code.
 dotnet_diagnostic.S138.severity = warning
+# S1067: Expressions should not contain too many conditional operators.
 dotnet_diagnostic.S1067.severity = warning
+# S1200: Classes should not be coupled to too many other types.
 dotnet_diagnostic.S1200.severity = warning
+# S1541: Methods should not have excessive cyclomatic complexity.
 dotnet_diagnostic.S1541.severity = warning
+# S3776: Methods and properties should not have excessive cognitive complexity.
 dotnet_diagnostic.S3776.severity = warning
 
-# Empty marker and fixture classes are intentional.
+# Additional rationale and guidance for other projects: ../docs/sonar-analyzer.md
+
+# S2094: Classes should not be empty.
+# Disabled: empty marker and fixture classes intentionally encode type identity or metadata.
 dotnet_diagnostic.S2094.severity = none
 
-# Rationale and guidance for other projects: ../docs/sonar-analyzer.md
-# LINQ filters can allocate iterators and capturing delegates on hot paths.
+# S3267: Loops should be simplified using LINQ filters.
+# Disabled: replacing hot-path loops can add iterator and capturing-delegate allocations.
 dotnet_diagnostic.S3267.severity = none
-# Closed generic types deliberately own separate static cache entries.
+
+# S2743: Warns about static fields being separate for each closed generic type.
+# Disabled: per-type static cache entries are intentional and support direct array lookup.
 dotnet_diagnostic.S2743.severity = none
-# Instance operations manage thread-local buffers and restore ambient scopes.
+
+# S2696: Instance methods should not write to static fields.
+# Disabled: instance operations intentionally reuse thread-local buffers and restore ambient scopes.
 dotnet_diagnostic.S2696.severity = none
 
-# Generic arguments can intentionally define type identity and per-type static caches.
+# S2326: Unused generic type parameters should be removed.
+# Disabled: a parameter can define type identity and separate static caches without appearing in a member.
 dotnet_diagnostic.S2326.severity = none
 
-# Inline TODOs are allowed for now; the long-term policy is undecided.
+# S1135: Tracks TODO comments as outstanding work.
+# Disabled temporarily: inline TODOs are allowed; the long-term policy is still to be decided.
 dotnet_diagnostic.S1135.severity = none
 
-# Test fixtures have members reached through metadata, reflection, or generated code.
+# Test-specific overrides.
 [**.Tests/**.cs]
+# S1144: Unused private types or members should be removed.
+# Disabled in tests: fixture members can be reached through metadata, reflection, or generated code.
 dotnet_diagnostic.S1144.severity = none
 
 # Verify snapshots must preserve their exact text representation.
