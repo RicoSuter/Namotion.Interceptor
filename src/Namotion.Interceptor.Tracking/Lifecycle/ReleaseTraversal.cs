@@ -21,7 +21,12 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
     /// Removes one committed incoming edge occurrence and releases the subject, and everything below
     /// it that this removal orphans, when nothing holds it anymore.
     /// </summary>
-    public void RemoveEdge(IInterceptorSubject subject, PropertyReference property, object? index)
+    /// <remarks>
+    /// <c>parentOwnership</c> is the committed ownership of the property's subject where the caller
+    /// already holds it, which spares the journal update a lookup; null means unknown, which is also
+    /// what a parent whose own release is in flight reads as.
+    /// </remarks>
+    public void RemoveEdge(IInterceptorSubject subject, PropertyReference property, object? index, SubjectOwnership? parentOwnership = null)
     {
         var ownership = graph.TryGetOwnership(subject);
         if (ownership is null || !ownership.RemoveIncoming(property))
@@ -30,7 +35,7 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
             return;
         }
 
-        graph.RecordIncomingRemoved(property, subject);
+        graph.RecordIncomingRemoved(property, subject, parentOwnership);
         var referenceCount = ownership.IncomingCount;
         ownership.RepublishParents();
 
@@ -79,7 +84,7 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
             {
                 if (ownership.RemoveIncoming(edge.Property))
                 {
-                    graph.RecordIncomingRemoved(edge.Property, subject);
+                    graph.RecordIncomingRemoved(edge.Property, subject, null);
                 }
 
                 ownership.RepublishParents();
@@ -110,14 +115,12 @@ internal sealed class ReleaseTraversal(LifecycleNotifier notifier, OwnershipGrap
         var releaseQueued = false;
         try
         {
-            graph.CollectStructuralChildren(subject, children, seed: false);
-
-            // Hide the ownership record and drop the baselines first: from here on the subject is
+            // Drop the baselines and hide the ownership record first: from here on the subject is
             // released as far as every other query is concerned, which is what makes the callbacks
             // below safe to re-enter this descent from, and what makes them see no parents at all
             // rather than only the edge being removed.
-            ownership.MarkReleasing();
-            graph.RemoveBaselines(subject);
+            graph.CollectAndDropStructuralChildren(subject, ownership, children);
+            graph.MarkReleasing(ownership);
 
             foreach (var entry in subject.Properties)
             {

@@ -71,8 +71,7 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
 
             else StructuralValueScanner.CollectOccurrences(metadata.Type, newValue, newOccurrences);
 
-            if (!ReferenceEquals(graph.TryGetOwnership(property.Subject), ownership) ||
-                graph.GetBaselineRevision(property) != previousRevision) return;
+            if (!graph.StillOwnsPublication(property, ownership, previousRevision)) return;
 
             var journal = graph.BeginPropertyJournal(property, ownership, oldOccurrences);
             try
@@ -80,8 +79,7 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
                 var revision = graph.SetBaseline(property, newValue, newOccurrences);
                 journal.IsComplete = false;
                 ReconcileOccurrences(property, newValue, oldOccurrences, newOccurrences, ownership, revision);
-                if (ReferenceEquals(graph.TryGetOwnership(property.Subject), ownership) &&
-                    graph.GetBaselineRevision(property) == revision)
+                if (graph.StillOwnsPublication(property, ownership, revision))
                 {
                     journal.Complete(newOccurrences);
                 }
@@ -115,15 +113,15 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
             var revision = graph.SetBaseline(property, newSubject);
             if (oldSubject is not null)
             {
-                release.RemoveEdge(oldSubject, property, null);
-                if (!ReferenceEquals(graph.TryGetOwnership(property.Subject), ownership) || graph.GetBaselineRevision(property) != revision)
+                release.RemoveEdge(oldSubject, property, null, ownership);
+                if (!graph.StillOwnsPublication(property, ownership, revision))
                     return;
             }
 
             if (newSubject is not null)
             {
-                attach.AttachEdge(newSubject, property, null);
-                if (!ReferenceEquals(graph.TryGetOwnership(property.Subject), ownership) || graph.GetBaselineRevision(property) != revision)
+                attach.AttachEdge(newSubject, property, null, ownership);
+                if (!graph.StillOwnsPublication(property, ownership, revision))
                     return;
             }
 
@@ -150,7 +148,6 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
         SubjectOwnership ownership,
         long revision)
     {
-        var parent = property.Subject;
         var oldCounts = LifecycleScratch.RentSubjectCounter();
         var newCounts = LifecycleScratch.RentSubjectCounter();
         try
@@ -178,8 +175,8 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
                 }
 
                 oldCounts[occurrence.Subject] = remaining - 1;
-                release.RemoveEdge(occurrence.Subject, property, occurrence.Index);
-                if (!ReferenceEquals(graph.TryGetOwnership(parent), ownership) || graph.GetBaselineRevision(property) != revision)
+                release.RemoveEdge(occurrence.Subject, property, occurrence.Index, ownership);
+                if (!graph.StillOwnsPublication(property, ownership, revision))
                 {
                     // Reachability and child discovery can invoke user code. A nested write owns
                     // the remaining publication once it replaces this baseline or ownership epoch.
@@ -196,19 +193,19 @@ internal sealed class StructuralReconciler(LifecycleNotifier notifier, Ownership
                 {
                     oldCounts[occurrence.Subject] = retained - 1;
                     if (attach.ResumeFailedSeed(occurrence.Subject) &&
-                        (!ReferenceEquals(graph.TryGetOwnership(parent), ownership) || graph.GetBaselineRevision(property) != revision))
+                        !graph.StillOwnsPublication(property, ownership, revision))
                         return;
                     continue;
                 }
 
-                attach.AttachEdge(occurrence.Subject, property, occurrence.Index);
-                if (!ReferenceEquals(graph.TryGetOwnership(parent), ownership) || graph.GetBaselineRevision(property) != revision)
+                attach.AttachEdge(occurrence.Subject, property, occurrence.Index, ownership);
+                if (!graph.StillOwnsPublication(property, ownership, revision))
                 {
                     return;
                 }
             }
 
-            if (!ReferenceEquals(graph.TryGetOwnership(parent), ownership) || graph.GetBaselineRevision(property) != revision)
+            if (!graph.StillOwnsPublication(property, ownership, revision))
             {
                 return;
             }
