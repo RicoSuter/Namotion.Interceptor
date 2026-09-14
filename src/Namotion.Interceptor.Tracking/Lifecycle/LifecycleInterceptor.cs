@@ -184,14 +184,14 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         return true;
     }
 
-    internal bool TryQueuePropertyChange(Change.PropertyChangeInterceptor.Publication publication)
+    internal bool TryQueuePropertyChange(in Change.PropertyChangeInterceptor.Publication publication)
     {
         if (!_gate.IsHeldByCurrentThread)
         {
             return false;
         }
 
-        _notifier.QueuePropertyChange(publication);
+        _notifier.QueuePropertyChange(in publication);
         return true;
     }
 
@@ -210,6 +210,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ReleaseGate()
     {
         // Decrement first, so an unbalanced exit leaves the count too low rather than too high: a
