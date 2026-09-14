@@ -169,11 +169,6 @@ public class ContextFunctionCacheTests
         Assert.Equal(lengthAfterFirst * 2, Assert.IsType<Delegate?[]>(GetWriteFunctions(executor)).Length);
     }
 
-    private static Type[] CreatePropertyTypes(int count)
-    {
-        return CreatePropertyTypes(count, typeof(PropertyType<>), typeof(PropertyTypeRoot));
-    }
-
     private static Type[] CreateDoublingPropertyTypes(int count)
     {
         return CreatePropertyTypes(count, typeof(DoublingPropertyType<>), typeof(DoublingPropertyTypeRoot));
@@ -182,6 +177,11 @@ public class ContextFunctionCacheTests
     private static Type[] CreateHighIndexPropertyTypes(int count)
     {
         return CreatePropertyTypes(count, typeof(HighIndexPropertyType<>), typeof(HighIndexPropertyTypeRoot));
+    }
+
+    private static Type[] CreatePropertyTypes(int count)
+    {
+        return CreatePropertyTypes(count, typeof(PropertyType<>), typeof(PropertyTypeRoot));
     }
 
     private static Type[] CreatePropertyTypes(int count, Type openGenericType, Type rootType)
@@ -207,14 +207,17 @@ public class ContextFunctionCacheTests
             static (_, _) => { });
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2326", Justification = "The generic argument creates distinct runtime types to exercise separate cache slots.")]
     private sealed class PropertyType<TProperty>;
 
     private sealed class PropertyTypeRoot;
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2326", Justification = "The generic argument creates distinct runtime types to exercise separate cache slots.")]
     private sealed class HighIndexPropertyType<TProperty>;
 
     private sealed class HighIndexPropertyTypeRoot;
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2326", Justification = "The generic argument creates distinct runtime types to exercise separate cache slots.")]
     private sealed class DoublingPropertyType<TProperty>;
 
     private sealed class DoublingPropertyTypeRoot;

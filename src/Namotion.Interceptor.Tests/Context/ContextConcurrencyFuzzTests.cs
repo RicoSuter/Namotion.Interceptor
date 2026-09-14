@@ -293,6 +293,7 @@ public class ContextConcurrencyFuzzTests
         return $"[{string.Join(", ", indices)}]";
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3776", Justification = "Temporary: decompose the seeded topology generator in a follow-up that preserves its random draw order and corpus. See rollout issue #545.")]
     private static Topology BuildTopology(Random random)
     {
         var contextCount = random.Next(2, MaxContextCount + 1);
@@ -507,6 +508,7 @@ public class ContextConcurrencyFuzzTests
         return exception.Message.Contains("delegation cycle", StringComparison.Ordinal);
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3776", Justification = "Temporary: preserve the weighted fuzz operation selector; decompose it with the seeded topology generator in a follow-up. See rollout issue #545.")]
     private static void RunOperation(
         Edge[] ownedEdges,
         ContextNode node,
@@ -732,11 +734,18 @@ public class ContextConcurrencyFuzzTests
             return current;
         }
 
+        private static string FormatDelegationDepth(int depth) => depth switch
+        {
+            < 0 => "!",
+            0 => "",
+            _ => $"~{depth}"
+        };
+
         internal string Describe(int roundSeed)
         {
             var shape = string.Join("; ", Nodes.Select(node =>
                 $"{node.Name}{(node.HasOwnService ? "" : "*")}+{node.MarkerCount}" +
-                $"{(DelegationDepth(node) is var depth && depth < 0 ? "!" : depth == 0 ? "" : $"~{depth}")}->" +
+                $"{FormatDelegationDepth(DelegationDepth(node))}->" +
                 $"[{string.Join(",", Edges.Where(edge => edge.IsPresent && edge.Source == node).Select(edge => edge.Target.Name))}]"));
 
             return $"Seed {roundSeed}, final topology ('c' is a context, 's' a subject executor, 'p' a proxy that " +
@@ -846,5 +855,6 @@ public partial class ContextProbeSubject
 
     public partial string? Text { get; set; }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2325", Justification = "The source generator requires an instance method to exercise method interception.")]
     protected int EchoWithoutInterceptor(int input) => input;
 }

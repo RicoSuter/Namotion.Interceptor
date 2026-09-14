@@ -1,8 +1,5 @@
 namespace Namotion.Interceptor.Interceptors;
 
-// TODO: Get rid of the executor (IInterceptorExecutor/InterceptorExecutor) completely.
-// The Execute* methods are already gone from IInterceptorSubjectContext; this layer is the
-// remaining step.
 public interface IInterceptorExecutor : IInterceptorSubjectContext
 {
     /// <summary>

@@ -44,6 +44,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// plain array read; the cost is that an array is as long as the largest index its context has
     /// seen rather than the number of types it uses.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2326", Justification = "Each closed property type needs its own runtime-assigned index.")]
     private static class PropertyTypeIndex<TProperty>
     {
         // ReSharper disable once StaticMemberInGenericType
@@ -309,6 +310,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// limit is correct.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S134", Justification = "Temporary: split the concurrent delegation walk in a follow-up while preserving snapshot validation and retry semantics. See rollout issue #545.")]
     private InterceptorSubjectContext ResolveDelegationChain(ref ContextState state)
     {
         var visited = _delegationCycleVisited ??= [];
@@ -904,11 +906,13 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             if (usedByContexts.Count == 1)
             {
                 // foreach binds the HashSet struct enumerator, First() would box it.
+#pragma warning disable S1751 // The lock pins Count at one; read that sole entry without boxing.
                 foreach (var usingContext in usedByContexts)
                 {
                     singleUsingContext = usingContext;
                     break;
                 }
+#pragma warning restore S1751
             }
             else if (usedByContexts.Count != 0)
             {

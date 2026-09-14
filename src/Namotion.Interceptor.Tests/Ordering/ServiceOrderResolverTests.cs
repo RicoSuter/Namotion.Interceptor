@@ -8,6 +8,31 @@ public class ServiceOrderResolverTests
     #region Basic cases
 
     [Fact]
+    public void WhenDependencyTypesAreMissingFromMultipleServices_ThenRegistrationOrderIsPreserved()
+    {
+        // Arrange
+        var services = new object[] { new ServiceBeforeA(), new ServiceB(), new ServiceAfterA() };
+
+        // Act
+        var result = ServiceOrderResolver.OrderByDependencies(services);
+
+        // Assert
+        Assert.Equal(services, result);
+    }
+
+    [Fact]
+    public void WhenConflictingGroupAttributesAppearAmongMultipleServices_ThenPartitioningRejectsThem()
+    {
+        // Arrange
+        var services = new object[] { new ServiceA(), new FirstAndLastService() };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            ServiceOrderResolver.OrderByDependencies(services));
+        Assert.Equal("Service FirstAndLastService cannot have both [RunsFirst] and [RunsLast]", exception.Message);
+    }
+
+    [Fact]
     public void EmptyList_ReturnsEmptyArray()
     {
         // Arrange

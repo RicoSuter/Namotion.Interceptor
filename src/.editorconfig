@@ -1,0 +1,30 @@
+[*.cs]
+dotnet_diagnostic.S104.severity = warning
+dotnet_diagnostic.S107.severity = warning
+dotnet_diagnostic.S134.severity = warning
+dotnet_diagnostic.S138.severity = warning
+dotnet_diagnostic.S1067.severity = warning
+dotnet_diagnostic.S1200.severity = warning
+dotnet_diagnostic.S1541.severity = warning
+dotnet_diagnostic.S3776.severity = warning
+
+# Empty marker and fixture classes are intentional.
+dotnet_diagnostic.S2094.severity = none
+
+# Rationale and guidance for other projects: ../docs/sonar-analyzer.md
+# LINQ filters can allocate iterators and capturing delegates on hot paths.
+dotnet_diagnostic.S3267.severity = none
+# Closed generic types deliberately own separate static cache entries.
+dotnet_diagnostic.S2743.severity = none
+# Instance operations manage thread-local buffers and restore ambient scopes.
+dotnet_diagnostic.S2696.severity = none
+
+# Verify snapshots must preserve their exact text representation.
+[*.{received,verified}.{txt}]
+charset = utf-8-bom
+end_of_line = lf
+indent_size = unset
+indent_style = unset
+insert_final_newline = false
+tab_width = unset
+trim_trailing_whitespace = false

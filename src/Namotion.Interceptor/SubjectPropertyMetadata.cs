@@ -20,7 +20,6 @@ public readonly record struct SubjectPropertyMetadata
     /// </summary>
     public IReadOnlyCollection<Attribute> Attributes { get; }
     
-    // TODO(perf): Use generic instead of object? here?
     
     /// <summary>
     /// Gets the getter delegate for the property.
@@ -94,6 +93,7 @@ public readonly record struct SubjectPropertyMetadata
     {
     }
     
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The private constructor combines the existing public metadata shapes without an intermediate allocation.")]
     private SubjectPropertyMetadata(
         string name, 
         Type type, 

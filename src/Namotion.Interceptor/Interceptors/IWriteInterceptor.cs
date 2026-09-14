@@ -30,15 +30,10 @@ public delegate void WriteInterceptionDelegate<TProperty>(ref PropertyWriteConte
 /// </summary>
 public struct PropertyWriteContext<TProperty>
 {
-    // Lazy-cache for the write timestamp. One long encodes three states:
-    //   == 0    uninitialized; first read calls ResolveAndCacheWriteTimestamp() to populate it.
-    //   >  0    real UtcNow ticks.
-    //   < -1    explicit-null scope (WithChangedTimestamp(null) was active): carries
-    //           -UtcNow.Ticks. Property storage decodes to 0 (the never-written sentinel);
-    //           publishing decodes to +ticks so consumers that require a timestamp still get one.
-    // The negative encoding lets one field carry both "was null" and the cached ticks.
-    // Cascade re-entries skip the resolve entirely: the internal ctor seeds this field with the
-    // trigger's already-resolved value.
+    // Zero is unresolved; positive ticks are the resolved timestamp. Negative ticks below
+    // minus one preserve an explicitly null source timestamp alongside the captured clock value:
+    // storage receives zero while change notifications receive the positive ticks. Cascade
+    // re-entry copies the resolved encoding so the cascade avoids repeated timestamp resolution.
     private long _writeTimestamp;
 
     // Set by the first PropertyChangeInterceptor instance that resolves this write's per-property
@@ -282,11 +277,17 @@ public struct PropertyWriteContext<TProperty>
         // explicitly ('null is TProperty' is always false), else a legitimately stored null would demote
         // to Local and defeat echo suppression. A box the pattern rejects falls back to the setter's own
         // unbox (see SentValueEqualsAfterUnbox); a box the setter would reject demotes.
-        var survives = _attempted.SentValue is TProperty typedSentValue
-            ? EqualityComparer<TProperty>.Default.Equals(typedSentValue, NewValue)
-            : _attempted.SentValue is null
+        bool survives;
+        if (_attempted.SentValue is TProperty typedSentValue)
+        {
+            survives = EqualityComparer<TProperty>.Default.Equals(typedSentValue, NewValue);
+        }
+        else
+        {
+            survives = _attempted.SentValue is null
                 ? NewValue is null
                 : SentValueEqualsAfterUnbox(_attempted.SentValue, NewValue);
+        }
 
         return survives ? _attempted.Origin : default;
     }

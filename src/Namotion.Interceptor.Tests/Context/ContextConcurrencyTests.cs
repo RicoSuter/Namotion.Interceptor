@@ -16,6 +16,7 @@ public class ContextConcurrencyTests
     [InlineData(nameof(IInterceptorSubjectContext.TryAddService))]
     [InlineData(nameof(IInterceptorSubjectContext.AddFallbackContext))]
     [InlineData(nameof(IInterceptorSubjectContext.RemoveFallbackContext))]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3776", Justification = "Temporary: retain the concurrency test schedule; decompose orchestration in a focused follow-up. See rollout issue #545.")]
     public async Task WhenFallbackContextIsMutatedWhileSubjectIsWritten_ThenNoDeadlockOccurs(string mutation)
     {
         // Arrange: the subject context keeps an own service so that it maintains an own service
@@ -76,7 +77,9 @@ public class ContextConcurrencyTests
                             break;
 
                         default:
+#pragma warning disable S3928 // The worker captures the enclosing test method's parameter.
                             throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown mutation.");
+#pragma warning restore S3928
                     }
                 }
             }, TaskCreationOptions.LongRunning);
@@ -95,6 +98,8 @@ public class ContextConcurrencyTests
                     "on a fallback context acquired the two context locks in opposite orders.",
                     exception);
             }
+
+            Assert.Equal(1_999, car.Speed);
         }
     }
 
