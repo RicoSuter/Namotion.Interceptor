@@ -293,39 +293,10 @@ public class ContextConcurrencyFuzzTests
         return $"[{string.Join(", ", indices)}]";
     }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3776", Justification = "Temporary: decompose the seeded topology generator in a follow-up that preserves its random draw order and corpus. See rollout issue #545.")]
     private static Topology BuildTopology(Random random)
     {
         var contextCount = random.Next(2, MaxContextCount + 1);
-        var nodes = new List<ContextNode>();
-
-        for (var index = 0; index < contextCount; index++)
-        {
-            // A context that keeps a service of its own never becomes a delegation target, which
-            // is what keeps cycles in the generated graph legal (see the class comment).
-            var hasOwnService = index == 0 || random.Next(4) != 0;
-            var context = InterceptorSubjectContext.Create();
-
-            RecordingInterceptor? interceptor = null;
-            if (hasOwnService)
-            {
-                interceptor = new RecordingInterceptor(index);
-                context.AddService(interceptor);
-            }
-
-            if (index == 0)
-            {
-                // One instance, reachable from every context that resolves through this one, so
-                // TryGetService exercises the arity path against a service the walk reaches over
-                // many routes at once. It does NOT detect a service admitted twice: the walk
-                // deduplicates by reference before returning, so one instance registered any
-                // number of times still resolves to one. Detecting that needs two instances that
-                // compare equal, which no worker here creates.
-                context.AddService(new SingletonProbeService());
-            }
-
-            nodes.Add(new ContextNode($"c{index}", context, interceptor, hasOwnService, null));
-        }
+        var nodes = CreateContextNodes(random, contextCount);
 
         // The executor of a subject is a context too, so it joins the graph as a node whose
         // fallbacks are fuzzed like any other.
@@ -357,14 +328,6 @@ public class ContextConcurrencyFuzzTests
         var edges = new List<Edge>();
         var declaredEdges = new HashSet<(ContextNode Source, ContextNode Target)>();
 
-        void DeclareEdge(ContextNode source, ContextNode target, bool isPresent)
-        {
-            if (declaredEdges.Add((source, target)))
-            {
-                edges.Add(new Edge(source, target, isPresent));
-            }
-        }
-
         // Force at least one back reference so that every round exercises a cycle, which is the
         // shape the registry produces for parent links.
         var servingNodes = contextNodes.Where(node => node.HasOwnService).ToArray();
@@ -374,8 +337,8 @@ public class ContextConcurrencyFuzzTests
             var second = servingNodes[random.Next(servingNodes.Length)];
             if (first != second)
             {
-                DeclareEdge(first, second, true);
-                DeclareEdge(second, first, true);
+                DeclareEdge(edges, declaredEdges, first, second, true);
+                DeclareEdge(edges, declaredEdges, second, first, true);
             }
         }
 
@@ -384,7 +347,7 @@ public class ContextConcurrencyFuzzTests
         // fallback and stops delegating is left to the candidate edges and to the workers.
         for (var index = 0; index + 1 < proxyNodes.Count; index++)
         {
-            DeclareEdge(proxyNodes[index], proxyNodes[index + 1], true);
+            DeclareEdge(edges, declaredEdges, proxyNodes[index], proxyNodes[index + 1], true);
         }
 
         if (proxyNodes.Count != 0)
@@ -397,7 +360,7 @@ public class ContextConcurrencyFuzzTests
                 ? proxyNodes[random.Next(proxyNodes.Count)]
                 : contextNodes[random.Next(contextNodes.Length)];
 
-            DeclareEdge(proxyNodes[^1], target, random.Next(5) != 0);
+            DeclareEdge(edges, declaredEdges, proxyNodes[^1], target, random.Next(5) != 0);
 
             // One proxy gains and loses a second fallback context while the workers run, so it
             // swings between delegating and not. That is what opens the window in which a context
@@ -406,9 +369,61 @@ public class ContextConcurrencyFuzzTests
             // sits in the using set it is leaving, and an invalidation can arrive over that entry
             // before it reaches the contexts further down.
             var swinging = proxyNodes[random.Next(proxyNodes.Count)];
-            DeclareEdge(swinging, targetNodes[random.Next(targetNodes.Length)], false);
+            DeclareEdge(edges, declaredEdges, swinging, targetNodes[random.Next(targetNodes.Length)], false);
         }
 
+        DeclareSubjectBindings(random, nodes, contextNodes, proxyNodes, edges, declaredEdges);
+
+        DeclareCandidateEdges(random, nodes, targetNodes, edges, declaredEdges);
+
+        AssignOwnersAndApplyEdges(random, edges);
+
+        return new Topology(nodes.ToArray(), edges, contextNodes[0]);
+    }
+
+    private static List<ContextNode> CreateContextNodes(Random random, int contextCount)
+    {
+        var nodes = new List<ContextNode>();
+
+        for (var index = 0; index < contextCount; index++)
+        {
+            // A context that keeps a service of its own never becomes a delegation target, which
+            // is what keeps cycles in the generated graph legal (see the class comment).
+            var hasOwnService = index == 0 || random.Next(4) != 0;
+            var context = InterceptorSubjectContext.Create();
+
+            RecordingInterceptor? interceptor = null;
+            if (hasOwnService)
+            {
+                interceptor = new RecordingInterceptor(index);
+                context.AddService(interceptor);
+            }
+
+            if (index == 0)
+            {
+                // One instance, reachable from every context that resolves through this one, so
+                // TryGetService exercises the arity path against a service the walk reaches over
+                // many routes at once. It does NOT detect a service admitted twice: the walk
+                // deduplicates by reference before returning, so one instance registered any
+                // number of times still resolves to one. Detecting that needs two instances that
+                // compare equal, which no worker here creates.
+                context.AddService(new SingletonProbeService());
+            }
+
+            nodes.Add(new ContextNode($"c{index}", context, interceptor, hasOwnService, null));
+        }
+
+        return nodes;
+    }
+
+    private static void DeclareSubjectBindings(
+        Random random,
+        List<ContextNode> nodes,
+        ContextNode[] contextNodes,
+        List<ContextNode> proxyNodes,
+        List<Edge> edges,
+        HashSet<(ContextNode Source, ContextNode Target)> declaredEdges)
+    {
         // Every subject starts out bound to one context, like a subject constructed with a context.
         // Binding to the head of the proxy chain is what makes an intercepted read, write or method
         // call resolve through the whole chain, which is the hot path a deep subject graph takes.
@@ -423,9 +438,17 @@ public class ContextConcurrencyFuzzTests
                 ? proxyNodes[0]
                 : contextNodes[random.Next(contextNodes.Length)];
 
-            DeclareEdge(nodes[index], target, true);
+            DeclareEdge(edges, declaredEdges, nodes[index], target, true);
         }
+    }
 
+    private static void DeclareCandidateEdges(
+        Random random,
+        List<ContextNode> nodes,
+        ContextNode[] targetNodes,
+        List<Edge> edges,
+        HashSet<(ContextNode Source, ContextNode Target)> declaredEdges)
+    {
         var candidateCount = random.Next(nodes.Count, nodes.Count * 2 + 1);
         for (var candidate = 0; candidate < candidateCount; candidate++)
         {
@@ -445,9 +468,12 @@ public class ContextConcurrencyFuzzTests
                 continue;
             }
 
-            DeclareEdge(source, target, random.Next(5) != 0);
+            DeclareEdge(edges, declaredEdges, source, target, random.Next(5) != 0);
         }
+    }
 
+    private static void AssignOwnersAndApplyEdges(Random random, List<Edge> edges)
+    {
         // Each edge belongs to at most one worker, so no two threads toggle the same edge and the
         // final edge set stays exactly known without weakening the concurrency.
         foreach (var edge in edges)
@@ -469,8 +495,19 @@ public class ContextConcurrencyFuzzTests
                 // the topology stays exactly as declared.
             }
         }
+    }
 
-        return new Topology(nodes.ToArray(), edges, contextNodes[0]);
+    private static void DeclareEdge(
+        List<Edge> edges,
+        HashSet<(ContextNode Source, ContextNode Target)> declaredEdges,
+        ContextNode source,
+        ContextNode target,
+        bool isPresent)
+    {
+        if (declaredEdges.Add((source, target)))
+        {
+            edges.Add(new Edge(source, target, isPresent));
+        }
     }
 
     private static void RunWorker(Topology topology, int workerIndex, Random random, ManualResetEventSlim start)
@@ -508,7 +545,6 @@ public class ContextConcurrencyFuzzTests
         return exception.Message.Contains("delegation cycle", StringComparison.Ordinal);
     }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3776", Justification = "Temporary: preserve the weighted fuzz operation selector; decompose it with the seeded topology generator in a follow-up. See rollout issue #545.")]
     private static void RunOperation(
         Edge[] ownedEdges,
         ContextNode node,
@@ -519,53 +555,15 @@ public class ContextConcurrencyFuzzTests
     {
         if (choice < 18 && ownedEdges.Length != 0)
         {
-            var edge = ownedEdges[random.Next(ownedEdges.Length)];
-            if (random.Next(2) == 0)
-            {
-                // Recorded before the call, not after: the executor override registers the
-                // fallback context first and only then resolves the lifecycle interceptors to run
-                // the attach callbacks, and that resolution raises when the chain is a circle at
-                // that instant. The edge exists either way, so recording it after the call would
-                // lose it. Removal is the other way round, it resolves first and unregisters
-                // afterwards, so a raise there means the edge is still in place.
-                edge.IsPresent = true;
-                edge.Source.Context.AddFallbackContext(edge.Target.Context);
-            }
-            else
-            {
-                edge.Source.Context.RemoveFallbackContext(edge.Target.Context);
-                edge.IsPresent = false;
-            }
+            ToggleEdge(ownedEdges, random);
         }
         else if (choice < 30)
         {
-            // A proxy keeps delegating for the whole round, so it is queried instead. Handing it a
-            // service would end its chain, and with nearly every context receiving one over a few
-            // hundred operations no chain would survive to the final topology at all.
-            if (node.IsProxy)
-            {
-                _ = node.Context.GetServices<MarkerService>();
-            }
-            else
-            {
-                node.Context.AddService(new MarkerService());
-                Interlocked.Increment(ref node.MarkerCount);
-            }
+            AddMarkerService(node);
         }
         else if (choice < 38)
         {
-            // Whether this adds anything depends on the topology at that instant, so the return
-            // value is what the model records. The service type is one the oracles ignore, but
-            // adding one stops a context from delegating, which decides whether it resolves or
-            // raises.
-            if (node.IsProxy)
-            {
-                _ = node.Context.TryGetService<SingletonProbeService>();
-            }
-            else if (node.Context.TryAddService(() => new TransientProbeService(), _ => true))
-            {
-                Interlocked.Increment(ref node.TransientServiceCount);
-            }
+            TryAddTransientService(node);
         }
         else if (choice < 55)
         {
@@ -594,6 +592,59 @@ public class ContextConcurrencyFuzzTests
         else
         {
             _ = subject.Echo(operation);
+        }
+    }
+
+    private static void ToggleEdge(Edge[] ownedEdges, Random random)
+    {
+        var edge = ownedEdges[random.Next(ownedEdges.Length)];
+        if (random.Next(2) == 0)
+        {
+            // Recorded before the call, not after: the executor override registers the
+            // fallback context first and only then resolves the lifecycle interceptors to run
+            // the attach callbacks, and that resolution raises when the chain is a circle at
+            // that instant. The edge exists either way, so recording it after the call would
+            // lose it. Removal is the other way round, it resolves first and unregisters
+            // afterwards, so a raise there means the edge is still in place.
+            edge.IsPresent = true;
+            edge.Source.Context.AddFallbackContext(edge.Target.Context);
+        }
+        else
+        {
+            edge.Source.Context.RemoveFallbackContext(edge.Target.Context);
+            edge.IsPresent = false;
+        }
+    }
+
+    private static void AddMarkerService(ContextNode node)
+    {
+        // A proxy keeps delegating for the whole round, so it is queried instead. Handing it a
+        // service would end its chain, and with nearly every context receiving one over a few
+        // hundred operations no chain would survive to the final topology at all.
+        if (node.IsProxy)
+        {
+            _ = node.Context.GetServices<MarkerService>();
+        }
+        else
+        {
+            node.Context.AddService(new MarkerService());
+            Interlocked.Increment(ref node.MarkerCount);
+        }
+    }
+
+    private static void TryAddTransientService(ContextNode node)
+    {
+        // Whether this adds anything depends on the topology at that instant, so the return
+        // value is what the model records. The service type is one the oracles ignore, but
+        // adding one stops a context from delegating, which decides whether it resolves or
+        // raises.
+        if (node.IsProxy)
+        {
+            _ = node.Context.TryGetService<SingletonProbeService>();
+        }
+        else if (node.Context.TryAddService(() => new TransientProbeService(), _ => true))
+        {
+            Interlocked.Increment(ref node.TransientServiceCount);
         }
     }
 
@@ -855,6 +906,5 @@ public partial class ContextProbeSubject
 
     public partial string? Text { get; set; }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2325", Justification = "The source generator requires an instance method to exercise method interception.")]
     protected int EchoWithoutInterceptor(int input) => input;
 }

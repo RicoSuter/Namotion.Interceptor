@@ -16,7 +16,6 @@ public class ContextConcurrencyTests
     [InlineData(nameof(IInterceptorSubjectContext.TryAddService))]
     [InlineData(nameof(IInterceptorSubjectContext.AddFallbackContext))]
     [InlineData(nameof(IInterceptorSubjectContext.RemoveFallbackContext))]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3776", Justification = "Temporary: retain the concurrency test schedule; decompose orchestration in a focused follow-up. See rollout issue #545.")]
     public async Task WhenFallbackContextIsMutatedWhileSubjectIsWritten_ThenNoDeadlockOccurs(string mutation)
     {
         // Arrange: the subject context keeps an own service so that it maintains an own service
@@ -58,29 +57,7 @@ public class ContextConcurrencyTests
                 start.Wait();
                 for (var index = 0; index < Mutations; index++)
                 {
-                    switch (mutation)
-                    {
-                        case nameof(IInterceptorSubjectContext.AddService):
-                            fallbackContext.AddService(new MarkerService());
-                            break;
-
-                        case nameof(IInterceptorSubjectContext.TryAddService):
-                            fallbackContext.TryAddService(() => new MarkerService(), _ => false);
-                            break;
-
-                        case nameof(IInterceptorSubjectContext.AddFallbackContext):
-                            fallbackContext.AddFallbackContext(attachedContexts[index]);
-                            break;
-
-                        case nameof(IInterceptorSubjectContext.RemoveFallbackContext):
-                            fallbackContext.RemoveFallbackContext(attachedContexts[index]);
-                            break;
-
-                        default:
-#pragma warning disable S3928 // The worker captures the enclosing test method's parameter.
-                            throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown mutation.");
-#pragma warning restore S3928
-                    }
+                    ApplyMutation(fallbackContext, attachedContexts, index, mutation);
                 }
             }, TaskCreationOptions.LongRunning);
 
@@ -100,6 +77,35 @@ public class ContextConcurrencyTests
             }
 
             Assert.Equal(1_999, car.Speed);
+        }
+    }
+
+    private static void ApplyMutation(
+        InterceptorSubjectContext fallbackContext,
+        InterceptorSubjectContext[] attachedContexts,
+        int index,
+        string mutation)
+    {
+        switch (mutation)
+        {
+            case nameof(IInterceptorSubjectContext.AddService):
+                fallbackContext.AddService(new MarkerService());
+                break;
+
+            case nameof(IInterceptorSubjectContext.TryAddService):
+                fallbackContext.TryAddService(() => new MarkerService(), _ => false);
+                break;
+
+            case nameof(IInterceptorSubjectContext.AddFallbackContext):
+                fallbackContext.AddFallbackContext(attachedContexts[index]);
+                break;
+
+            case nameof(IInterceptorSubjectContext.RemoveFallbackContext):
+                fallbackContext.RemoveFallbackContext(attachedContexts[index]);
+                break;
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(mutation), mutation, "Unknown mutation.");
         }
     }
 

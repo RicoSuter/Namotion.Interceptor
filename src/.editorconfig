@@ -56,6 +56,12 @@ dotnet_diagnostic.S1135.severity = none
 # When reusing: weigh the loss of dead-code detection against fixture noise. Production remains checked.
 dotnet_diagnostic.S1144.severity = none
 
+# S2325: Methods and properties that do not access instance data should be static.
+# Disabled in tests: fixtures intentionally use instance members to exercise generated interception,
+# reflection, and instance-shaped APIs even when their bodies do not need instance state.
+# When reusing: keep the rule if such fixtures are uncommon. Production remains checked.
+dotnet_diagnostic.S2325.severity = none
+
 # Verify snapshots must preserve their exact text representation.
 [*.{received,verified}.{txt}]
 charset = utf-8-bom
