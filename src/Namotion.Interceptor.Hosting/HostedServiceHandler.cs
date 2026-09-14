@@ -144,6 +144,9 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             return;
         }
 
+        // Liveness is per subject. It cannot be per target: one subject reachable from two hosting
+        // enabled contexts shares a single target with two handlers, and both are live for it while
+        // only one of them owns it.
         _liveSubjects.TryRemove(subject, out _);
 
         if (subjectTarget is null && attachments.IsEmpty)

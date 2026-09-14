@@ -109,8 +109,8 @@ public static class InterceptorHostingExtensions
         {
             RemoveAttachment(subject, attachment);
 
-            // The removal above puts this target out of reach, so nothing retires an ownership left
-            // installed here and a host that retries failed attaches leaks a subject per failure.
+            // The removal above puts this target out of reach, so nothing retires before shutdown an
+            // ownership left installed here and a host that retries failed attaches leaks a subject per failure.
             // Marked first, so a context attach that snapshotted this attachment before the removal
             // cannot take the target in the gap.
             attachment.Target.MarkDetached();
@@ -122,8 +122,8 @@ public static class InterceptorHostingExtensions
             _ = handler.AppendStop(subject, attachment.Target, signal: null, waitFor: null, CancellationToken.None);
 
             // Released rather than only retired, unlike an explicit detach: the removal above is what
-            // puts this target out of reach, so an ownership left installed is never retired. Safe to
-            // release ahead of the stop because that body reads Current and never Owner.
+            // puts this target out of reach, so an ownership left installed is retired by nothing
+            // before the drain. Safe to release ahead of the stop, which reads Current and never Owner.
             attachment.Target.ReleaseOwnership(handler);
 
             // Captured rather than rethrown: the fault was raised on the transition thread, and a plain

@@ -190,7 +190,8 @@ internal sealed class SingleAttachmentHost<TService>
                 // CancellationToken.None rather than the caller's token: the returned handle is the
                 // only record of the attachment and the transition runs to completion whatever the
                 // token does, so a cancelled wait strands a live attachment with nothing pointing at
-                // it and lets the next start attach a second instance.
+                // it. Bounded: the instance is a BackgroundService whose StartAsync returns at its
+                // first await, and a start appended during shutdown returns without creating anything and lets the next start attach a second instance.
                 var attachment = await _owner.AttachHostedServiceAsync(_owner.CreateInstance, CancellationToken.None);
                 if (attachment.Current is null)
                 {
@@ -257,7 +258,8 @@ internal sealed class SingleAttachmentHost<TService>
             {
                 // CancellationToken.None, symmetrically with the attach: the detach removes the
                 // attachment before it stops anything, so a cancelled wait returns while the instance
-                // is still stopping with nothing left pointing at it.
+                // is still stopping with nothing left pointing at it. Bounded by the stop the handler
+                // runs.
                 await _owner.DetachHostedServiceAsync(attachment, CancellationToken.None);
                 _logger.LogInformation("{Service} stopped", _owner.LogName);
             }
