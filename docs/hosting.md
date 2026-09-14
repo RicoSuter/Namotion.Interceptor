@@ -199,6 +199,9 @@ The handle carries the state of the attachment:
 
 - `Current` is the running instance, or null when nothing is running: before the first start, after a stop, and after a start that failed. The awaiting overload can return this way too, with no fault, when there was no start to wait for: no handler on the context, the subject not in the graph, the attachment already detached, or the host shutting down.
 - `Fault` is the exception from the last failed transition, or null. Only a start clears it, and only once it has got past its own guards, so that a start skipped by a shutdown does not drop a fault nobody has read yet. A stop never clears it. A start that failed followed by a clean stop therefore leaves `Fault` set with `Current` null, which is the shape of "this should be running and is not".
+- `State` says what the attachment is doing, which is what tells apart the situations a null `Current` covers: `Stopped` (nothing is running), `Starting` (the handler is creating and starting an instance), `Running`, `Stopping` (the instance has left `Current` and is still stopping or being disposed), `Removed` (detached, or an awaited attach faulted, so no start appended after that point is accepted) and `Faulted` (the last attempt failed, and the next one may still succeed). `Stopped` against `Removed` is the distinction to act on: recoverable against terminal. Neither member is a promise about the next start, and no state is the state of a declined one. A start the handler declined, whether because the host is shutting down, because the subject is no longer in the graph, because ownership has moved on or because the target already holds an instance, leaves the attachment reading exactly what it read before, because every one of those refusals returns before the start clears the fault. A start already queued when a detach marked the attachment still runs and is then stopped, so `Removed` can be followed by a brief `Starting`, `Running` and `Stopping` before it settles back.
+
+**A factory with observable side effects must not assume `Current` becomes non null before anything else can observe them.** The factory runs inside the transition and the instance is recorded only after it has returned and started, so whatever the factory publishes into the subject is already visible while `Current` is still null. That is what `State` is for: a consumer reconciling its own view against the handle reads `Starting` there and leaves the fresh state alone, where `Current is null` on its own would tell it to discard what the factory has just published.
 
 ```csharp
 if (attachment.Fault is { } fault)
@@ -209,9 +212,21 @@ else if (attachment.Current is { } service)
 {
     // Running.
 }
+else if (attachment.State is HostedServiceAttachmentState.Starting or HostedServiceAttachmentState.Running)
+{
+    // An instance is on its way. The factory may already have published into the subject, so
+    // whatever is there is fresh. Running reads here because an instance arrived between the two
+    // reads above, which is the same case.
+}
+else
+{
+    // Nothing is running and nothing is being created.
+}
 ```
 
-`AttachHostedService` and `DetachHostedService` return once the transition has been queued rather than run, so neither result means "started" or "stopped". Queueing is not instant on the attach side: it takes the lifecycle lock to record liveness, so it blocks for as long as any graph move already holding that lock takes. Do not call it while holding a lock that a lifecycle handler could need, and do not call it from a hosted service's own dispose path. `Current` and `Fault` are how the outcome is observed. `DetachHostedService` returns false when the attachment was not on the subject, which is what a second detach of the same handle gets. The awaitable overloads wait for the transition instead:
+Read the fault first and the state after it, and take the state again immediately before anything irreversible you decide from it. A start clears the fault before it enters its start window, so a state read taken above the fault can be settled for a fault that is already being retried, and a poll has no synchronization with the start it races.
+
+`AttachHostedService` and `DetachHostedService` return once the transition has been queued rather than run, so neither result means "started" or "stopped". Queueing is not instant on the attach side: it takes the lifecycle lock to record liveness, so it blocks for as long as any graph move already holding that lock takes. Do not call it while holding a lock that a lifecycle handler could need, and do not call it from a hosted service's own dispose path. `Current`, `Fault` and `State` are how the outcome is observed. `DetachHostedService` returns false when the attachment was not on the subject, which is what a second detach of the same handle gets. The awaitable overloads wait for the transition instead:
 
 ```csharp
 var attachment = await person.AttachHostedServiceAsync(
@@ -232,7 +247,7 @@ The cancellation token bounds the wait, not the work. A cancelled await leaves t
 
 Two different things are called detaching, and they differ in exactly one respect:
 
-- **The subject leaves the graph.** The handler stops the instance, disposes it and clears `Current`, and **keeps the attachment on the subject**. The factory survives, so the next time the subject enters a hosting enabled graph the handler invokes it again and a fresh instance runs. This is what makes moving a subject through the graph work.
+- **The subject leaves the graph.** The handler takes the instance out of `Current`, stops it and disposes it, and **keeps the attachment on the subject**. The factory survives, so the next time the subject enters a hosting enabled graph the handler invokes it again and a fresh instance runs. This is what makes moving a subject through the graph work.
 - **`DetachHostedService` or `DetachHostedServiceAsync`.** The same stop and dispose, and the attachment is removed from the subject as well, so a later context attach starts nothing.
 
 Disposal prefers `IAsyncDisposable` and falls back to `IDisposable`, and a service that implements neither is simply dropped after its stop. A dispose that throws is logged and never propagated, because the disposal can run from inside a property write that has nothing to do with the service.

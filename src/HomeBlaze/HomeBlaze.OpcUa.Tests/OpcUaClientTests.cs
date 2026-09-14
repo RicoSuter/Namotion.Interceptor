@@ -211,7 +211,7 @@ public class OpcUaClientTests
             "The wrapper reports Error, offers Start, and the start cannot clear it.");
     }
 
-    [Fact(Skip = "Reproduces an unfixed defect: a reconciliation landing between the factory publishing its tree and the handler recording the instance detaches that tree, so the re-attach fails to start.")]
+    [Fact]
     public async Task WhenAReconciliationLandsInsideAReAttach_ThenTheReAttachStillProducesARunningClient()
     {
         // Arrange
@@ -340,8 +340,10 @@ public class OpcUaClientTests
         await using var testHost = await OpcUaTestHost.StartAsync();
         var client = testHost.CreateClient(serverUrl: null);
         testHost.Container.Client = client;
-        await OpcUaTestHost.WaitForStatusAsync(() => client.Status, ServiceStatus.Error);
-        Assert.NotNull(client.StatusMessage);
+        // Compound, because a move to Error writes the status ahead of the message, so waiting on the
+        // status alone can return before the text this test needs is there.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Status == ServiceStatus.Error && client.StatusMessage is not null);
 
         var messageBesideStarting = default(string);
         var reachedStarting = 0;

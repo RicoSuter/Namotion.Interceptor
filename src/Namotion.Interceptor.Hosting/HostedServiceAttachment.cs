@@ -14,6 +14,13 @@ public interface IHostedServiceAttachment
 
     /// <summary>The exception from the last failed transition, or null.</summary>
     Exception? Fault { get; }
+
+    /// <summary>
+    /// What the attachment is doing right now. Separates a start in flight, a stop in flight and a
+    /// terminal attachment from a settled one with nothing running, which <see cref="Current"/> and
+    /// <see cref="Fault"/> reading null cannot.
+    /// </summary>
+    HostedServiceAttachmentState State { get; }
 }
 
 /// <inheritdoc />
@@ -47,6 +54,8 @@ internal sealed class HostedServiceAttachment<T> : IHostedServiceAttachment<T>, 
     public T? Current => (T?)Target.Current;
 
     public Exception? Fault => Target.Fault;
+
+    public HostedServiceAttachmentState State => Target.State;
 
     IHostedService? IHostedServiceAttachment.Current => Target.Current;
 }

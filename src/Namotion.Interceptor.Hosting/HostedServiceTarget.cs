@@ -24,8 +24,39 @@ internal sealed class HostedServiceTarget
     /// </remarks>
     private readonly object _ownershipSync = new();
 
+    /// <summary>Which transition owns the target right now, or none.</summary>
+    private enum TransitionPhase
+    {
+        /// <summary>No transition is in flight.</summary>
+        None,
+
+        /// <summary>A start body is creating and starting an instance.</summary>
+        Starting,
+
+        /// <summary>A stop body owns the instance it took, until that instance is stopped and disposed.</summary>
+        Stopping
+    }
+
+    /// <summary>
+    /// The instance and the phase as one value, because they are one fact about the target. Held in a
+    /// single reference field so every transition is one write and the pair comes out of one load, which
+    /// is what leaves <see cref="State"/> no order to get wrong between the two of them.
+    /// </summary>
+    private sealed record TargetSnapshot(IHostedService? Instance, TransitionPhase Phase);
+
+    // Every snapshot that holds no instance is one of these three, so a settled target allocates
+    // nothing and only recording an instance allocates at all.
+    private static readonly TargetSnapshot SettledSnapshot = new(null, TransitionPhase.None);
+    private static readonly TargetSnapshot StartingSnapshot = new(null, TransitionPhase.Starting);
+    private static readonly TargetSnapshot StoppingSnapshot = new(null, TransitionPhase.Stopping);
+
     private Task _tail = Task.CompletedTask;
-    private IHostedService? _current;
+
+    // Written by transition bodies only, which the chain serializes, and read from anywhere the handle
+    // is polled. Volatile because a poll on an unrelated thread has no happens before edge to the body
+    // that wrote it.
+    private TargetSnapshot _snapshot = SettledSnapshot;
+
     private Exception? _fault;
     private HostedServiceHandler? _owner;
     private IHostedService? _lastFactoryInstance;
@@ -52,19 +83,120 @@ internal sealed class HostedServiceTarget
     /// <summary>Test seam, invoked inside the chain lock between the take and the append. Null in production.</summary>
     internal Action? ChainLockGate { get; set; }
 
-    public IHostedService? Current => Volatile.Read(ref _current);
+    public IHostedService? Current => Volatile.Read(ref _snapshot).Instance;
 
     public Exception? Fault => Volatile.Read(ref _fault);
 
     public HostedServiceHandler? Owner => Volatile.Read(ref _owner);
 
-    public void SetCurrent(IHostedService? instance) => Volatile.Write(ref _current, instance);
-
     public void SetFault(Exception? fault) => Volatile.Write(ref _fault, fault);
 
+    /// <summary>Enters the start window, with nothing recorded yet.</summary>
+    /// <remarks>
+    /// One write, and each of the four transitions below has to stay one write. A reader takes the
+    /// instance and the phase in a single load, so a transition split back into two writes puts a state
+    /// that is neither the one before nor the one after between them, and nothing in the suite would
+    /// catch it: what makes this safe is the shape of the write rather than a test.
+    /// </remarks>
+    public void BeginStart() => Volatile.Write(ref _snapshot, StartingSnapshot);
+
+    /// <summary>Records the started instance and leaves the start window together.</summary>
+    /// <remarks>Stays one write, for the reason on <see cref="BeginStart"/>.</remarks>
+    public void CompleteStart(IHostedService instance)
+        => Volatile.Write(ref _snapshot, new TargetSnapshot(instance, TransitionPhase.None));
+
     /// <summary>
-    /// Permanently refuses further starts. Under the chain lock, so a detach that marks here before
-    /// appending its stop leaves an appended start either refused or ordered ahead of that stop.
+    /// Leaves the start window for a start that recorded nothing, and leaves a start that recorded its
+    /// instance alone, because the write that recorded it already left the window.
+    /// </summary>
+    /// <remarks>
+    /// Stays one write, for the reason on <see cref="BeginStart"/>. The condition is load bearing as
+    /// the start body is written: <see cref="CompleteStart"/> replaces the snapshot with the one
+    /// holding the instance, and this runs afterwards in the same body, so settling unconditionally
+    /// would null an instance that has just started. Contrast <see cref="EndStop"/>, whose condition
+    /// guards against a later edit rather than against the body as it stands.
+    /// </remarks>
+    public void EndStart() => LeavePhase(TransitionPhase.Starting);
+
+    /// <summary>
+    /// Takes the instance out of <see cref="Current"/> and enters the stop window together, so the
+    /// target never holds no instance while raising no phase.
+    /// </summary>
+    /// <remarks>Stays one write, for the reason on <see cref="BeginStart"/>.</remarks>
+    public void BeginStop() => Volatile.Write(ref _snapshot, StoppingSnapshot);
+
+    /// <summary>
+    /// Leaves the stop window, and leaves the snapshot alone for a stop body that never entered it.
+    /// </summary>
+    /// <remarks>
+    /// Stays one write, for the reason on <see cref="BeginStart"/>. The condition changes nothing for
+    /// the stop body as it stands: the one exit above the phase change is the return taken because the
+    /// target held no instance, the chain runs no other body meanwhile, so an unconditional settle
+    /// there would write the value already in the field. It is conditional so that this method is
+    /// correct on its own rather than on what precedes it, because a guard added above the instance
+    /// read later would otherwise make it a settle over a live instance and nothing would say so.
+    /// Contrast <see cref="EndStart"/>, whose condition is load bearing as the start body stands.
+    /// </remarks>
+    public void EndStop() => LeavePhase(TransitionPhase.Stopping);
+
+    /// <summary>
+    /// Settles the snapshot while <paramref name="phase"/> is still the one in flight. A plain read
+    /// modify write rather than a compare and exchange: the chain serializes the bodies for one target,
+    /// so nothing else writes the snapshot while this runs.
+    /// </summary>
+    private void LeavePhase(TransitionPhase phase)
+    {
+        if (Volatile.Read(ref _snapshot).Phase == phase)
+        {
+            Volatile.Write(ref _snapshot, SettledSnapshot);
+        }
+    }
+
+    /// <summary>
+    /// What the target is doing right now, derived from the one snapshot the transitions write rather
+    /// than stored, so <see cref="HostedServiceAttachmentState.Running"/> and a non null
+    /// <see cref="Current"/> can never disagree.
+    /// </summary>
+    /// <remarks>
+    /// Two steps of the precedence are not arbitrary. <see cref="HostedServiceAttachmentState.Removed"/>
+    /// outranks <see cref="HostedServiceAttachmentState.Faulted"/> because the mark is terminal for the
+    /// attachment while the fault is not: every start appended after it is refused, and the one start
+    /// that can still run, one queued ahead of the mark, clears the fault on its way past. Ranked the
+    /// other way a target nothing can attach to again would read as the recoverable one of the two.
+    /// <see cref="HostedServiceAttachmentState.Stopping"/> outranks
+    /// <see cref="HostedServiceAttachmentState.Removed"/> because an explicit detach marks detached and
+    /// then appends its stop, so both hold while that stop runs and "still shutting down" is the more
+    /// urgent of the two; it settles into <see cref="HostedServiceAttachmentState.Removed"/>.
+    /// </remarks>
+    public HostedServiceAttachmentState State
+    {
+        get
+        {
+            // The instance and the phase come out of this one load, which is what the property rests
+            // on: they are written together, so no transition can land between them. This is not the
+            // only load the property takes, and the other two below are not covered by that argument.
+            var snapshot = Volatile.Read(ref _snapshot);
+
+            return snapshot.Instance is not null ? HostedServiceAttachmentState.Running
+                : snapshot.Phase is TransitionPhase.Starting ? HostedServiceAttachmentState.Starting
+                : snapshot.Phase is TransitionPhase.Stopping ? HostedServiceAttachmentState.Stopping
+                // The two loads below run only on a settled snapshot, so neither can contradict a
+                // transition in flight: between them they choose among Removed, Faulted and Stopped,
+                // and a reading that is one moment old is one of those three rather than a phase.
+                //
+                // Read outside _sync, unlike everywhere else: a poll must not queue behind an append,
+                // and the mark is one way, so the worst a racing read can do is report the state one
+                // moment older.
+                : Volatile.Read(ref _detached) ? HostedServiceAttachmentState.Removed
+                : Fault is not null ? HostedServiceAttachmentState.Faulted
+                : HostedServiceAttachmentState.Stopped;
+        }
+    }
+
+    /// <summary>
+    /// Permanently refuses every start appended after this, and none already queued. Under the chain
+    /// lock, so a detach that marks here before appending its stop leaves an appended start either
+    /// refused or ordered ahead of that stop.
     /// </summary>
     public void MarkDetached()
     {

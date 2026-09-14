@@ -298,6 +298,10 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
             try
             {
+                // Entered here, past every guard and immediately before the factory: a refused start
+                // must report the state it leaves behind rather than a start window it never entered.
+                target.BeginStart();
+
                 var instance = target.Subject ?? target.Factory!();
                 if (target.IsHandlerOwnedInstance && !target.TryRecordFactoryInstance(instance))
                 {
@@ -323,12 +327,18 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                     throw;
                 }
 
-                target.SetCurrent(instance);
+                target.CompleteStart(instance);
             }
             catch (Exception exception)
             {
                 target.SetFault(exception);
                 Logger?.LogError(exception, "Failed to start hosted service for subject {Subject}.", subject);
+            }
+            finally
+            {
+                // Acts on a start that recorded nothing only: a successful one already left the start
+                // window with the same write that recorded its instance.
+                target.EndStart();
             }
         }
         finally
@@ -462,7 +472,12 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                     return;
                 }
 
-                target.SetCurrent(null);
+                // One write, which takes the instance out of Current and enters the stop window
+                // together: as two the target would briefly hold no instance and raise no phase, and a
+                // poll landing there reads a settled state while this instance still holds its sessions,
+                // semaphores and subscriptions. Below the return above, so a stop with nothing to do
+                // reports no window of its own.
+                target.BeginStop();
 
                 await Task.Delay(TransitionDelayMilliseconds, CancellationToken.None).ConfigureAwait(false);
 
@@ -489,6 +504,11 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             }
             finally
             {
+                // Left ahead of the signal, so nothing ordered behind it reads this target still in
+                // its stop window. Only a subject stop carries a signal and no handle exposes a
+                // subject target's state, so no such reader exists yet.
+                target.EndStop();
+
                 // Always signals, including on the gated-out and cancelled paths, or a paired
                 // attachment stop parks forever on a signal that is never set.
                 signal?.TrySetResult();

@@ -147,4 +147,8 @@ internal static class TestGateExtensions
     /// <summary>Holds the subject inside its own <c>StopAsync</c>.</summary>
     public static TestGate HoldAtStop(this CountingHostedSubject subject)
         => TestGate.Arm(gate => subject.StopHold = gate);
+
+    /// <summary>Holds a handler owned instance inside its own <c>StopAsync</c>.</summary>
+    public static TestGate HoldAtStop(this TrackedBackgroundService instance)
+        => TestGate.Arm(gate => instance.StopHold = gate);
 }

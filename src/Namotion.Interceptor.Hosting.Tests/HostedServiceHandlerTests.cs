@@ -90,6 +90,157 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
+    public async Task WhenTheFactoryIsHeld_ThenTheAttachmentReportsStartingUntilTheInstanceIsRecorded()
+    {
+        // Arrange - a consumer polling the handle sees Current null both before a start and inside one,
+        // and the factory may already have published into the subject by then. Holding the factory is
+        // what puts the read inside that window rather than near it.
+        await HostingTestHost.RunAsync(async context =>
+        {
+            var person = new Person(context);
+
+            Action? holdInFactory = null;
+            using var factory = TestGate.ArmBlocking(hold => holdInFactory = hold);
+
+            var attachment = person.AttachHostedService(() =>
+            {
+                holdInFactory?.Invoke();
+                return new TrackedBackgroundService();
+            });
+
+            // Act
+            await factory.WaitUntilReachedAsync();
+
+            // Assert
+            Assert.Null(attachment.Current);
+            Assert.Equal(HostedServiceAttachmentState.Starting, attachment.State);
+
+            // Act
+            factory.Release();
+            await attachment.DrainAsync();
+
+            // Assert
+            Assert.NotNull(attachment.Current);
+            Assert.Equal(HostedServiceAttachmentState.Running, attachment.State);
+        });
+    }
+
+    [Fact]
+    public async Task WhenAStartedAttachmentIsDetached_ThenItLeavesTheStartWindowBehind()
+    {
+        // Arrange - the start window has to close when the start body leaves it, and a target that is
+        // still running hides a window that never closed, because Running outranks Starting. Settling
+        // the target first is what makes the flag observable at all.
+        await HostingTestHost.RunAsync(async context =>
+        {
+            var person = new Person(context);
+            var attachment = await person.AttachHostedServiceAsync(
+                () => new TrackedBackgroundService(), CancellationToken.None);
+
+            // Act
+            Assert.True(await person.DetachHostedServiceAsync(attachment, CancellationToken.None));
+
+            // Assert
+            Assert.Null(attachment.Current);
+            Assert.Equal(HostedServiceAttachmentState.Removed, attachment.State);
+        });
+    }
+
+    [Fact]
+    public async Task WhenADetachIsHeldInsideTheInstanceStop_ThenTheAttachmentReportsStopping()
+    {
+        // Arrange
+        await HostingTestHost.RunAsync(async context =>
+        {
+            var person = new Person(context);
+            var instance = new TrackedBackgroundService();
+            using var stop = instance.HoldAtStop();
+            var attachment = await person.AttachHostedServiceAsync(() => instance, CancellationToken.None);
+
+            // Act - not awaited, so the read below lands while the stop body is inside StopAsync, which
+            // is past the point where the instance left Current and still holding everything it opened.
+            var detachment = person.DetachHostedServiceAsync(attachment, CancellationToken.None);
+            await stop.WaitUntilReachedAsync();
+
+            // Assert
+            Assert.Null(attachment.Current);
+            Assert.Equal(HostedServiceAttachmentState.Stopping, attachment.State);
+
+            // Act
+            stop.Release();
+            Assert.True(await detachment);
+
+            // Assert - the detach marked the target before it appended that stop, so both held while it
+            // ran and only one of them is left now.
+            Assert.Equal(HostedServiceAttachmentState.Removed, attachment.State);
+        });
+    }
+
+    [Fact]
+    public async Task WhenAnAwaitedAttachFaults_ThenTheAttachmentReportsRemoved()
+    {
+        // Arrange - the faulted attach records the fault and marks the target, so both hold at once.
+        // The handle is read out of the subject before the attach removes it, which is the only moment
+        // it is reachable on this path.
+        await HostingTestHost.RunAsync(async context =>
+        {
+            var person = new Person(context);
+
+            Action? holdInFactory = null;
+            using var factory = TestGate.ArmBlocking(hold => holdInFactory = hold);
+
+            var attaching = person.AttachHostedServiceAsync(
+                () =>
+                {
+                    holdInFactory?.Invoke();
+                    return new TrackedBackgroundService { ThrowOnStart = true };
+                },
+                CancellationToken.None);
+
+            await factory.WaitUntilReachedAsync();
+            var attachment = Assert.Single(person.GetHostedServiceAttachments());
+            factory.Release();
+
+            // Act
+            await Assert.ThrowsAsync<InvalidOperationException>(() => attaching);
+            await attachment.DrainAsync();
+
+            // Assert
+            Assert.NotNull(attachment.Fault);
+            Assert.Equal(HostedServiceAttachmentState.Removed, attachment.State);
+        });
+    }
+
+    [Fact]
+    public async Task WhenAParkedStartIsRefusedAfterItsSubjectLeftTheGraph_ThenTheAttachmentReportsStopped()
+    {
+        // Arrange
+        await HostingTestHost.RunAsync(async context =>
+        {
+            var parent = new Parent(context);
+            var person = new Person();
+            parent.Child = person;
+
+            // Act - the scope parks the start body ahead of the guards it re-reads when the scope
+            // closes, and the detach inside it clears the liveness one of them reads, so the body runs
+            // and returns without creating anything.
+            IHostedServiceAttachment<TrackedBackgroundService> attachment;
+            using (context.DeferHostedServiceStartup())
+            {
+                attachment = person.AttachHostedService(() => new TrackedBackgroundService());
+                parent.Child = null;
+            }
+
+            await attachment.DrainAsync();
+
+            // Assert - a refused start reports the state it left behind rather than a start window it
+            // never entered.
+            Assert.Null(attachment.Current);
+            Assert.Equal(HostedServiceAttachmentState.Stopped, attachment.State);
+        });
+    }
+
+    [Fact]
     public async Task WhenSubjectIsDetachedAndReattached_ThenAFreshInstanceRuns()
     {
         // Arrange - this is the whole point of the factory API. The pre-detach instance must be
@@ -392,6 +543,13 @@ public class HostedServiceHandlerTests
             parent.Child = child;
             await AsyncTestHelpers.WaitUntilAsync(() => attachment.Fault is not null);
 
+            // The fault is recorded inside the start's catch and the start window is left in the
+            // finally behind it, so the attachment still reads Starting for a moment after the fault
+            // itself is visible.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => attachment.State is not HostedServiceAttachmentState.Starting);
+            Assert.Equal(HostedServiceAttachmentState.Faulted, attachment.State);
+
             // Act
             parent.Child = null;
             parent.Child = child;
@@ -399,6 +557,7 @@ public class HostedServiceHandlerTests
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(() => attachment.Current is not null);
             Assert.Null(attachment.Fault);
+            Assert.Equal(HostedServiceAttachmentState.Running, attachment.State);
         });
     }
 

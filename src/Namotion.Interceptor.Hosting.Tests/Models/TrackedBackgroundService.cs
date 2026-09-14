@@ -23,6 +23,12 @@ public sealed class TrackedBackgroundService : IHostedService, IAsyncDisposable
 
     public bool IsStopped { get; private set; }
 
+    /// <summary>
+    /// Awaited inside <see cref="StopAsync"/>. Lets a test hold the instance mid stop and read what the
+    /// attachment reports while it is still being torn down.
+    /// </summary>
+    public Func<Task>? StopHold { get; set; }
+
     public bool IsDisposed => Volatile.Read(ref _disposeCount) > 0;
 
     public int DisposeCount => Volatile.Read(ref _disposeCount);
@@ -40,14 +46,18 @@ public sealed class TrackedBackgroundService : IHostedService, IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
         // Honours the token like any real hosted service, which is what makes a cancelled stop
         // observable: the handler still has to dispose an instance whose stop was cut short.
         cancellationToken.ThrowIfCancellationRequested();
 
+        if (StopHold is { } hold)
+        {
+            await hold();
+        }
+
         IsStopped = true;
-        return Task.CompletedTask;
     }
 
     public ValueTask DisposeAsync()

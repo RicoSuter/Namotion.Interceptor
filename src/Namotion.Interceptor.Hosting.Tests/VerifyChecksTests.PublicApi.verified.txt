@@ -3,6 +3,15 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
 namespace Namotion.Interceptor.Hosting
 {
+    public enum HostedServiceAttachmentState
+    {
+        Stopped = 0,
+        Starting = 1,
+        Running = 2,
+        Stopping = 3,
+        Removed = 4,
+        Faulted = 5,
+    }
     public sealed class HostedServiceStartupScope : System.IDisposable
     {
         public void Dispose() { }
@@ -11,6 +20,7 @@ namespace Namotion.Interceptor.Hosting
     {
         Microsoft.Extensions.Hosting.IHostedService? Current { get; }
         System.Exception? Fault { get; }
+        Namotion.Interceptor.Hosting.HostedServiceAttachmentState State { get; }
     }
     public interface IHostedServiceAttachment<out T> : Namotion.Interceptor.Hosting.IHostedServiceAttachment
         where out T :  class, Microsoft.Extensions.Hosting.IHostedService
