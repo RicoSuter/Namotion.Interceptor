@@ -207,17 +207,14 @@ public class ContextFunctionCacheTests
             static (_, _) => { });
     }
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2326", Justification = "The generic argument creates distinct runtime types to exercise separate cache slots.")]
     private sealed class PropertyType<TProperty>;
 
     private sealed class PropertyTypeRoot;
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2326", Justification = "The generic argument creates distinct runtime types to exercise separate cache slots.")]
     private sealed class HighIndexPropertyType<TProperty>;
 
     private sealed class HighIndexPropertyTypeRoot;
 
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S2326", Justification = "The generic argument creates distinct runtime types to exercise separate cache slots.")]
     private sealed class DoublingPropertyType<TProperty>;
 
     private sealed class DoublingPropertyTypeRoot;

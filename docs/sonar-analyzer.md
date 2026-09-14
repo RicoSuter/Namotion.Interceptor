@@ -15,6 +15,12 @@ These exclusions reflect this library's implementation patterns. Evaluate the re
 | S2696: instance methods writing static fields | Synchronous instance operations acquire and release thread-local traversal buffers, and disposing a scope restores its thread's previous ambient value. Retaining these patterns avoids per-operation scratch allocations and preserves scope semantics. Making the caller static does not itself provide synchronization. | Keep the rule where instance methods unexpectedly mutate process-wide state. This exclusion is also about ownership and scope, not only speed. Review ordinary shared statics for races and thread-local buffers for reentrancy; a thread-local buffer is not automatically safe across callbacks or asynchronous suspension. |
 | S2094: empty classes | Empty marker classes and test fixtures intentionally encode type identity or metadata. | Keep the rule where an empty class usually indicates unfinished implementation. |
 
+## Test-only exclusions
+
+S2326 (unused type parameters) and S1144 (unused private types or members) are disabled only for C# files under directories ending in `.Tests`, including those beneath HomeBlaze. Generic fixture types often exist solely to provide distinct runtime identities, and fixture constructors or members can be reached through attributes, reflection, or generated code. We accept losing some dead-code detection in tests to reduce this noise. Both rules remain enabled in production; the intentional per-type cache in core retains its local S2326 exception.
+
+The editorconfig override matches file paths, not MSBuild's `IsTestProject` property. Test projects with another directory naming convention, shared testing libraries, and benchmark projects do not receive these exclusions automatically. When reusing this policy elsewhere, adapt the path pattern to the repository's layout and decide whether its tests benefit more from unused-member detection or reduced fixture noise. S108 and S2699 remain enabled in tests.
+
 ## Local exceptions and follow-ups
 
 Other exceptions stay at the affected member or statement, with a reason. Temporary complexity suppressions in the first adoption preserve established ordering and concurrency code while its decomposition is deferred. They are not a blanket exemption for new code.

@@ -16,7 +16,6 @@ public partial class PropertyInfoExtensionsTests
     private class TagAttribute : Attribute
     {
         public string Value { get; }
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1144", Justification = "The constructor is invoked through attribute metadata on the test properties.")]
         public TagAttribute(string value) => Value = value;
     }
 
@@ -24,7 +23,6 @@ public partial class PropertyInfoExtensionsTests
     private class SingleAttribute : Attribute
     {
         public string Value { get; }
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1144", Justification = "The constructor is invoked through attribute metadata on the test properties.")]
         public SingleAttribute(string value) => Value = value;
     }
 
@@ -32,7 +30,6 @@ public partial class PropertyInfoExtensionsTests
     private class MultipleAttribute : Attribute
     {
         public string Value { get; }
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1144", Justification = "The constructor is invoked through attribute metadata on the test properties.")]
         public MultipleAttribute(string value) => Value = value;
     }
 
@@ -40,7 +37,6 @@ public partial class PropertyInfoExtensionsTests
     private class DefaultAttribute : Attribute
     {
         public string Value { get; }
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1144", Justification = "The constructor is invoked through attribute metadata on the test properties.")]
         public DefaultAttribute(string value) => Value = value;
     }
 

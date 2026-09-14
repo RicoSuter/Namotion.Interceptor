@@ -19,6 +19,11 @@ dotnet_diagnostic.S2743.severity = none
 # Instance operations manage thread-local buffers and restore ambient scopes.
 dotnet_diagnostic.S2696.severity = none
 
+# Test fixtures use generic type identity and members reached through metadata or reflection.
+[**.Tests/**.cs]
+dotnet_diagnostic.S2326.severity = none
+dotnet_diagnostic.S1144.severity = none
+
 # Verify snapshots must preserve their exact text representation.
 [*.{received,verified}.{txt}]
 charset = utf-8-bom
