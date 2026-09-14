@@ -168,29 +168,39 @@ internal sealed class HostedServiceTarget
     /// then appends its stop, so both hold while that stop runs and "still shutting down" is the more
     /// urgent of the two; it settles into <see cref="HostedServiceAttachmentState.Removed"/>.
     /// </remarks>
-    public HostedServiceAttachmentState State
-    {
-        get
-        {
-            // The instance and the phase come out of this one load, which is what the property rests
-            // on: they are written together, so no transition can land between them. This is not the
-            // only load the property takes, and the other two below are not covered by that argument.
-            var snapshot = Volatile.Read(ref _snapshot);
+    public HostedServiceAttachmentState State => GetState(out _);
 
-            return snapshot.Instance is not null ? HostedServiceAttachmentState.Running
-                : snapshot.Phase is TransitionPhase.Starting ? HostedServiceAttachmentState.Starting
-                : snapshot.Phase is TransitionPhase.Stopping ? HostedServiceAttachmentState.Stopping
-                // The two loads below run only on a settled snapshot, so neither can contradict a
-                // transition in flight: between them they choose among Removed, Faulted and Stopped,
-                // and a reading that is one moment old is one of those three rather than a phase.
-                //
-                // Read outside _sync, unlike everywhere else: a poll must not queue behind an append,
-                // and the mark is one way, so the worst a racing read can do is report the state one
-                // moment older.
-                : Volatile.Read(ref _detached) ? HostedServiceAttachmentState.Removed
-                : Fault is not null ? HostedServiceAttachmentState.Faulted
-                : HostedServiceAttachmentState.Stopped;
-        }
+    /// <summary>
+    /// The state and the instance it was derived from, out of one snapshot load, so a caller cannot
+    /// read a state that disagrees with the instance it then acts on.
+    /// </summary>
+    /// <remarks>
+    /// Reading <see cref="State"/> and <see cref="Current"/> separately leaves a transition free to
+    /// land between them, and a caller that then drops what the instance published acts on a pairing
+    /// that never existed. Everything <see cref="State"/> documents about its own precedence and its
+    /// two further loads applies here unchanged.
+    /// </remarks>
+    public HostedServiceAttachmentState GetState(out IHostedService? current)
+    {
+        // The instance and the phase come out of this one load, which is what both this method and
+        // State rest on: they are written together, so no transition can land between them. This is
+        // not the only load taken, and the other two below are not covered by that argument.
+        var snapshot = Volatile.Read(ref _snapshot);
+        current = snapshot.Instance;
+
+        return snapshot.Instance is not null ? HostedServiceAttachmentState.Running
+            : snapshot.Phase is TransitionPhase.Starting ? HostedServiceAttachmentState.Starting
+            : snapshot.Phase is TransitionPhase.Stopping ? HostedServiceAttachmentState.Stopping
+            // The two loads below run only on a settled snapshot, so neither can contradict a
+            // transition in flight: between them they choose among Removed, Faulted and Stopped,
+            // and a reading that is one moment old is one of those three rather than a phase.
+            //
+            // Read outside _sync, unlike everywhere else: a poll must not queue behind an append,
+            // and the mark is one way, so the worst a racing read can do is report the state one
+            // moment older.
+            : Volatile.Read(ref _detached) ? HostedServiceAttachmentState.Removed
+            : Fault is not null ? HostedServiceAttachmentState.Faulted
+            : HostedServiceAttachmentState.Stopped;
     }
 
     /// <summary>

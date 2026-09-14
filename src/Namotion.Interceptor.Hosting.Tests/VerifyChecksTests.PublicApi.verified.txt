@@ -21,11 +21,13 @@ namespace Namotion.Interceptor.Hosting
         Microsoft.Extensions.Hosting.IHostedService? Current { get; }
         System.Exception? Fault { get; }
         Namotion.Interceptor.Hosting.HostedServiceAttachmentState State { get; }
+        Namotion.Interceptor.Hosting.HostedServiceAttachmentState GetState(out Microsoft.Extensions.Hosting.IHostedService? current);
     }
-    public interface IHostedServiceAttachment<out T> : Namotion.Interceptor.Hosting.IHostedServiceAttachment
-        where out T :  class, Microsoft.Extensions.Hosting.IHostedService
+    public interface IHostedServiceAttachment<T> : Namotion.Interceptor.Hosting.IHostedServiceAttachment
+        where T :  class, Microsoft.Extensions.Hosting.IHostedService
     {
         T Current { get; }
+        Namotion.Interceptor.Hosting.HostedServiceAttachmentState GetState(out T? current);
     }
     public static class InterceptorHostingExtensions
     {

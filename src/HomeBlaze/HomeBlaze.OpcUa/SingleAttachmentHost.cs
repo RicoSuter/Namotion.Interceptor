@@ -333,15 +333,10 @@ internal sealed class SingleAttachmentHost<TService>
             return;
         }
 
-        // The fault is read once and both branches below decide from that one reading. The state is
-        // not read with it: each drop takes its own reading immediately before dropping, so nothing
-        // but the branch sits between the reading and the act it decides. Hoisted up to here, an
-        // intercepted property write sits in that gap instead, which is long enough for a start to
-        // publish a whole tree into it.
-        //
-        // Wherever it is taken, the state is read below the fault: a retry start clears the fault
-        // before it enters its start window, so a state read taken above the fault would still be
-        // settled for a fault this poll is about to act on.
+        // Read below the fault, not above it: a retry start clears the fault before it enters its start
+        // window, so a reading taken above would still be settled for a fault this poll is about to act
+        // on. Each drop takes its own reading immediately before dropping, so nothing but the branch
+        // sits between the reading and the act it decides.
         var fault = attachment.Fault;
 
         if (fault is not null)
@@ -350,7 +345,10 @@ internal sealed class SingleAttachmentHost<TService>
             _owner.StatusMessage = fault.Message;
             _owner.ResetDiagnostics();
 
-            if (!IsPublishing(attachment))
+            // One reading, for the reason the not running branch below gives. Current is read here too,
+            // because a fault says nothing about whether a later start has already produced an instance.
+            if (attachment.GetState(out var faultedCurrent) is not HostedServiceAttachmentState.Starting &&
+                faultedCurrent is null)
             {
                 _owner.DropInstanceState();
             }
@@ -363,16 +361,16 @@ internal sealed class SingleAttachmentHost<TService>
         // the error text of the transition that failed.
         _owner.StatusMessage = null;
 
-        if (attachment.Current is not { } instance)
+        // One reading, so the state and the instance cannot disagree: a start in flight may already have
+        // published its tree, and dropping it here would take that tree back out of the graph underneath
+        // the factory. Reading them separately is what let a stale state stand beside a fresh instance.
+        var state = attachment.GetState(out var instance);
+
+        if (instance is null)
         {
             // Attached but not yet created: the start transition has not run, or it has just disposed
             // the previous instance on a re-attach.
-            //
-            // A start in flight may already have published its tree, so only a settled attachment is
-            // stale. Dropping it here takes that tree back out of the graph underneath the factory.
-            // Running counts as unsettled for the same reason: reading it below a null Current means an
-            // instance arrived between the two reads.
-            if (!IsPublishing(attachment))
+            if (state is not HostedServiceAttachmentState.Starting)
             {
                 _owner.DropInstanceState();
             }
@@ -385,21 +383,6 @@ internal sealed class SingleAttachmentHost<TService>
         _owner.ApplyDiagnostics(instance);
     }
 
-    /// <summary>
-    /// Whether the attachment may be publishing into the subject right now, which is the tree a drop
-    /// must not take away: a start in flight, whose factory publishes into the same tree the drop
-    /// clears, or an instance that arrived between the caller's <c>Current</c> read and this one.
-    /// </summary>
-    /// <remarks>
-    /// It does not answer "is anything still live", and
-    /// <see cref="HostedServiceAttachmentState.Stopping"/> is excluded deliberately: an instance that
-    /// has left <c>Current</c> is being stopped and disposed, so what it published is the wrapper's
-    /// to drop rather than something to preserve. Reads the state, so each call is its own reading
-    /// and every call site has to sit immediately before the drop it decides. Hoisting one out is
-    /// what reopens the window.
-    /// </remarks>
-    private static bool IsPublishing(IHostedServiceAttachment<TService> attachment)
-        => attachment.State is HostedServiceAttachmentState.Starting or HostedServiceAttachmentState.Running;
 
     /// <summary>
     /// Waits for the attachment gate. Returns false when the wait was cancelled, in which case the
