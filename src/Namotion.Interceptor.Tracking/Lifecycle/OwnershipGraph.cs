@@ -40,6 +40,12 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     // baseline carries a revision rather than being compared by value. Revisions are drawn from this
     // counter, which every mutation of the two maps above advances, so it doubles as the mutation
     // epoch the publication guards test; see StillOwnsPublication.
+    //
+    // The two maps are written only by the four helpers below, each of which advances the epoch
+    // first. Writing either map directly would leave the epoch standing where the last commit left
+    // it, and StillOwnsPublication would then read "nothing moved" for a graph that did move. That
+    // is a false positive in the unsafe direction, so the write has to carry the bump with it
+    // rather than rely on a caller remembering one.
     private long _epoch;
     private PropertyEdgeJournal? _firstPropertyJournal;
     private Dictionary<PropertyReference, PropertyEdgeJournal>? _additionalPropertyJournals;
@@ -84,8 +90,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     public SubjectOwnership AddOwnership(IInterceptorSubject subject)
     {
         var ownership = new SubjectOwnership();
-        _epoch++;
-        _owned[subject] = ownership;
+        PublishOwnership(subject, ownership);
         return ownership;
     }
 
@@ -97,6 +102,43 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     {
         _epoch++;
         ownership.MarkReleasing();
+    }
+
+    /// <summary>Publishes an ownership record, advancing the epoch that stands in for it.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void PublishOwnership(IInterceptorSubject subject, SubjectOwnership ownership)
+    {
+        _epoch++;
+        _owned[subject] = ownership;
+    }
+
+    /// <summary>Withdraws an ownership record, advancing the epoch that stands in for it.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void WithdrawOwnership(IInterceptorSubject subject)
+    {
+        _epoch++;
+        _owned.TryRemove(subject, out _);
+    }
+
+    /// <summary>
+    /// Publishes a baseline and returns the revision the epoch advanced to. The revision is drawn
+    /// here rather than passed in, so a caller cannot publish against a revision the epoch never
+    /// reached.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long PublishBaseline(PropertyReference property, object? value, SubjectOccurrence[]? occurrences)
+    {
+        var revision = ++_epoch;
+        _baselines[property] = new PropertyBaseline(value, revision, occurrences);
+        return revision;
+    }
+
+    /// <summary>Withdraws a baseline, advancing the epoch that stands in for it.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool WithdrawBaseline(PropertyReference property, out PropertyBaseline baseline)
+    {
+        _epoch++;
+        return _baselines.Remove(property, out baseline);
     }
 
     /// <summary>
@@ -126,8 +168,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
         // entry, so an older queued release must not remove a newer ownership lifetime.
         if (IsCurrentRelease(subject, ownership))
         {
-            _epoch++;
-            _owned.TryRemove(subject, out _);
+            WithdrawOwnership(subject);
         }
     }
 
@@ -162,17 +203,13 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
 
     public long SetBaseline(PropertyReference property, IInterceptorSubject? value)
     {
-        var revision = ++_epoch;
-        _baselines[property] = new PropertyBaseline(value, revision, null);
-        return revision;
+        return PublishBaseline(property, value, null);
     }
 
     public long SetBaseline(PropertyReference property, object? value, List<SubjectOccurrence> occurrences)
     {
-        var revision = ++_epoch;
-        _baselines[property] = new PropertyBaseline(value, revision,
+        return PublishBaseline(property, value,
             value is IInterceptorSubject || occurrences.Count == 0 ? null : occurrences.ToArray());
-        return revision;
     }
 
     public long GetBaselineRevision(PropertyReference property)
@@ -586,7 +623,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     /// <summary>Drops one property's baseline along with any journal still registered for it.</summary>
     private PropertyBaseline DropBaseline(PropertyReference property)
     {
-        _baselines.Remove(property, out var baseline);
+        WithdrawBaseline(property, out var baseline);
         var first = _firstPropertyJournal;
         if (first is not null && first.Property == property)
         {
