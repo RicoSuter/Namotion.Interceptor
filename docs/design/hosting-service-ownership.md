@@ -240,6 +240,14 @@ The two marks are independent, so each needs a test that drives its own overload
 
 The reachable shape is one hosting enabled context plus one lifecycle only context, not two hosting contexts, because `TryGetService<HostedServiceHandler>()` throws when two hosting contexts are reachable. Reaching it needs a manual `AddFallbackContext` to put a subject in a second lifecycle enabled graph: `ContextInheritanceHandler` fires only at reference count one, so a subject already in one graph never gains a second context through ordinary assignment. Recorded here rather than defended against, because the guard would have to distinguish which interceptor's graph a handler serves, which the handler does not know.
 
+### A handler that loses the exchange to a departing handler never retries
+
+`DetachSubject` clears liveness, appends its stops and releases ownership last, in that order. A *different* handler attaching the same subject concurrently reaches `TryTakeOwnershipAndAppendAsync`, and a compare and exchange landing between the clear and the release finds the departing handler still installed. The take fails, nothing is appended, and the departing handler then nulls the owner, leaving the subject live for the second handler, the target owned by nobody, nothing running and no error recorded. Nothing retries a lost exchange.
+
+Two shapes do not reach it. A sequential move is safe, because a detach that has returned has already released. A re-attach to the same context is safe for a different reason: `TryTakeOwnership` treats an owner that is already this handler as success, so the ordering against its own release does not matter.
+
+It is the same failure mode the draining handler guard in `TryTakeOwnershipAndStart` exists to prevent, and that guard closes it by installing no owner at all rather than by retrying. It is reachable under the same conditions as the paragraph above: two hosting enabled contexts over one subject, which needs a manual `AddFallbackContext`, plus concurrent graph mutation on both. Recorded rather than defended against, and recorded as derived rather than measured: no seam sits between the liveness clear and the release, so driving the interleaving deterministically would mean adding one to production code. A fix is new design rather than a reordering, because the handler that lost the exchange has to learn that ownership became free, and releasing before appending the stops reopens a defect that was measured.
+
 ## Resolving the Handler on the Public Paths
 
 ### The lookup precedes the mutation, on all four entry points

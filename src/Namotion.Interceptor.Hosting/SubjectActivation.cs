@@ -24,7 +24,6 @@ internal sealed class SubjectActivation<T> : IHostedService
     {
         // Resolving constructs and attaches the subject, which makes the handler append its start.
         var subject = _serviceProvider.GetRequiredService<T>();
-
         if (subject is not IHostedService hostedService)
         {
             return;
