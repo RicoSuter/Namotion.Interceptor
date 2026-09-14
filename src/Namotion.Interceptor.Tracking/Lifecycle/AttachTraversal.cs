@@ -30,24 +30,31 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
     {
         var ownership = graph.TryGetOwnership(subject);
         var children = LifecycleScratch.RentChildList();
-        var journals = LifecycleScratch.RentJournalList();
+        // A subject whose structural properties are all empty, which is most of them, never needs
+        // this list, so the collection allocates it only once it has a journal to hand back.
+        List<(PropertyEdgeJournal Journal, long Revision)>? journals = null;
         var completed = false;
         try
         {
-            graph.CollectStructuralChildren(subject, children, seed: true, journals);
+            graph.SeedStructuralChildren(subject, ownership, children, ref journals);
             foreach (var (property, occurrence, baselineRevision) in children)
             {
-                if (!graph.IsSeedOwnerCurrent(subject, ownership))
+                // Nothing has moved since this child's baseline was committed with the owner
+                // current, so neither guard can answer differently; see OwnershipGraph.Epoch.
+                if (ownership is null || graph.Epoch != baselineRevision)
                 {
-                    return;
+                    if (!graph.IsSeedOwnerCurrent(subject, ownership))
+                    {
+                        return;
+                    }
+
+                    if (graph.GetBaselineRevision(property) != baselineRevision)
+                    {
+                        continue;
+                    }
                 }
 
-                if (graph.GetBaselineRevision(property) != baselineRevision)
-                {
-                    continue;
-                }
-
-                AttachEdge(occurrence.Subject, property, occurrence.Index);
+                AttachEdge(occurrence.Subject, property, occurrence.Index, ownership);
             }
 
             completed = true;
@@ -59,14 +66,17 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
         }
         finally
         {
-            foreach (var (journal, revision) in journals)
+            if (journals is not null)
             {
-                if (completed && ReferenceEquals(graph.TryGetOwnership(subject), ownership) &&
-                    graph.GetBaselineRevision(journal.Property) == revision) journal.IsComplete = true;
-                graph.EndPropertyJournal(journal);
+                foreach (var (journal, revision) in journals)
+                {
+                    if (completed && graph.StillOwnsPublication(journal.Property, ownership, revision)) journal.IsComplete = true;
+                    graph.EndPropertyJournal(journal);
+                }
+
+                LifecycleScratch.Return(journals);
             }
 
-            LifecycleScratch.Return(journals);
             LifecycleScratch.Return(children);
         }
     }
@@ -114,7 +124,11 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
     /// Records one incoming edge occurrence and publishes it, entering the subject into the graph
     /// when this is its first edge.
     /// </summary>
-    public void AttachEdge(IInterceptorSubject subject, PropertyReference property, object? index)
+    /// <remarks>
+    /// <c>parentOwnership</c> is the committed ownership of the property's subject where the caller
+    /// already holds it, which spares the journal update a lookup; null means unknown.
+    /// </remarks>
+    public void AttachEdge(IInterceptorSubject subject, PropertyReference property, object? index, SubjectOwnership? parentOwnership = null)
     {
         var existing = graph.TryGetOwnership(subject);
         var isContextAttach = existing is null;
@@ -135,7 +149,9 @@ internal sealed class AttachTraversal(LifecycleNotifier notifier, OwnershipGraph
         }
 
         ownership.AddIncoming(property, index);
-        graph.RecordIncomingAdded(property, subject, index);
+        // A self edge just replaced the parent's own record, so the caller's copy is the stale one.
+        graph.RecordIncomingAdded(property, subject, index,
+            ReferenceEquals(subject, property.Subject) ? null : parentOwnership);
         var referenceCount = ownership.IncomingCount;
 
         // Authoritative parent and anchor state before the first handler observes the change.

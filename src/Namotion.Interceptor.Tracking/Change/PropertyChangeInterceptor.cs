@@ -235,9 +235,11 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
         }
     }
 
-    private static void Publish(Publication publication)
+    // By reference throughout the queueing seam: the publication carries a whole property change and
+    // is large enough that passing it by value copies it once per hop between here and the queue.
+    private static void Publish(in Publication publication)
     {
-        if (publication.Change.Property.Subject.TryGetContext()?.TryGetLifecycleInterceptor()?.TryQueuePropertyChange(publication) == true)
+        if (publication.Change.Property.Subject.TryGetContext()?.TryGetLifecycleInterceptor()?.TryQueuePropertyChange(in publication) == true)
         {
             return;
         }

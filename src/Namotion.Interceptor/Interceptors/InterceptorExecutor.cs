@@ -198,10 +198,43 @@ public sealed class InterceptorExecutor : IInterceptorExecutor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue)
     {
-        var propertyTypeIndex = InterceptorSubjectContext.PropertyTypeIndex<TProperty>.Value;
+        // TProperty is a hint here, not the declared type: a narrowed or boxed write reaches this
+        // entry with a different generic argument, and routing on it would skip the structural
+        // protocol of a property that owns subjects, or gate a scalar write. The registered
+        // metadata carries the declared classification, so it decides wherever the property is
+        // registered. A caller that already passes the declared type takes
+        // SetDeclaredPropertyValue instead and pays nothing for this lookup.
         var structural = _subject.Properties.TryGetValue(propertyName, out var metadata)
-            ? metadata.IsStructural<TProperty>()
+            ? metadata.IsStructural
             : InterceptorSubjectContext.PropertyTypeIndex<TProperty>.CanContainSubjects;
+
+        return WritePropertyValue(propertyName, newValue, currentValue, writeValue, structural);
+    }
+
+    /// <summary>
+    /// The write entry of a generated setter, where <typeparamref name="TProperty"/> is the
+    /// declared property type by construction, so routing reads its classification, a JIT
+    /// constant, and never consults the subject's property metadata. Reached through
+    /// <see cref="InterceptorExecutorExtensions.SetDeclaredPropertyValue{TProperty}"/>; see there
+    /// for what a caller passing anything else would break.
+    /// </summary>
+    /// <remarks>
+    /// Not inlined on purpose. Every generated setter calls this, and the body it would carry is
+    /// the whole scalar write, so inlining it puts the same near-kilobyte of code in every setter
+    /// of every subject. The interface dispatch this replaced was that call boundary; keeping the
+    /// boundary keeps the win a direct call instead of a virtual one, not a code-size trade.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal bool SetDeclaredPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue)
+    {
+        return WritePropertyValue(propertyName, newValue, currentValue, writeValue,
+            InterceptorSubjectContext.PropertyTypeIndex<TProperty>.CanContainSubjects);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool WritePropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, bool structural)
+    {
+        var propertyTypeIndex = InterceptorSubjectContext.PropertyTypeIndex<TProperty>.Value;
         if (structural)
         {
             return SetStructuralPropertyValue(propertyName, newValue, currentValue, writeValue, propertyTypeIndex);

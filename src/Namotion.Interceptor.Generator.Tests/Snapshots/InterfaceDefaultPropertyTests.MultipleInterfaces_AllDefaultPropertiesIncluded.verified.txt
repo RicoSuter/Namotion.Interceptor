@@ -155,7 +155,7 @@ using System.Text.Json.Serialization;
             }
             else
             {
-                return _executor.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                return _executor.SetDeclaredPropertyValue(propertyName, newValue, currentValue, setValue);
             }
         }
 

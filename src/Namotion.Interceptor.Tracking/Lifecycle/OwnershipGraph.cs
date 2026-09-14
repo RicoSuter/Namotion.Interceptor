@@ -36,8 +36,17 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     private readonly ConcurrentDictionary<IInterceptorSubject, SubjectOwnership> _owned = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<PropertyReference, PropertyBaseline> _baselines = new(PropertyReference.Comparer);
 
-    // A nested write can replace a value and restore the exact same instance before returning.
-    private long _nextBaselineRevision;
+    // A nested write can replace a value and restore the exact same instance before returning, so a
+    // baseline carries a revision rather than being compared by value. Revisions are drawn from this
+    // counter, which every mutation of the two maps above advances, so it doubles as the mutation
+    // epoch the publication guards test; see StillOwnsPublication.
+    //
+    // The two maps are written only by the four helpers below, each of which advances the epoch
+    // first. Writing either map directly would leave the epoch standing where the last commit left
+    // it, and StillOwnsPublication would then read "nothing moved" for a graph that did move. That
+    // is a false positive in the unsafe direction, so the write has to carry the bump with it
+    // rather than rely on a caller remembering one.
+    private long _epoch;
     private PropertyEdgeJournal? _firstPropertyJournal;
     private Dictionary<PropertyReference, PropertyEdgeJournal>? _additionalPropertyJournals;
     // Failure-only state: ordinary retained children need no seeding flag or property reread.
@@ -63,7 +72,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool IsStructural(in SubjectPropertyMetadata metadata)
     {
-        return metadata.IsStructural<object>();
+        return metadata.IsStructural;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -81,8 +90,55 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     public SubjectOwnership AddOwnership(IInterceptorSubject subject)
     {
         var ownership = new SubjectOwnership();
-        _owned[subject] = ownership;
+        PublishOwnership(subject, ownership);
         return ownership;
+    }
+
+    /// <summary>
+    /// Ends the ownership lifetime, hiding it from ownership queries. Routed through the graph rather
+    /// than set on the record directly so that the mutation epoch covers it; see <see cref="Epoch"/>.
+    /// </summary>
+    public void MarkReleasing(SubjectOwnership ownership)
+    {
+        _epoch++;
+        ownership.MarkReleasing();
+    }
+
+    /// <summary>Publishes an ownership record, advancing the epoch that stands in for it.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void PublishOwnership(IInterceptorSubject subject, SubjectOwnership ownership)
+    {
+        _epoch++;
+        _owned[subject] = ownership;
+    }
+
+    /// <summary>Withdraws an ownership record, advancing the epoch that stands in for it.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void WithdrawOwnership(IInterceptorSubject subject)
+    {
+        _epoch++;
+        _owned.TryRemove(subject, out _);
+    }
+
+    /// <summary>
+    /// Publishes a baseline and returns the revision the epoch advanced to. The revision is drawn
+    /// here rather than passed in, so a caller cannot publish against a revision the epoch never
+    /// reached.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long PublishBaseline(PropertyReference property, object? value, SubjectOccurrence[]? occurrences)
+    {
+        var revision = ++_epoch;
+        _baselines[property] = new PropertyBaseline(value, revision, occurrences);
+        return revision;
+    }
+
+    /// <summary>Withdraws a baseline, advancing the epoch that stands in for it.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool WithdrawBaseline(PropertyReference property, out PropertyBaseline baseline)
+    {
+        _epoch++;
+        return _baselines.Remove(property, out baseline);
     }
 
     /// <summary>
@@ -112,7 +168,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
         // entry, so an older queued release must not remove a newer ownership lifetime.
         if (IsCurrentRelease(subject, ownership))
         {
-            _owned.TryRemove(subject, out _);
+            WithdrawOwnership(subject);
         }
     }
 
@@ -147,22 +203,48 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
 
     public long SetBaseline(PropertyReference property, IInterceptorSubject? value)
     {
-        var revision = ++_nextBaselineRevision;
-        _baselines[property] = new PropertyBaseline(value, revision, null);
-        return revision;
+        return PublishBaseline(property, value, null);
     }
 
     public long SetBaseline(PropertyReference property, object? value, List<SubjectOccurrence> occurrences)
     {
-        var revision = ++_nextBaselineRevision;
-        _baselines[property] = new PropertyBaseline(value, revision,
+        return PublishBaseline(property, value,
             value is IInterceptorSubject || occurrences.Count == 0 ? null : occurrences.ToArray());
-        return revision;
     }
 
     public long GetBaselineRevision(PropertyReference property)
     {
         return _baselines.GetValueOrDefault(property).Revision;
+    }
+
+    /// <summary>
+    /// The mutation counter, which a guard that must re-validate after running user code can read
+    /// instead of probing the maps: it advances on every change to an ownership record or a
+    /// baseline, so an unchanged value proves that neither <see cref="TryGetOwnership"/> nor
+    /// <see cref="GetBaselineRevision"/> can answer differently than before.
+    /// </summary>
+    public long Epoch => _epoch;
+
+    /// <summary>
+    /// Whether the operation that committed <paramref name="revision"/> still owns the publication:
+    /// the property's subject still carries <paramref name="ownership"/> and the property still
+    /// holds that baseline. Callers must have committed the revision while the record was current,
+    /// which every <c>SetBaseline</c> call site does.
+    /// </summary>
+    /// <remarks>
+    /// Baseline revisions come from the same counter that every graph mutation advances, so a
+    /// counter still standing at the committed revision proves both halves without probing either
+    /// map. That is the whole point of drawing them from one counter: publication guards run once
+    /// per edge, and both probes hash (the baseline key hashes a string).
+    ///
+    /// An owner with no record has no identity the counter can stand in for, because what makes it
+    /// current is its executor anchor rather than graph state, so that one is always probed.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool StillOwnsPublication(PropertyReference property, SubjectOwnership? ownership, long revision)
+    {
+        return (ownership is not null && _epoch == revision) ||
+               (ReferenceEquals(TryGetOwnership(property.Subject), ownership) && GetBaselineRevision(property) == revision);
     }
 
     public PropertyEdgeJournal? GetPropertyJournal(PropertyReference property, SubjectOwnership? ownership)
@@ -176,6 +258,14 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
         return _additionalPropertyJournals is { Count: > 0 } &&
                _additionalPropertyJournals.TryGetValue(property, out var journal) &&
                ReferenceEquals(journal.Ownership, ownership) ? journal : null;
+    }
+
+    /// <summary>Whether any journal is registered for the property, its ownership lifetime aside.</summary>
+    private bool HasPropertyJournal(PropertyReference property)
+    {
+        var first = _firstPropertyJournal;
+        return (first is not null && first.Property == property) ||
+               (_additionalPropertyJournals is { Count: > 0 } && _additionalPropertyJournals.ContainsKey(property));
     }
 
     public PropertyEdgeJournal BeginPropertyJournal(PropertyReference property, SubjectOwnership ownership, List<SubjectOccurrence>? installed = null)
@@ -246,24 +336,33 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
         return false;
     }
 
-    public void RecordIncomingAdded(PropertyReference property, IInterceptorSubject child, object? index)
+    /// <summary>Records one installed incoming occurrence on the property's journal, if it has one.</summary>
+    /// <remarks>
+    /// <c>parentOwnership</c> is the committed ownership of the property's subject where the caller
+    /// already holds it. Null means unknown and is looked up, which is also the answer for a parent
+    /// whose own release is in flight.
+    /// </remarks>
+    public void RecordIncomingAdded(PropertyReference property, IInterceptorSubject child, object? index, SubjectOwnership? parentOwnership)
     {
-        if (_firstPropertyJournal is null && _additionalPropertyJournals is not { Count: > 0 })
+        // Match the property before resolving the owner. A release descent runs this once per edge it
+        // drains while an unrelated journal is open, and resolving the owner is the expensive half.
+        if (!HasPropertyJournal(property))
         {
             return;
         }
 
-        GetPropertyJournal(property, TryGetOwnership(property.Subject))?.Add(child, index);
+        GetPropertyJournal(property, parentOwnership ?? TryGetOwnership(property.Subject))?.Add(child, index);
     }
 
-    public void RecordIncomingRemoved(PropertyReference property, IInterceptorSubject child)
+    /// <inheritdoc cref="RecordIncomingAdded"/>
+    public void RecordIncomingRemoved(PropertyReference property, IInterceptorSubject child, SubjectOwnership? parentOwnership)
     {
-        if (_firstPropertyJournal is null && _additionalPropertyJournals is not { Count: > 0 })
+        if (!HasPropertyJournal(property))
         {
             return;
         }
 
-        GetPropertyJournal(property, TryGetOwnership(property.Subject))?.RemoveLast(child);
+        GetPropertyJournal(property, parentOwnership ?? TryGetOwnership(property.Subject))?.RemoveLast(child);
     }
 
     /// <summary>
@@ -289,18 +388,71 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     }
 
     /// <summary>
-    /// Walks the subject's structural properties and appends the occurrences their values contain, in
-    /// property enumeration order and then value order, which is the order the release descent visits
-    /// children in. Seeding reads the current getter output and commits it as the baseline;
-    /// collecting reads the committed baseline. That one difference is why both callers exist.
+    /// Appends the committed children of a subject that is leaving the graph, in property enumeration
+    /// order and then value order, which is the order the release descent visits them in, and drops
+    /// the subject's structural state in the same pass.
     /// </summary>
-    public void CollectStructuralChildren(
+    /// <remarks>
+    /// Collecting and dropping run back to back on the release path and hash the same keys, so they
+    /// walk the properties once. Nothing reads a baseline between the two, and neither half runs user
+    /// code, so the merged pass is not observable. A property whose publication is incomplete answers
+    /// from its journal: the release removes the edges that were installed, not the ones intended.
+    /// </remarks>
+    public void CollectAndDropStructuralChildren(
         IInterceptorSubject subject,
-        List<(PropertyReference Property, SubjectOccurrence Occurrence, long BaselineRevision)> children,
-        bool seed,
-        List<(PropertyEdgeJournal Journal, long Revision)>? seedingJournals = null)
+        SubjectOwnership? ownership,
+        List<(PropertyReference Property, SubjectOccurrence Occurrence, long BaselineRevision)> children)
     {
-        var ownership = TryGetOwnership(subject);
+        _epoch++;
+        _incompleteSeeds?.Remove(subject);
+        var occurrences = LifecycleScratch.RentOccurrenceList();
+        try
+        {
+            foreach (var entry in subject.Properties)
+            {
+                if (!IsStructural(entry.Value))
+                {
+                    continue;
+                }
+
+                var property = new PropertyReference(subject, entry.Key);
+                occurrences.Clear();
+
+                // Read before the drop: dropping can hand the journal back to the scratch pool.
+                var installedJournal = GetPropertyJournal(property, ownership);
+                installedJournal?.CopyTo(occurrences);
+                var baseline = DropBaseline(property);
+                if (installedJournal is null)
+                {
+                    baseline.CopyTo(occurrences);
+                }
+
+                foreach (var occurrence in occurrences) children.Add((property, occurrence, baseline.Revision));
+            }
+        }
+        finally
+        {
+            LifecycleScratch.Return(occurrences);
+        }
+    }
+
+    /// <summary>
+    /// Reads the subject's unseeded structural properties, commits what their getters return as the
+    /// baselines, and appends the occurrences those values contain, in property enumeration order and
+    /// then value order.
+    /// </summary>
+    public void SeedStructuralChildren(
+        IInterceptorSubject subject,
+        SubjectOwnership? ownership,
+        List<(PropertyReference Property, SubjectOccurrence Occurrence, long BaselineRevision)> children,
+        ref List<(PropertyEdgeJournal Journal, long Revision)>? seedingJournals)
+    {
+        // Both re-validation guards below are epoch tests first: the getter and the enumerator can
+        // run user code, but usually do not, and a counter that has not moved proves that neither
+        // the owner nor the baseline changed without probing for either. An owner without a record
+        // is validated through its executor anchor instead, which the epoch does not cover, so that
+        // one keeps probing; it is the explicit-attach root alone.
+        var epoch = _epoch;
         var occurrences = LifecycleScratch.RentOccurrenceList();
         try
         {
@@ -314,18 +466,6 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
 
                 var property = new PropertyReference(subject, entry.Key);
                 var hadBaseline = _baselines.TryGetValue(property, out var previousBaseline);
-                if (!seed)
-                {
-                    occurrences.Clear();
-                    if (GetPropertyJournal(property, ownership) is { } installedJournal)
-                    {
-                        installedJournal.CopyTo(occurrences);
-                    }
-
-                    else previousBaseline.CopyTo(occurrences);
-                    foreach (var occurrence in occurrences) children.Add((property, occurrence, previousBaseline.Revision));
-                    continue;
-                }
 
                 // A nested write to another property already committed and published it.
                 if (hadBaseline)
@@ -333,42 +473,56 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
                     continue;
                 }
 
-                if (!IsSeedOwnerCurrent(subject, ownership))
+                if (ownership is null || epoch != _epoch)
                 {
-                    return;
+                    if (!IsSeedOwnerCurrent(subject, ownership))
+                    {
+                        return;
+                    }
+
+                    epoch = _epoch;
                 }
 
                 var value = ReadSeedingGetter(property, metadata, ownership);
-                if (!IsSeedOwnerCurrent(subject, ownership))
+                if (ownership is null || epoch != _epoch)
                 {
-                    return;
-                }
+                    if (!IsSeedOwnerCurrent(subject, ownership))
+                    {
+                        return;
+                    }
 
-                if (previousBaseline.Revision != GetBaselineRevision(property))
-                {
-                    continue;
+                    if (previousBaseline.Revision != GetBaselineRevision(property))
+                    {
+                        continue;
+                    }
+
+                    epoch = _epoch;
                 }
 
                 occurrences.Clear();
                 StructuralValueScanner.CollectOccurrences(metadata.Type, value, occurrences);
                 // Getters and enumerators can release this owner or publish a newer property.
                 // Neither continuation may recreate their obsolete edges.
-                if (!IsSeedOwnerCurrent(subject, ownership))
+                if (ownership is null || epoch != _epoch)
                 {
-                    return;
-                }
+                    if (!IsSeedOwnerCurrent(subject, ownership))
+                    {
+                        return;
+                    }
 
-                if (previousBaseline.Revision != GetBaselineRevision(property))
-                {
-                    continue;
+                    if (previousBaseline.Revision != GetBaselineRevision(property))
+                    {
+                        continue;
+                    }
                 }
 
                 var journal = occurrences.Count > 0 ? BeginPropertyJournal(property, ownership!) : null;
                 var revision = SetBaseline(property, value, occurrences);
+                epoch = _epoch;
                 if (journal is not null)
                 {
                     journal.IsComplete = false;
-                    seedingJournals!.Add((journal, revision));
+                    (seedingJournals ??= LifecycleScratch.RentJournalList()).Add((journal, revision));
                 }
 
                 foreach (var occurrence in occurrences) children.Add((property, occurrence, revision));
@@ -455,30 +609,38 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     /// <summary>Drops every structural baseline of the subject; called when it leaves the graph.</summary>
     public void RemoveBaselines(IInterceptorSubject subject)
     {
+        _epoch++;
         _incompleteSeeds?.Remove(subject);
         foreach (var entry in subject.Properties)
         {
             if (IsStructural(entry.Value))
             {
-                var property = new PropertyReference(subject, entry.Key);
-                _baselines.Remove(property);
-                var first = _firstPropertyJournal;
-                if (first is not null && first.Property == property)
-                {
-                    _firstPropertyJournal = null;
-                    if (first.Users == 0)
-                    {
-                        LifecycleScratch.Return(first);
-                    }
-                }
-
-                if (_additionalPropertyJournals is not null &&
-                    _additionalPropertyJournals.Remove(property, out var journal) && journal.Users == 0)
-                {
-                    LifecycleScratch.Return(journal);
-                }
+                DropBaseline(new PropertyReference(subject, entry.Key));
             }
         }
+    }
+
+    /// <summary>Drops one property's baseline along with any journal still registered for it.</summary>
+    private PropertyBaseline DropBaseline(PropertyReference property)
+    {
+        WithdrawBaseline(property, out var baseline);
+        var first = _firstPropertyJournal;
+        if (first is not null && first.Property == property)
+        {
+            _firstPropertyJournal = null;
+            if (first.Users == 0)
+            {
+                LifecycleScratch.Return(first);
+            }
+        }
+
+        if (_additionalPropertyJournals is not null &&
+            _additionalPropertyJournals.Remove(property, out var journal) && journal.Users == 0)
+        {
+            LifecycleScratch.Return(journal);
+        }
+
+        return baseline;
     }
 
     #endregion

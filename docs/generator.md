@@ -571,7 +571,7 @@ A class can host generated subclasses when it exposes all of the following. A ge
 | implements `IInterceptorSubject` | everything else |
 | implements `IRaisePropertyChanged`, on the base class or on the subject | the subject not re-declaring `PropertyChanged` and `RaisePropertyChanged` |
 | `protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)` | generated getters |
-| `protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)` | generated setters |
+| `protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)` | generated setters, which always infer `TProperty` as the declared property type |
 | `protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)` | generated method wrappers |
 | `protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties()` | the subject's own `IInterceptorSubject.Properties` |
 | `public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties` | merging the subject's properties with the base class ones |
@@ -640,7 +640,10 @@ public class TrackedEntityBase : IInterceptorSubject, INotifyPropertyChanged, IR
             return true;
         }
 
-        return _executor.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+        // Declared-type entry: TProperty is the declared property type here, because every
+        // generated setter infers it from the property. A hand-written caller must do the same,
+        // or route through IInterceptorExecutor.SetPropertyValue instead.
+        return _executor.SetDeclaredPropertyValue(propertyName, newValue, currentValue, setValue);
     }
 
     protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod,

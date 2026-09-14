@@ -95,6 +95,16 @@ public sealed class InterceptorSubjectContext : IInterceptorSubjectContext
         return GetServicesFromState<TInterface>(Volatile.Read(ref _state));
     }
 
+    /// <summary>
+    /// Identity of the snapshot every query currently resolves against. Because a mutation
+    /// publishes a fresh snapshot rather than editing the live one, a caller that remembers this
+    /// reference alongside a resolved <see cref="GetServices{TInterface}"/> result can reuse that
+    /// result while the reference is unchanged and re-resolve the moment a registration lands.
+    /// Typed as <see cref="object"/> because reference identity is the only thing a caller may do
+    /// with it.
+    /// </summary>
+    internal object ServiceSnapshot => Volatile.Read(ref _state);
+
     public bool TryAddService<TService>(Func<TService> factory, Func<TService, bool> exists)
     {
         lock (_mutationLock)

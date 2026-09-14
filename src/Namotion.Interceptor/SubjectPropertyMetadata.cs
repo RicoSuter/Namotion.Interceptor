@@ -1,5 +1,4 @@
 ﻿using System.Reflection;
-using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Tracking;
 
@@ -59,14 +58,20 @@ public readonly record struct SubjectPropertyMetadata
     /// </summary>
     public PropertyInfo? PropertyInfo { get; }
 
-    // Generated intercepted properties have backing fields; dynamic getter-only derived values
-    // are projections. Routing and ownership must use the same declared-property classification.
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal bool IsStructural<TProperty>()
-    {
-        return IsIntercepted && !(IsDerived && IsDynamic && SetValue is null) &&
-            (Type == typeof(TProperty) ? Type.CanContainSubjects<TProperty>() : Type.CanContainSubjects());
-    }
+    /// <summary>
+    /// Gets a value indicating whether the property carries an ownership edge, meaning it is the
+    /// store of record for a value whose declared type can hold subjects.
+    /// </summary>
+    /// <remarks>
+    /// Generated intercepted properties have backing fields; dynamic getter-only derived values
+    /// are projections. Routing and ownership must use the same declared-property classification,
+    /// so this is a function of the declared type alone and never of the generic argument a
+    /// particular write happens to use: a narrowed or boxed write routes exactly like a write
+    /// typed as the declared property. Classified once here rather than per call, because the
+    /// answer is a pure function of the declared type and the property shape, both fixed at
+    /// construction.
+    /// </remarks>
+    internal bool IsStructural { get; }
 
     public SubjectPropertyMetadata(
         PropertyInfo propertyInfo, 
@@ -123,6 +128,7 @@ public readonly record struct SubjectPropertyMetadata
         IsIntercepted = isIntercepted;
         IsDynamic = isDynamic;
         IsDerived = attributes.Any(a => a is DerivedAttribute);
+        IsStructural = isIntercepted && !(IsDerived && isDynamic && setValue is null) && type.CanContainSubjects();
         PropertyInfo = propertyInfo;
         IsPublic =
             PropertyInfo is null ||

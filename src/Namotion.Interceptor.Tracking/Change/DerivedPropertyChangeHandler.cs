@@ -183,6 +183,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         CompleteWrite(ref context);
     }
 
+    // Small enough to inline into both of its call sites, which is what keeps a write on a property
+    // no derived value depends on inside the caller's frame. The recalculation body below is far
+    // too large for that and stays a call.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void CompleteWrite<TProperty>(ref PropertyWriteContext<TProperty> context)
     {
         if (!context.IsWritten)
@@ -194,11 +198,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         Interlocked.Increment(ref _writeGeneration);
 
         var data = context.Property.TryGetDerivedPropertyData();
-        if (data is null)
+        if (data is not null)
         {
-            return;
+            RecalculateAfterWrite(ref context, data);
         }
+    }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void RecalculateAfterWrite<TProperty>(ref PropertyWriteContext<TProperty> context, DerivedPropertyData data)
+    {
         List<Exception>? failures = null;
 
         // Derived-with-setter: value comes from the getter, so setter changes require recalc

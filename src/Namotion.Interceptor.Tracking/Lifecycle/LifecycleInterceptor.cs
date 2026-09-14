@@ -184,14 +184,14 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         return true;
     }
 
-    internal bool TryQueuePropertyChange(Change.PropertyChangeInterceptor.Publication publication)
+    internal bool TryQueuePropertyChange(in Change.PropertyChangeInterceptor.Publication publication)
     {
         if (!_gate.IsHeldByCurrentThread)
         {
             return false;
         }
 
-        _notifier.QueuePropertyChange(publication);
+        _notifier.QueuePropertyChange(in publication);
         return true;
     }
 
@@ -210,6 +210,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ReleaseGate()
     {
         // Decrement first, so an unbalanced exit leaves the count too low rather than too high: a
@@ -316,14 +317,28 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     /// </remarks>
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        var property = context.Property;
-        var metadata = property.Metadata;
-        if (!metadata.IsStructural<TProperty>())
+        var metadata = context.Property.Metadata;
+        if (!metadata.IsStructural)
         {
             next(ref context);
             return;
         }
 
+        WriteStructuralProperty(ref context, next);
+    }
+
+    // Out of line, and taking the metadata from the context rather than from the caller, so that
+    // the scalar path above keeps a small frame and a single copy of the metadata struct. Inlined
+    // here, the topology transaction's frame, its zero-initialized locals and its exception region
+    // are set up on every scalar write; handing the struct down as a parameter instead of
+    // re-reading it exposes the caller's copy and costs a second one on that same path. A
+    // structural write pays one extra property table lookup, which is noise beside the gate it
+    // is about to take.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void WriteStructuralProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+    {
+        var property = context.Property;
+        var metadata = property.Metadata;
         var subject = property.Subject;
         if (!ReferenceEquals(subject.Executor.AttachedContext, _context))
         {
