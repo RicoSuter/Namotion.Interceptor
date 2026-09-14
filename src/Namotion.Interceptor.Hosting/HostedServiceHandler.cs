@@ -134,9 +134,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
     private void DetachSubject(IInterceptorSubject subject)
     {
-        // Read before anything is allocated: a completion source per subject is 1.76 MB of garbage per
-        // detach of a 20,000 subject graph, under the lifecycle lock. "Has ever hosted", not "hosts
-        // now", for the reason on TryGetHostedServiceAttachments.
+        // Read before allocating: a completion source per subject is 1.76 MB per detach of a 20,000
+        // subject graph. "Has ever hosted", not "hosts now", for the reason on that method.
         var everHosted = subject.TryGetHostedServiceAttachments(out var attachments);
         var subjectTarget = subject is IHostedService ? subject.TryGetSubjectTarget() : null;
         if (subjectTarget is null && !everHosted)

@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.Hosting;
 /// </summary>
 internal sealed class HostedServiceTarget
 {
-    private readonly object _sync = new();
+    private readonly Lock _chainLock = new();
 
     /// <summary>
     /// Pairs the ownership exchange with the handler's record of it, which are one fact: a release
@@ -17,12 +17,12 @@ internal sealed class HostedServiceTarget
     /// one that no later release can ever match.
     /// </summary>
     /// <remarks>
-    /// Its own lock rather than <c>_sync</c>. A context detach releases every attachment target it
+    /// Its own lock rather than <c>_chainLock</c>. A context detach releases every attachment target it
     /// enumerates, including ones whose chain lock a concurrent attach is holding, so releasing under
     /// the chain lock deadlocks that pair. Nothing held here ever takes another lock, and the take
-    /// enters it while already holding <c>_sync</c>, so the one order is chain lock then this.
+    /// enters it while already holding <c>_chainLock</c>, so the one order is chain lock then this.
     /// </remarks>
-    private readonly object _ownershipSync = new();
+    private readonly Lock _ownershipLock = new();
 
     /// <summary>Which transition owns the target right now, or none.</summary>
     private enum TransitionPhase
@@ -40,7 +40,7 @@ internal sealed class HostedServiceTarget
     /// <summary>
     /// The instance and the phase as one value, because they are one fact about the target. Held in a
     /// single reference field so every transition is one write and the pair comes out of one load, which
-    /// is what leaves <see cref="State"/> no order to get wrong between the two of them.
+    /// is what leaves <see cref="GetState"/> no order to get wrong between the two of them.
     /// </summary>
     private sealed record TargetSnapshot(IHostedService? Instance, TransitionPhase Phase);
 
@@ -153,9 +153,10 @@ internal sealed class HostedServiceTarget
     }
 
     /// <summary>
-    /// What the target is doing right now, derived from the one snapshot the transitions write rather
-    /// than stored, so <see cref="HostedServiceAttachmentState.Running"/> and a non null
-    /// <see cref="Current"/> can never disagree.
+    /// The state and the instance it was derived from, out of one snapshot load, so a caller cannot read
+    /// a state that disagrees with the instance it then acts on. Derived rather than stored, so
+    /// <see cref="HostedServiceAttachmentState.Running"/> and a non null <see cref="Current"/> can never
+    /// disagree.
     /// </summary>
     /// <remarks>
     /// Two steps of the precedence are not arbitrary. <see cref="HostedServiceAttachmentState.Removed"/>
@@ -168,23 +169,11 @@ internal sealed class HostedServiceTarget
     /// then appends its stop, so both hold while that stop runs and "still shutting down" is the more
     /// urgent of the two; it settles into <see cref="HostedServiceAttachmentState.Removed"/>.
     /// </remarks>
-    public HostedServiceAttachmentState State => GetState(out _);
-
-    /// <summary>
-    /// The state and the instance it was derived from, out of one snapshot load, so a caller cannot
-    /// read a state that disagrees with the instance it then acts on.
-    /// </summary>
-    /// <remarks>
-    /// Reading <see cref="State"/> and <see cref="Current"/> separately leaves a transition free to
-    /// land between them, and a caller that then drops what the instance published acts on a pairing
-    /// that never existed. Everything <see cref="State"/> documents about its own precedence and its
-    /// two further loads applies here unchanged.
-    /// </remarks>
     public HostedServiceAttachmentState GetState(out IHostedService? current)
     {
-        // The instance and the phase come out of this one load, which is what both this method and
-        // State rest on: they are written together, so no transition can land between them. This is
-        // not the only load taken, and the other two below are not covered by that argument.
+        // The instance and the phase come out of this one load, which is what this method rests on:
+        // they are written together, so no transition can land between them. This is not the only
+        // load taken, and the other two below are not covered by that argument.
         var snapshot = Volatile.Read(ref _snapshot);
         current = snapshot.Instance;
 
@@ -195,7 +184,7 @@ internal sealed class HostedServiceTarget
             // transition in flight: between them they choose among Removed, Faulted and Stopped,
             // and a reading that is one moment old is one of those three rather than a phase.
             //
-            // Read outside _sync, unlike everywhere else: a poll must not queue behind an append,
+            // Read outside _chainLock, unlike everywhere else: a poll must not queue behind an append,
             // and the mark is one way, so the worst a racing read can do is report the state one
             // moment older.
             : Volatile.Read(ref _detached) ? HostedServiceAttachmentState.Removed
@@ -210,7 +199,7 @@ internal sealed class HostedServiceTarget
     /// </summary>
     public void MarkDetached()
     {
-        lock (_sync)
+        lock (_chainLock)
         {
             _detached = true;
         }
@@ -244,7 +233,7 @@ internal sealed class HostedServiceTarget
     /// </remarks>
     public bool TryTakeOwnership(HostedServiceHandler handler, IInterceptorSubject subject, out bool ownershipTaken)
     {
-        lock (_ownershipSync)
+        lock (_ownershipLock)
         {
             var previous = Interlocked.CompareExchange(ref _owner, handler, null);
             ownershipTaken = previous is null;
@@ -265,7 +254,7 @@ internal sealed class HostedServiceTarget
     /// </remarks>
     public void ReleaseOwnership(HostedServiceHandler handler)
     {
-        lock (_ownershipSync)
+        lock (_ownershipLock)
         {
             if (ReferenceEquals(Interlocked.CompareExchange(ref _owner, null, handler), handler))
             {
@@ -281,7 +270,7 @@ internal sealed class HostedServiceTarget
     /// </summary>
     public Task AppendAsync(HostedServiceHandler handler, Func<Task> body)
     {
-        lock (_sync)
+        lock (_chainLock)
         {
             return AppendCore(body, handler);
         }
@@ -295,7 +284,7 @@ internal sealed class HostedServiceTarget
     /// </remarks>
     public Task AppendAsync(Func<Task> body)
     {
-        lock (_sync)
+        lock (_chainLock)
         {
             return AppendCore(body, handler: null);
         }
@@ -312,7 +301,7 @@ internal sealed class HostedServiceTarget
     /// </remarks>
     public Task? AppendIfOwnedAsync(HostedServiceHandler handler, Func<Task> body)
     {
-        lock (_sync)
+        lock (_chainLock)
         {
             return ReferenceEquals(Owner, handler) ? AppendCore(body, handler) : null;
         }
@@ -338,7 +327,7 @@ internal sealed class HostedServiceTarget
     {
         ownershipTaken = false;
 
-        lock (_sync)
+        lock (_chainLock)
         {
             if (_detached || !handler.IsLive(subject))
             {

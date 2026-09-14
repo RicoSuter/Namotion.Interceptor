@@ -113,7 +113,7 @@ public class HostedServiceHandlerTests
 
             // Assert
             Assert.Null(attachment.Current);
-            Assert.Equal(HostedServiceAttachmentState.Starting, attachment.State);
+            Assert.Equal(HostedServiceAttachmentState.Starting, attachment.GetState(out _));
 
             // Act
             factory.Release();
@@ -121,7 +121,7 @@ public class HostedServiceHandlerTests
 
             // Assert
             Assert.NotNull(attachment.Current);
-            Assert.Equal(HostedServiceAttachmentState.Running, attachment.State);
+            Assert.Equal(HostedServiceAttachmentState.Running, attachment.GetState(out _));
         });
     }
 
@@ -142,7 +142,7 @@ public class HostedServiceHandlerTests
 
             // Assert
             Assert.Null(attachment.Current);
-            Assert.Equal(HostedServiceAttachmentState.Removed, attachment.State);
+            Assert.Equal(HostedServiceAttachmentState.Removed, attachment.GetState(out _));
         });
     }
 
@@ -164,7 +164,7 @@ public class HostedServiceHandlerTests
 
             // Assert
             Assert.Null(attachment.Current);
-            Assert.Equal(HostedServiceAttachmentState.Stopping, attachment.State);
+            Assert.Equal(HostedServiceAttachmentState.Stopping, attachment.GetState(out _));
 
             // Act
             stop.Release();
@@ -172,7 +172,7 @@ public class HostedServiceHandlerTests
 
             // Assert - the detach marked the target before it appended that stop, so both held while it
             // ran and only one of them is left now.
-            Assert.Equal(HostedServiceAttachmentState.Removed, attachment.State);
+            Assert.Equal(HostedServiceAttachmentState.Removed, attachment.GetState(out _));
         });
     }
 
@@ -207,7 +207,7 @@ public class HostedServiceHandlerTests
 
             // Assert
             Assert.NotNull(attachment.Fault);
-            Assert.Equal(HostedServiceAttachmentState.Removed, attachment.State);
+            Assert.Equal(HostedServiceAttachmentState.Removed, attachment.GetState(out _));
         });
     }
 
@@ -236,7 +236,7 @@ public class HostedServiceHandlerTests
             // Assert - a refused start reports the state it left behind rather than a start window it
             // never entered.
             Assert.Null(attachment.Current);
-            Assert.Equal(HostedServiceAttachmentState.Stopped, attachment.State);
+            Assert.Equal(HostedServiceAttachmentState.Stopped, attachment.GetState(out _));
         });
     }
 
@@ -547,8 +547,8 @@ public class HostedServiceHandlerTests
             // finally behind it, so the attachment still reads Starting for a moment after the fault
             // itself is visible.
             await AsyncTestHelpers.WaitUntilAsync(
-                () => attachment.State is not HostedServiceAttachmentState.Starting);
-            Assert.Equal(HostedServiceAttachmentState.Faulted, attachment.State);
+                () => attachment.GetState(out _) is not HostedServiceAttachmentState.Starting);
+            Assert.Equal(HostedServiceAttachmentState.Faulted, attachment.GetState(out _));
 
             // Act
             parent.Child = null;
@@ -557,7 +557,7 @@ public class HostedServiceHandlerTests
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(() => attachment.Current is not null);
             Assert.Null(attachment.Fault);
-            Assert.Equal(HostedServiceAttachmentState.Running, attachment.State);
+            Assert.Equal(HostedServiceAttachmentState.Running, attachment.GetState(out _));
         });
     }
 

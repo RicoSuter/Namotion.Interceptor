@@ -16,22 +16,18 @@ public interface IHostedServiceAttachment
     Exception? Fault { get; }
 
     /// <summary>
-    /// The state and the instance it was derived from, together, so the two cannot disagree.
-    /// </summary>
-    /// <remarks>
-    /// Prefer this to reading <see cref="State"/> and <see cref="Current"/> separately: a transition
-    /// can land between two reads, and a caller that then discards what the instance published acts on
-    /// a pairing that never existed. Take the reading immediately before the decision it informs, since
-    /// anything in between widens the window it exists to close.
-    /// </remarks>
-    HostedServiceAttachmentState GetState(out IHostedService? current);
-
-    /// <summary>
-    /// What the attachment is doing right now. Separates a start in flight, a stop in flight and a
-    /// terminal attachment from a settled one with nothing running, which <see cref="Current"/> and
+    /// What the attachment is doing right now, together with the instance that reading was derived from,
+    /// so the two cannot disagree. Separates a start in flight, a stop in flight and a terminal
+    /// attachment from a settled one with nothing running, which <see cref="Current"/> and
     /// <see cref="Fault"/> reading null cannot.
     /// </summary>
-    HostedServiceAttachmentState State { get; }
+    /// <remarks>
+    /// The pair comes out of one load, which is why the state is not also exposed on its own: two reads
+    /// leave a transition free to land between them, and a caller that then discards what the instance
+    /// published acts on a pairing that never existed. Take the reading immediately before the decision
+    /// it informs, since anything in between widens the window it exists to close.
+    /// </remarks>
+    HostedServiceAttachmentState GetState(out IHostedService? current);
 }
 
 /// <inheritdoc />
@@ -41,15 +37,7 @@ public interface IHostedServiceAttachment<T> : IHostedServiceAttachment
     /// <inheritdoc cref="IHostedServiceAttachment.Current" />
     new T? Current { get; }
 
-    /// <summary>
-    /// The state and the instance it was derived from, together, so the two cannot disagree.
-    /// </summary>
-    /// <remarks>
-    /// Prefer this to reading <see cref="IHostedServiceAttachment.State"/> and <see cref="Current"/>
-    /// separately: a transition can land between two reads, and a caller that then discards what the
-    /// instance published acts on a pairing that never existed. Take the reading immediately before the
-    /// decision it informs, since anything in between widens the window it exists to close.
-    /// </remarks>
+    /// <inheritdoc cref="IHostedServiceAttachment.GetState" />
     HostedServiceAttachmentState GetState(out T? current);
 }
 
@@ -76,8 +64,6 @@ internal sealed class HostedServiceAttachment<T> : IHostedServiceAttachment<T>, 
     public T? Current => (T?)Target.Current;
 
     public Exception? Fault => Target.Fault;
-
-    public HostedServiceAttachmentState State => Target.State;
 
     public HostedServiceAttachmentState GetState(out T? current)
     {

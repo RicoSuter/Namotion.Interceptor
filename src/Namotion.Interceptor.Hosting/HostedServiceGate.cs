@@ -15,7 +15,7 @@ internal enum HostedServiceGateState
 /// </summary>
 internal sealed class HostedServiceGate
 {
-    private readonly object _sync = new();
+    private readonly Lock _lock = new();
     private readonly TaskCompletionSource _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _draining = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -25,7 +25,7 @@ internal sealed class HostedServiceGate
     {
         get
         {
-            lock (_sync)
+            lock (_lock)
             {
                 return _state;
             }
@@ -39,7 +39,7 @@ internal sealed class HostedServiceGate
     public void EnsureStarted()
     {
         var opened = false;
-        lock (_sync)
+        lock (_lock)
         {
             if (_state == HostedServiceGateState.NotStarted)
             {
@@ -56,7 +56,7 @@ internal sealed class HostedServiceGate
 
     public void BeginDraining()
     {
-        lock (_sync)
+        lock (_lock)
         {
             if (_state is HostedServiceGateState.NotStarted or HostedServiceGateState.Running)
             {
@@ -72,7 +72,7 @@ internal sealed class HostedServiceGate
 
     public void CompleteDraining()
     {
-        lock (_sync)
+        lock (_lock)
         {
             _state = HostedServiceGateState.Drained;
         }
@@ -84,6 +84,9 @@ internal sealed class HostedServiceGate
     /// Completes once the gate has left <see cref="HostedServiceGateState.NotStarted"/>. Callers must
     /// then read <see cref="State"/> and decide what to do; the wait itself carries no verdict.
     /// </summary>
+    // Untokened, here and below: BeginDraining completes both unconditionally, so nothing parked on
+    // either outlives the start of shutdown, and both are awaited inside transition bodies, where a
+    // caller's token must never abort a start already creating an instance.
     public Task WaitForOpenAsync() => _opened.Task;
 
     /// <summary>

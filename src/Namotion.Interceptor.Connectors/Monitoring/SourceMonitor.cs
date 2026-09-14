@@ -259,14 +259,9 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
 
     /// <inheritdoc />
     /// <remarks>
-    /// Explicit, so <see cref="DeferWaitCompletion"/> stays this type's only surface.
-    /// <para>
-    /// The interface's locking constraint holds here: the take is an interlocked increment and acquires
-    /// nothing, and the release acquires _lock only to re-evaluate pending waits, which is the order this
-    /// type already establishes for itself, since <see cref="HandleLifecycleChange"/> reaches
-    /// <see cref="OnWaitConditionChanged"/> from inside the lifecycle lock. Nothing held under _lock ever
-    /// waits on something that needs the lifecycle lock, so the order never reverses.
-    /// </para>
+    /// Explicit, so <see cref="DeferWaitCompletion"/> stays this type's only surface. The interface's
+    /// locking constraint holds: the take acquires nothing, and the release takes _lock in the order this
+    /// type already establishes for itself through <see cref="HandleLifecycleChange"/>.
     /// </remarks>
     IDisposable IStartupCompletionDeferrer.DeferCompletion() => DeferWaitCompletion();
 
