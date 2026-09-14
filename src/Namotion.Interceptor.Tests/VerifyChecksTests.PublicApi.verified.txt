@@ -224,6 +224,10 @@ namespace Namotion.Interceptor.Interceptors
         public bool TryUpdateAttachment(long expectedRevision, Namotion.Interceptor.IInterceptorSubjectContext? context, Namotion.Interceptor.SubjectAttachmentAnchorKind anchor, out long currentRevision) { }
         public static Namotion.Interceptor.Interceptors.IInterceptorExecutor GetOrCreate(ref Namotion.Interceptor.Interceptors.IInterceptorExecutor? context, Namotion.Interceptor.IInterceptorSubject subject) { }
     }
+    public static class InterceptorExecutorExtensions
+    {
+        public static bool SetDeclaredPropertyValue<TProperty>(this Namotion.Interceptor.Interceptors.IInterceptorExecutor executor, string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue) { }
+    }
     public delegate object? InvokeMethodInterceptionDelegate(ref Namotion.Interceptor.Interceptors.MethodInvocationContext context);
     public struct MethodInvocationContext
     {

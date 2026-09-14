@@ -66,7 +66,7 @@ internal sealed class OwnershipGraph(IInterceptorSubjectContext context)
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool IsStructural(in SubjectPropertyMetadata metadata)
     {
-        return metadata.IsStructural<object>();
+        return metadata.IsStructural;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -318,7 +318,7 @@ public sealed class LifecycleInterceptor : ILifecycleInterceptor, ILifecycleHand
     {
         var property = context.Property;
         var metadata = property.Metadata;
-        if (!metadata.IsStructural<TProperty>())
+        if (!metadata.IsStructural)
         {
             next(ref context);
             return;

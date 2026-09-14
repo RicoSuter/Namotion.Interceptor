@@ -581,7 +581,9 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("            }");
         builder.AppendLine("            else");
         builder.AppendLine("            {");
-        builder.AppendLine("                return _executor.SetPropertyValue(propertyName, newValue, currentValue, setValue);");
+        // The declared-type entry, valid because every generated setter infers TProperty as the
+        // declared property type. A hand-written caller of this helper must do the same.
+        builder.AppendLine("                return _executor.SetDeclaredPropertyValue(propertyName, newValue, currentValue, setValue);");
         builder.AppendLine("            }");
         builder.AppendLine("        }");
         builder.AppendLine();
