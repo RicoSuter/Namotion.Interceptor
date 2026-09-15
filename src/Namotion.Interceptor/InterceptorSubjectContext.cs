@@ -8,6 +8,7 @@ using Namotion.Interceptor.Ordering;
 
 namespace Namotion.Interceptor;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "Explicit use of the allocation-free HashSet struct enumerator raises the counted dependencies from 30 to 31; it does not add a runtime dependency beyond the previous foreach.")]
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
     // All topology (services, fallback contexts) and everything derived from it (delegation
@@ -309,6 +310,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     /// limit is correct.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S134", Justification = "Temporary: split the concurrent delegation walk in a follow-up while preserving snapshot validation and retry semantics. See rollout issue #545.")]
     private InterceptorSubjectContext ResolveDelegationChain(ref ContextState state)
     {
         var visited = _delegationCycleVisited ??= [];
@@ -903,12 +905,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (usedByContexts.Count == 1)
             {
-                // foreach binds the HashSet struct enumerator, First() would box it.
-                foreach (var usingContext in usedByContexts)
-                {
-                    singleUsingContext = usingContext;
-                    break;
-                }
+                using var enumerator = usedByContexts.GetEnumerator();
+                enumerator.MoveNext(); // Count == 1 under the lock guarantees success; Single() would box the enumerator.
+                singleUsingContext = enumerator.Current;
             }
             else if (usedByContexts.Count != 0)
             {

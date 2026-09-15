@@ -39,6 +39,8 @@ internal static class ServiceOrderResolver
         return hasFirstOrLast ? OrderWithPartitioning(services) : TopologicalSort(services);
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3776", Justification = "Temporary: defer ordering decomposition to preserve the established algorithm in the analyzer setup PR. See rollout issue #545.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1541", Justification = "Temporary: defer ordering decomposition to preserve the established algorithm in the analyzer setup PR. See rollout issue #545.")]
     private static T[] OrderWithPartitioning<T>(T[] services)
     {
         // Count group sizes
@@ -101,6 +103,9 @@ internal static class ServiceOrderResolver
         return result;
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3776", Justification = "Temporary: defer ordering decomposition to preserve the established algorithm in the analyzer setup PR. See rollout issue #545.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1541", Justification = "Temporary: defer ordering decomposition to preserve the established algorithm in the analyzer setup PR. See rollout issue #545.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S134", Justification = "Temporary: defer ordering decomposition to preserve the established algorithm in the analyzer setup PR. See rollout issue #545.")]
     private static void TopologicalSortInto<T>(T[] services, T[] result, int resultOffset)
     {
         var count = services.Length;
@@ -199,6 +204,9 @@ internal static class ServiceOrderResolver
             throw new InvalidOperationException($"Service {service.GetType().Name} cannot have both [RunsFirst] and [RunsLast]");
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3776", Justification = "Temporary: defer ordering decomposition to preserve the established algorithm in the analyzer setup PR. See rollout issue #545.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1541", Justification = "Temporary: defer ordering decomposition to preserve the established algorithm in the analyzer setup PR. See rollout issue #545.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S134", Justification = "Temporary: defer ordering decomposition to preserve the established algorithm in the analyzer setup PR. See rollout issue #545.")]
     private static void ValidateCrossGroupDependencies<T>(T[]? firstGroup, T[]? middleGroup, T[]? lastGroup)
     {
         HashSet<Type>? middleTypes = null;

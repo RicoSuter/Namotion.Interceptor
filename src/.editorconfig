@@ -1,0 +1,73 @@
+# SonarAnalyzer.CSharp overrides; unspecified rules retain the analyzer defaults.
+[*.cs]
+# S104: Files should not have too many lines of code.
+dotnet_diagnostic.S104.severity = warning
+# S107: Methods and constructors should not have too many parameters.
+dotnet_diagnostic.S107.severity = warning
+# S134: Control flow statements should not be nested too deeply.
+dotnet_diagnostic.S134.severity = warning
+# S138: Methods should not have too many lines of code.
+dotnet_diagnostic.S138.severity = warning
+# S1067: Expressions should not contain too many conditional operators.
+dotnet_diagnostic.S1067.severity = warning
+# S1200: Classes should not be coupled to too many other types.
+dotnet_diagnostic.S1200.severity = warning
+# S1541: Methods should not have excessive cyclomatic complexity.
+dotnet_diagnostic.S1541.severity = warning
+# S3776: Methods and properties should not have excessive cognitive complexity.
+dotnet_diagnostic.S3776.severity = warning
+
+# S2094: Classes should not be empty.
+# Disabled: empty marker and fixture classes intentionally encode type identity or metadata.
+# When reusing: keep the rule where empty classes usually indicate unfinished implementation.
+dotnet_diagnostic.S2094.severity = none
+
+# S3267: Loops should be simplified using LINQ filters.
+# Disabled: replacing hot-path loops can add iterator and capturing-delegate allocations.
+# When reusing: keep the rule if LINQ readability is preferred, or suppress only allocation-sensitive loops.
+dotnet_diagnostic.S3267.severity = none
+
+# S2743: Warns about static fields being separate for each closed generic type.
+# Disabled: per-type static cache entries are intentional and support direct array lookup.
+# When reusing: keep the rule when static state is intended to be shared across type arguments.
+dotnet_diagnostic.S2743.severity = none
+
+# S2696: Instance methods should not write to static fields.
+# Disabled: instance operations intentionally reuse thread-local buffers and restore ambient scopes.
+# Making a caller static does not establish synchronization; still review shared-state races and reentrancy.
+# When reusing: keep the rule where unexpected instance writes to process-wide state are useful warnings.
+dotnet_diagnostic.S2696.severity = none
+
+# S2326: Unused generic type parameters should be removed.
+# Disabled: a parameter can define type identity and separate static caches without appearing in a member.
+# Removing such a parameter changes cache semantics; do not add dummy uses merely to satisfy analysis.
+# When reusing: keep the rule where intentional type-identity parameters are uncommon.
+dotnet_diagnostic.S2326.severity = none
+
+# S1135: Tracks TODO comments as outstanding work.
+# Disabled temporarily: inline TODOs are allowed; the long-term policy is still to be decided.
+dotnet_diagnostic.S1135.severity = none
+
+# Test-specific overrides match directory names, not MSBuild IsTestProject.
+# Adapt this pattern when reusing; shared .Testing libraries and benchmarks are not included.
+[**.Tests/**.cs]
+# S1144: Unused private types or members should be removed.
+# Disabled in tests: fixture members can be reached through metadata, reflection, or generated code.
+# When reusing: weigh the loss of dead-code detection against fixture noise. Production remains checked.
+dotnet_diagnostic.S1144.severity = none
+
+# S2325: Methods and properties that do not access instance data should be static.
+# Disabled in tests: fixtures intentionally use instance members to exercise generated interception,
+# reflection, and instance-shaped APIs even when their bodies do not need instance state.
+# When reusing: keep the rule if such fixtures are uncommon. Production remains checked.
+dotnet_diagnostic.S2325.severity = none
+
+# Verify snapshots must preserve their exact text representation.
+[*.{received,verified}.{txt}]
+charset = utf-8-bom
+end_of_line = lf
+indent_size = unset
+indent_style = unset
+insert_final_newline = false
+tab_width = unset
+trim_trailing_whitespace = false
