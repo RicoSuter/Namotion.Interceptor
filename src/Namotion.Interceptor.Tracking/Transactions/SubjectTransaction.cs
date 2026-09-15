@@ -770,6 +770,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         private readonly SubjectTransaction? _previousTransaction;
 
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3010", Justification = "This scope deliberately installs the current thread's commit identity and restores the previous identity on disposal, including nested scopes.")]
         public CommitModelAccessScope(SubjectTransaction transaction)
         {
             _previousTransaction = _commitModelAccessTransaction;

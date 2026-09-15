@@ -92,6 +92,7 @@ internal readonly struct InlineValueStorage
         return BoxingDelegates.GetOrAdd(_storedType, CreateBoxingDelegateForType)(this);
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3011", Justification = "Reflection accesses this type's known private factory to cache a typed boxing delegate; it does not inspect third-party internals or accept an external member name.")]
     private static Func<InlineValueStorage, object> CreateBoxingDelegateForType(Type type)
     {
         // Use reflection once to create a typed delegate, subsequent calls use the fast delegate

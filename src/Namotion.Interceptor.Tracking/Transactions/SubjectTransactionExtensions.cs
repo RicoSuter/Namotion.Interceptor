@@ -80,6 +80,7 @@ public readonly struct TransactionAwaiter : ICriticalNotifyCompletion
 
     public bool IsCompleted => _awaiter.IsCompleted;
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S5034", Justification = "The awaiter protocol consumes the completed operation here and sets the transaction in the caller's execution context; an async wrapper would isolate that AsyncLocal assignment.")]
     public SubjectTransaction GetResult()
     {
         SubjectTransaction? transaction = null;
