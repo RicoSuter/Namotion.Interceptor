@@ -33,16 +33,12 @@ internal static class SubjectCodeGenerator
     }
 
     /// <summary>
-    /// The accessibility of a member that a generated subclass has to reach. A sealed class cannot be
-    /// derived from, so a protected member in one is CS0628, which is a build error under
-    /// TreatWarningsAsErrors; nothing can need the access, so emit private instead.
+    /// Returns private for sealed subjects and protected for inheritable subjects.
     /// </summary>
     private static string ProtectedUnlessSealed(SubjectMetadata metadata) => metadata.IsSealed ? "private" : "protected";
 
     /// <summary>
-    /// Emitted per member rather than across the block: a blanket 'new' is CS0109 wherever nothing is
-    /// hidden, and an NI0062 base that hides nothing is the common case. Names come from
-    /// <see cref="MemberNames"/>, never from a literal here.
+    /// Returns the hiding modifier for a generated member named by <see cref="MemberNames"/>.
     /// </summary>
     private static string HidingModifier(SubjectMetadata metadata, string memberName)
         => metadata.BaseClass.HiddenMemberNames.Contains(memberName) ? "new " : "";
@@ -52,10 +48,7 @@ internal static class SubjectCodeGenerator
     /// </summary>
     public static string GetFileName(SubjectMetadata metadata)
     {
-        // From the symbol name, not from the emitted names: those keep their source spelling, and
-        // AddSource rejects the '@' of a keyword escape, the backslash of a \uXXXX escape, and the
-        // comment or line break a namespace name can hold, failing the whole subject with NI0004
-        // and emitting nothing. The symbol name is that name normalised, so only two decorations go.
+        // Symbol names normalize source escapes and trivia that AddSource rejects in hint names.
         return metadata.FullTypeName
             .Replace("global::", "")
             .Replace("@", "") + ".g.cs";
@@ -98,11 +91,6 @@ internal static class SubjectCodeGenerator
     /// <summary>
     /// Emits the JsonIgnore using directive when the consuming compilation can resolve the attribute.
     /// </summary>
-    /// <remarks>
-    /// System.Text.Json is in the shared framework from .NET Core 3.0 on, but it is a separate package
-    /// on netstandard2.0, which the generator also runs in. Emitting it unconditionally there fails the
-    /// consumer's build with CS0246 inside a file they did not write.
-    /// </remarks>
     private static void EmitJsonIgnoreUsing(StringBuilder builder, bool isJsonIgnoreAvailable)
     {
         if (isJsonIgnoreAvailable)
@@ -190,10 +178,7 @@ internal static class SubjectCodeGenerator
 
     private static void EmitInterceptorSubjectImplementation(StringBuilder builder, SubjectMetadata metadata, bool isJsonIgnoreAvailable)
     {
-        // Emitted by every subject, root and derived alike. It is the one member that cannot move
-        // to the root: DefaultProperties is a static hidden by 'new' at each level, so this
-        // expression binds at compile time to the class it was emitted into. Emitted only in the
-        // root, every derived subject would report the root's property set.
+        // Re-emit Properties in derived subjects so the static DefaultProperties binds to their own type.
         if (!metadata.BaseClass.EmitsInterceptionMembers)
         {
             EmitJsonIgnore(builder, isJsonIgnoreAvailable);
@@ -221,9 +206,7 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("        {");
         builder.AppendLine("            lock (((IInterceptorSubject)this).SyncRoot)");
         builder.AppendLine("            {");
-        // Dispatching through the interface rather than reading _properties directly is what lets
-        // this method live in the root: it makes the merge start from the most derived
-        // DefaultProperties instead of this class's own.
+        // Interface dispatch starts the merge from the most-derived property set.
         builder.AppendLine("                _properties = ((IInterceptorSubject)this).Properties");
         builder.AppendLine("                    .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))");
         builder.AppendLine("                    .ToFrozenDictionary();");
@@ -233,10 +216,7 @@ internal static class SubjectCodeGenerator
     }
 
     /// <summary>
-    /// Precedence, highest first: the subject's own declarations, then everything it inherited, then
-    /// the interface default implementations it adopted. An adopted default is a fallback, so it must
-    /// rank below an inherited real property; otherwise a subject that declares nothing re-injects the
-    /// default and overwrites an ancestor's declaration.
+    /// Emits properties with precedence: own declarations, inherited properties, then adopted interface defaults.
     /// </summary>
     private static void EmitDefaultProperties(StringBuilder builder, SubjectMetadata metadata)
     {
@@ -244,7 +224,6 @@ internal static class SubjectCodeGenerator
 
         builder.AppendLine($"        public {newModifier}static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties {{ get; }} =");
 
-        // A root has nothing to lose a key to, so it stays a single dictionary.
         if (metadata.BaseClass.TypeName is null)
         {
             EmitPropertyDictionary(builder, metadata, metadata.Properties);
@@ -253,9 +232,7 @@ internal static class SubjectCodeGenerator
             return;
         }
 
-        // Partitioned on IsFromInterface alone. A class-declared explicit implementation is a
-        // declaration in the subject's own class and belongs in the first tier, even though it is
-        // emitted through an interface cast like an adopted default.
+        // Class-declared explicit implementations belong to the own-declaration tier, despite their interface casts.
         EmitPropertyDictionary(builder, metadata, metadata.Properties.Where(property => !property.IsFromInterface));
         builder.AppendLine($"            .Concat({metadata.BaseClass.TypeName}.DefaultProperties)");
 
@@ -266,11 +243,7 @@ internal static class SubjectCodeGenerator
             builder.AppendLine("            )");
         }
 
-        // Keeps the FIRST occurrence of each key, which is what makes the order above a precedence
-        // order. Without it ToFrozenDictionary keeps the last, which is how the base used to overwrite
-        // the subject. GroupBy rather than the shorter DistinctBy because this runs in the consumer's
-        // compilation: DistinctBy is .NET 6 or later, and a subject may be declared in a netstandard2.0
-        // assembly, where ToFrozenDictionary still resolves through System.Collections.Immutable.
+        // Keep the first key to preserve precedence. GroupBy supports netstandard2.0 consumers; DistinctBy does not.
         builder.AppendLine("            .GroupBy(pair => pair.Key)");
         builder.AppendLine("            .Select(group => group.First())");
         builder.AppendLine("            .ToFrozenDictionary();");
@@ -286,69 +259,76 @@ internal static class SubjectCodeGenerator
         builder.AppendLine($"{extraIndent}            new Dictionary<string, SubjectPropertyMetadata>");
         builder.AppendLine($"{extraIndent}            {{");
 
-        // Each entry is emitted as an indexer assignment (["Name"] = ...) rather than a
-        // collection-initializer Add(...), so a duplicate key within one tier silently overwrites
-        // rather than throwing at type init. The extractor dedups names and reports NI0061, so this
-        // should never trigger; across tiers the GroupBy below resolves duplicates instead.
+        // Indexer assignments avoid type-initialization failures for duplicate keys within a tier.
+        // Extraction already deduplicates these; cross-tier precedence is resolved separately.
         foreach (var property in properties)
         {
-            // An explicitly implemented member is unreachable through the class, so it is emitted
-            // through the interface exactly like an interface default property.
-            var accessorInterfaceTypeName = property.IsFromInterface
-                ? property.InterfaceTypeName
-                : property.ExplicitInterfaceTypeName;
-
-            var castTypeName = accessorInterfaceTypeName ?? metadata.ClassName;
-
-            var nameofArgument = accessorInterfaceTypeName is not null
-                ? $"{accessorInterfaceTypeName}.{property.Name}"
-                : property.Name;
-
-            // DeclaredOnly on the class lookup because a 'new' property whose type differs from the
-            // one it hides makes the unfiltered lookup ambiguous, which throws at type init. Every
-            // property looked up on the class came from the subject's own declarations, so the filter
-            // drops nothing.
-            var declaredOnlyFlag = accessorInterfaceTypeName is not null ? "" : " | BindingFlags.DeclaredOnly";
-
-            // A member reached through an interface cast is read directly rather than through the
-            // executor, whatever the declaration looks like.
-            var isIntercepted = accessorInterfaceTypeName is null && property.IsPartial;
-
-            var getterLambda = property.HasGetter || property.HasInheritedGetter
-                ? $"(o) => (({castTypeName})o).{property.Name}"
-                : "null";
-            // Note: init-only properties cannot have a setter lambda because they can only be set during construction
-            var setterLambda = property.HasSetter || property.HasInheritedSetter
-                ? $"(o, v) => (({castTypeName})o).{property.Name} = ({property.FullTypeName})v"
-                : "null";
-
-            builder.AppendLine($"{extraIndent}                    [\"{property.Name}\"] = new SubjectPropertyMetadata(");
-            builder.AppendLine($"{extraIndent}                        typeof({castTypeName}).GetProperty(nameof({nameofArgument}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance{declaredOnlyFlag})!,");
-            builder.AppendLine($"{extraIndent}                        {getterLambda},");
-            builder.AppendLine($"{extraIndent}                        {setterLambda},");
-            builder.AppendLine($"{extraIndent}                        isIntercepted: {(isIntercepted ? "true" : "false")},");
-            builder.AppendLine($"{extraIndent}                        isDynamic: false),");
+            EmitPropertyDictionaryEntry(builder, metadata, property, extraIndent);
         }
 
         builder.AppendLine($"{extraIndent}            }}");
     }
 
+    private static void EmitPropertyDictionaryEntry(
+        StringBuilder builder, SubjectMetadata metadata, PropertyMetadata property, string extraIndent)
+    {
+        // Explicit implementations require an interface cast, just like adopted defaults.
+        var accessorInterfaceTypeName = property.IsFromInterface
+            ? property.InterfaceTypeName
+            : property.ExplicitInterfaceTypeName;
+
+        var castTypeName = accessorInterfaceTypeName ?? metadata.ClassName;
+
+        var nameofArgument = accessorInterfaceTypeName is not null
+            ? $"{accessorInterfaceTypeName}.{property.Name}"
+            : property.Name;
+
+        // Class entries are declared on this subject. DeclaredOnly avoids ambiguous lookup when 'new' changes a property's type.
+        var declaredOnlyFlag = accessorInterfaceTypeName is not null ? "" : " | BindingFlags.DeclaredOnly";
+
+        // Interface access bypasses the executor, including class-declared explicit implementations.
+        var isIntercepted = accessorInterfaceTypeName is null && property.IsPartial;
+
+        var getterLambda = GetGetterLambda(property, castTypeName);
+        var setterLambda = GetSetterLambda(property, castTypeName);
+
+        builder.AppendLine($"{extraIndent}                    [\"{property.Name}\"] = new SubjectPropertyMetadata(");
+        builder.AppendLine($"{extraIndent}                        typeof({castTypeName}).GetProperty(nameof({nameofArgument}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance{declaredOnlyFlag})!,");
+        builder.AppendLine($"{extraIndent}                        {getterLambda},");
+        builder.AppendLine($"{extraIndent}                        {setterLambda},");
+        builder.AppendLine($"{extraIndent}                        isIntercepted: {(isIntercepted ? "true" : "false")},");
+        builder.AppendLine($"{extraIndent}                        isDynamic: false),");
+    }
+
+    private static string GetGetterLambda(PropertyMetadata property, string castTypeName)
+    {
+        return property.HasGetter || property.HasInheritedGetter
+            ? $"(o) => (({castTypeName})o).{property.Name}"
+            : "null";
+    }
+
+    private static string GetSetterLambda(PropertyMetadata property, string castTypeName)
+    {
+        // Init-only accessors cannot be called by a setter lambda after construction.
+        return property.HasSetter || property.HasInheritedSetter
+            ? $"(o, v) => (({castTypeName})o).{property.Name} = ({property.FullTypeName})v"
+            : "null";
+    }
+
     /// <summary>
-    /// Fully qualified rather than imported, so generated files of subjects without the attribute stay
-    /// byte-identical, and rooted at global:: so the name still reaches a consumer-declared polyfill
-    /// when the subject's own namespace shadows System.
+    /// Emits SetsRequiredMembers when required by the constructor chain.
     /// </summary>
     private static void EmitSetsRequiredMembersAttribute(StringBuilder builder, SubjectMetadata metadata)
     {
         if (metadata.ParameterlessConstructorSetsRequiredMembers)
         {
+            // Qualification also resolves consumer polyfills when the subject namespace shadows System.
             builder.AppendLine("        [global::System.Diagnostics.CodeAnalysis.SetsRequiredMembers]");
         }
     }
 
     private static void EmitConstructors(StringBuilder builder, SubjectMetadata metadata)
     {
-        // Generate parameterless constructor only if no constructor exists
         if (metadata.NeedsGeneratedParameterlessConstructor)
         {
             EmitSetsRequiredMembersAttribute(builder, metadata);
@@ -358,7 +338,6 @@ internal static class SubjectCodeGenerator
             builder.AppendLine();
         }
 
-        // Generate constructor with context parameter if we have or will have a parameterless constructor
         if (metadata.HasOrWillHaveParameterlessConstructor)
         {
             EmitSetsRequiredMembersAttribute(builder, metadata);
@@ -380,13 +359,33 @@ internal static class SubjectCodeGenerator
 
     private static void EmitProperty(StringBuilder builder, PropertyMetadata property, SubjectMetadata metadata)
     {
-        // Backing field
         builder.AppendLine($"        private {property.FullTypeName} _{property.Name};");
         builder.AppendLine();
 
-        // Every modifier the declaring half carries has to be repeated here, or the two halves of
-        // the partial property disagree and the compiler reports CS8800. 'new' matters beyond
-        // symmetry: it is the only way to silence the CS0108 that accompanies NI0060.
+        var additionalModifiers = GetAdditionalPropertyModifiers(property);
+        var requiredModifier = property.IsRequired ? "required " : "";
+
+        builder.AppendLine($"        {property.AccessModifier} {requiredModifier}{additionalModifiers}partial {property.FullTypeName} {property.Name}");
+        builder.AppendLine("        {");
+
+        EmitPropertyGetter(builder, property, metadata);
+        EmitPropertySetter(builder, property, metadata);
+
+        builder.AppendLine("        }");
+        builder.AppendLine();
+
+        if (property.HasSetter || property.HasInit)
+        {
+            builder.AppendLine($"        partial void On{property.Name}Changing(ref {property.FullTypeName} newValue, ref bool cancel);");
+            builder.AppendLine();
+            builder.AppendLine($"        partial void On{property.Name}Changed({property.FullTypeName} newValue);");
+            builder.AppendLine();
+        }
+    }
+
+    private static string GetAdditionalPropertyModifiers(PropertyMetadata property)
+    {
+        // Partial declarations must agree on modifiers (CS8800); retaining 'new' also prevents CS0108.
         var additionalModifiers = "";
         if (property.IsNew)
         {
@@ -408,12 +407,11 @@ internal static class SubjectCodeGenerator
             additionalModifiers += "override ";
         }
 
-        var requiredModifier = property.IsRequired ? "required " : "";
+        return additionalModifiers;
+    }
 
-        builder.AppendLine($"        {property.AccessModifier} {requiredModifier}{additionalModifiers}partial {property.FullTypeName} {property.Name}");
-        builder.AppendLine("        {");
-
-        // Getter
+    private static void EmitPropertyGetter(StringBuilder builder, PropertyMetadata property, SubjectMetadata metadata)
+    {
         if (property.HasGetter)
         {
             var getterModifiers = property.GetterAccessModifier is not null ? $"{property.GetterAccessModifier} " : "";
@@ -422,24 +420,16 @@ internal static class SubjectCodeGenerator
             builder.AppendLine($"                return GetPropertyValue<{property.FullTypeName}>(nameof({property.Name}), static (o) => (({metadata.ClassName})o)._{property.Name});");
             builder.AppendLine("            }");
         }
+    }
 
-        // Setter or Init
+    private static void EmitPropertySetter(StringBuilder builder, PropertyMetadata property, SubjectMetadata metadata)
+    {
         if (property.HasSetter || property.HasInit)
         {
             var accessorText = property.HasInit ? "init" : "set";
             var setterModifiers = property.SetterAccessModifier is not null ? $"{property.SetterAccessModifier} " : "";
 
-            // Determine how to call RaisePropertyChanged:
-            // - [InterceptorSubject] base with a callable member: direct call (fastest); the attribute
-            //   alone does not prove one exists, see SubjectAncestry.HasCallableRaisePropertyChanged
-            // - Manual IRaisePropertyChanged base: interface cast (rare case)
-            // - Own implementation: direct call to own method (fastest)
-            var raisePropertyChangedCall =
-                metadata.BaseClass.HasInterceptorSubject && metadata.BaseClass.HasCallableRaisePropertyChanged
-                    ? $"RaisePropertyChanged(nameof({property.Name}))"
-                    : metadata.BaseClass.HasInpc
-                        ? $"((IRaisePropertyChanged)this).RaisePropertyChanged(nameof({property.Name}))"
-                        : $"RaisePropertyChanged(nameof({property.Name}))";
+            var raisePropertyChangedCall = GetRaisePropertyChangedCall(property, metadata);
 
             builder.AppendLine($"            {setterModifiers}{accessorText}");
             builder.AppendLine("            {");
@@ -453,18 +443,22 @@ internal static class SubjectCodeGenerator
             builder.AppendLine("                }");
             builder.AppendLine("            }");
         }
+    }
 
-        builder.AppendLine("        }");
-        builder.AppendLine();
-
-        // Partial method hooks
-        if (property.HasSetter || property.HasInit)
+    private static string GetRaisePropertyChangedCall(PropertyMetadata property, SubjectMetadata metadata)
+    {
+        // The subject attribute alone does not guarantee a callable inherited helper.
+        if (metadata.BaseClass.HasInterceptorSubject && metadata.BaseClass.HasCallableRaisePropertyChanged)
         {
-            builder.AppendLine($"        partial void On{property.Name}Changing(ref {property.FullTypeName} newValue, ref bool cancel);");
-            builder.AppendLine();
-            builder.AppendLine($"        partial void On{property.Name}Changed({property.FullTypeName} newValue);");
-            builder.AppendLine();
+            return $"RaisePropertyChanged(nameof({property.Name}))";
         }
+
+        if (metadata.BaseClass.HasInpc)
+        {
+            return $"((IRaisePropertyChanged)this).RaisePropertyChanged(nameof({property.Name}))";
+        }
+
+        return $"RaisePropertyChanged(nameof({property.Name}))";
     }
 
     private static void EmitMethods(StringBuilder builder, SubjectMetadata metadata)
@@ -510,10 +504,8 @@ internal static class SubjectCodeGenerator
 
         var modifier = ProtectedUnlessSealed(metadata);
 
-        // A method rather than a property: DynamicSubjectFactory reflects over
-        // GetProperties(Instance | Public | NonPublic), which returns inherited protected
-        // properties and turns every unknown one into an intercepted subject property. A protected
-        // property here would give every Castle-proxied generated subject a phantom property.
+        // DynamicSubjectFactory discovers inherited protected properties; a property here would
+        // become an unintended intercepted property on generated subjects proxied by Castle.
         builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
         builder.AppendLine($"        {HidingModifier(metadata, MemberNames.GetInstanceProperties)}{modifier} IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;");
         builder.AppendLine();

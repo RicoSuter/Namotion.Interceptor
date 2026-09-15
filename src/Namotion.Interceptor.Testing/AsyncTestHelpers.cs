@@ -17,6 +17,7 @@ public static class AsyncTestHelpers
     /// <param name="pollInterval">Interval between condition checks. Defaults to 100ms.</param>
     /// <param name="message">Optional message to include in the timeout exception.</param>
     /// <exception cref="TimeoutException">Thrown when the condition is not met within the timeout.</exception>
+    [AssertionMethod]
     public static async Task WaitUntilAsync(
         Func<bool> condition,
         TimeSpan? timeout = null,

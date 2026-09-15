@@ -53,6 +53,7 @@ public sealed class SourceStateRecorder : IDisposable
     /// Thrown when the states are not reached in order within <paramref name="timeout"/>. The message
     /// lists every transition that was recorded instead.
     /// </exception>
+    [AssertionMethod]
     public async Task<IReadOnlyList<SourceEvent>> WaitForStatesAsync(
         TimeSpan timeout, string message, params SourceState[] states)
     {
