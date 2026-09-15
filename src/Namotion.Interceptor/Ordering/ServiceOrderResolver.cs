@@ -74,6 +74,7 @@ internal static class ServiceOrderResolver
         return result;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static (int FirstCount, int LastCount) CountGroups<T>(T[] services)
     {
         var firstCount = 0;
@@ -251,7 +252,6 @@ internal static class ServiceOrderResolver
             ValidateLastGroupDependencies(firstGroup, middleGroup, lastGroup, middleTypes);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static HashSet<Type>? ValidateFirstGroupDependencies<T>(T[] firstGroup, T[]? middleGroup, T[]? lastGroup)
     {
         HashSet<Type>? middleTypes = null;
@@ -273,7 +273,6 @@ internal static class ServiceOrderResolver
         return middleTypes;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void ValidateLastGroupDependencies<T>(T[]? firstGroup, T[]? middleGroup, T[] lastGroup, HashSet<Type>? middleTypes)
     {
         HashSet<Type>? firstTypes = null;
