@@ -292,45 +292,61 @@ internal static class SubjectCodeGenerator
         // should never trigger; across tiers the GroupBy below resolves duplicates instead.
         foreach (var property in properties)
         {
-            // An explicitly implemented member is unreachable through the class, so it is emitted
-            // through the interface exactly like an interface default property.
-            var accessorInterfaceTypeName = property.IsFromInterface
-                ? property.InterfaceTypeName
-                : property.ExplicitInterfaceTypeName;
-
-            var castTypeName = accessorInterfaceTypeName ?? metadata.ClassName;
-
-            var nameofArgument = accessorInterfaceTypeName is not null
-                ? $"{accessorInterfaceTypeName}.{property.Name}"
-                : property.Name;
-
-            // DeclaredOnly on the class lookup because a 'new' property whose type differs from the
-            // one it hides makes the unfiltered lookup ambiguous, which throws at type init. Every
-            // property looked up on the class came from the subject's own declarations, so the filter
-            // drops nothing.
-            var declaredOnlyFlag = accessorInterfaceTypeName is not null ? "" : " | BindingFlags.DeclaredOnly";
-
-            // A member reached through an interface cast is read directly rather than through the
-            // executor, whatever the declaration looks like.
-            var isIntercepted = accessorInterfaceTypeName is null && property.IsPartial;
-
-            var getterLambda = property.HasGetter || property.HasInheritedGetter
-                ? $"(o) => (({castTypeName})o).{property.Name}"
-                : "null";
-            // Note: init-only properties cannot have a setter lambda because they can only be set during construction
-            var setterLambda = property.HasSetter || property.HasInheritedSetter
-                ? $"(o, v) => (({castTypeName})o).{property.Name} = ({property.FullTypeName})v"
-                : "null";
-
-            builder.AppendLine($"{extraIndent}                    [\"{property.Name}\"] = new SubjectPropertyMetadata(");
-            builder.AppendLine($"{extraIndent}                        typeof({castTypeName}).GetProperty(nameof({nameofArgument}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance{declaredOnlyFlag})!,");
-            builder.AppendLine($"{extraIndent}                        {getterLambda},");
-            builder.AppendLine($"{extraIndent}                        {setterLambda},");
-            builder.AppendLine($"{extraIndent}                        isIntercepted: {(isIntercepted ? "true" : "false")},");
-            builder.AppendLine($"{extraIndent}                        isDynamic: false),");
+            EmitPropertyDictionaryEntry(builder, metadata, property, extraIndent);
         }
 
         builder.AppendLine($"{extraIndent}            }}");
+    }
+
+    private static void EmitPropertyDictionaryEntry(
+        StringBuilder builder, SubjectMetadata metadata, PropertyMetadata property, string extraIndent)
+    {
+        // An explicitly implemented member is unreachable through the class, so it is emitted
+        // through the interface exactly like an interface default property.
+        var accessorInterfaceTypeName = property.IsFromInterface
+            ? property.InterfaceTypeName
+            : property.ExplicitInterfaceTypeName;
+
+        var castTypeName = accessorInterfaceTypeName ?? metadata.ClassName;
+
+        var nameofArgument = accessorInterfaceTypeName is not null
+            ? $"{accessorInterfaceTypeName}.{property.Name}"
+            : property.Name;
+
+        // DeclaredOnly on the class lookup because a 'new' property whose type differs from the
+        // one it hides makes the unfiltered lookup ambiguous, which throws at type init. Every
+        // property looked up on the class came from the subject's own declarations, so the filter
+        // drops nothing.
+        var declaredOnlyFlag = accessorInterfaceTypeName is not null ? "" : " | BindingFlags.DeclaredOnly";
+
+        // A member reached through an interface cast is read directly rather than through the
+        // executor, whatever the declaration looks like.
+        var isIntercepted = accessorInterfaceTypeName is null && property.IsPartial;
+
+        var getterLambda = GetGetterLambda(property, castTypeName);
+        var setterLambda = GetSetterLambda(property, castTypeName);
+
+        builder.AppendLine($"{extraIndent}                    [\"{property.Name}\"] = new SubjectPropertyMetadata(");
+        builder.AppendLine($"{extraIndent}                        typeof({castTypeName}).GetProperty(nameof({nameofArgument}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance{declaredOnlyFlag})!,");
+        builder.AppendLine($"{extraIndent}                        {getterLambda},");
+        builder.AppendLine($"{extraIndent}                        {setterLambda},");
+        builder.AppendLine($"{extraIndent}                        isIntercepted: {(isIntercepted ? "true" : "false")},");
+        builder.AppendLine($"{extraIndent}                        isDynamic: false),");
+    }
+
+    private static string GetGetterLambda(PropertyMetadata property, string castTypeName)
+    {
+        return property.HasGetter || property.HasInheritedGetter
+            ? $"(o) => (({castTypeName})o).{property.Name}"
+            : "null";
+    }
+
+    private static string GetSetterLambda(PropertyMetadata property, string castTypeName)
+    {
+        // Init-only properties can only be assigned during construction.
+        return property.HasSetter || property.HasInheritedSetter
+            ? $"(o, v) => (({castTypeName})o).{property.Name} = ({property.FullTypeName})v"
+            : "null";
     }
 
     /// <summary>
@@ -384,6 +400,30 @@ internal static class SubjectCodeGenerator
         builder.AppendLine($"        private {property.FullTypeName} _{property.Name};");
         builder.AppendLine();
 
+        var additionalModifiers = GetAdditionalPropertyModifiers(property);
+        var requiredModifier = property.IsRequired ? "required " : "";
+
+        builder.AppendLine($"        {property.AccessModifier} {requiredModifier}{additionalModifiers}partial {property.FullTypeName} {property.Name}");
+        builder.AppendLine("        {");
+
+        EmitPropertyGetter(builder, property, metadata);
+        EmitPropertySetter(builder, property, metadata);
+
+        builder.AppendLine("        }");
+        builder.AppendLine();
+
+        // Partial method hooks
+        if (property.HasSetter || property.HasInit)
+        {
+            builder.AppendLine($"        partial void On{property.Name}Changing(ref {property.FullTypeName} newValue, ref bool cancel);");
+            builder.AppendLine();
+            builder.AppendLine($"        partial void On{property.Name}Changed({property.FullTypeName} newValue);");
+            builder.AppendLine();
+        }
+    }
+
+    private static string GetAdditionalPropertyModifiers(PropertyMetadata property)
+    {
         // Every modifier the declaring half carries has to be repeated here, or the two halves of
         // the partial property disagree and the compiler reports CS8800. 'new' matters beyond
         // symmetry: it is the only way to silence the CS0108 that accompanies NI0060.
@@ -408,11 +448,11 @@ internal static class SubjectCodeGenerator
             additionalModifiers += "override ";
         }
 
-        var requiredModifier = property.IsRequired ? "required " : "";
+        return additionalModifiers;
+    }
 
-        builder.AppendLine($"        {property.AccessModifier} {requiredModifier}{additionalModifiers}partial {property.FullTypeName} {property.Name}");
-        builder.AppendLine("        {");
-
+    private static void EmitPropertyGetter(StringBuilder builder, PropertyMetadata property, SubjectMetadata metadata)
+    {
         // Getter
         if (property.HasGetter)
         {
@@ -422,24 +462,17 @@ internal static class SubjectCodeGenerator
             builder.AppendLine($"                return GetPropertyValue<{property.FullTypeName}>(nameof({property.Name}), static (o) => (({metadata.ClassName})o)._{property.Name});");
             builder.AppendLine("            }");
         }
+    }
 
+    private static void EmitPropertySetter(StringBuilder builder, PropertyMetadata property, SubjectMetadata metadata)
+    {
         // Setter or Init
         if (property.HasSetter || property.HasInit)
         {
             var accessorText = property.HasInit ? "init" : "set";
             var setterModifiers = property.SetterAccessModifier is not null ? $"{property.SetterAccessModifier} " : "";
 
-            // Determine how to call RaisePropertyChanged:
-            // - [InterceptorSubject] base with a callable member: direct call (fastest); the attribute
-            //   alone does not prove one exists, see SubjectAncestry.HasCallableRaisePropertyChanged
-            // - Manual IRaisePropertyChanged base: interface cast (rare case)
-            // - Own implementation: direct call to own method (fastest)
-            var raisePropertyChangedCall =
-                metadata.BaseClass.HasInterceptorSubject && metadata.BaseClass.HasCallableRaisePropertyChanged
-                    ? $"RaisePropertyChanged(nameof({property.Name}))"
-                    : metadata.BaseClass.HasInpc
-                        ? $"((IRaisePropertyChanged)this).RaisePropertyChanged(nameof({property.Name}))"
-                        : $"RaisePropertyChanged(nameof({property.Name}))";
+            var raisePropertyChangedCall = GetRaisePropertyChangedCall(property, metadata);
 
             builder.AppendLine($"            {setterModifiers}{accessorText}");
             builder.AppendLine("            {");
@@ -453,18 +486,21 @@ internal static class SubjectCodeGenerator
             builder.AppendLine("                }");
             builder.AppendLine("            }");
         }
+    }
 
-        builder.AppendLine("        }");
-        builder.AppendLine();
-
-        // Partial method hooks
-        if (property.HasSetter || property.HasInit)
+    private static string GetRaisePropertyChangedCall(PropertyMetadata property, SubjectMetadata metadata)
+    {
+        if (metadata.BaseClass.HasInterceptorSubject && metadata.BaseClass.HasCallableRaisePropertyChanged)
         {
-            builder.AppendLine($"        partial void On{property.Name}Changing(ref {property.FullTypeName} newValue, ref bool cancel);");
-            builder.AppendLine();
-            builder.AppendLine($"        partial void On{property.Name}Changed({property.FullTypeName} newValue);");
-            builder.AppendLine();
+            return $"RaisePropertyChanged(nameof({property.Name}))";
         }
+
+        if (metadata.BaseClass.HasInpc)
+        {
+            return $"((IRaisePropertyChanged)this).RaisePropertyChanged(nameof({property.Name}))";
+        }
+
+        return $"RaisePropertyChanged(nameof({property.Name}))";
     }
 
     private static void EmitMethods(StringBuilder builder, SubjectMetadata metadata)

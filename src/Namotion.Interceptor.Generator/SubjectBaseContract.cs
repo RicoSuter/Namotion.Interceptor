@@ -169,22 +169,7 @@ internal static class SubjectBaseContract
         {
             foreach (var member in candidate.GetMembers(MemberNames.DefaultProperties))
             {
-                var memberType = member switch
-                {
-                    IPropertySymbol property => property.Type,
-                    IFieldSymbol field => field.Type,
-                    _ => null
-                };
-
-                if (memberType is null ||
-                    !member.IsStatic ||
-                    !compilation.IsSymbolAccessibleWithin(member, subject))
-                {
-                    continue;
-                }
-
-                if (SymbolEqualityComparer.Default.Equals(memberType, expectedType) ||
-                    memberType.AllInterfaces.Contains(expectedType, SymbolEqualityComparer.Default))
+                if (IsUsableDefaultPropertiesMember(member, subject, compilation, expectedType))
                 {
                     return true;
                 }
@@ -192,6 +177,25 @@ internal static class SubjectBaseContract
         }
 
         return false;
+    }
+
+    private static bool IsUsableDefaultPropertiesMember(
+        ISymbol member, INamedTypeSymbol subject, Compilation compilation, INamedTypeSymbol expectedType)
+    {
+        var memberType = member switch
+        {
+            IPropertySymbol property => property.Type,
+            IFieldSymbol field => field.Type,
+            _ => null
+        };
+
+        if (memberType is null || !member.IsStatic || !compilation.IsSymbolAccessibleWithin(member, subject))
+        {
+            return false;
+        }
+
+        return SymbolEqualityComparer.Default.Equals(memberType, expectedType) ||
+               memberType.AllInterfaces.Contains(expectedType, SymbolEqualityComparer.Default);
     }
 
     /// <summary>
@@ -219,14 +223,29 @@ internal static class SubjectBaseContract
         AccessorHelperShape accessorHelper)
         => SymbolExtensions.AccessibleMembers(ancestor, subject, compilation, accessorHelper.Name)
             .OfType<IMethodSymbol>()
-            .Any(method =>
-                method.TypeParameters.Length == accessorHelper.TypeParameterCount &&
-                method.Parameters.Length == accessorHelper.ParameterCount &&
-                (!accessorHelper.RequiresParameterArray ||
-                 method.Parameters[method.Parameters.Length - 1].IsParams) &&
-                (!accessorHelper.RequiresLeadingString ||
-                 method.Parameters[0].Type.SpecialType == SpecialType.System_String) &&
-                HasExpectedReturnType(method, accessorHelper, compilation));
+            .Any(method => HasAccessibleMethodShape(method, accessorHelper, compilation));
+
+    private static bool HasAccessibleMethodShape(
+        IMethodSymbol method, AccessorHelperShape accessorHelper, Compilation compilation)
+    {
+        if (method.TypeParameters.Length != accessorHelper.TypeParameterCount ||
+            method.Parameters.Length != accessorHelper.ParameterCount)
+        {
+            return false;
+        }
+
+        if (accessorHelper.RequiresParameterArray && !method.Parameters[method.Parameters.Length - 1].IsParams)
+        {
+            return false;
+        }
+
+        if (accessorHelper.RequiresLeadingString && method.Parameters[0].Type.SpecialType != SpecialType.System_String)
+        {
+            return false;
+        }
+
+        return HasExpectedReturnType(method, accessorHelper, compilation);
+    }
 
     /// <summary>
     /// Whether the base helper returns what the generated call sites consume. Nullability annotations

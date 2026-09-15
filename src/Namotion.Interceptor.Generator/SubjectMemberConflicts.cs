@@ -106,19 +106,25 @@ internal static class SubjectMemberConflicts
         {
             foreach (var name in GeneratedMemberTable.GeneratedMemberNames)
             {
-                foreach (var member in type.GetMembers(name))
+                if (HasHidingMember(type, name, subject, compilation))
                 {
-                    if (!SymbolEqualityComparer.Default.Equals(type, subject) &&
-                        !compilation.IsSymbolAccessibleWithin(member, subject))
-                    {
-                        continue;
-                    }
-
                     yield return (type, name);
-                    break;
                 }
             }
         }
+    }
+
+    private static bool HasHidingMember(INamedTypeSymbol type, string name, INamedTypeSymbol subject, Compilation compilation)
+    {
+        foreach (var member in type.GetMembers(name))
+        {
+            if (SymbolEqualityComparer.Default.Equals(type, subject) || compilation.IsSymbolAccessibleWithin(member, subject))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -154,32 +160,40 @@ internal static class SubjectMemberConflicts
 
             foreach (var (name, interfaceMember) in hijackableMembers)
             {
-                foreach (var member in type.GetMembers())
+                if (!DeclaresCandidateImplementation(type, name, interfaceMember))
                 {
-                    if (member.IsStatic || member.IsOverride)
-                    {
-                        continue;
-                    }
-
-                    var isPublicMatch = member.Name == name &&
-                                        member.DeclaredAccessibility == Accessibility.Public &&
-                                        IsImplicitImplementationOf(member, interfaceMember);
-
-                    if (!isPublicMatch && !IsExplicitInterceptorSubjectImplementation(member, name))
-                    {
-                        continue;
-                    }
-
-                    if (isAtOrAboveContractProvider && !TakesSlotFromAbove(type, interfaceMember))
-                    {
-                        break;
-                    }
-
-                    yield return (type, name);
-                    break;
+                    continue;
                 }
+
+                if (isAtOrAboveContractProvider && !TakesSlotFromAbove(type, interfaceMember))
+                {
+                    continue;
+                }
+
+                yield return (type, name);
             }
         }
+    }
+
+    private static bool DeclaresCandidateImplementation(INamedTypeSymbol type, string name, ISymbol interfaceMember)
+    {
+        foreach (var member in type.GetMembers())
+        {
+            if (member.IsStatic || member.IsOverride)
+            {
+                continue;
+            }
+
+            var isPublicMatch = member.Name == name &&
+                                member.DeclaredAccessibility == Accessibility.Public &&
+                                IsImplicitImplementationOf(member, interfaceMember);
+            if (isPublicMatch || IsExplicitInterceptorSubjectImplementation(member, name))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -206,10 +220,14 @@ internal static class SubjectMemberConflicts
         switch (interfaceMember)
         {
             case IPropertySymbol interfaceProperty:
-                return member is IPropertySymbol property &&
-                       SymbolEqualityComparer.Default.Equals(property.Type, interfaceProperty.Type) &&
-                       ParametersMatch(property.Parameters, interfaceProperty.Parameters) &&
-                       (interfaceProperty.GetMethod is null || IsPubliclyCallable(property.GetMethod)) &&
+                if (member is not IPropertySymbol property ||
+                    !SymbolEqualityComparer.Default.Equals(property.Type, interfaceProperty.Type) ||
+                    !ParametersMatch(property.Parameters, interfaceProperty.Parameters))
+                {
+                    return false;
+                }
+
+                return (interfaceProperty.GetMethod is null || IsPubliclyCallable(property.GetMethod)) &&
                        (interfaceProperty.SetMethod is null || IsPubliclyCallable(property.SetMethod));
 
             case IMethodSymbol interfaceMethod:

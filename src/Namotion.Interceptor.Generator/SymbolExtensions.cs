@@ -98,4 +98,75 @@ internal static class SymbolExtensions
         => EnumerateChain(baseType)
             .SelectMany(type => type.GetMembers(name))
             .Where(member => compilation.IsSymbolAccessibleWithin(member, accessingType));
+
+    /// <summary>
+    /// The shape guard a property must pass to become a subject property, shared between a
+    /// property declared in the class body and one adopted from an interface default
+    /// implementation: an indexer has no usable name and is parameterised, and a static member
+    /// cannot be read from an instance (the emitted accessor lambda always takes an instance).
+    /// Kept as one rule both paths consult, rather than one each, because the two paths have
+    /// already drifted apart once before, on accessibility.
+    /// </summary>
+    /// <remarks>
+    /// Neither shape is reported: NI0040 speaks to a member that could plausibly have become a
+    /// subject property and did not, and neither an indexer nor a static member was ever a
+    /// candidate. A class-declared indexer has always been ignored in silence (it parses as
+    /// <c>IndexerDeclarationSyntax</c>, which the property filter excludes before this guard runs),
+    /// so reporting the interface-default form was also an inconsistency between the two paths.
+    /// This rule outranks the explicit-implementation opt-in below: a <c>static abstract</c>
+    /// interface member forces a static implementation on the subject, and no edit the author can
+    /// make would turn it into a property.
+    /// </remarks>
+    public static bool IsNeverASubjectProperty(IPropertySymbol property)
+    {
+        return property.IsIndexer || property.IsStatic;
+    }
+
+    /// <summary>
+    /// Resolves per-accessor reachability of an interface member from generated code living inside
+    /// <paramref name="typeSymbol"/>, accessed through a receiver cast to <paramref name="throughType"/>.
+    /// Shared by the interface default-implementation path and the class explicit-implementation
+    /// path, since both reach the member through the same "cast to the interface" pattern and are
+    /// governed by the same accessibility rule.
+    /// </summary>
+    public static (bool IsGetterAccessible, bool IsSetterAccessible) GetAccessorAccessibility(
+        Compilation compilation,
+        IPropertySymbol member,
+        INamedTypeSymbol typeSymbol,
+        ITypeSymbol throughType)
+    {
+        if (!compilation.IsSymbolAccessibleWithin(member, typeSymbol, throughType))
+        {
+            return (false, false);
+        }
+
+        // A getter or setter can be individually less accessible than the property itself
+        // (e.g. `string Probe { get; private set; }`); generated code accesses whichever accessor
+        // it emits directly, so each one needs its own reachability check.
+        var isGetterAccessible = member.GetMethod is { } getMethod &&
+            compilation.IsSymbolAccessibleWithin(getMethod, typeSymbol, throughType);
+        var isSetterAccessible = member.SetMethod is { } setMethod &&
+            compilation.IsSymbolAccessibleWithin(setMethod, typeSymbol, throughType);
+
+        // Both false here (with the property-level check above having passed) is believed
+        // unreachable: C# forbids an accessor modifier on both accessors at once, and requires any
+        // accessor modifier to be strictly more restrictive than the property, so the accessor
+        // without a modifier is accessible by construction whenever the property-level check
+        // passed. Kept defensive rather than assumed, in case that invariant stops holding.
+        return (isGetterAccessible, isSetterAccessible);
+    }
+
+    public static string GetAccessModifierFromAccessibility(Accessibility accessibility)
+    {
+        return accessibility switch
+        {
+            Accessibility.Public => "public",
+            Accessibility.Internal => "internal",
+            Accessibility.Protected => "protected",
+            Accessibility.ProtectedOrInternal => "protected internal",
+            Accessibility.ProtectedAndInternal => "private protected",
+            Accessibility.Private => "private",
+            _ => "public"  // Interface members default to public
+        };
+    }
 }
