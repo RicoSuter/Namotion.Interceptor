@@ -1,11 +1,9 @@
-using System.Reflection;
-using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking;
 using Xunit;
 
 namespace Namotion.Interceptor.Generator.Tests;
 
-public partial class SubjectBaseShapeTests
+public class SubjectInheritanceShapeTests
 {
     [Fact]
     public void WhenAPlainClassSitsBetweenTwoSubjects_ThenTheDerivedSubjectCompilesAndMergesBaseProperties()
