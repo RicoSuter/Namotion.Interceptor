@@ -58,6 +58,8 @@ internal readonly struct InlineValueStorage
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1541", Justification = "The ordered primitive specializations keep common value boxing on a direct path before the cached delegate fallback.")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S3776", Justification = "The ordered primitive specializations keep common value boxing on a direct path before the cached delegate fallback.")]
     public object? GetValueBoxed()
     {
         if (_storedType == null) return null;

@@ -240,7 +240,7 @@ namespace Namotion.Interceptor.Tracking.Recorder
         public TProperty ReadProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext<TProperty> context, Namotion.Interceptor.Interceptors.ReadInterceptionDelegate<TProperty> next) { }
         public static Namotion.Interceptor.Tracking.Recorder.ReadPropertyRecorderScope Start(System.Collections.Concurrent.ConcurrentDictionary<Namotion.Interceptor.PropertyReference, bool>? properties = null) { }
     }
-    public class ReadPropertyRecorderScope : System.IDisposable
+    public sealed class ReadPropertyRecorderScope : System.IDisposable
     {
         public void Dispose() { }
         public System.Collections.Generic.ICollection<Namotion.Interceptor.PropertyReference> GetPropertiesAndDispose() { }

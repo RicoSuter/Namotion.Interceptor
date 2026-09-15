@@ -54,24 +54,35 @@ internal static class SubjectPropertyChangeOperations
             }
             else
             {
-                if (failed is null)
-                {
-                    // On the no-exclude path, materialize the successful prefix at the first failure.
-                    successful ??= CopyAppliedChanges(changes[..i]);
-                    failed = [];
-                }
-
-                failed.Add(change);
-                if (error != null)
-                {
-                    (errors ??= []).Add(error);
-                }
+                RecordApplyFailure(changes[..i], change, error, ref successful, ref failed, ref errors);
             }
         }
 
         return failed is null
             ? (successful ?? (IReadOnlyList<SubjectPropertyChange>)[], [], [])
             : (successful!, failed, errors ?? []);
+    }
+
+    private static void RecordApplyFailure(
+        ReadOnlySpan<SubjectPropertyChange> appliedPrefix,
+        SubjectPropertyChange change,
+        Exception? error,
+        ref List<SubjectPropertyChange>? successful,
+        ref List<SubjectPropertyChange>? failed,
+        ref List<Exception>? errors)
+    {
+        if (failed is null)
+        {
+            // On the no-exclude path, materialize the successful prefix at the first failure.
+            successful ??= CopyAppliedChanges(appliedPrefix);
+            failed = [];
+        }
+
+        failed.Add(change);
+        if (error != null)
+        {
+            (errors ??= []).Add(error);
+        }
     }
 
     private static List<SubjectPropertyChange> CopyAppliedChanges(ReadOnlySpan<SubjectPropertyChange> changes)

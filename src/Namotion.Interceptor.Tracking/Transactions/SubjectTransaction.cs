@@ -8,6 +8,7 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// Represents a transaction that captures property changes and commits them atomically.
 /// Changes are buffered until <see cref="CommitAsync"/> is called.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "Transaction buffering, commit, failure handling and disposal coordinate one shared state; splitting these responsibilities would fragment its synchronization and lifecycle invariants.")]
 public sealed class SubjectTransaction : IDisposable
 {
     private static readonly AsyncLocal<SubjectTransaction?> CurrentTransaction = new();
@@ -217,6 +218,7 @@ public sealed class SubjectTransaction : IDisposable
     /// </summary>
     public TransactionLocking Locking { get; }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The private constructor explicitly initializes the transaction context, policies and acquired lock ownership as one coherent state.")]
     private SubjectTransaction(
         IInterceptorSubjectContext context,
         SubjectTransactionInterceptor interceptor,
@@ -468,7 +470,7 @@ public sealed class SubjectTransaction : IDisposable
 
             VerifySnapshotIntegrity(capturedProperties, changes.Span);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        catch (Exception exception) when (!IsCommitCancellation(exception, cancellationToken))
         {
             return new SubjectTransactionException(
                 "The transaction writer threw an exception or violated its contract during commit. Sources " +
@@ -538,11 +540,20 @@ public sealed class SubjectTransaction : IDisposable
                 SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, bestEffortRevert.Errors));
         }
 
-        // Apply succeeded. Report any remaining source failure or writer error (BestEffort; Rollback
-        // returned above). On the no-exclude path ApplyLocalChanges returned an empty Successful set,
-        // so materialize the snapshot as the applied set.
+        return CreateFailureAfterSuccessfulLocalApply(changes, exclude, applied, failedSource, sourceErrors);
+    }
+
+    private SubjectTransactionException? CreateFailureAfterSuccessfulLocalApply(
+        Memory<SubjectPropertyChange> changes,
+        IReadOnlyList<SubjectPropertyChange>? exclude,
+        IReadOnlyList<SubjectPropertyChange> applied,
+        IReadOnlyList<SubjectPropertyChange> failedSource,
+        IReadOnlyList<Exception> sourceErrors)
+    {
         if (failedSource.Count > 0 || sourceErrors.Count > 0)
         {
+            // Without exclusions ApplyLocalChanges leaves its successful list empty, so the snapshot
+            // must be copied before the pooled storage is returned at commit completion.
             var appliedChanges = exclude is null ? changes.ToArray() : applied;
             return CreateFailureException(appliedChanges, failedSource, sourceErrors);
         }
@@ -599,10 +610,15 @@ public sealed class SubjectTransaction : IDisposable
         {
             return await writer.RevertSourceWritesAsync(written, revertState, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        catch (Exception exception) when (!IsCommitCancellation(exception, cancellationToken))
         {
             return new SourceRevertResult(written, [exception]);
         }
+    }
+
+    private static bool IsCommitCancellation(Exception exception, CancellationToken cancellationToken)
+    {
+        return exception is OperationCanceledException && cancellationToken.IsCancellationRequested;
     }
 
     /// <summary>
