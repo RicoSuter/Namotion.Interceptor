@@ -153,6 +153,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
     {
         public ContextInheritanceHandler() { }
         public override bool Equals(object? obj) { }
+        public override int GetHashCode() { }
         public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change) { }
     }
     public interface ILifecycleHandler

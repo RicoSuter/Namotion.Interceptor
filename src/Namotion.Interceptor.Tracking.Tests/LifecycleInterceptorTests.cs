@@ -228,7 +228,7 @@ public class LifecycleInterceptorTests
         context.AddService(new AddPropertyToSubjectHandler());
 
         // Act
-        var person = new Person(context);
+        _ = new Person(context);
 
         // Assert
         Assert.Single(handler.GetEvents(), e => e == "prop+ NA.FooBar"); // should attach FooBar only once

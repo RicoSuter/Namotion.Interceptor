@@ -216,27 +216,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         if (isLastDetach)
         {
             _attachedSubjects.Remove(subject);
-
-            foreach (var entry in subject.Properties)
-            {
-                var subjectProperty = new PropertyReference(subject, entry.Key);
-
-                var metadata = entry.Value;
-                if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
-                {
-                    // Use _lastProcessedValues (what was actually attached) instead of the backing
-                    // store, which may contain unattached children from a concurrent next() call.
-                    if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
-                    {
-                        children ??= GetList();
-                        FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
-                    }
-
-                    _lastProcessedValues.Remove(subjectProperty);
-                }
-
-                subject.DetachSubjectProperty(subjectProperty);
-            }
+            children = DetachSubjectProperties(subject);
         }
 
         var count = subject.DecrementReferenceCount();
@@ -266,6 +246,34 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
             ReturnList(children);
         }
+    }
+
+    private List<(IInterceptorSubject subject, PropertyReference property, object? index)>? DetachSubjectProperties(
+        IInterceptorSubject subject)
+    {
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
+        foreach (var entry in subject.Properties)
+        {
+            var subjectProperty = new PropertyReference(subject, entry.Key);
+
+            var metadata = entry.Value;
+            if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
+            {
+                // Use _lastProcessedValues (what was actually attached) instead of the backing
+                // store, which may contain unattached children from a concurrent next() call.
+                if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
+                {
+                    children ??= GetList();
+                    FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
+                }
+
+                _lastProcessedValues.Remove(subjectProperty);
+            }
+
+            subject.DetachSubjectProperty(subjectProperty);
+        }
+
+        return children;
     }
 
     private static void InvokeRemovedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)

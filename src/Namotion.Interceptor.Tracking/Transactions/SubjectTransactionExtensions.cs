@@ -69,7 +69,7 @@ public readonly struct TransactionAwaitable
 /// <summary>
 /// Custom awaiter that sets AsyncLocal in the caller's context after GetResult.
 /// </summary>
-public readonly struct TransactionAwaiter : INotifyCompletion, ICriticalNotifyCompletion
+public readonly struct TransactionAwaiter : ICriticalNotifyCompletion
 {
     private readonly ValueTaskAwaiter<SubjectTransaction> _awaiter;
 

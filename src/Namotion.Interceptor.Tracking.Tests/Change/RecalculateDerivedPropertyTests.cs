@@ -75,11 +75,19 @@ public class RecalculateDerivedPropertyTests
             .Create()
             .WithFullPropertyTracking();
 
-        var sensor = new ExternalSensor(context);
+        var sensor = new ExternalSensor(context) { Label = "unchanged" };
+        var changes = new List<SubjectPropertyChange>();
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
 
-        // Act & Assert
+        // Act
         var property = new PropertyReference(sensor, nameof(ExternalSensor.Label));
         property.RecalculateDerivedProperty();
+
+        // Assert
+        Assert.Equal("unchanged", sensor.Label);
+        Assert.Empty(changes);
     }
 
     [Fact]

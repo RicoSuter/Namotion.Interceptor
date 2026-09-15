@@ -36,8 +36,12 @@ public static class SubjectPropertyTypeExtensions
         if (typeof(TProperty).IsPrimitive ||
             typeof(TProperty) == typeof(decimal) ||
             typeof(TProperty) == typeof(string) ||
-            typeof(TProperty) == typeof(DateTime) ||
-            typeof(TProperty) == typeof(DateTimeOffset) ||
+            typeof(TProperty) == typeof(DateTime))
+        {
+            return false;
+        }
+
+        if (typeof(TProperty) == typeof(DateTimeOffset) ||
             typeof(TProperty) == typeof(TimeSpan) ||
             typeof(TProperty) == typeof(Guid))
         {

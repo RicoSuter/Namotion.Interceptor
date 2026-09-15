@@ -194,6 +194,7 @@ public sealed class ScheduledPropertySubscription : IDisposable
             }
             catch
             {
+                // Preserve the original delivery failure when cleanup also fails.
             }
 
             ReportError(onError, exception);
@@ -228,6 +229,7 @@ public sealed class ScheduledPropertySubscription : IDisposable
         }
         catch
         {
+            // Observer error callbacks cannot safely propagate into the scheduler.
         }
     }
 

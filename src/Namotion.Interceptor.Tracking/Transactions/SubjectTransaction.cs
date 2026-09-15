@@ -158,7 +158,7 @@ public sealed class SubjectTransaction : IDisposable
 
             ThrowIfCommittingConcurrently();
 
-            var pendingChanges = _pendingChanges!;
+            var pendingChanges = _pendingChanges;
             var isFirstWrite = !pendingChanges.TryGetValue(property, out var existingChange);
             pendingChanges[property] = SubjectPropertyChange.Create(
                 property,
@@ -279,8 +279,7 @@ public sealed class SubjectTransaction : IDisposable
             transactionLock = await interceptor.AcquireTransactionLockAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        // An AsyncLocal assignment here would not flow back through this async method's await;
-        // the caller assigns the transaction in its own execution context.
+        // The caller assigns the transaction so the value flows into its execution context.
         return new SubjectTransaction(
             context,
             interceptor,
@@ -482,9 +481,8 @@ public sealed class SubjectTransaction : IDisposable
 
         var (written, failedSource, sourceErrors, revertState) = writeResult;
 
-        // Rollback with any source-write failure or reported error: nothing is applied to the local model;
-        // revert what reached a source and report. Local (no-source) changes did not commit either and are
-        // reported as failed. An error without failed changes (custom writers only) must not be swallowed.
+        // Source failures leave local changes uncommitted, and written source changes must be reverted.
+        // Errors without failed changes from custom writers must still be reported.
         if (_failureHandling == TransactionFailureHandling.Rollback && (failedSource.Count > 0 || sourceErrors.Count > 0))
         {
             var revert = await RevertSourceWritesSafelyAsync(writer, written, revertState, cancellationToken).ConfigureAwait(false);

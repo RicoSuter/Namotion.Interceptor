@@ -7,6 +7,10 @@ namespace Namotion.Interceptor.Tracking.Tests.Transactions;
 [CollectionDefinition(WriterContractValidationCollection.Name, DisableParallelization = true)]
 public sealed class WriterContractValidationCollection
 {
+    private WriterContractValidationCollection()
+    {
+    }
+
     public const string Name = "WriterContractValidation";
 }
 

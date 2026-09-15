@@ -7,6 +7,23 @@ namespace Namotion.Interceptor.Tracking.Tests;
 
 public class ContextInheritanceHandlerTests
 {
+    private sealed class DerivedContextInheritanceHandler : ContextInheritanceHandler;
+
+    [Fact]
+    public void WhenEqualBaseAndDerivedHandlersAddedToHashSet_ThenOnlyOneEntryIsStored()
+    {
+        // Arrange
+        var handlers = new HashSet<ContextInheritanceHandler>();
+
+        // Act
+        handlers.Add(new ContextInheritanceHandler());
+        handlers.Add(new ContextInheritanceHandler());
+        handlers.Add(new DerivedContextInheritanceHandler());
+
+        // Assert
+        Assert.Single(handlers);
+    }
+
     [Fact]
     public void WhenPropertyIsAssigned_ThenContextIsSet()
     {
