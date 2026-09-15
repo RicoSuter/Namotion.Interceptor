@@ -41,7 +41,7 @@ public interface IWritableDefaultInterface
 {
     double Temperature { get; set; }
 
-    string Label { get => $"Temp: {Temperature}"; set { } }
+    string Label { get => $"Temp: {Temperature}"; set { _ = value; } }
 }
 
 [InterceptorSubject]
