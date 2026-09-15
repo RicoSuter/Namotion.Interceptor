@@ -8,6 +8,7 @@ using Namotion.Interceptor.Ordering;
 
 namespace Namotion.Interceptor;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "Explicit use of the allocation-free HashSet struct enumerator raises the counted dependencies from 30 to 31; it does not add a runtime dependency beyond the previous foreach.")]
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
     // All topology (services, fallback contexts) and everything derived from it (delegation
@@ -904,14 +905,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (usedByContexts.Count == 1)
             {
-                // foreach binds the HashSet struct enumerator, First() would box it.
-#pragma warning disable S1751 // The lock pins Count at one; read that sole entry without boxing.
-                foreach (var usingContext in usedByContexts)
-                {
-                    singleUsingContext = usingContext;
-                    break;
-                }
-#pragma warning restore S1751
+                // The lock keeps Count at one; the concrete enumerator avoids boxing.
+                using var enumerator = usedByContexts.GetEnumerator();
+                enumerator.MoveNext();
+                singleUsingContext = enumerator.Current;
             }
             else if (usedByContexts.Count != 0)
             {
