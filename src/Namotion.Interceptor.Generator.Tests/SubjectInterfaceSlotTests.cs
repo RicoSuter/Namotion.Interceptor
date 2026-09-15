@@ -1,9 +1,10 @@
 using Namotion.Interceptor.Tracking;
 using Xunit;
+using static Namotion.Interceptor.Generator.Tests.SubjectInheritanceTestSources;
 
 namespace Namotion.Interceptor.Generator.Tests;
 
-public partial class SubjectBaseDiagnosticsTests
+public class SubjectInterfaceSlotTests
 {
     [Fact]
     public void WhenDerivedSubjectDeclaresAPublicSyncRoot_ThenNI0064IsReported()
@@ -378,4 +379,29 @@ public partial class SubjectBaseDiagnosticsTests
         Assert.Empty(result.CompilationErrors);
         Assert.Empty(result.CompilationWarnings);
     }
+
+    /// <summary>
+    /// <see cref="PublicMemberBase"/> with a virtual Context, which is what an intermediate class
+    /// needs in order to override it rather than hide it.
+    /// </summary>
+    private static readonly string VirtualContextBase = PublicMemberBase.Replace(
+        "public IInterceptorSubjectContext Context",
+        "public virtual IInterceptorSubjectContext Context");
+
+    private const string OverridingIntermediateDerived = """
+
+        namespace Repro
+        {
+            public class Middle : HandBase
+            {
+                public override IInterceptorSubjectContext Context => base.Context;
+            }
+
+            [Namotion.Interceptor.Attributes.InterceptorSubject]
+            public partial class GenDerived : Middle
+            {
+                public partial string Name { get; set; }
+            }
+        }
+        """;
 }
