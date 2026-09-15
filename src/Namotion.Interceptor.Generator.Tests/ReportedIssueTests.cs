@@ -6,6 +6,7 @@ using Namotion.Interceptor.Attributes;
 // supplies the value through an explicit implementation, and an empty subject class with no
 // namespace.
 
+#pragma warning disable S3903 // Types belong in namespaces, but this fixture intentionally tests the global namespace for #428.
 public enum Rank { Junior, Senior }
 
 public interface IEmployee
@@ -22,6 +23,7 @@ public interface ISenior : IEmployee
 public partial class Alice : ISenior
 {
 }
+#pragma warning restore S3903
 
 namespace Namotion.Interceptor.Generator.Tests
 {
