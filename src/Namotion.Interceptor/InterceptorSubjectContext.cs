@@ -905,9 +905,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (usedByContexts.Count == 1)
             {
-                // The lock keeps Count at one; the concrete enumerator avoids boxing.
                 using var enumerator = usedByContexts.GetEnumerator();
-                enumerator.MoveNext();
+                enumerator.MoveNext(); // Count == 1 under the lock guarantees success; Single() would box the enumerator.
                 singleUsingContext = enumerator.Current;
             }
             else if (usedByContexts.Count != 0)
