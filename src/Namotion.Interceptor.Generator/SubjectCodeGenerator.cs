@@ -343,7 +343,8 @@ internal static class SubjectCodeGenerator
 
     private static string GetSetterLambda(PropertyMetadata property, string castTypeName)
     {
-        // Init-only properties can only be assigned during construction.
+        // HasInit is deliberately not consulted: an init-only property cannot have a setter lambda,
+        // because it can only be set during construction.
         return property.HasSetter || property.HasInheritedSetter
             ? $"(o, v) => (({castTypeName})o).{property.Name} = ({property.FullTypeName})v"
             : "null";
@@ -490,16 +491,20 @@ internal static class SubjectCodeGenerator
 
     private static string GetRaisePropertyChangedCall(PropertyMetadata property, SubjectMetadata metadata)
     {
+        // [InterceptorSubject] base with a callable member. The attribute alone does not prove one
+        // exists, see SubjectAncestry.HasCallableRaisePropertyChanged.
         if (metadata.BaseClass.HasInterceptorSubject && metadata.BaseClass.HasCallableRaisePropertyChanged)
         {
             return $"RaisePropertyChanged(nameof({property.Name}))";
         }
 
+        // Manual IRaisePropertyChanged base.
         if (metadata.BaseClass.HasInpc)
         {
             return $"((IRaisePropertyChanged)this).RaisePropertyChanged(nameof({property.Name}))";
         }
 
+        // Otherwise the subject's own implementation.
         return $"RaisePropertyChanged(nameof({property.Name}))";
     }
 

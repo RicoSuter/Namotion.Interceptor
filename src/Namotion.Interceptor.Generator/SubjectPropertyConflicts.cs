@@ -115,6 +115,7 @@ internal static class SubjectPropertyConflicts
             }
         }
     }
+
     private static bool ShadowsBaseImplementation(INamedTypeSymbol typeSymbol, INamedTypeSymbol baseType, string propertyName)
     {
         foreach (var interfaceType in typeSymbol.AllInterfaces)

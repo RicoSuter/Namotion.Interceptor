@@ -6,7 +6,6 @@ namespace Namotion.Interceptor.Generator.Tests;
 
 public class SubjectBaseInterceptionTests
 {
-
     [Fact]
     public void WhenSubjectIsSealedAndDerived_ThenItCompilesWithoutWarnings()
     {

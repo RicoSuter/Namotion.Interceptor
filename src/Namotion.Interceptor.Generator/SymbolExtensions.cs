@@ -113,9 +113,9 @@ internal static class SymbolExtensions
     /// candidate. A class-declared indexer has always been ignored in silence (it parses as
     /// <c>IndexerDeclarationSyntax</c>, which the property filter excludes before this guard runs),
     /// so reporting the interface-default form was also an inconsistency between the two paths.
-    /// This rule outranks the explicit-implementation opt-in below: a <c>static abstract</c>
-    /// interface member forces a static implementation on the subject, and no edit the author can
-    /// make would turn it into a property.
+    /// This rule outranks the explicit-implementation opt-in, which <c>ClassPropertyMetadataExtractor</c>
+    /// checks after it. A <c>static abstract</c> interface member forces a static implementation on the
+    /// subject, and no edit the author can make would turn it into a property.
     /// </remarks>
     public static bool IsNeverASubjectProperty(IPropertySymbol property)
     {

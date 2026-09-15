@@ -29,6 +29,8 @@ internal static class InterfacePropertyMetadataExtractor
         {
             foreach (var member in interfaceType.GetMembers())
             {
+                // Eligibility runs before every other check, so those only ever fire on a member the
+                // subject could plausibly have adopted.
                 if (member is not IPropertySymbol property || !IsEligibleProperty(property))
                 {
                     continue;
@@ -36,19 +38,25 @@ internal static class InterfacePropertyMetadataExtractor
 
                 var (explicitImplementation, resolvedName, accessorInterface) = ResolvePropertySlot(property, interfaceType);
 
-                if (!TryClaimSlot((explicitImplementation ?? property, resolvedName, accessorInterface), classPropertyNames,
-                    winnerByPropertyName, ref processedSlots, location, diagnostics))
+                // A name the class declares itself is skipped in silence: the class declaration is
+                // the implementation, so nothing diverges.
+                if (classPropertyNames.Contains(resolvedName) ||
+                    !TryClaimSlot(explicitImplementation ?? property, resolvedName, accessorInterface, winnerByPropertyName, ref processedSlots, location, diagnostics))
                 {
                     continue;
                 }
 
-                var accessors = GetAccessibleAccessors(property, explicitImplementation, typeSymbol, accessorInterface, compilation);
-
-                if (!HasEmittableAccessors(property, explicitImplementation, accessors, resolvedName, location, diagnostics))
+                // After the cheap name-based checks above, so the compiler is not asked about a
+                // member that would be discarded anyway.
+                if (!TryGetEmittableAccessors(property, explicitImplementation, typeSymbol, accessorInterface, compilation, out var accessors))
                 {
                     continue;
                 }
 
+                ReportIgnoredExplicitImplementationAttributes(property, explicitImplementation, resolvedName, location, diagnostics);
+
+                // The name is taken only once the member is known to be emitted, so a same-named member
+                // without an emittable accessor never blocks a later one that has one.
                 winnerByPropertyName[resolvedName] = $"{accessorInterface.ToDisplayString()}.{resolvedName}";
 
                 interfaceProperties.Add(CreateMetadata(property, resolvedName, accessorInterface, accessors));
@@ -74,11 +82,9 @@ internal static class InterfacePropertyMetadataExtractor
 
     private static bool IsEligibleProperty(IPropertySymbol property)
     {
-        // A property has a default implementation if any accessor is not abstract. This
-        // runs before every other guard so that the guards below only ever fire on a
-        // member the subject could plausibly have adopted: an abstract interface member is
-        // implemented by the class itself, so nothing about it is skipped and reporting on
-        // it would put a warning on every interface a subject implements.
+        // A property has a default implementation if any accessor is not abstract. An abstract
+        // interface member is implemented by the class itself, so nothing about it is skipped and
+        // reporting on it would put a warning on every interface a subject implements.
         var hasDefaultImplementation =
             property.GetMethod is { IsAbstract: false } ||
             property.SetMethod is { IsAbstract: false };
@@ -97,22 +103,18 @@ internal static class InterfacePropertyMetadataExtractor
         return true;
     }
 
+    /// <summary>
+    /// Claims the dispatch slot without taking its simple name, and rejects it, reporting NI0061,
+    /// when an earlier slot already took that name.
+    /// </summary>
     private static bool TryClaimSlot(
-        (IPropertySymbol member, string resolvedName, INamedTypeSymbol accessorInterface) slot,
-        HashSet<string> classPropertyNames, Dictionary<string, string> winnerByPropertyName,
-        ref HashSet<ISymbol>? processedSlots, Location location, List<Diagnostic> diagnostics)
+        IPropertySymbol slot, string resolvedName, INamedTypeSymbol accessorInterface,
+        Dictionary<string, string> winnerByPropertyName, ref HashSet<ISymbol>? processedSlots,
+        Location location, List<Diagnostic> diagnostics)
     {
-        var (member, resolvedName, accessorInterface) = slot;
-        // Skip properties already declared in the class. The class declaration is the
-        // implementation, so nothing diverges and nothing is reported.
-        if (classPropertyNames.Contains(resolvedName))
-        {
-            return false;
-        }
-
         // Explicit interface overrides and their declarations share one dispatch slot.
         // AllInterfaces visits derived interfaces first, so retain the most-derived entry.
-        if (!(processedSlots ??= new HashSet<ISymbol>(SymbolEqualityComparer.Default)).Add(member))
+        if (!(processedSlots ??= new HashSet<ISymbol>(SymbolEqualityComparer.Default)).Add(slot))
         {
             return false;
         }
@@ -129,9 +131,10 @@ internal static class InterfacePropertyMetadataExtractor
         return true;
     }
 
-    private static (bool hasGetter, bool hasSetter, bool hasInit) GetAccessibleAccessors(
+    private static bool TryGetEmittableAccessors(
         IPropertySymbol property, IPropertySymbol? explicitImplementation, INamedTypeSymbol typeSymbol,
-        INamedTypeSymbol accessorInterface, Compilation compilation)
+        INamedTypeSymbol accessorInterface, Compilation compilation,
+        out (bool HasGetter, bool HasSetter, bool HasInit) accessors)
     {
         // Roslyn reports an explicit implementation as Private regardless of the implemented
         // member's real visibility, so the accessibility that matters is the implemented
@@ -142,8 +145,6 @@ internal static class InterfacePropertyMetadataExtractor
         // internal members are then unreachable, CS0122/CS1540, unless InternalsVisibleTo
         // says otherwise), and passing accessorInterface as the qualifying type correctly
         // rejects protected members, which are never reachable through this cast pattern.
-        // This runs after the cheap name-based filters above so the compiler is not asked
-        // about a member that would be discarded anyway.
         var accessibilityMember = explicitImplementation ?? property;
         var (isGetterAccessible, isSetterAccessible) = SymbolExtensions.GetAccessorAccessibility(
             compilation, accessibilityMember, typeSymbol, accessorInterface);
@@ -151,30 +152,25 @@ internal static class InterfacePropertyMetadataExtractor
         var hasGetter = property.GetMethod != null && isGetterAccessible;
         var hasSetter = property.SetMethod is { IsInitOnly: false } && isSetterAccessible;
         var hasInit = property.SetMethod?.IsInitOnly == true && isSetterAccessible;
+        accessors = (hasGetter, hasSetter, hasInit);
 
-        return (hasGetter, hasSetter, hasInit);
-    }
-
-    private static bool HasEmittableAccessors(
-        IPropertySymbol property, IPropertySymbol? explicitImplementation,
-        (bool hasGetter, bool hasSetter, bool hasInit) accessors,
-        string resolvedName, Location location, List<Diagnostic> diagnostics)
-    {
-        var (hasGetter, hasSetter, _) = accessors;
         // Asked of the accessors that can actually be emitted, not of raw accessibility. An
         // init accessor is accessible but cannot be called from the emitted lambda, so a
         // property whose only reachable accessor is init would produce an entry with two null
         // accessors: a key that exists and does nothing. HasInit does not rescue it, being
         // consulted only when emitting a partial property's own accessor, which an interface
         // default never is. Skipped in silence, unlike the class-declared explicit
-        // implementation in CollectProperties: an interface member generated code cannot see
-        // was scoped as a helper by its own author rather than offered as a property, and the
-        // interface may well be third-party, leaving the subject author with no remedy.
-        if (!hasGetter && !hasSetter)
-        {
-            return false;
-        }
+        // implementation in ClassPropertyMetadataExtractor.NarrowExplicitAccessors: an interface
+        // member generated code cannot see was scoped as a helper by its own author rather than
+        // offered as a property, and the interface may well be third-party, leaving the subject
+        // author with no remedy.
+        return hasGetter || hasSetter;
+    }
 
+    private static void ReportIgnoredExplicitImplementationAttributes(
+        IPropertySymbol property, IPropertySymbol? explicitImplementation, string resolvedName,
+        Location location, List<Diagnostic> diagnostics)
+    {
         // The emitted metadata reflects the implemented member's PropertyInfo, not the
         // explicit implementation's, so anything declared on the implementation (a Derived
         // or validation attribute in particular) never reaches the runtime.
@@ -183,13 +179,11 @@ internal static class InterfacePropertyMetadataExtractor
             diagnostics.Add(Diagnostic.Create(
                 Diagnostics.ExplicitImplementationAttributesIgnored, location, resolvedName));
         }
-
-        return true;
     }
 
     private static PropertyMetadata CreateMetadata(
         IPropertySymbol property, string resolvedName, INamedTypeSymbol accessorInterface,
-        (bool hasGetter, bool hasSetter, bool hasInit) accessors)
+        (bool HasGetter, bool HasSetter, bool HasInit) accessors)
     {
         var (hasGetter, hasSetter, hasInit) = accessors;
         var fullyQualifiedTypeName = property.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);

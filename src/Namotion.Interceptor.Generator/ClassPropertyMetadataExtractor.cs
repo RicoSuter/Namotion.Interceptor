@@ -48,28 +48,23 @@ internal static class ClassPropertyMetadataExtractor
     {
         var typeInfo = declarationModel.GetTypeInfo(property.Type, cancellationToken);
         var fullyQualifiedName = typeInfo.Type?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) ?? "object";
-        var propertyName = property.Identifier.ValueText;
 
         // Resolved once and reused below for the explicit-implementation accessibility
         // check: an indexer cannot reach this path (it parses as IndexerDeclarationSyntax,
-        // which the PropertyDeclarationSyntax filter above already excludes), but a static
-        // property can, and the same rule that skips one on the interface-default path must
-        // skip it here too, or it emits a cast-through-the-class accessor that fails CS0176.
+        // which CollectProperties never passes here), but a static property can, and the
+        // same rule that skips one on the interface-default path must skip it here too,
+        // or it emits a cast-through-the-class accessor that fails CS0176.
         var declaredPropertySymbol = declarationModel.GetDeclaredSymbol(property, cancellationToken);
         if (declaredPropertySymbol is not null && SymbolExtensions.IsNeverASubjectProperty(declaredPropertySymbol))
         {
             return null;
         }
 
-        var explicitInterfaceTypeName = property.ExplicitInterfaceSpecifier is { } explicitSpecifier
-            ? declarationModel
-                .GetTypeInfo(explicitSpecifier.Name, cancellationToken)
-                .Type?
-                .ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
-            : null;
-
-        var modifiers = GetPropertyModifiers(property, declarationModel, cancellationToken);
-        var accessors = GetPropertyAccessors(property);
+        var explicitInterfaceTypeName = GetExplicitInterfaceTypeName(property, declarationModel, cancellationToken);
+        var modifiers = property.Modifiers;
+        var isOverride = modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword));
+        var isDerived = HasDerivedAttribute(property, declarationModel, cancellationToken);
+        var accessors = GetDeclaredAccessors(property);
 
         if (property.ExplicitInterfaceSpecifier is not null &&
             !NarrowExplicitAccessors(property, declaredPropertySymbol, declarationModel.Compilation, typeSymbol, location, diagnostics, ref accessors))
@@ -77,44 +72,62 @@ internal static class ClassPropertyMetadataExtractor
             return null;
         }
 
-        return CreateMetadata((propertyName, fullyQualifiedName, explicitInterfaceTypeName), declaredPropertySymbol,
-            typeSymbol, declarationModel.Compilation, modifiers, accessors);
+        return new PropertyMetadata(
+            property.Identifier.ValueText,
+            fullyQualifiedName,
+            GetAccessModifier(modifiers),
+            IsPartial: modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)) && property.ExplicitInterfaceSpecifier is null,
+            IsVirtual: modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword)),
+            IsOverride: isOverride,
+            IsNew: modifiers.Any(m => m.IsKind(SyntaxKind.NewKeyword)),
+            IsSealed: modifiers.Any(m => m.IsKind(SyntaxKind.SealedKeyword)),
+            IsDerived: isDerived,
+            IsRequired: modifiers.Any(m => m.IsKind(SyntaxKind.RequiredKeyword)),
+            accessors.HasGetter,
+            accessors.HasSetter,
+            accessors.HasInit,
+            IsFromInterface: false,
+            GetAccessorModifier(property.AccessorList, SyntaxKind.GetAccessorDeclaration),
+            GetAccessorModifier(property.AccessorList, SyntaxKind.SetAccessorDeclaration) ??
+                GetAccessorModifier(property.AccessorList, SyntaxKind.InitAccessorDeclaration),
+            InterfaceTypeName: null,
+            ExplicitInterfaceTypeName: explicitInterfaceTypeName,
+            HasInheritedGetter: HasAccessibleInheritedAccessor(
+                declaredPropertySymbol, isOverride, declaresAccessor: accessors.HasGetter, isGetter: true, declarationModel.Compilation, typeSymbol),
+            HasInheritedSetter: HasAccessibleInheritedAccessor(
+                declaredPropertySymbol, isOverride, declaresAccessor: accessors.HasSetter || accessors.HasInit, isGetter: false, declarationModel.Compilation, typeSymbol));
     }
 
-    private static (string accessModifier, bool isPartial, bool isVirtual, bool isOverride, bool isNew, bool isSealed, bool isDerived, bool isRequired) GetPropertyModifiers(
+    private static string? GetExplicitInterfaceTypeName(
         PropertyDeclarationSyntax property, SemanticModel declarationModel, CancellationToken cancellationToken)
     {
-        var accessModifier = GetAccessModifier(property.Modifiers);
-        var isPartial = property.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)) &&
-                        property.ExplicitInterfaceSpecifier is null;
-        var isVirtual = property.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword));
-        var isOverride = property.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword));
-        var isNew = property.Modifiers.Any(m => m.IsKind(SyntaxKind.NewKeyword));
-        var isSealed = property.Modifiers.Any(m => m.IsKind(SyntaxKind.SealedKeyword));
-        var isDerived = HasDerivedAttribute(property, declarationModel, cancellationToken);
-        var isRequired = property.Modifiers.Any(m => m.IsKind(SyntaxKind.RequiredKeyword));
-
-        return (accessModifier, isPartial, isVirtual, isOverride, isNew, isSealed, isDerived, isRequired);
+        return property.ExplicitInterfaceSpecifier is { } explicitSpecifier
+            ? declarationModel
+                .GetTypeInfo(explicitSpecifier.Name, cancellationToken)
+                .Type?
+                .ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            : null;
     }
 
-    private static (bool hasGetter, bool hasSetter, bool hasInit, string? getterAccessModifier, string? setterAccessModifier) GetPropertyAccessors(PropertyDeclarationSyntax property)
+    private static (bool HasGetter, bool HasSetter, bool HasInit) GetDeclaredAccessors(PropertyDeclarationSyntax property)
     {
         var hasGetter = property.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true ||
                         property.ExpressionBody != null;
         var hasSetter = property.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) == true;
         var hasInit = property.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.InitAccessorDeclaration)) == true;
 
-        var getterAccessModifier = GetAccessorModifier(property.AccessorList, SyntaxKind.GetAccessorDeclaration);
-        var setterAccessModifier = GetAccessorModifier(property.AccessorList, SyntaxKind.SetAccessorDeclaration) ??
-                                   GetAccessorModifier(property.AccessorList, SyntaxKind.InitAccessorDeclaration);
-
-        return (hasGetter, hasSetter, hasInit, getterAccessModifier, setterAccessModifier);
+        return (hasGetter, hasSetter, hasInit);
     }
 
+    /// <summary>
+    /// Narrows a class-declared explicit implementation's accessors to the ones generated code can
+    /// reach through the implemented member. Returns false, having reported why, when the declaration
+    /// does not become a subject property.
+    /// </summary>
     private static bool NarrowExplicitAccessors(
         PropertyDeclarationSyntax property, IPropertySymbol? declaredPropertySymbol, Compilation compilation,
         INamedTypeSymbol typeSymbol, Location location, List<Diagnostic> diagnostics,
-        ref (bool hasGetter, bool hasSetter, bool hasInit, string? getterAccessModifier, string? setterAccessModifier) accessors)
+        ref (bool HasGetter, bool HasSetter, bool HasInit) accessors)
     {
         var implementedMember = declaredPropertySymbol?.ExplicitInterfaceImplementations.FirstOrDefault();
         if (implementedMember is null)
@@ -146,12 +159,14 @@ internal static class ClassPropertyMetadataExtractor
                 Diagnostics.ExplicitImplementationAttributesIgnored, location, property.Identifier.ValueText));
         }
 
-        ApplyAccessorAccessibility(ref accessors, isGetterAccessible, isSetterAccessible);
+        accessors.HasGetter &= isGetterAccessible;
+        accessors.HasSetter &= isSetterAccessible;
+        accessors.HasInit &= isSetterAccessible;
 
-        // Narrowing can leave both emittable accessors off while accessors.hasInit survives,
+        // Narrowing can leave both emittable accessors off while HasInit survives,
         // which would add a key whose getter and setter lambdas are both null. Same
         // outcome as the inaccessible case above, so it is reported the same way.
-        if (!accessors.hasGetter && !accessors.hasSetter)
+        if (!accessors.HasGetter && !accessors.HasSetter)
         {
             diagnostics.Add(Diagnostic.Create(
                 Diagnostics.MemberSkipped, location,
@@ -164,52 +179,22 @@ internal static class ClassPropertyMetadataExtractor
         return true;
     }
 
-    private static void ApplyAccessorAccessibility(
-        ref (bool hasGetter, bool hasSetter, bool hasInit, string? getterAccessModifier, string? setterAccessModifier) accessors,
-        bool isGetterAccessible, bool isSetterAccessible)
-    {
-        accessors.hasGetter = accessors.hasGetter && isGetterAccessible;
-        accessors.hasSetter = accessors.hasSetter && isSetterAccessible;
-        accessors.hasInit = accessors.hasInit && isSetterAccessible;
-    }
-
-    private static PropertyMetadata CreateMetadata(
-        (string propertyName, string fullyQualifiedName, string? explicitInterfaceTypeName) names,
-        IPropertySymbol? declaredPropertySymbol, INamedTypeSymbol typeSymbol, Compilation compilation,
-        (string accessModifier, bool isPartial, bool isVirtual, bool isOverride, bool isNew, bool isSealed, bool isDerived, bool isRequired) modifiers,
-        (bool hasGetter, bool hasSetter, bool hasInit, string? getterAccessModifier, string? setterAccessModifier) accessors)
-    {
-        return new PropertyMetadata(
-            names.propertyName,
-            names.fullyQualifiedName,
-            modifiers.accessModifier,
-            modifiers.isPartial,
-            modifiers.isVirtual,
-            modifiers.isOverride,
-            modifiers.isNew,
-            modifiers.isSealed,
-            modifiers.isDerived,
-            modifiers.isRequired,
-            accessors.hasGetter,
-            accessors.hasSetter,
-            accessors.hasInit,
-            IsFromInterface: false,
-            accessors.getterAccessModifier,
-            accessors.setterAccessModifier,
-            InterfaceTypeName: null,
-            ExplicitInterfaceTypeName: names.explicitInterfaceTypeName,
-            HasInheritedGetter: modifiers.isOverride && !accessors.hasGetter && HasAccessibleInheritedAccessor(
-                declaredPropertySymbol?.OverriddenProperty, true, compilation, typeSymbol),
-            HasInheritedSetter: modifiers.isOverride && !accessors.hasSetter && !accessors.hasInit && HasAccessibleInheritedAccessor(
-                declaredPropertySymbol?.OverriddenProperty, false, compilation, typeSymbol));
-    }
-
+    /// <summary>
+    /// Whether an override that leaves the accessor out still exposes the inherited one to generated
+    /// code, which then emits a lambda for it.
+    /// </summary>
     private static bool HasAccessibleInheritedAccessor(
-        IPropertySymbol? property, bool isGetter, Compilation compilation, INamedTypeSymbol subjectType)
+        IPropertySymbol? declaredPropertySymbol, bool isOverride, bool declaresAccessor, bool isGetter,
+        Compilation compilation, INamedTypeSymbol subjectType)
     {
+        if (!isOverride || declaresAccessor)
+        {
+            return false;
+        }
+
         // Follow the overridden slot, including plain intermediate classes. A same-named property
         // elsewhere in the base chain may belong to a different slot.
-        for (; property is not null; property = property.OverriddenProperty)
+        for (var property = declaredPropertySymbol?.OverriddenProperty; property is not null; property = property.OverriddenProperty)
         {
             var accessor = isGetter ? property.GetMethod : property.SetMethod;
             if (accessor is not null)
