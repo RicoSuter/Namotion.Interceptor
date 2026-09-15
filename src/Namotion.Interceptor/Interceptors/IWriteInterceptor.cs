@@ -277,17 +277,12 @@ public struct PropertyWriteContext<TProperty>
         // explicitly ('null is TProperty' is always false), else a legitimately stored null would demote
         // to Local and defeat echo suppression. A box the pattern rejects falls back to the setter's own
         // unbox (see SentValueEqualsAfterUnbox); a box the setter would reject demotes.
-        bool survives;
-        if (_attempted.SentValue is TProperty typedSentValue)
+        var survives = _attempted.SentValue switch
         {
-            survives = EqualityComparer<TProperty>.Default.Equals(typedSentValue, NewValue);
-        }
-        else
-        {
-            survives = _attempted.SentValue is null
-                ? NewValue is null
-                : SentValueEqualsAfterUnbox(_attempted.SentValue, NewValue);
-        }
+            TProperty typedSentValue => EqualityComparer<TProperty>.Default.Equals(typedSentValue, NewValue),
+            null => NewValue is null,
+            var sentValue => SentValueEqualsAfterUnbox(sentValue, NewValue)
+        };
 
         return survives ? _attempted.Origin : default;
     }
