@@ -86,6 +86,8 @@ internal static class ServiceOrderResolver
         return (firstCount, lastCount);
     }
 
+    // Inlining can keep the group references in caller locals instead of a tuple return buffer.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static (T[]? FirstGroup, T[]? MiddleGroup, T[]? LastGroup) PartitionGroups<T>(T[] services)
     {
         var (firstCount, lastCount) = ValidateAndCountGroups(services);
@@ -223,8 +225,10 @@ internal static class ServiceOrderResolver
 
     private static void ReleaseDependents(List<int> neighbors, int[] inDegree, SortedSet<int> ready)
     {
-        foreach (var neighbor in neighbors)
+        // Indexing avoids enumerator cleanup that can inhibit inlining into the ready loop.
+        for (var index = 0; index < neighbors.Count; index++)
         {
+            var neighbor = neighbors[index];
             if (--inDegree[neighbor] == 0)
                 ready.Add(neighbor);
         }
