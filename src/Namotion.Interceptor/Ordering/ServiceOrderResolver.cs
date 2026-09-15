@@ -122,20 +122,21 @@ internal static class ServiceOrderResolver
             return;
         }
 
-        var typeToIndices = MapTypeToIndices(services);
+        // Build type-to-indices mapping; a type can have multiple instances when a
+        // context aggregates fallback contexts that each register the same service type
+        var typeToIndices = new Dictionary<Type, List<int>>(count);
+        for (var i = 0; i < count; i++)
+        {
+            var type = services[i]!.GetType();
+            if (!typeToIndices.TryGetValue(type, out var indices))
+                typeToIndices[type] = indices = [];
+            indices.Add(i);
+        }
 
         // Build adjacency list and in-degree counts; edges bind to every instance of the referenced type
         var adjacency = new List<int>[count];
         var inDegree = new int[count];
-
-        for (var i = 0; i < count; i++)
-        {
-            var info = GetOrderInfo(services[i]!.GetType());
-            if (info.RunsBefore.Length > 0)
-                AddRunsBeforeEdges(i, info.RunsBefore, typeToIndices, adjacency, inDegree);
-            if (info.RunsAfter.Length > 0)
-                AddRunsAfterEdges(i, info.RunsAfter, typeToIndices, adjacency, inDegree);
-        }
+        BuildDependencyGraph(services, typeToIndices, adjacency, inDegree);
 
         // Kahn's algorithm with sorted ready set (preserves registration order)
         var ready = new SortedSet<int>();
@@ -145,7 +146,17 @@ internal static class ServiceOrderResolver
                 ready.Add(i);
         }
 
-        var resultIndex = ProcessReadyServices(services, result, resultOffset, adjacency, inDegree, ready);
+        var resultIndex = 0;
+        while (ready.Count > 0)
+        {
+            var current = ready.Min;
+            ready.Remove(current);
+            result[resultOffset + resultIndex++] = services[current];
+
+            var neighbors = adjacency[current];
+            if (neighbors != null)
+                ReleaseDependents(neighbors, inDegree, ready);
+        }
 
         if (resultIndex != count)
         {
@@ -164,20 +175,16 @@ internal static class ServiceOrderResolver
         throw new InvalidOperationException($"Circular dependency detected in service ordering: {string.Join(" -> ", cycleTypes)}");
     }
 
-    private static Dictionary<Type, List<int>> MapTypeToIndices<T>(T[] services)
+    private static void BuildDependencyGraph<T>(T[] services, Dictionary<Type, List<int>> typeToIndices, List<int>[] adjacency, int[] inDegree)
     {
-        // Build type-to-indices mapping; a type can have multiple instances when a
-        // context aggregates fallback contexts that each register the same service type
-        var typeToIndices = new Dictionary<Type, List<int>>(services.Length);
         for (var i = 0; i < services.Length; i++)
         {
-            var type = services[i]!.GetType();
-            if (!typeToIndices.TryGetValue(type, out var indices))
-                typeToIndices[type] = indices = [];
-            indices.Add(i);
+            var info = GetOrderInfo(services[i]!.GetType());
+            if (info.RunsBefore.Length > 0)
+                AddRunsBeforeEdges(i, info.RunsBefore, typeToIndices, adjacency, inDegree);
+            if (info.RunsAfter.Length > 0)
+                AddRunsAfterEdges(i, info.RunsAfter, typeToIndices, adjacency, inDegree);
         }
-
-        return typeToIndices;
     }
 
     private static void AddRunsBeforeEdges(int index, Type[] beforeTypes, Dictionary<Type, List<int>> typeToIndices, List<int>[] adjacency, int[] inDegree)
@@ -208,23 +215,6 @@ internal static class ServiceOrderResolver
                 }
             }
         }
-    }
-
-    private static int ProcessReadyServices<T>(T[] services, T[] result, int resultOffset, List<int>[] adjacency, int[] inDegree, SortedSet<int> ready)
-    {
-        var resultIndex = 0;
-        while (ready.Count > 0)
-        {
-            var current = ready.Min;
-            ready.Remove(current);
-            result[resultOffset + resultIndex++] = services[current];
-
-            var neighbors = adjacency[current];
-            if (neighbors != null)
-                ReleaseDependents(neighbors, inDegree, ready);
-        }
-
-        return resultIndex;
     }
 
     private static void ReleaseDependents(List<int> neighbors, int[] inDegree, SortedSet<int> ready)
